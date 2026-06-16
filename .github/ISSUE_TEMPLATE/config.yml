@@ -1,0 +1,10 @@
+# Configuración del selector de issues de GitHub.
+# blank_issues_enabled: false obliga a usar una plantilla (bug/feature).
+blank_issues_enabled: false
+contact_links:
+  - name: 📚 Documentación del proyecto
+    url: https://github.com/AgroVoz/AgroVoz/tree/main/docs
+    about: Arquitectura (ARCHITECTURE.md), fases de ejecución (phases/) y decisiones (ADRs).
+  - name: 🔒 Reportar vulnerabilidad de seguridad
+    url: https://github.com/AgroVoz/AgroVoz/security/advisories/new
+    about: Reportá vulnerabilidades en privado, NO como issue pública. Secrets, auth, webhook HMAC, ban de número WhatsApp.

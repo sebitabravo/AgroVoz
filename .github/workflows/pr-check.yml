@@ -1,0 +1,97 @@
+# Pr-check: gate issue-first. Bloquea merge si el PR no cumple:
+#   1. El PR referencia un issue (Closes #N / Fixes #N / Resolves #N)
+#   2. El issue referenciado tiene label status:approved
+#   3. El PR tiene al menos un label mod:* (módulo)
+#
+# Adaptado del patrón gentleman-guardian-angel. Hacer este check REQUIRED en
+# branch protection (Settings → Branches → main → Require status checks).
+name: pr-check
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, labeled, unlabeled]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  # 1. El PR debe referenciar un issue.
+  check-issue-ref:
+    name: PR referencia un issue
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const body = (context.payload.pull_request.body || '').trim();
+            const re = /(?:closes|fixes|resolves)\s+#(\d+)/i;
+            const m = body.match(re);
+            if (!m) {
+              core.setFailed(
+                'El PR debe vincular un issue con "Closes #N" (o Fixes/Resolves) en el cuerpo.\n' +
+                'Flujo: crear issue → status:approved → abrir PR que cierra el issue.'
+              );
+              return;
+            }
+            core.info(`Issue referenciado: #${m[1]}`);
+            core.setOutput('issue_number', m[1]);
+
+  # 2. El issue referenciado debe estar aprobado.
+  check-issue-approved:
+    name: Issue tiene status:approved
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const body = (context.payload.pull_request.body || '').trim();
+            const m = body.match(/(?:closes|fixes|resolves)\s+#(\d+)/i);
+            if (!m) {
+              core.setFailed('No se encontró issue referenciado (Closes #N).');
+              return;
+            }
+            const issueNumber = parseInt(m[1], 10);
+            let issue;
+            try {
+              const resp = await github.rest.issues.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+              });
+              issue = resp.data;
+            } catch (e) {
+              core.setFailed(`No se pudo obtener el issue #${issueNumber}: ${e.message}`);
+              return;
+            }
+            const labels = (issue.labels || []).map(l => l.name);
+            if (!labels.includes('status:approved')) {
+              core.setFailed(
+                `El issue #${issueNumber} no tiene label "status:approved".\n` +
+                `Labels actuales: ${labels.join(', ') || '(ninguno)'}.\n` +
+                'El tech lead debe aprobar el issue antes de abrir el PR.'
+              );
+              return;
+            }
+            core.info(`Issue #${issueNumber} aprobado.`);
+
+  # 3. El PR debe tener al menos un label de módulo (mod:*).
+  check-pr-module-label:
+    name: PR tiene label mod:*
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = (context.payload.pull_request.labels || []).map(l => l.name);
+            const modLabels = labels.filter(n => n.startsWith('mod:'));
+            if (modLabels.length === 0) {
+              core.setFailed(
+                `El PR no tiene label de módulo (mod:*).\n` +
+                `Labels actuales: ${labels.join(', ') || '(ninguno)'}.\n` +
+                'Agregar al menos un mod:* (mod:backend, mod:voz, mod:openwa, mod:landing, mod:admin, mod:infra, mod:datos).'
+              );
+              return;
+            }
+            core.info(`Labels de módulo: ${modLabels.join(', ')}`);

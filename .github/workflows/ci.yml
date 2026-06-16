@@ -1,0 +1,113 @@
+# CI de AgroVoz. Inspirado en OpenWA, adaptado al stack Python + Astro + Open-WA.
+# Ejecuta lint, type-check, tests del backend y build de la landing en cada push/PR a main.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancela runs anteriores de la misma rama (ahorra minutos de Actions).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  # ── Backend: lint + type-check ──
+  lint:
+    name: Backend lint & types
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Ruff (lint + format check)
+        run: uv run ruff check app/
+
+      - name: mypy (strict)
+        run: uv run mypy app/
+
+  # ── Backend: tests ──
+  test:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: pytest
+        run: uv run pytest tests/ -v --cov=app --cov-report=term-missing
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: backend/.coverage*
+          retention-days: 7
+
+  # ── Landing: build Astro ──
+  landing:
+    name: Landing build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: landing
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+  # ── Docker: validar compose ──
+  compose-check:
+    name: Docker Compose config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate dev compose
+        run: docker compose -f docker-compose.yml config --quiet
+
+      - name: Validate prod compose
+        run: docker compose -f docker-compose.prod.yml config --quiet

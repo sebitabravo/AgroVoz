@@ -1,0 +1,125 @@
+# Solicitud de feature — AgroVoz.
+# Equipo interno de 3. No open-source: nada de "busqué en issues existentes".
+# Lo que importa para decidir: es MVP o post-MVP, módulo, fase, prioridad MoSCoW,
+# criterio de aceptación (qué = "done"). Scope check obligatorio contra hard constraints.
+name: ✨ Feature
+description: Idea o mejora para AgroVoz (módulo, flujo de voz, datos, infra)
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describí primero el **problema** — ayuda a encontrar la mejor solución.
+
+        Recordá las restricciones (`AGENTS.md`):
+        - Stack 100% open-source, sin APIs pagas externas.
+        - Sin app nativa, sin IoT, sin recomendaciones agronómicas.
+        - MVP: solo precios de papa + clima de Traiguén. El resto es post-MVP.
+
+        1 issue = 1 branch = 1 PR = 1 objetivo claro (regla de `AGENTS.md`).
+  - type: dropdown
+    id: module
+    attributes:
+      label: Módulo principal
+      options:
+        - Backend (FastAPI, API REST)
+        - Pipeline de voz (Whisper / LLM / TTS)
+        - Integración Open-WA (WhatsApp)
+        - Landing (Astro)
+        - Admin (Jinja2 + HTMX)
+        - Infra (Docker, nginx, CI/CD)
+        - Datos (ODEPA / OpenWeatherMap)
+        - Otro
+    validations:
+      required: true
+  - type: dropdown
+    id: scope_target
+    attributes:
+      label: ¿MVP o post-MVP?
+      description: Define si entra en el piloto Traiguén o queda para después.
+      options:
+        - MVP (piloto Traiguén, 6 semanas)
+        - Post-MVP (multi-producto, clima dinámico, Tool Calling completo, historial)
+    validations:
+      required: true
+  - type: dropdown
+    id: fase
+    attributes:
+      label: Fase objetivo
+      description: En qué fase del plan encaja (ver docs/phases/).
+      options:
+        - "00 — Inicialización"
+        - "01 — Backend core"
+        - "02 — Pipeline de voz"
+        - "03 — Open-WA"
+        - "04 — Landing"
+        - "05 — Admin"
+        - "06 — Deploy"
+        - Post-MVP
+        - No aplica
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Prioridad (MoSCoW)
+      description: Para ordenar el backlog entre los 3.
+      options:
+        - Must — tiene que estar sí o sí en el piloto
+        - Should — importante pero no bloquea piloto
+        - Could — si sobra tiempo
+        - Won't — decidido no hacerlo ahora (documentar y cerrar)
+    validations:
+      required: true
+  - type: dropdown
+    id: owner
+    attributes:
+      label: Responsable tentativo
+      description: Quién se cree con mejor contexto. Lo confirma quien lo tome.
+      options:
+        - Sebastián (backend / pipeline voz / Open-WA / infra)
+        - Francisco (producto / landing / productores Traiguén)
+        - Matías (testing / docs / datos ODEPA)
+        - Sin asignar (lo vemos en standup)
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problema / motivación
+      description: Qué intentás hacer y qué te lo dificulta hoy. Perspectiva del agricultor o del equipo.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Solución propuesta
+      description: Comportamiento esperado, endpoint, flujo de voz, etc. Cuanto más concreto, mejor.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Criterio de aceptación (qué = "done")
+      description: "Lista de puntos verificables. Si aplica, métrica (latencia, WER, etc.). Ejemplo: 'GET /precios/papa responde <200ms'."
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativas consideradas
+      description: Qué otras formas pensaste y por qué descartaste. Evita que otro proponga lo mismo después.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check (hard constraints)
+      description: Marca los que apliquen. Si algo no marca, justificá en "solución".
+      options:
+        - label: No requiere APIs pagas externas (Whisper/LLM/TTS/Open-WA son self-hosted).
+        - label: No implica recomendaciones agronómicas (el LLM entrega datos, no interpreta).
+        - label: Respeta audio temporal <24h y números anonimizados (Ley 21.719).
+        - label: Entiendo que si es post-MVP no bloquea el piloto Traiguén.

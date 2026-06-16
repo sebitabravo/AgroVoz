@@ -1,0 +1,99 @@
+# Tarea técnica — AgroVoz.
+# Para trabajo interno que NO es bug ni feature de cara al agricultor:
+# configurar tooling, escribir Dockerfile, integrar una librería, montar una migración.
+# La mayoría de las tareas de las fases 00-06 son de este tipo.
+name: 🔧 Tarea técnica
+description: Trabajo técnico concreto (setup, infra, integración, refactor planificado)
+title: "[Tarea]: "
+labels: ["task"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Para chambas técnicas internas. Si es un error usá **Bug**; si es una
+        capacidad nueva de cara al agricultor usá **Feature**.
+
+        1 issue = 1 branch = 1 PR = 1 objetivo claro (`AGENTS.md`).
+  - type: dropdown
+    id: module
+    attributes:
+      label: Módulo
+      options:
+        - Backend (FastAPI, API REST)
+        - Pipeline de voz (Whisper / LLM / TTS)
+        - Integración Open-WA (WhatsApp)
+        - Landing (Astro)
+        - Admin (Jinja2 + HTMX)
+        - Infra (Docker, nginx, CI/CD)
+        - Datos (ODEPA / OpenWeatherMap)
+        - Otro
+    validations:
+      required: true
+  - type: dropdown
+    id: fase
+    attributes:
+      label: Fase
+      description: En qué fase del plan encaja (ver docs/phases/).
+      options:
+        - "00 — Inicialización"
+        - "01 — Backend core"
+        - "02 — Pipeline de voz"
+        - "03 — Open-WA"
+        - "04 — Landing"
+        - "05 — Admin"
+        - "06 — Deploy"
+        - Post-MVP
+        - No aplica
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Prioridad (MoSCoW)
+      options:
+        - Must — bloquea el avance de la fase
+        - Should — importante, no bloquea
+        - Could — si sobra tiempo
+        - Won't — decidido no hacerlo ahora
+    validations:
+      required: true
+  - type: dropdown
+    id: owner
+    attributes:
+      label: Responsable tentativo
+      options:
+        - Sebastián (backend / pipeline voz / Open-WA / infra)
+        - Francisco (producto / landing / productores Traiguén)
+        - Matías (testing / docs / datos ODEPA)
+        - Sin asignar (lo vemos en standup)
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Descripción
+      description: Qué hay que hacer y por qué. Contexto suficiente para que cualquiera del equipo lo tome.
+    validations:
+      required: true
+  - type: textarea
+    id: subtasks
+    attributes:
+      label: Subtareas
+      description: Pasos concretos para completar la tarea.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Definición de "hecho"
+      description: "Qué tiene que cumplirse para cerrar. Ej: 'ruff y mypy limpios', 'tests pasan', 'levanta con make up'."
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notas / dependencias
+      description: Issues que la bloquean, decisiones pendientes, links útiles. Opcional.

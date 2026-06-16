@@ -1,0 +1,125 @@
+# Reporte de bug interno — AgroVoz.
+# Equipo: Sebastián, Francisco, Matías. No es un repo open-source: omitir pre-flight
+# de "busqué duplicados" / "versión más reciente". Lo que sí importa: módulo, ambiente,
+# fase, responsable y severidad para priorizar rápido entre los 3.
+name: 🐛 Bug
+description: Algo del pipeline / WhatsApp / landing / admin no funciona como esperábamos
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Completá módulo + ambiente + severidad para que podamos priorizar entre los 3.
+
+        ⚠️ Si es **seguridad** (secrets, auth, HMAC del webhook, ban de número WhatsApp,
+        fuga de datos de productores) → **no abras issue**. Avisá por interno / usá
+        [Security Advisories](https://github.com/AgroVoz/AgroVoz/security/advisories/new).
+
+        Restricciones del proyecto (ver `AGENTS.md`): stack 100% open-source, sin APIs
+        pagas, sin reco agronómica, audio temporal <24h, números anonimizados.
+  - type: dropdown
+    id: module
+    attributes:
+      label: Módulo
+      description: Dónde está el bug.
+      options:
+        - Backend (FastAPI, API REST)
+        - Pipeline de voz (Whisper / LLM / TTS)
+        - Integración Open-WA (WhatsApp)
+        - Landing (Astro)
+        - Admin (Jinja2 + HTMX)
+        - Infra (Docker, nginx, CI/CD)
+        - Sync ODEPA / cron
+        - Otro (describir abajo)
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Ambiente
+      description: Dónde se reproduce.
+      options:
+        - Dev local (Docker Compose)
+        - VPS producción (Hetzner)
+        - Piloto Traiguén (productor real)
+        - CI/CD (GitHub Actions)
+        - No aplica
+    validations:
+      required: true
+  - type: dropdown
+    id: fase
+    attributes:
+      label: Fase relacionada
+      description: En qué fase del plan apareció (ver docs/phases/).
+      options:
+        - "00 — Inicialización"
+        - "01 — Backend core"
+        - "02 — Pipeline de voz"
+        - "03 — Open-WA"
+        - "04 — Landing"
+        - "05 — Admin"
+        - "06 — Deploy"
+        - Post-MVP
+        - No aplica
+    validations:
+      required: true
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severidad
+      description: Qué tan urgente para el piloto.
+      options:
+        - 🔴 Bloqueante — no avanza la fase / piloto caído
+        - 🟠 Alta — hay workaround pero duele
+        - 🟡 Media — feo pero vive
+        - 🟢 Baja — cosmético / deuda
+    validations:
+      required: true
+  - type: dropdown
+    id: owner
+    attributes:
+      label: Responsable tentativo
+      description: Quién se cree con mejor contexto. Lo confirma quien lo tome.
+      options:
+        - Sebastián (backend / pipeline voz / Open-WA / infra)
+        - Francisco (producto / landing / productores Traiguén)
+        - Matías (testing / docs / datos ODEPA)
+        - Sin asignar (lo vemos en standup)
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Qué falló
+      description: Qué pasó y su impacto (productor, datos, latencia, fase).
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Pasos para reproducir
+      description: Audio enviado, query, endpoint, acción en dashboard. Mínimo para que otro lo replique.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Comportamiento esperado
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Logs del contenedor / backend alrededor del fallo. Redactá API keys y números de teléfono.
+      render: shell
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexto extra
+      description: Producto ODEPA consultado, query literal, modelo de voz (Whisper tiny/small), número WA (solo últimos 4), comuna.

@@ -1,0 +1,40 @@
+                    GNU AFFERO GENERAL PUBLIC LICENSE
+                       Version 3, 19 November 2007
+
+ Copyright (C) 2026 AgroVoz — INACAP Temuco
+
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU Affero General Public License as published
+ by the Free Software Foundation, either version 3 of the License, or
+ (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU Affero General Public License for more details.
+
+ You should have received a copy of the GNU Affero General Public License
+ along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+=============================================================================
+
+Resumen en español (el texto legal vinculante es el de arriba en inglés):
+
+Permisos:
+- Usar el código para cualquier propósito
+- Modificarlo y distribuir copias
+- Ejecutarlo como servicio (SaaS, web, API)
+
+Condiciones (copyleft fuerte):
+- Si modificás el código, DEBÉS publicar tus cambios bajo AGPL-3.0
+- Si ofrecés AgroVoz como servicio en red, DEBÉS publicar el código completo
+- Todo trabajo derivado hereda esta misma licencia
+
+Los copyright holders originales (equipo AgroVoz) retienen el derecho de
+relicenciar el código bajo otros términos (ej: licencia comercial para INDAP).
+
+Protección de la idea:
+- Nadie puede tomar este código, mejorarlo en privado, y venderlo como servicio
+  sin compartir sus mejoras con la comunidad.
+- El dataset de voz rural chilena NO está cubierto por esta licencia de software.
+  Se rige por términos separados (ver docs/DATASET-LICENSE.md cuando exista).

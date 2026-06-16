@@ -1,0 +1,67 @@
+# ── Secrets ────────────────────────────
+.env
+.env.production
+.env.staging
+*.pem
+*.key
+*.crt
+credentials*.json
+service-account*.json
+
+# ── Docs de postulación con datos personales (RUT, teléfono, correos) ──
+# NUNCA al repo — Ley 21.719. Quedan solo en local.
+AgroVoz_Informe_Completo.md
+agrovoz-postulacion-crea2026.md
+
+# ── Modelos IA (solo backend/models/, no backend/app/models/ que es SQLAlchemy) ──
+/backend/models/
+*.gguf
+*.bin
+*.pt
+*.safetensors
+*.onnx
+
+# ── Datos y runtime (solo backend/data/) ──
+/backend/data/
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Audio temporal ───────────────────
+audio/
+*.ogg
+*.wav
+*.mp3
+
+# ── Python ────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+*.egg
+.venv/
+venv/
+.uv/
+
+# ── Node ──────────────────────────────
+node_modules/
+.astro/
+dist/
+
+# ── IDE ───────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── OS ────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Docker ────────────────────────────
+docker-compose.override.yml
+
+# ── Logs ──────────────────────────────
+*.log
+logs/
