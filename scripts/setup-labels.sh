@@ -17,10 +17,15 @@ if ! gh auth status >/dev/null 2>&1; then
   exit 1
 fi
 
-# Crea o actualiza un label (color hex sin #).
+# Cache de labels existentes: una sola llamada a la API.
+# Evita el race de `grep -q | gh` con pipefail (grep cierra el pipe al primer
+# match → gh recibe SIGPIPE → pipefail lo lee como fallo → falsa "no existe").
+EXISTING_LABELS="$(gh label list --limit 200 --json name --jq '.[].name')"
+
+# Crea un label si no existe (color hex sin #). Idempotente.
 create_label() {
   local name="$1" color="$2" desc="$3"
-  if gh label list --limit 200 | grep -q "^$name\b"; then
+  if grep -qxF "$name" <<<"$EXISTING_LABELS"; then
     echo "  skip  $name (existe)"
   else
     gh label create "$name" --color "$color" --description "$desc" && echo "  ok    $name"
