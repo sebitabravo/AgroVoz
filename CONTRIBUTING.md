@@ -46,12 +46,8 @@ completar módulo + ambiente/fase + severidad/prioridad + responsable.
 
 ### Labels
 
-Después de crear el repo en GitHub, correr **una sola vez**:
-
-```bash
-gh auth login                           # si no está autenticado
-./scripts/setup-labels.sh               # crea el set de labels (idempotente)
-```
+Los labels ya están creados en el repo. Si falta alguno, agregalo desde
+**Issues → Labels** o con `gh label create`.
 
 Set de labels: `mod:*` (módulo), `fase:*` (00–06 + post-mvp), `prio:*` (MoSCoW),
 `status:*` (flujo issue-first), `bug`, `enhancement`, `documentation`, `refactor`,
@@ -75,7 +71,7 @@ el merge de cualquier PR cuyo issue no tenga `status:approved`, que no tenga
 
 ⚠️ Si el issue es de **seguridad** (secrets, auth, HMAC del webhook, ban de número,
 fuga de datos de productores) → **no abras issue pública**. Usá
-[Security Advisories](https://github.com/AgroVoz/AgroVoz/security/advisories/new)
+[Security Advisories](https://github.com/sebitabravo/AgroVoz/security/advisories/new)
 o avisá por interno.
 
 ---
@@ -230,7 +226,7 @@ reviewer según la ruta tocada:
 | `/backend/` (api, services, core, models) | Sebastián |
 | `/landing/` | Francisco, Matías |
 | `/backend/app/admin/` | Sebastián, Francisco |
-| `/.github/`, `/nginx/`, `/scripts/`, compose | Sebastián |
+| `/.github/`, `/scripts/`, compose | Sebastián |
 | `/docs/` | Matías |
 | Default (todo lo demás) | Sebastián (tech lead) |
 

@@ -43,7 +43,7 @@ Regex de validación:
 | landing | `landing/` (Astro) |
 | admin | `app/admin/` (Jinja2 + HTMX) |
 | datos | `app/jobs/` ODEPA sync, OpenWeatherMap |
-| infra | Docker, nginx, VPS, scripts/ |
+| infra | Docker, Dokploy, VPS, scripts/ |
 | ci | `.github/workflows/` |
 | config | `.env`, `pyproject.toml`, Makefile |
 | docs | `docs/`, AGENTS.md, CONTRIBUTING.md |

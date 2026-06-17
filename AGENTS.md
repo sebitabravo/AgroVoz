@@ -60,7 +60,7 @@ Institución: INACAP Temuco, Ingeniería en Informática.
 - Tailwind CSS 4.x
 - System fonts (system-ui, sin Google Fonts)
 - Íconos SVG inline (Lucide)
-- Hosteable en mismo VPS vía nginx o Cloudflare Pages
+- Hosteable en mismo VPS vía Dokploy o Cloudflare Pages
 
 ### Admin Dashboard
 - Server-side rendering: Jinja2 + HTMX (parte del backend, sin build step)
@@ -71,7 +71,7 @@ Institución: INACAP Temuco, Ingeniería en Informática.
 - VPS Hetzner CX43, Ubuntu 24.04 LTS
 - Docker Compose (dev y prod)
 - Open-WA (gateway WhatsApp self-hosted, gratuito)
-- nginx + Let's Encrypt
+- Dokploy (PaaS self-hosted: Traefik + SSL Let's Encrypt automático)
 - GitHub Actions (CI/CD)
 
 ### APIs externas
@@ -137,13 +137,11 @@ AgroVoz/
 ├── .env.production.example
 ├── .gitignore
 ├── docker-compose.yml          ← Dev (backend + openwa)
-├── docker-compose.prod.yml     ← Prod (backend + openwa + nginx + certbot)
+├── docker-compose.prod.yml     ← Prod (backend + openwa), desplegado por Dokploy
 ├── .github/
 │   └── workflows/
-│       └── deploy.yml          ← CI/CD
-├── nginx/
-│   ├── nginx.dev.conf          ← Reverse proxy dev (backend + openwa)
-│   └── nginx.prod.conf         ← Reverse proxy producción + SSL
+│       ├── ci.yml              ← CI: tests (backend + landing)
+│       └── pr-check.yml        ← Gate: issue-first + labels en PRs
 ├── backend/
 │   ├── Dockerfile
 │   ├── Makefile
@@ -172,7 +170,7 @@ AgroVoz/
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   └── phases/            ← Instrucciones por fase (00–06)
-├── scripts/               ← provision-vps.sh, deploy.sh, smoke-test.sh, setup-labels.sh
+├── scripts/               ← provision-vps.sh, smoke-test.sh
 └── skills/                ← Guías de trabajo del equipo (leer ANTES de codear)
     ├── issue-creation/SKILL.md   ← Crear issues (flujo issue-first)
     ├── branch-pr/SKILL.md        ← Branches, PRs, squash
@@ -298,7 +296,7 @@ git push --force-with-lease            # reescribir branch remota ya pusheada
 | 03 | Integración Open-WA (WhatsApp webhook self-hosted) | `docs/phases/03-integracion-openwa.md` | 4-5 |
 | 04 | Landing page (Astro + Tailwind) | `docs/phases/04-landing-page.md` | 3-4 |
 | 05 | Admin dashboard (Jinja2 + HTMX) | `docs/phases/05-admin-dashboard.md` | 3-4 |
-| 06 | Deploy y puesta en marcha (VPS + nginx + CI/CD) | `docs/phases/06-deploy.md` | 2-3 |
+| 06 | Deploy y puesta en marcha (VPS + Dokploy + CI/CD) | `docs/phases/06-deploy.md` | 2-3 |
 
 **Total estimado**: 23-30 días de desarrollo (5-6 semanas).
 Las fases 04 y 05 pueden ejecutarse en paralelo con 03 si hay más de un desarrollador.

@@ -10,7 +10,7 @@ El productor envía un audio por WhatsApp y recibe una respuesta hablada con dat
 - **Voz:** Whisper (transcripción) + Qwen2.5-3B (LLM) + Piper TTS (síntesis)
 - **Frontend:** Astro 5.x + Tailwind CSS 4.x (landing)
 - **Admin:** Jinja2 + HTMX (dashboard server-side)
-- **Infra:** Docker Compose / nginx / Let's Encrypt / VPS Hetzner CX43
+- **Infra:** Docker Compose / Dokploy (Traefik + SSL Let's Encrypt) / VPS Hetzner CX43
 
 ## Requisitos
 
