@@ -74,10 +74,10 @@ sino para INDAP, PRODESAL, jurados Crea INACAP, y credibilidad institucional.
 
 - [ ] `bun run build` — debe generar `dist/` sin errores
 - [ ] Probar local: `bun run preview`
-- [ ] Configurar deploy en Docker:
-  - Agregar servicio `landing` en `docker-compose.yml`
-  - Servir `dist/` con nginx
-  - O alternativamente: deploy en Cloudflare Pages (gratis, más simple)
+- [ ] Configurar deploy:
+  - Opción A: Dokploy static app (dashboard, conecta repo GitHub, build `cd landing && bun run build`)
+  - Opción B: Cloudflare Pages (gratis, CDN global, más simple)
+  - Domain: `agrovoz.cl` con HTTPS automatico
 - [ ] Agregar target `deploy-landing` en `landing/Makefile` o `package.json`
 - [ ] Test visual: acceder a `http://localhost:4321` y verificar todas las secciones
 - Archivos a modificar: `docker-compose.yml`

@@ -14,7 +14,7 @@
 - [ ] 📝 Documentación
 - [ ] 🎨 Refactor
 - [ ] 🚀 Performance
-- [ ] ⚙️ Config / Infra (Docker, nginx, CI/CD, variables)
+- [ ] ⚙️ Config / Infra (Docker, Dokploy, CI/CD, variables)
 
 ## Issue relacionada
 
@@ -28,7 +28,7 @@ Fase: `docs/phases/0X-*.md` (si aplica):
 - [ ] Integración Open-WA (WhatsApp)
 - [ ] Landing (Astro)
 - [ ] Admin (Jinja2 + HTMX)
-- [ ] Infra (Docker, nginx, CI/CD)
+- [ ] Infra (Docker, Dokploy, CI/CD)
 - [ ] Docs
 
 ## Checklist

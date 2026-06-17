@@ -179,3 +179,9 @@ CREATE INDEX idx_consultations_created ON consultations(created_at);
     Sin costos recurrentes de API WhatsApp. Riesgo: Meta puede banear el número
     si escala mucho (>100 mensajes/día). Para MVP con 3-5 productores es seguro.
     Para producción escalar a WhatsApp Business API oficial.
+
+12. **Dokploy en vez de nginx + certbot.** Dokploy es PaaS self-hosted que bundla
+    Docker + Traefik + Let's Encrypt SSL automático. Un comando de install y todo listo.
+    Elimina 200+ líneas de config nginx manual. Traefik hace routing + SSL al vuelo.
+    Dashboard UI para crear apps (Docker Compose, static). Zero-downtime deploys.
+    Landing puede ser Dokploy static app o Cloudflare Pages (más simple para CDN).

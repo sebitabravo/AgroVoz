@@ -31,8 +31,7 @@
   mkdir -p backend/data       # SQLite + audio temp (gitignored)
   mkdir -p backend/migrations/versions
   mkdir -p landing/src
-  mkdir -p nginx
-  mkdir -p scripts            # Scripts de raíz (provision, deploy, smoke-test)
+  mkdir -p scripts            # Scripts de raíz (provision, smoke-test)
   mkdir -p docs/phases
   mkdir -p .github/workflows
   ```
@@ -69,8 +68,8 @@
 
 - [ ] Crear `docker-compose.yml` con:
   - Servicio `backend`: FastAPI con uvicorn, volumen `./data:/app/data`, puerto 8000
-  - Servicio `nginx`: reverse proxy, SSL con Let's Encrypt (solo prod)
-  - Perfiles: `dev` (solo backend), `prod` (backend + nginx)
+  - Servicio `openwa`: gateway WhatsApp self-hosted
+  - Red `dokploy-network` para production (Dokploy la crea automaticamente)
 - [ ] Crear `backend/Dockerfile`:
   - Multi-stage: builder (instala ffmpeg, descarga modelos) + runtime
   - Python 3.12-slim base
@@ -78,8 +77,7 @@
   - Instala dependencias Python desde requirements.txt
   - Copia código, expone puerto 8000
   - HEALTHCHECK endpoint
-- [ ] Crear `nginx/nginx.conf` (config básica, reverse proxy a backend:8000)
-- Archivos a crear: `docker-compose.yml`, `backend/Dockerfile`, `nginx/nginx.conf`
+- Archivos a crear: `docker-compose.yml`, `backend/Dockerfile`
 
 ### T0.4: Inicializar Alembic y base de datos
 
@@ -97,8 +95,8 @@
 
 ### T0.5: Configurar scripts de raíz y CI/CD
 
-- [ ] Crear `scripts/` con `.gitkeep` — los scripts reales (`provision-vps.sh`, `deploy.sh`, `smoke-test.sh`) se crean en Fase 06
-- [ ] Crear `.github/workflows/` con `.gitkeep` — el workflow real (`deploy.yml`) se crea en Fase 06
+- [ ] Crear `scripts/` con `.gitkeep` — los scripts reales (`provision-vps.sh`, `smoke-test.sh`) se crean en Fase 06
+- [ ] Crear `.github/workflows/` con `.gitkeep` — los workflows reales (`ci.yml`, `pr-check.yml`) ya existen
 - [ ] Verificar que `Makefile` (ya existente) tiene todos los targets necesarios:
   - `make help`, `make setup-dev`, `make setup-env`, `make setup-models`
   - `make up`, `make down`, `make logs`, `make build`
@@ -148,10 +146,8 @@ AgroVoz/
 ├── .gitignore                    ← YA EXISTE
 ├── .env.example                  ← YA EXISTE
 ├── docker-compose.yml            ← NUEVO en T0.3
-├── nginx/
-│   └── nginx.conf                ← NUEVO en T0.3 (dev). En Fase 06 → nginx.dev.conf + nginx.prod.conf
 ├── scripts/
-│   └── .gitkeep                  ← provision-vps.sh, deploy.sh, smoke-test.sh en Fase 06
+│   └── .gitkeep                  ← provision-vps.sh, smoke-test.sh en Fase 06
 ├── backend/
 │   ├── Dockerfile                ← NUEVO en T0.3
 │   ├── Makefile                  ← NUEVO en T0.2

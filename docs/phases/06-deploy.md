@@ -1,8 +1,8 @@
-# Fase 06: Deploy y Puesta en Marcha — VPS Hetzner + Docker + nginx
+# Fase 06: Deploy y Puesta en Marcha — VPS Hetzner + Dokploy
 
-**Objetivo**: Desplegar AgroVoz en VPS Hetzner CX43 con Docker Compose, nginx como reverse proxy,
-Let's Encrypt SSL, y CI/CD con GitHub Actions. Debe quedar productivo y accesible vía `https://agrovoz.cl`.
-**Duración estimada**: 5 tareas (2-3 días)
+**Objetivo**: Desplegar AgroVoz en VPS Hetzner CX43 con Dokploy (Docker + Traefik + SSL automático).
+Deben quedar productivos y accesibles vía `https://agrovoz.cl` (landing) y `https://api.agrovoz.cl` (backend/admin).
+**Duración estimada**: 4 tareas (2-3 días)
 **Dependencias**: Fase 03 completada (webhook Open-WA funcionando) + Fase 04 completada (landing)
 **Archivos de contexto requeridos**:
 - `AGENTS.md`
@@ -12,36 +12,37 @@ Let's Encrypt SSL, y CI/CD con GitHub Actions. Debe quedar productivo y accesibl
 
 ## Tareas
 
-### T6.1: Provisioning del VPS Hetzner
+### T6.1: Provisioning del VPS Hetzner + Dokploy
 
 - [ ] Contratar VPS Hetzner CX43 (8 vCPU, 16 GB RAM, 160 GB SSD, Ubuntu 24.04 LTS)
 - [ ] Crear `scripts/provision-vps.sh`:
   ```bash
   #!/bin/bash
-  # Provisioning inicial del VPS Hetzner para AgroVoz
+  # Provisioning inicial del VPS Hetzner para AgroVoz con Dokploy
   set -euo pipefail
 
   # Actualizar sistema
   apt update && apt upgrade -y
 
   # Dependencias esenciales
-  apt install -y curl wget git ufw nginx certbot python3-certbot-nginx
+  apt install -y curl wget git ufw
 
-  # Docker
+  # Docker (Dokploy lo requiere)
   curl -fsSL https://get.docker.com | sh
   usermod -aG docker ubuntu
   systemctl enable docker
 
-  # Docker Compose (standalone, más simple que el plugin para CI/CD)
-  curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose
-  chmod +x /usr/local/bin/docker-compose
+  # Dokploy: instala Docker + Traefik + dashboard automaticamente
+  # Requisitos: Ubuntu 22.04+/24.04, >=2GB RAM, >=30GB disco, dominio con A record
+  curl -sSL https://dokploy.com/install.sh | sudo bash
 
-  # Firewall
+  # Firewall (Dokploy usa Traefik en 80/443, dashboard en 3000)
   ufw default deny incoming
   ufw default allow outgoing
   ufw allow ssh
-  ufw allow 80/tcp
-  ufw allow 443/tcp
+  ufw allow 80/tcp    # Traefik HTTP
+  ufw allow 443/tcp   # Traefik HTTPS
+  ufw allow 3000/tcp  # Dokploy dashboard
   ufw --force enable
 
   # Fail2ban
@@ -60,28 +61,36 @@ Let's Encrypt SSL, y CI/CD con GitHub Actions. Debe quedar productivo y accesibl
   chown ubuntu:ubuntu /opt/agrovoz
 
   echo "=== Provisioning completo ==="
+  echo "Dokploy instalado. Acceder a http://<vps-ip>:3000 para configurar dominio."
   echo "Próximo paso: configurar DNS (agrovoz.cl → IP del VPS)"
   ```
 - [ ] Ejecutar script en el VPS (manual, una sola vez)
-- [ ] Configurar DNS: `agrovoz.cl` A record → IP del VPS
+- [ ] Configurar DNS:
+  - `agrovoz.cl` A record → IP del VPS (landing)
+  - `api.agrovoz.cl` A record → misma IP (backend/admin)
+- [ ] Acceder a `http://<vps-ip>:3000`, primer setup:
+  - Crear cuenta admin
+  - Configurar dominio principal: `agrovoz.cl`
+  - Traefik obtiene SSL automatico via Let's Encrypt
 - Archivos a crear: `scripts/provision-vps.sh`
 
-### T6.2: Docker Compose producción
+### T6.2: Docker Compose para Dokploy
 
 - [ ] Crear `docker-compose.prod.yml` en raíz del proyecto:
   ```yaml
   services:
     backend:
       build: ./backend
-      container_name: agrovoz-backend
       restart: unless-stopped
       env_file:
         - .env.production
       volumes:
         - backend_models:/app/models    # Modelos IA (persisten entre deploys)
         - backend_data:/app/data        # SQLite DB + audio
+      expose:
+        - "8000"                        # Exponer a Traefik, NO bind host port
       networks:
-        - agrovoz-net
+        - dokploy-network              # Unir a red de Dokploy para dominio
       logging:
         driver: json-file
         options:
@@ -94,10 +103,9 @@ Let's Encrypt SSL, y CI/CD con GitHub Actions. Debe quedar productivo y accesibl
         retries: 3
 
     # Open-WA: gateway WhatsApp self-hosted (protocolo WhatsApp Web via QR scan)
-    # Dashboard para escanear QR NO se expone públicamente (ver T6.3, acceso via SSH tunnel)
+    # Dashboard para escanear QR NO se expone públicamente (acceso via SSH tunnel)
     openwa:
       image: ghcr.io/rmyndharis/openwa:latest
-      container_name: agrovoz-openwa
       restart: unless-stopped
       env_file:
         - .env.production
@@ -109,54 +117,24 @@ Let's Encrypt SSL, y CI/CD con GitHub Actions. Debe quedar productivo y accesibl
         - WEBHOOK_SECRET=${OPENWA_WEBHOOK_SECRET}
       volumes:
         - openwa_data:/app/data    # Sesión WhatsApp persiste entre reinicios
+      expose:
+        - "2785"                   # Para backend interno
       networks:
-        - agrovoz-net
+        - dokploy-network
       logging:
         driver: json-file
         options:
           max-size: "10m"
           max-file: "3"
-
-    nginx:
-      image: nginx:1.27-alpine
-      container_name: agrovoz-nginx
-      restart: unless-stopped
-      ports:
-        - "80:80"
-        - "443:443"
-      volumes:
-        - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
-        - ./landing/dist:/usr/share/nginx/html/landing:ro
-        - certbot_www:/var/www/certbot:ro
-        - certbot_conf:/etc/letsencrypt
-      depends_on:
-        - backend
-      networks:
-        - agrovoz-net
-      logging:
-        driver: json-file
-        options:
-          max-size: "10m"
-          max-file: "3"
-
-    certbot:
-      image: certbot/certbot:latest
-      container_name: agrovoz-certbot
-      volumes:
-        - certbot_www:/var/www/certbot
-        - certbot_conf:/etc/letsencrypt
-      entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
 
   volumes:
     backend_models:
     backend_data:
     openwa_data:
-    certbot_www:
-    certbot_conf:
 
   networks:
-    agrovoz-net:
-      driver: bridge
+    dokploy-network:
+      external: true               # Red externa creada por Dokploy
   ```
 - [ ] Crear `.env.production.example`:
   ```
@@ -185,240 +163,72 @@ Let's Encrypt SSL, y CI/CD con GitHub Actions. Debe quedar productivo y accesibl
 - Archivos a crear: `docker-compose.prod.yml`, `.env.production.example`
 - Archivos a modificar: `.gitignore` (agregar `.env.production`)
 
-### T6.3: nginx reverse proxy + Let's Encrypt
+### T6.3: Crear apps en Dokploy + dominios + SSL
 
-- [ ] Crear `nginx/nginx.prod.conf`:
-  ```nginx
-  events {
-      worker_connections 1024;
-  }
-
-  http {
-      include /etc/nginx/mime.types;
-      default_type application/octet-stream;
-
-      # Logging
-      access_log /var/log/nginx/access.log;
-      error_log /var/log/nginx/error.log warn;
-
-      # Rate limiting global
-      limit_req_zone $binary_remote_addr zone=api_limit:10m rate=60r/m;
-
-      # Gzip
-      gzip on;
-      gzip_types text/plain application/json text/css application/javascript;
-
-      # ── HTTP → HTTPS redirect ──
-      server {
-          listen 80;
-          server_name agrovoz.cl www.agrovoz.cl;
-
-          # Let's Encrypt challenge
-          location /.well-known/acme-challenge/ {
-              root /var/www/certbot;
-          }
-
-          location / {
-              return 301 https://$host$request_uri;
-          }
-      }
-
-      # ── HTTPS ──
-      server {
-          listen 443 ssl;
-          server_name agrovoz.cl www.agrovoz.cl;
-
-          ssl_certificate /etc/letsencrypt/live/agrovoz.cl/fullchain.pem;
-          ssl_certificate_key /etc/letsencrypt/live/agrovoz.cl/privkey.pem;
-          ssl_protocols TLSv1.2 TLSv1.3;
-          ssl_ciphers HIGH:!aNULL:!MD5;
-
-          # Landing (estática, servida por nginx directo)
-          location / {
-              root /usr/share/nginx/html/landing;
-              try_files $uri $uri/ /index.html;
-          }
-
-          # API (reverse proxy a FastAPI)
-          location /api/ {
-              limit_req zone=api_limit burst=10 nodelay;
-              proxy_pass http://backend:8000;
-              proxy_set_header Host $host;
-              proxy_set_header X-Real-IP $remote_addr;
-              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-              proxy_set_header X-Forwarded-Proto $scheme;
-              proxy_read_timeout 60s;  # Pipeline de voz puede tardar
-          }
-
-          # Admin dashboard (reverse proxy a FastAPI)
-          location /admin/ {
-              proxy_pass http://backend:8000;
-              proxy_set_header Host $host;
-              proxy_set_header X-Real-IP $remote_addr;
-              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-              proxy_set_header X-Forwarded-Proto $scheme;
-          }
-
-          # Audio responses (servir .ogg generados)
-          location /audio/ {
-              proxy_pass http://backend:8000;
-              proxy_set_header Host $host;
-              add_header Cache-Control "no-store";
-          }
-      }
-  }
-  ```
-- [ ] Generar certificado SSL inicial (manual, una vez):
-  ```bash
-  docker compose -f docker-compose.prod.yml run --rm certbot \
-    certonly --webroot --webroot-path=/var/www/certbot \
-    --email sebastian.bravo77@inacapmail.cl \
-    --agree-tos --no-eff-email \
-    -d agrovoz.cl -d www.agrovoz.cl
-  ```
-- [ ] Recargar nginx después de obtener el certificado:
-  ```bash
-  docker compose -f docker-compose.prod.yml exec nginx nginx -s reload
-  ```
-- Archivos a crear: `nginx/nginx.prod.conf`
-- Archivos a modificar: nginx/nginx.conf existente renombrarlo a `nginx/nginx.dev.conf`
+- [ ] **Backend app** (en dashboard Dokploy):
+  - Type: Docker Compose
+  - Name: `agrovoz-backend`
+  - Repository: conectar repo GitHub `sebitabravo/AgroVoz`
+  - Branch: `main`
+  - Compose path: `docker-compose.prod.yml`
+  - Environment: auto-generar `.env` desde `.env.production` (Dokploy lo crea en `/etc/dokploy/compose/agrovoz-backend/.env`)
+  - Domains:
+    - `api.agrovoz.cl`
+    - Enable HTTPS (Traefik auto- Let's Encrypt)
+- [ ] **Landing app** (opción A: Dokploy static):
+  - Type: Static
+  - Name: `agrovoz-landing`
+  - Build: conectar repo, `cd landing && bun run build`
+  - Output directory: `landing/dist`
+  - Domain: `agrovoz.cl`
+  - HTTPS: enabled
+- [ ] **Landing app** (opción B: Cloudflare Pages, más simple):
+  - Conectar repo `sebitabravo/AgroVoz` en CF dashboard
+  - Build command: `cd landing && bun install && bun run build`
+  - Output directory: `dist`
+  - Root directory: `landing`
+  - Domain: `agrovoz.cl`
+  - CF maneja SSL automaticamente
+- [ ] **Verificar routing**:
+  - `https://agrovoz.cl` → landing page
+  - `https://api.agrovoz.cl/` → backend (404 esperado si root no definido)
+  - `https://api.agrovoz.cl/api/v1/health` → `{"status": "ok"}`
+  - `https://api.agrovoz.cl/admin/` → dashboard admin (con header `X-Admin-Key`)
 
 > **Open-WA — emparejamiento WhatsApp (una sola vez)**
 >
 > El dashboard de Open-WA (puerto 2886) NO se expone públicamente. Para escanear
 > el QR y vincular el número WhatsApp por primera vez, usar SSH tunnel desde tu PC:
 > ```bash
-> ssh -L 2886:localhost:2886 -L 2785:localhost:2785 ubuntu@agrovoz.cl
+> ssh -L 2886:localhost:2886 -L 2785:localhost:2785 ubuntu@api.agrovoz.cl
 > ```
 > Luego abrir `http://localhost:2886`, crear sesión default, escanear QR con WhatsApp.
 > La sesión queda persistida en el volumen `openwa_data` (sobrevive reinicios).
 > Para cerrar el tunnel: Ctrl+C en la terminal SSH.
 
-### T6.4: GitHub Actions CI/CD
+### T6.4: CI/CD como quality gate (deploy por Dokploy)
 
-- [ ] Crear `.github/workflows/deploy.yml`:
-  ```yaml
-  name: Deploy AgroVoz
+- [ ] NO crear workflow `deploy.yml` — Dokploy hace auto-deploy en cada push a `main`
+- [ ] `.github/workflows/ci.yml` ya existe como quality gate:
+  - Lint (ruff), type check (mypy), tests (pytest) para backend
+  - Build check para landing
+  - Compose config check
+  - Solo deja pasar código que pasa todas las validaciones
+- [ ] Dokploy auto-deploy:
+  - Cuando el CI pasa y se mergea a `main`, Dokploy detecta el cambio
+  - Reconstruye imágenes (`docker compose build`)
+  - Reinicia servicios (`docker compose up -d`)
+  - Zero-downtime por rolling restart
 
-  on:
-    push:
-      branches: [main]
+### T6.5: Script de smoke test
 
-  concurrency:
-    group: deploy
-    cancel-in-progress: false
-
-  jobs:
-    test-backend:
-      name: Test Backend
-      runs-on: ubuntu-24.04
-      steps:
-        - uses: actions/checkout@v4
-        - uses: astral-sh/setup-uv@v5
-          with:
-            python-version: "3.12"
-        - name: Install dependencies
-          run: cd backend && uv sync --dev
-        - name: Lint (ruff)
-          run: cd backend && uv run ruff check app/
-        - name: Type check (mypy)
-          run: cd backend && uv run mypy app/
-        - name: Test
-          run: cd backend && uv run pytest tests/ -v --cov=app --cov-report=term-missing
-
-    test-landing:
-      name: Test Landing
-      runs-on: ubuntu-24.04
-      steps:
-        - uses: actions/checkout@v4
-        - uses: oven-sh/setup-bun@v2
-          with:
-            bun-version: latest
-        - name: Install dependencies
-          run: cd landing && bun install
-        - name: Build
-          run: cd landing && bun run build
-
-    deploy:
-      name: Deploy to VPS
-      needs: [test-backend, test-landing]
-      runs-on: ubuntu-24.04
-      if: github.ref == 'refs/heads/main'
-      steps:
-        - uses: actions/checkout@v4
-
-        - name: Build landing
-          uses: oven-sh/setup-bun@v2
-          with:
-            bun-version: latest
-        - run: cd landing && bun install && bun run build
-
-        - name: Deploy via SSH
-          uses: appleboy/ssh-action@v1
-          with:
-            host: ${{ secrets.VPS_HOST }}
-            username: ${{ secrets.VPS_USER }}
-            key: ${{ secrets.VPS_SSH_KEY }}
-            script: |
-              cd /opt/agrovoz
-              git pull origin main
-              docker compose -f docker-compose.prod.yml up -d --build backend
-              docker compose -f docker-compose.prod.yml exec nginx nginx -s reload
-              docker system prune -f  # Limpiar imágenes viejas
-
-        - name: Smoke test
-          run: |
-            sleep 5
-            curl -f https://agrovoz.cl/api/v1/health || echo "WARNING: Health check falló"
-  ```
-- [ ] Configurar secrets en GitHub:
-  - `VPS_HOST`: IP del VPS Hetzner
-  - `VPS_USER`: `ubuntu`
-  - `VPS_SSH_KEY`: clave privada SSH del VPS
-- Archivos a crear: `.github/workflows/deploy.yml`
-
-### T6.5: Scripts de operación y smoke test
-
-- [ ] Crear `scripts/deploy.sh` (deploy manual desde local):
-  ```bash
-  #!/bin/bash
-  # Deploy manual a VPS (alternativa si CI/CD no está disponible)
-  set -euo pipefail
-  VPS_HOST="${VPS_HOST:-}"
-  VPS_USER="${VPS_USER:-ubuntu}"
-
-  if [ -z "$VPS_HOST" ]; then
-    echo "ERROR: VPS_HOST no definido. Ejecutar: VPS_HOST=<ip> ./scripts/deploy.sh"
-    exit 1
-  fi
-
-  echo "→ Construyendo landing..."
-  cd landing && bun install && bun run build && cd ..
-
-  echo "→ Sincronizando código al VPS..."
-  rsync -avz --exclude='.git' --exclude='models/' --exclude='data/' \
-    --exclude='node_modules' --exclude='.venv' --exclude='__pycache__' \
-    ./ "$VPS_USER@$VPS_HOST:/opt/agrovoz/"
-
-  echo "→ Reconstruyendo backend en VPS..."
-  ssh "$VPS_USER@$VPS_HOST" "\
-    cd /opt/agrovoz && \
-    docker compose -f docker-compose.prod.yml up -d --build backend && \
-    docker compose -f docker-compose.prod.yml exec nginx nginx -s reload && \
-    docker system prune -f"
-
-  echo "→ Smoke test..."
-  sleep 5
-  curl -f https://agrovoz.cl/api/v1/health
-
-  echo "✓ Deploy completo"
-  ```
 - [ ] Crear `scripts/smoke-test.sh`:
   ```bash
   #!/bin/bash
   # Smoke test post-deploy: verifica que todo el pipeline responde
   set -euo pipefail
-  BASE_URL="${1:-https://agrovoz.cl}"
+  BASE_URL="${1:-https://api.agrovoz.cl}"
+  LANDING_URL="${2:-https://agrovoz.cl}"
 
   echo "→ Smoke test: $BASE_URL"
 
@@ -432,46 +242,52 @@ Let's Encrypt SSL, y CI/CD con GitHub Actions. Debe quedar productivo y accesibl
 
   # 3. Landing responde
   echo "3. GET / (landing)"
-  curl -fsS -o /dev/null "$BASE_URL/" || { echo "✗ Landing no responde"; exit 1; }
+  curl -fsS -o /dev/null "$LANDING_URL" || { echo "✗ Landing no responde"; exit 1; }
 
   # 4. Admin dashboard
   echo "4. GET /admin/"
   curl -fsS -o /dev/null "$BASE_URL/admin/" || echo "⚠ Admin no accesible (esperable sin API key)"
 
   # 5. SSL válido
-  echo "5. Verificando SSL"
+  echo "5. Verificando SSL (api)"
+  echo | openssl s_client -connect api.agrovoz.cl:443 -servername api.agrovoz.cl 2>/dev/null | \
+    openssl x509 -noout -dates || echo "⚠ No se pudo verificar SSL api"
+
+  echo "6. Verificando SSL (landing)"
   echo | openssl s_client -connect agrovoz.cl:443 -servername agrovoz.cl 2>/dev/null | \
-    openssl x509 -noout -dates || echo "⚠ No se pudo verificar SSL"
+    openssl x509 -noout -dates || echo "⚠ No se pudo verificar SSL landing"
 
   echo "✓ Smoke test completo"
   ```
-- Archivos a crear: `scripts/deploy.sh`, `scripts/smoke-test.sh`
-- Hacer ejecutables: `chmod +x scripts/*.sh`
+- Archivos a crear: `scripts/smoke-test.sh`
+- Hacer ejecutable: `chmod +x scripts/smoke-test.sh`
 
 ---
 
 ## Validación
 
 - [ ] `scripts/provision-vps.sh` ejecutado en VPS sin errores
-- [ ] `docker compose -f docker-compose.prod.yml up -d` levanta todos los servicios sin errores
-- [ ] `docker compose -f docker-compose.prod.yml ps` muestra `healthy` en backend y nginx
-- [ ] `curl https://agrovoz.cl/api/v1/health` retorna `{"status": "ok"}`
+- [ ] Dokploy dashboard accesible en `http://<vps-ip>:3000`
+- [ ] Dominios configurados: `agrovoz.cl`, `api.agrovoz.cl` apuntando al VPS
+- [ ] Apps creadas en Dokploy: `agrovoz-backend` + landing (static o CF Pages)
+- [ ] HTTPS automatico activo (candado verde en navegador)
+- [ ] `docker compose -f docker-compose.prod.yml ps` muestra `healthy` en backend y openwa
+- [ ] `curl https://api.agrovoz.cl/api/v1/health` retorna `{"status": "ok"}`
 - [ ] `curl https://agrovoz.cl/` retorna la landing page (HTML)
-- [ ] SSL válido: candado verde en navegador
-- [ ] CI/CD: push a main → tests pasan → deploy automático
+- [ ] CI/CD: push a main → tests pasan → Dokploy auto-deploy
 - [ ] Smoke test pasa: `bash scripts/smoke-test.sh`
 
 Comandos:
 ```bash
-# Verificar servicios
-docker compose -f docker-compose.prod.yml ps
-docker compose -f docker-compose.prod.yml logs backend --tail 50
+# Verificar servicios en VPS
+ssh ubuntu@<vps-ip> "cd /opt/agrovoz && docker compose -f docker-compose.prod.yml ps"
+ssh ubuntu@<vps-ip> "cd /opt/agrovoz && docker compose -f docker-compose.prod.yml logs backend --tail 50"
 
-# Smoke test
+# Smoke test desde local
 bash scripts/smoke-test.sh
 
-# Rollback (si algo falla)
-ssh ubuntu@<vps-ip> "cd /opt/agrovoz && git log --oneline -5 && docker compose -f docker-compose.prod.yml up -d backend"
+# Logs Dokploy (dashboard o directo)
+ssh ubuntu@<vps-ip> "docker logs dokploy -f"
 ```
 
 ---
@@ -481,28 +297,27 @@ ssh ubuntu@<vps-ip> "cd /opt/agrovoz && git log --oneline -5 && docker compose -
 ```
 scripts/
 ├── provision-vps.sh
-├── deploy.sh
 └── smoke-test.sh
-
-nginx/
-├── nginx.dev.conf           (renombrado de nginx.conf)
-└── nginx.prod.conf          (NUEVO)
-
-.github/
-└── workflows/
-    └── deploy.yml            (NUEVO)
 
 docker-compose.prod.yml       (NUEVO)
 .env.production.example       (NUEVO)
 ```
 
+**Eliminados** (ya no necesarios con Dokploy):
+- `nginx/` (todo el directorio)
+- `scripts/deploy.sh`
+- `.github/workflows/deploy.yml`
+
 ---
 
 ## Riesgos y notas
 
-- **Certificado SSL inicial**: requiere que el DNS ya apunte al VPS. Si no, el certbot falla. Alternativa: usar IP directa para testeo inicial y configurar SSL después.
-- **CI/CD con SSH**: la clave privada del VPS se guarda en GitHub Secrets. Rotarla periódicamente.
-- **Modelos IA en volumen**: los modelos (~4-6 GB) se descargan UNA VEZ en el volumen `backend_models`. No se re-descargan en cada deploy.
-- **Rollback simple**: si un deploy rompe algo, `git revert` + push, o manualmente `docker compose up -d backend` con la imagen anterior.
+- **Dokploy prerequisitos**: dominio con A record apuntando al VPS ANTES de configurar dominios en dashboard. Si no, Traefik no puede obtener certificado Let's Encrypt.
+- **Red externa dokploy-network**: Dokploy crea esta red automaticamente. El compose debe usar `external: true` para unirse.
+- **Sin container_name**: Dokploy maneja nombres de contenedor automaticamente. No especificar `container_name` en compose.
+- **Ports vs expose**: NO usar `ports: "80:80"` o similar. Traefik ya reserva 80/443 en el host. Usar `expose` para comunicacion interna.
+- **SSL automatico**: Traefik obtiene certificados Let's Encrypt al vuelto. No hay comando manual como con certbot.
+- **Rollback simple**: si un deploy rompe algo, `git revert` + push. Dokploy redeploya la version anterior. O manualmente `docker compose up -d --force-recreate` con commit anterior.
 - **Base de datos SQLite**: está en volumen `backend_data`. Backup simple: `scp ubuntu@vps:/opt/agrovoz/data/agrovoz.db ./backups/`. Agregar cron de backup diario.
-- **Monitoreo**: para MVP basta con `docker compose ps` y el health check. Post-MVP: UptimeRobot gratuito monitoreando `/api/v1/health`.
+- **Monitoreo**: para MVP basta con dashboard Dokploy + health check. Post-MVP: UptimeRobot gratuito monitoreando `/api/v1/health`.
+- **Landing en Cloudflare Pages**: alternativa más simple que Dokploy static si el equipo prefiere CF para frontend (CDN global, cache, preview deployments).

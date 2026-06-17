@@ -28,7 +28,7 @@ body:
         - Integración Open-WA (WhatsApp)
         - Landing (Astro)
         - Admin (Jinja2 + HTMX)
-        - Infra (Docker, nginx, CI/CD)
+        - Infra (Docker, Dokploy, CI/CD)
         - Datos (ODEPA / OpenWeatherMap)
         - Otro
     validations:
