@@ -185,12 +185,27 @@ AgroVoz/
     └── docs-alignment/SKILL.md   ← Mantener docs sincronizados
 ```
 
+## Skills del equipo — leer ANTES de actuar
+
+El repo trae **skills**: guías cortas de trabajo en `skills/<tema>/SKILL.md`. No son decorativas ni opcionales. **Antes de hacer una de estas acciones, abrí la skill que corresponde y seguila.** Existen para evitar errores tontos al vibecodear: issues sin formato, branches mal nombradas, commits sucios, código sin types, features sin tests, docs desincronizados.
+
+| Cuando vayas a... | Leé primero | Te asegura |
+|---|---|---|
+| Crear un issue, reportar bug o pedir feature | `skills/issue-creation/SKILL.md` | Flujo issue-first, 1 issue = 1 objetivo claro |
+| Crear branch, abrir PR o preparar review | `skills/branch-pr/SKILL.md` | Branch clara + PR vinculado a issue + squash |
+| Crear, revisar o hacer squash de commits | `skills/commit-hygiene/SKILL.md` | Conventional Commits, historial limpio |
+| Escribir o revisar código Python en `backend/` | `skills/python-standards/SKILL.md` | Type hints, capas, async, seguridad |
+| Escribir feature, arreglar bug o revisar PR | `skills/testing-coverage/SKILL.md` | Cada cambio llega con tests + regresión |
+| Tocar arquitectura, stack, constraints o fases | `skills/docs-alignment/SKILL.md` | Docs en sync con el código (fuente: `AGENTS.md` + `docs/`) |
+
+Regla simple: **si tu tarea calza con una fila, esa skill es lectura obligatoria, no sugerencia.**
+
 ## Working rules for AI agents
 
 ### Reglas de ejecución
 
 1. **Leer antes de editar.** Nunca editar a ciegas. Leer el archivo primero.
-2. **Consultar `skills/` antes de codear.** Issue, branch, commit, código Python, tests y docs tienen su guía en `skills/<tema>/SKILL.md`. Evitan errores tontos al vibecodear.
+2. **Consultar la skill que corresponde antes de actuar** (ver tabla "Skills del equipo" arriba). Issue, branch, commit, código Python, tests y docs tienen su guía en `skills/<tema>/SKILL.md`. No es opcional: abrí la skill y seguila. Evitan errores tontos al vibecodear.
 3. **Cambios pequeños y reversibles.** Un cambio por vez. Fácil de revisar.
 4. **No inventar arquitectura.** Todo está en `docs/ARCHITECTURE.md`. Si no está ahí, preguntar.
 5. **Si algo no está definido, elegir la opción más simple y documentarla** en `docs/ARCHITECTURE.md` (sección Decisiones).
