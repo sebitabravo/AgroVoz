@@ -2,42 +2,40 @@
 # GitHub auto-requesta review de los owners según la ruta que toca cada PR.
 # Esto hace que el code review llegue a la persona correcta sin tener que asignar a mano.
 #
-# ⚠️ REEMPLAZAR los handles por los usernames REALES de GitHub del equipo:
-#   Sebastián Bravo   → @sebastianbravo   (tech lead: backend, pipeline voz, Open-WA, infra)
-#   Francisco Fernández → @franbuilds (PO: producto, landing, productores Traiguén)
-#   Matías Atuán      → @matiasatuan      (dev: testing, docs, datos ODEPA)
-# Después de cambiarlos, borrar este aviso.
+# Equipo:
+#   Sebastián Bravo   → @sebitabravo   (tech lead: backend, pipeline voz, Open-WA, infra)
+#   Francisco Fernández → @franbuilds  (PO: producto, landing, productores Traiguén)
+#   Matías Atuán      → @FixZzT        (dev: testing, docs, datos ODEPA)
 
 # ── Backend: Python, FastAPI, DB, lógica ──
-/backend/app/api/            @sebastianbravo
-/backend/app/services/       @sebastianbravo
-/backend/app/core/           @sebastianbravo
-/backend/app/models/         @sebastianbravo
-/backend/app/schemas/        @sebastianbravo
-/backend/app/jobs/           @sebastianbravo
-/backend/tests/              @sebastianbravo @matiasatuan
-/backend/requirements*.txt   @sebastianbravo
-/backend/pyproject.toml      @sebastianbravo
+/backend/app/api/            @sebitabravo
+/backend/app/services/       @sebitabravo
+/backend/app/core/           @sebitabravo
+/backend/app/models/         @sebitabravo
+/backend/app/schemas/        @sebitabravo
+/backend/app/jobs/           @sebitabravo
+/backend/tests/              @sebitabravo @FixZzT
+/backend/requirements*.txt   @sebitabravo
+/backend/pyproject.toml      @sebitabravo
 
 # ── Pipeline de voz + Open-WA (dominio de Sebastián) ──
-/backend/Dockerfile          @sebastianbravo
+/backend/Dockerfile          @sebitabravo
 
 # ── Landing (Astro) ──
-/landing/                    @franbuilds @matiasatuan
+/landing/                    @franbuilds @FixZzT
 
 # ── Admin dashboard (Jinja2 + HTMX) ──
-/backend/app/admin/          @sebastianbravo @franbuilds
+/backend/app/admin/          @sebitabravo @franbuilds
 
 # ── Infra / deploy / CI ──
-/.github/                    @sebastianbravo
-/docker-compose*.yml         @sebastianbravo
-/scripts/                    @sebastianbravo
-/Makefile                    @sebastianbravo
+/.github/                    @sebitabravo
+/docker-compose*.yml         @sebitabravo
+/scripts/                    @sebitabravo
+/Makefile                    @sebitabravo
 
 # ── Documentación ──
-/AGENTS.md                   @sebastianbravo
-/DESIGN.md                   @franbuilds
-/docs/                       @matiasatuan
+/AGENTS.md                   @sebitabravo
+/docs/                       @FixZzT
 
 # ── Default: todo lo no cubierto arriba ──
-*                            @sebastianbravo
+*                            @sebitabravo
