@@ -3,8 +3,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: 📚 Documentación del proyecto
-    url: https://github.com/AgroVoz/AgroVoz/tree/main/docs
+    url: https://github.com/sebitabravo/AgroVoz/tree/main/docs
     about: Arquitectura (ARCHITECTURE.md), fases de ejecución (phases/) y decisiones (ADRs).
   - name: 🔒 Reportar vulnerabilidad de seguridad
-    url: https://github.com/AgroVoz/AgroVoz/security/advisories/new
+    url: https://github.com/sebitabravo/AgroVoz/security/advisories/new
     about: Reportá vulnerabilidades en privado, NO como issue pública. Secrets, auth, webhook HMAC, ban de número WhatsApp.
