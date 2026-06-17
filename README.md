@@ -43,7 +43,6 @@ make up
 ```
 AgroVoz/
 ├── AGENTS.md              ← Source of truth para IAs
-├── DESIGN.md              ← Sistema de diseño visual
 ├── Makefile               ← Comandos de desarrollo
 ├── backend/               ← FastAPI + servicios
 ├── landing/               ← Astro static site
@@ -56,7 +55,6 @@ AgroVoz/
 - `AGENTS.md` — instrucciones completas del proyecto (source of truth)
 - `docs/ARCHITECTURE.md` — arquitectura, DB schema, decisiones técnicas
 - `docs/phases/` — fases de ejecución (00 → 06)
-- `DESIGN.md` — sistema de diseño visual
 
 ## Licencia
 

@@ -16,12 +16,18 @@ Proyecto estudiantil para Desafío Crea INACAP 2026. Etapa actual: IDEA con arqu
 - **Francisco Fernández** — Product Owner: investigación, pitch, enlace con productores en Traiguén
 - **Matías Atuán** — Desarrollo: apoyo técnico, testing, documentación, validación de fuentes
 
-Institución: INACAP Temuco, Ingeniería en Informática.
+## Academic context
+
+- **Institución:** INACAP Temuco, Ingeniería en Informática
+- **Competencia:** Desafío Crea INACAP 2026
+- **Etapa actual:** IDEA con arquitectura definida (sin código aún)
+- **Entregables esperados:** prototipo funcional MVP, pitch, demo en vivo, documentación técnica
+- **Piloto de validación:** 3-5 productores reales en Traiguén, 4 semanas
 
 ## Main goals
 
 1. **MVP funcional (6 semanas):** pipeline end-to-end de voz en VPS Hetzner CX43
-2. **Validación técnica:** precisión Whisper en español rural chileno (métrica WER)
+2. **Validación técnica:** precisión de Whisper small en español rural chileno, target WER < 15% en muestra piloto de Traiguén (stretch < 10%, a validar en piloto)
 3. **Piloto en Traiguén:** 3-5 productores reales, 4 semanas de uso
 4. **Dataset de voz rural chilena:** activo propietario para fine-tuning futuro
 5. **Validación institucional:** contacto formal con PRODESAL/INDAP Araucanía
@@ -130,7 +136,6 @@ Detalle completo en `docs/ARCHITECTURE.md`.
 AgroVoz/
 ├── AGENTS.md              ← Source of truth (este archivo)
 ├── CLAUDE.md → AGENTS.md  ← Symlink
-├── DESIGN.md              ← Sistema de diseño visual
 ├── Makefile               ← Comandos de desarrollo
 ├── README.md
 ├── .env.example

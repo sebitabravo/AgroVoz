@@ -8,7 +8,7 @@
 - `docs/ARCHITECTURE.md`
 
 **Archivos YA EXISTENTES** (creados en setup inicial, NO recrear):
-- `AGENTS.md`, `CLAUDE.md → AGENTS.md` (symlink), `DESIGN.md`
+- `AGENTS.md`, `CLAUDE.md → AGENTS.md` (symlink)
 - `Makefile` (raíz, 24 targets)
 - `.gitignore`, `.env.example`
 
@@ -140,7 +140,6 @@ AgroVoz/
 │       └── .gitkeep              ← deploy.yml en Fase 06
 ├── AGENTS.md                     ← YA EXISTE (source of truth)
 ├── CLAUDE.md → AGENTS.md         ← YA EXISTE (symlink)
-├── DESIGN.md                     ← YA EXISTE (diseño visual)
 ├── Makefile                      ← YA EXISTE (24 targets)
 ├── README.md                     ← NUEVO en T0.1
 ├── .gitignore                    ← YA EXISTE
