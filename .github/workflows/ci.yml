@@ -17,9 +17,42 @@ env:
   PYTHON_VERSION: '3.12'
 
 jobs:
+  # ── Detectar qué módulos ya tienen código ──
+  # En etapa IDEA el repo es solo scaffolding (.gitkeep, sin manifiestos).
+  # Cada job real se activa solo cuando aparece su manifiesto. Así el CI queda
+  # verde en el punto 0 y se enciende fase por fase sin tocar este archivo.
+  detect:
+    name: Detectar módulos con código
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.check.outputs.backend }}
+      landing: ${{ steps.check.outputs.landing }}
+      compose: ${{ steps.check.outputs.compose }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          if [ -f backend/pyproject.toml ]; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -f landing/package.json ]; then
+            echo "landing=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "landing=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -f docker-compose.yml ]; then
+            echo "compose=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "compose=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # ── Backend: lint + type-check ──
   lint:
     name: Backend lint & types
+    needs: detect
+    if: needs.detect.outputs.backend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -49,6 +82,8 @@ jobs:
   # ── Backend: tests ──
   test:
     name: Backend tests
+    needs: detect
+    if: needs.detect.outputs.backend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -83,6 +118,8 @@ jobs:
   # ── Landing: build Astro ──
   landing:
     name: Landing build
+    needs: detect
+    if: needs.detect.outputs.landing == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -102,6 +139,8 @@ jobs:
   # ── Docker: validar compose ──
   compose-check:
     name: Docker Compose config
+    needs: detect
+    if: needs.detect.outputs.compose == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -110,4 +149,5 @@ jobs:
         run: docker compose -f docker-compose.yml config --quiet
 
       - name: Validate prod compose
+        if: hashFiles('docker-compose.prod.yml') != ''
         run: docker compose -f docker-compose.prod.yml config --quiet
