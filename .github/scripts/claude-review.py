@@ -19,16 +19,23 @@ Setup:
 
 import json
 import os
+import random
 import re
 import subprocess
 import sys
 import textwrap
 import time
 
-from anthropic import Anthropic, APIError, APIConnectionError, RateLimitError
+from anthropic import (
+    Anthropic,
+    APIError, APIConnectionError, RateLimitError,
+    AuthenticationError, PermissionDeniedError, NotFoundError,
+    BadRequestError, RequestTooLargeError, UnprocessableEntityError,
+)
 
 # ── Config ──────────────────────────────────────────────────────────────────
 MAX_DIFF_CHARS = 80_000  # ~20K tokens para el diff
+MAX_PR_DESC_CHARS = 10_000  # PR description típica: 500-2000 chars. Limitar para no saturar el prompt.
 MODEL = os.environ.get("ANTHROPIC_DEFAULT_OPUS_MODEL", "glm-5.2")
 # Modelo para verificación (mismo que principal por defecto, puede ser más barato)
 VERIFY_MODEL = os.environ.get("ANTHROPIC_VERIFY_MODEL", MODEL)
@@ -43,9 +50,12 @@ MAX_TOKENS_FIND = 16384  # 8192 era insuficiente: JSON se truncaba con diffs gra
 MAX_TOKENS_VERIFY = 4096
 MAX_TOKENS_ASSESS = 4096
 MAX_RETRIES = 3
-RETRY_BACKOFF = 5  # segundos base entre reintentos
+RETRY_BACKOFF = 5  # segundos base entre reintentos (+ jitter aleatorio 0-2s)
+API_PASS_DELAY = 1  # segundos entre passes (Find→Verify→Assess) para evitar rate limit
 CODE_CONTEXT_LINES = 40  # líneas de contexto alrededor del hallazgo (solo archivos grandes)
 WHOLE_FILE_MAX_LINES = 400  # archivos <= esto se pasan COMPLETOS al verificador (ve todo el control-flow)
+MAX_REVIEW_MD_CHARS = 20_000  # REVIEW.md demasiado grande satura el system prompt sin beneficio
+MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB — archivos más grandes no se leen (OOM prevention en CI)
 
 # ── System prompt ───────────────────────────────────────────────────────────
 # Contiene identidad adversarial + contexto del proyecto.
@@ -468,28 +478,103 @@ ASSESS_PROMPT = textwrap.dedent("""\
 
 
 def load_review_md() -> str:
-    """Carga REVIEW.md de la raíz del repo. Retorna '' si no existe."""
-    review_path = os.path.join(
-        os.environ.get("GITHUB_WORKSPACE", "."), "REVIEW.md"
-    )
+    """Carga REVIEW.md de origin/main (branch base), NO del PR branch.
+
+    Por seguridad: leer del PR branch permitiría prompt injection vía
+    un REVIEW.md malicioso incluido en el diff. Solo se confía en la
+    versión que ya está en main.
+    """
+    # Intentar de origin/main (CI y entornos con remote).
+    # Por seguridad, NUNCA usar fallback al workspace: leer REVIEW.md del PR branch
+    # permitiría prompt injection vía un REVIEW.md malicioso incluido en el diff.
+    # Si origin/main no tiene REVIEW.md, simplemente no se usa — sin fallback.
     try:
-        with open(review_path) as f:
-            content = f.read().strip()
-            if content:
-                print(f"📋 REVIEW.md cargado ({len(content)} caracteres).")
-                return content
-    except FileNotFoundError:
-        print("ℹ️  REVIEW.md no encontrado. Usando solo system prompt.")
+        result = subprocess.run(
+            ["git", "show", "origin/main:REVIEW.md"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            content = result.stdout.strip()
+            if len(content) > MAX_REVIEW_MD_CHARS:
+                print(f"⚠️  REVIEW.md excede {MAX_REVIEW_MD_CHARS} caracteres "
+                      f"({len(content):,}). Truncando para no saturar el system prompt.")
+                content = content[:MAX_REVIEW_MD_CHARS] + (
+                    f"\n\n⚠️ REVIEW.md truncado ({MAX_REVIEW_MD_CHARS}/{len(content)} caracteres)."
+                )
+            print(f"📋 REVIEW.md cargado de origin/main ({len(content)} caracteres).")
+            return content
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+
+    # Sin fallback: REVIEW.md del workspace NO se lee por seguridad.
+    # Si no existe en origin/main, simplemente usamos solo el system prompt.
+    print("ℹ️  REVIEW.md no encontrado en origin/main. Usando solo system prompt.")
     return ""
+
+
+def _sanitize_for_prompt(text: str) -> str:
+    """Escapea marcadores que podrían cerrar bloques de código o inyectar instrucciones.
+
+    Previene prompt injection: si el diff/PR description contiene ```, el modelo
+    podría interpretar que el bloque de código terminó y lo que sigue son instrucciones.
+    También neutraliza marcadores comunes de inyección.
+
+    Además elimina lone surrogates (U+D800–U+DFFF) que causarían UnicodeEncodeError
+    al serializar a JSON, y caracteres Unicode bidi override (U+202A–U+202E)
+    que pueden alterar la dirección de lectura del código en el LLM.
+    """
+    # Reemplazar backticks triples — el vector más directo de code block escape
+    sanitized = text.replace('```', '\\`\\`\\`')
+    # Eliminar lone surrogates: rompen json.dumps con UnicodeEncodeError.
+    # Un surrogate sin su par es inválido en UTF-16 y Python no lo serializa.
+    sanitized = re.sub(r'[\ud800-\udfff]', '�', sanitized)
+    # Eliminar caracteres Unicode bidi override (LRE, RLE, PDF, LRO, RLO)
+    # que pueden alterar la dirección de lectura del código en el LLM.
+    sanitized = re.sub(r'[‪-‮]', '', sanitized)
+    return sanitized
+
+
+def _sanitize_error(text: str) -> str:
+    """Elimina credenciales y URLs sensibles de mensajes de error antes de loguear.
+
+    Previene leak de API keys en CI logs: el SDK de Anthropic incluye la URL del
+    request en los mensajes de error. Si la API key va como query param (?key=...),
+    aparecería en texto plano en los logs públicos de GitHub Actions.
+    También sanitiza headers de autenticación y tokens.
+    """
+    # Redactar API keys en formato key=value (?key=..., &key=...) y
+    # key: value (JSON error bodies: {"error": "Invalid api_key: sk-..."}).
+    sanitized = re.sub(
+        r'(api[-_]?\s*key|api[-_]?key|key|token|secret|password|auth)\s*[:=]\s*[^\s&\'\",;)\]}]+',
+        r'\1=<REDACTED>',
+        text,
+        flags=re.IGNORECASE,
+    )
+    # Redactar headers de autorización
+    # NOTA: el valor puede ser multi-token (ej: "Bearer sk-ant-xxx").
+    # Un solo [^\s] se detiene en el espacio. Usamos (?:[^\s,;\")}\]]+\s*)*
+    # para capturar tokens separados por espacio hasta el siguiente delimiter.
+    sanitized = re.sub(
+        r"(x-api-key|x-anthropic-key|authorization|bearer)\s*[:=]\s*"
+        r"(?:[^\s,;\")}\]]+\s*)*",
+        r"\1: <REDACTED>",
+        sanitized,
+        flags=re.IGNORECASE,
+    )
+    return sanitized
 
 
 def get_diff() -> str:
     """Obtiene el diff del PR contra la branch base."""
     base_ref = os.environ.get("GITHUB_BASE_REF", "main")
-    result = subprocess.run(
-        ["git", "diff", f"origin/{base_ref}...HEAD"],
-        capture_output=True, text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "diff", f"origin/{base_ref}...HEAD"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError) as e:
+        print(f"⚠️  Error obteniendo diff: {e}", file=sys.stderr)
+        return ""
     if result.returncode != 0:
         print(f"⚠️  Error obteniendo diff: {result.stderr}", file=sys.stderr)
         return ""
@@ -499,10 +584,14 @@ def get_diff() -> str:
 def get_changed_files() -> list[str]:
     """Obtiene la lista de archivos modificados en el PR."""
     base_ref = os.environ.get("GITHUB_BASE_REF", "main")
-    result = subprocess.run(
-        ["git", "diff", "--name-only", f"origin/{base_ref}...HEAD"],
-        capture_output=True, text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", f"origin/{base_ref}...HEAD"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError) as e:
+        print(f"⚠️  Error obteniendo changed files: {e}", file=sys.stderr)
+        return []
     if result.returncode != 0:
         print(f"⚠️  Error obteniendo changed files: {result.stderr}", file=sys.stderr)
         return []
@@ -565,14 +654,24 @@ def _run_ruff(file_path: str, start_id: int) -> list[dict]:
         _ = subprocess.run(
             ["ruff", "--version"], capture_output=True, text=True, timeout=10
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        print("   ⚠️  ruff no está instalado. Saltando lint check.")
+    except FileNotFoundError:
+        print("   ⚠️  ruff no está instalado (comando no encontrado). Saltando lint check.")
+        return []
+    except subprocess.TimeoutExpired:
+        print("   ⚠️  ruff --version timeout (>{10}s). Posible sistema sobrecargado. Saltando lint check.")
         return []
 
-    result = subprocess.run(
-        ["ruff", "check", "--output-format=json", file_path],
-        capture_output=True, text=True, timeout=30,
-    )
+    try:
+        result = subprocess.run(
+            ["ruff", "check", "--output-format=json", file_path],
+            capture_output=True, text=True, timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"   ⚠️  ruff check timeout en {file_path} (>{30}s). Saltando.")
+        return []
+    except OSError as e:
+        print(f"   ⚠️  ruff check error en {file_path}: {e}. Saltando.")
+        return []
     if result.returncode == 0:
         return []  # Sin problemas
     if not result.stdout.strip():
@@ -647,10 +746,17 @@ def _run_py_compile(file_path: str, start_id: int) -> list[dict]:
     if not os.path.isfile(file_path):
         return []  # Archivo eliminado en el PR
 
-    result = subprocess.run(
-        [sys.executable, "-m", "py_compile", file_path],
-        capture_output=True, text=True, timeout=15,
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "py_compile", file_path],
+            capture_output=True, text=True, timeout=15,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"   ⚠️  py_compile timeout en {file_path} (>{15}s). Saltando.")
+        return []
+    except OSError as e:
+        print(f"   ⚠️  py_compile error en {file_path}: {e}. Saltando.")
+        return []
     if result.returncode == 0:
         return []
 
@@ -696,11 +802,15 @@ def get_pr_description() -> str:
     pr_number = os.environ.get("GITHUB_PR_NUMBER", "")
     if not pr_number:
         return ""
-    result = subprocess.run(
-        ["gh", "pr", "view", pr_number, "--json", "title,body", "-q",
-         ".title + \"\\n\\n\" + .body"],
-        capture_output=True, text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "view", pr_number, "--json", "title,body", "-q",
+             ".title + \"\\n\\n\" + .body"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        print("⚠️  Error obteniendo PR description (timeout/OS).", file=sys.stderr)
+        return ""
     if result.returncode != 0:
         return ""
     return result.stdout.strip()
@@ -720,6 +830,73 @@ def truncate_diff(diff: str, max_chars: int = MAX_DIFF_CHARS) -> str:
     return truncated
 
 
+# Paths válidos: solo caracteres seguros, sin path traversal, sin hidden files sensibles.
+_VALID_PATH_RE = re.compile(r'^[a-zA-Z0-9_./-]+$')
+
+
+def _validate_file_path(file_path: str) -> bool:
+    """Valida que un file_path sea seguro para pasar a `git show`.
+
+    Previene path injection desde el output del LLM: un modelo comprometido
+    (vía prompt injection) podría generar paths como `../../.env` o `/etc/passwd`.
+    """
+    if not file_path:
+        return False
+    if '..' in file_path:
+        return False
+    if file_path.startswith('/'):
+        return False
+    if not _VALID_PATH_RE.match(file_path):
+        return False
+    # Bloquear hidden files sensibles (.env, .gitconfig, etc.) pero permitir .github/
+    basename = os.path.basename(file_path)
+    if basename.startswith('.') and not file_path.startswith('.github/'):
+        return False
+    return True
+
+
+def _read_from_filesystem(file_path: str, line: int, context: int) -> str | None:
+    """Lee archivo del filesystem (para archivos nuevos que no existen en HEAD).
+
+    Con protección de OOM: archivos > MAX_FILE_SIZE_BYTES se rechazan.
+    """
+    workspace = os.environ.get("GITHUB_WORKSPACE", ".")
+    full_path = os.path.join(workspace, file_path)
+
+    # Protección OOM: verificar tamaño antes de leer
+    try:
+        file_size = os.path.getsize(full_path)
+    except OSError:
+        return None
+    if file_size > MAX_FILE_SIZE_BYTES:
+        print(f"   ⚠️  {file_path}: {file_size / 1024 / 1024:.1f} MB — "
+              f"excede límite de {MAX_FILE_SIZE_BYTES // 1024 // 1024} MB. Saltando (OOM prevention).")
+        return None
+
+    try:
+        with open(full_path) as f:
+            content = f.read()
+    except (FileNotFoundError, PermissionError, OSError):
+        return None
+
+    all_lines = content.split('\n')
+
+    if len(all_lines) <= WHOLE_FILE_MAX_LINES + 1:
+        start, end = 0, len(all_lines)
+    else:
+        start = max(0, line - context - 1)
+        end = min(len(all_lines), line + context)
+
+    excerpt: list[str] = []
+    for i in range(start, end):
+        actual_line = i + 1
+        marker = ">>>" if actual_line == line else "   "
+        if i < len(all_lines):
+            excerpt.append(f"{marker} {actual_line:4d}: {all_lines[i]}")
+
+    return '\n'.join(excerpt)
+
+
 def get_code_context(file_path: str, line: int, context: int = CODE_CONTEXT_LINES) -> str | None:
     """Lee el archivo real en HEAD y retorna contexto con números de línea.
 
@@ -733,11 +910,40 @@ def get_code_context(file_path: str, line: int, context: int = CODE_CONTEXT_LINE
             capture_output=True, text=True, timeout=10,
         )
         if result.returncode != 0:
+            # Archivo nuevo (no existe en HEAD) → intentar filesystem
+            print(f"   📄 Archivo nuevo detectado: {file_path} (no existe en HEAD). "
+                  f"Leyendo del filesystem.")
+            return _read_from_filesystem(file_path, line, context)
+    except subprocess.TimeoutExpired:
+        print(f"   ⚠️  Timeout en git show para {file_path}. Reintentando (1/2)...")
+        try:
+            result = subprocess.run(
+                ["git", "show", f"HEAD:{file_path}"],
+                capture_output=True, text=True, timeout=15,
+            )
+            if result.returncode != 0:
+                return _read_from_filesystem(file_path, line, context)
+        except (subprocess.TimeoutExpired, OSError):
+            print(f"   ⚠️  Segundo intento fallido para {file_path}.")
             return None
-    except (subprocess.TimeoutExpired, OSError):
+    except OSError:
+        return None
+
+    # Protección OOM: si git show retorna un archivo enorme (ej: LLM alucinó path a modelo ML).
+    # GitHub Actions runners tienen ~7 GB RAM — un archivo de 500 MB ya es peligroso.
+    stdout_size = len(result.stdout)
+    if stdout_size > MAX_FILE_SIZE_BYTES:
+        print(f"   ⚠️  {file_path}: {stdout_size / 1024 / 1024:.1f} MB — "
+              f"excede límite de {MAX_FILE_SIZE_BYTES // 1024 // 1024} MB. Saltando (OOM prevention).")
         return None
 
     all_lines = result.stdout.split('\n')
+
+    # Strip trailing empty line (archivos con trailing newline producen N+1 elementos).
+    # Sin esto, un archivo de 400 líneas exactas + \n final → 401 elementos y se trata
+    # como archivo grande, perdiendo contexto completo para el verificador.
+    if all_lines and all_lines[-1] == '':
+        all_lines.pop()
 
     # Archivos chicos → contexto COMPLETO. El verificador necesita ver TODO el
     # control-flow (gates, `if:`, early returns, try/except) para refutar hallazgos
@@ -944,37 +1150,62 @@ def api_call(client: Anthropic, system: str, prompt: str,
                 temperature=temperature,
                 system=system,
                 messages=[{"role": "user", "content": prompt}],
+                timeout=120,  # 2 min max por llamada (default SDK: 10 min)
             )
-            return response.content[0].text
+            content_blocks = response.content
+            if not content_blocks:
+                raise RuntimeError("API response sin content blocks (vacio)")
+            first_block = content_blocks[0]
+            if not hasattr(first_block, "text"):
+                raise RuntimeError(
+                    f"API response content inesperado: {type(first_block).__name__}"
+                )
+            return first_block.text
 
         except RateLimitError as e:
             last_error = e
-            wait = RETRY_BACKOFF * attempt
+            wait = RETRY_BACKOFF * attempt + random.uniform(0, 2)
             print(f"⏳ [{label}] Rate limit (intento {attempt}/{MAX_RETRIES}). "
-                  f"Esperando {wait}s...", file=sys.stderr)
+                  f"Esperando {wait:.1f}s...", file=sys.stderr)
             time.sleep(wait)
 
         except APIConnectionError as e:
             last_error = e
-            wait = RETRY_BACKOFF * attempt
+            wait = RETRY_BACKOFF * attempt + random.uniform(0, 2)
             print(f"🔌 [{label}] Error de conexión (intento {attempt}/{MAX_RETRIES}). "
-                  f"Esperando {wait}s...", file=sys.stderr)
+                  f"Esperando {wait:.1f}s...", file=sys.stderr)
             time.sleep(wait)
 
+        # Errores no reintentables: fallas permanentes del cliente (4xx excepto 429).
+        # Reintentar sería perder ~30s en algo que nunca va a funcionar.
+        except (
+            AuthenticationError,   # 401 — API key inválida o sin acceso
+            PermissionDeniedError,  # 403 — sin permiso al recurso
+            NotFoundError,          # 404 — endpoint/modelo no encontrado
+            BadRequestError,        # 400 — request mal formado
+            RequestTooLargeError,   # 413 — prompt demasiado grande
+            UnprocessableEntityError,  # 422 — parámetros inválidos
+        ) as e:
+            print(f"❌ [{label}] Error no reintentable ({type(e).__name__}): "
+                  f"{_sanitize_error(str(e))}", file=sys.stderr)
+            raise
+
         except APIError as e:
-            # Error 1211 = unknown model, no reintentar
+            # Errores reintentables: del servidor (5xx) o genéricos.
+            # Error 1211 = unknown model → tratarlo como no reintentable.
             if "1211" in str(e) or "Unknown Model" in str(e):
                 print(f"❌ [{label}] Modelo '{effective_model}' no reconocido por z.ai.", file=sys.stderr)
                 print("   Modelos válidos: glm-5.2, glm-5.1, glm-5-turbo, glm-4.5-air", file=sys.stderr)
                 raise
             last_error = e
-            wait = RETRY_BACKOFF * attempt
-            print(f"⚠️  [{label}] API error (intento {attempt}/{MAX_RETRIES}): {e}", file=sys.stderr)
+            wait = RETRY_BACKOFF * attempt + random.uniform(0, 2)
+            print(f"⚠️  [{label}] API error (intento {attempt}/{MAX_RETRIES}): "
+                  f"{_sanitize_error(str(e))}", file=sys.stderr)
             time.sleep(wait)
 
     raise RuntimeError(
         f"❌ [{label}] No se pudo completar la llamada tras {MAX_RETRIES} intentos. "
-        f"Último error: {last_error}"
+        f"Último error: {_sanitize_error(str(last_error))}"
     )
 
 
@@ -993,7 +1224,11 @@ def find_issues(client: Anthropic, diff: str, pr_description: str,
             "---\n\n"
         )
 
-    prompt = FIND_PROMPT.replace("{diff}", diff).replace("{pr_context}", context)
+    prompt = FIND_PROMPT.replace(
+        "{diff}", _sanitize_for_prompt(diff)
+    ).replace(
+        "{pr_context}", _sanitize_for_prompt(context)
+    )
 
     # System: REVIEW.md primero (máxima prioridad), luego system prompt
     system = SYSTEM_PROMPT
@@ -1071,17 +1306,35 @@ def verify_findings(client: Anthropic, findings: list[dict],
     enriched: list[dict] = []
     for f in findings:
         file_path = f.get("file", "")
-        line = f.get("line", 0)
+        line_raw = f.get("line", 0)
         code_context = None
 
-        if file_path and line:
-            code_context = get_code_context(file_path, int(line))
+        # Validar que line sea un entero positivo
+        try:
+            line = int(line_raw) if isinstance(line_raw, (str, int, float)) else 0
+        except (ValueError, TypeError):
+            print(f"   ⚠️  Línea no numérica del LLM: {line_raw} — hallazgo omitido.")
+            continue
+        if line <= 0:
+            print(f"   ⚠️  Línea inválida del LLM: {line_raw} — hallazgo omitido.")
+            continue
+
+        if file_path:
+            if not _validate_file_path(file_path):
+                print(f"   ⚠️  Path inválido del LLM: {file_path} — ignorado por seguridad.")
+                continue
+            code_context = get_code_context(file_path, line)
             if code_context:
                 print(f"   📄 Código real cargado: {file_path}:{line}")
             else:
                 print(f"   ⚠️  No se pudo leer {file_path}:{line} — "
                       f"hallazgo se omitirá por no verificable.")
                 continue  # Sin código real, no podemos verificar → omitir
+        else:
+            # Sin file_path no hay código que verificar — omitir igual que el caso no legible.
+            # Consistente: solo verificamos hallazgos con código real accesible.
+            print(f"   ⚠️  Hallazgo sin file_path — omitido por no verificable.")
+            continue
 
         enriched.append({
             **f,
@@ -1159,6 +1412,7 @@ def verify_findings(client: Anthropic, findings: list[dict],
             return []
 
     verified_list = result.get("verified", [])
+    _VERDICT_EMOJI = {"real": "✅", "false_positive": "❌", "speculative": "🤔"}
     verdicts: dict[int, str] = {}
     for v in verified_list:
         fid = v.get("finding_id")
@@ -1166,8 +1420,7 @@ def verify_findings(client: Anthropic, findings: list[dict],
         explanation = v.get("explanation", "")
         if fid is not None:
             verdicts[fid] = verdict
-            emoji = {"real": "✅", "false_positive": "❌", "speculative": "🤔"}
-            print(f"   {emoji.get(verdict, '❓')} Finding #{fid}: {verdict} — {explanation[:100]}")
+            print(f"   {_VERDICT_EMOJI.get(verdict, '❓')} Finding #{fid}: {verdict} — {explanation[:100]}")
 
     # Solo hallazgos verificados como reales
     verified_findings = []
@@ -1299,6 +1552,7 @@ def _programmatic_assessment(verified_findings: list[dict],
         "Performance": "performance",
         "Tests y validación": "testing",
         "Documentación": "documentation",
+        "Mantenibilidad": "maintainability",
     }
 
     checklist = []
@@ -1492,12 +1746,19 @@ def build_review_markdown(parsed: dict, verified_findings: list[dict],
             "La ejecución de tests y type checking (mypy) se validan en CI aparte."
         ]
 
-    # Safety net: si Pass 3 no detectó bloqueo pero hay P0 verificados, forzar BLOCK
-    if p0_list and verdict != "BLOCK":
-        print("   🔒 Safety net: P0 verificados → forzando BLOCK.")
-        verdict = "BLOCK"
-        quality = min(quality, 3)
-        risk = "HIGH"
+    # Safety net: si hay P0 verificados, forzar BLOCK + calidad ≤3.
+    # Si el LLM ya dio BLOCK pero con quality > 3, corregirlo.
+    if p0_list:
+        needs_correction = verdict != "BLOCK" or quality > 3
+        if needs_correction:
+            if verdict != "BLOCK":
+                print("   🔒 Safety net: P0 verificados → forzando BLOCK.")
+            if quality > 3:
+                print(f"   🔒 Safety net: P0 con quality_score={quality} → "
+                      f"forzando 3 (max permitido para P0).")
+            verdict = "BLOCK"
+            quality = min(quality, 3)
+            risk = "HIGH"
     elif p1_list and verdict not in ("CHANGES REQUESTED", "BLOCK"):
         print("   🔒 Safety net: P1 verificados → forzando CHANGES REQUESTED.")
         verdict = "CHANGES REQUESTED"
@@ -1850,14 +2111,15 @@ def format_finding(f: dict) -> str:
     if code_snippet:
         parts.append("**Código actual:**")
         parts.append("```python")
-        parts.append(code_snippet.strip())
+        # Escape triple backticks dentro del snippet para no romper el bloque de markdown
+        parts.append(code_snippet.strip().replace('```', '\\`\\`\\`'))
         parts.append("```")
         parts.append("")
 
     if proposed_fix:
         parts.append("**Fix propuesto:**")
         parts.append("```python")
-        parts.append(proposed_fix.strip())
+        parts.append(proposed_fix.strip().replace('```', '\\`\\`\\`'))
         parts.append("```")
         parts.append("")
 
@@ -1872,13 +2134,27 @@ def post_review_comment(review_text: str) -> None:
         return
 
     review_path = "/tmp/claude-review.md"
-    with open(review_path, "w") as f:
-        f.write(review_text)
+    try:
+        # tempfile mitiga race condition si múltiples jobs comparten runner.
+        # Usamos delete=False para que gh CLI pueda leer el archivo.
+        import tempfile as _tmp
+        with _tmp.NamedTemporaryFile(mode='w', suffix='.md', delete=False,
+                                        dir='/tmp', prefix='claude-review-') as f:
+            f.write(review_text)
+            review_path = f.name
+    except OSError as e:
+        print(f"❌ No se pudo escribir review temporal: {e}", file=sys.stderr)
+        print("   Posible causa: /tmp lleno o sin permisos de escritura.", file=sys.stderr)
+        sys.exit(1)
 
-    result = subprocess.run(
-        ["gh", "pr", "review", pr_number, "--body-file", review_path, "--comment"],
-        capture_output=True, text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "review", pr_number, "--body-file", review_path, "--comment"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError) as e:
+        print(f"❌ Error posteando review: {e}", file=sys.stderr)
+        sys.exit(1)
     if result.returncode != 0:
         print(f"❌ Error posteando review: {result.stderr}", file=sys.stderr)
         sys.exit(1)  # Fallar el job — no sirve review que no se publica
@@ -1888,13 +2164,22 @@ def post_review_comment(review_text: str) -> None:
 
 def main() -> None:
     if not API_KEY:
-        print("⏭️  ANTHROPIC_API_KEY no configurado. Agregalo en Secrets → Actions.")
-        print("    Docs: https://github.com/sebitabravo/AgroVoz/settings/secrets/actions")
-        return
+        print("❌ ANTHROPIC_API_KEY no configurado. Agregalo en Secrets → Actions.", file=sys.stderr)
+        print("    Docs: https://github.com/sebitabravo/AgroVoz/settings/secrets/actions", file=sys.stderr)
+        print("    El CI falla a propósito: sin API key, el PR no recibe review.", file=sys.stderr)
+        sys.exit(1)
 
     diff = get_diff()
     if not diff.strip():
         print("⏭️  Diff vacío. Nada que revisar.")
+        # Postear review mínima para que el check aparezca como completado
+        review_text = (
+            "## 🤖 Claude Code Review — Diff vacío\n\n"
+            "No hay cambios de código que revisar en este PR.\n\n"
+            "---\n\n"
+            "🔍 **Veredicto:** Sin cambios detectados. Verificá que el PR contenga los commits esperados."
+        )
+        post_review_comment(review_text)
         return
 
     print(f"📝 Diff: {len(diff):,} caracteres, ~{diff.count('diff --git')} archivos.")
@@ -1904,6 +2189,11 @@ def main() -> None:
 
     review_md = load_review_md()
     pr_description = get_pr_description()
+    if len(pr_description) > MAX_PR_DESC_CHARS:
+        print(f"📋 Descripción del PR truncada: {len(pr_description)} → {MAX_PR_DESC_CHARS} caracteres.")
+        pr_description = pr_description[:MAX_PR_DESC_CHARS] + (
+            f"\n\n⚠️ Descripción truncada ({MAX_PR_DESC_CHARS}/{len(pr_description)} caracteres)."
+        )
     if pr_description:
         print(f"📋 Descripción del PR cargada ({len(pr_description)} caracteres).")
 
@@ -1953,14 +2243,17 @@ def main() -> None:
     findings = parsed.get("findings", [])
     verified_findings: list[dict] = []
 
+    if findings and API_PASS_DELAY > 0:
+        time.sleep(API_PASS_DELAY)
+
     if findings:
         try:
             verify_client = Anthropic(api_key=API_KEY, base_url=BASE_URL)
             verified_findings = verify_findings(verify_client, findings, review_md)
         except (RuntimeError, APIError) as e:
             print(f"⚠️  Error en Pass 2 (Verify): {e}", file=sys.stderr)
-            print("   Conservando todos los hallazgos por seguridad.", file=sys.stderr)
-            verified_findings = findings  # Fallback: reportar todo
+            print("   Descartando todos los hallazgos (fail-closed: silencio > ruido).", file=sys.stderr)
+            verified_findings = []  # Fail-closed: no confiar en hallazgos sin verificar
     else:
         print("✅ Pass 1 no encontró issues. Saltando Pass 2.")
 
@@ -1974,6 +2267,8 @@ def main() -> None:
               f"(P0: {auto_p0}, P1: {auto_p1}, P2: {auto_p2}) — sin verificación LLM.")
 
     # ── Pass 3: Assess ────────────────────────────────────────────────────
+    if API_PASS_DELAY > 0:
+        time.sleep(API_PASS_DELAY)
     discarded_count = len(findings) - len(verified_findings)
     preliminary_suggestions = parsed.get("improvement_suggestions", [])
 
