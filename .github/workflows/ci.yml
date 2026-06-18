@@ -1,5 +1,11 @@
 # CI de AgroVoz. Inspirado en OpenWA, adaptado al stack Python + Astro + Open-WA.
 # Ejecuta lint, type-check, tests del backend y build de la landing en cada push/PR a main.
+#
+# Jobs self-gateados: cada job verifica si su manifiesto (pyproject.toml, package.json,
+# docker-compose.yml) existe antes de ejecutar. Si no existe, el gate step setea un output
+# y los steps siguientes se saltan vía `if:`. El job sale verde sin hacer nada.
+# Esto permite que los checks sean REQUIRED en el ruleset sin bloquear PRs pre-fase.
+# Cuando el manifiesto aparece (al iniciar la fase), el job se activa automáticamente.
 name: CI
 
 on:
@@ -17,42 +23,12 @@ env:
   PYTHON_VERSION: '3.12'
 
 jobs:
-  # ── Detectar qué módulos ya tienen código ──
-  # En etapa IDEA el repo es solo scaffolding (.gitkeep, sin manifiestos).
-  # Cada job real se activa solo cuando aparece su manifiesto. Así el CI queda
-  # verde en el punto 0 y se enciende fase por fase sin tocar este archivo.
-  detect:
-    name: Detectar módulos con código
-    runs-on: ubuntu-latest
-    outputs:
-      backend: ${{ steps.check.outputs.backend }}
-      landing: ${{ steps.check.outputs.landing }}
-      compose: ${{ steps.check.outputs.compose }}
-    steps:
-      - uses: actions/checkout@v4
-      - id: check
-        run: |
-          if [ -f backend/pyproject.toml ]; then
-            echo "backend=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "backend=false" >> "$GITHUB_OUTPUT"
-          fi
-          if [ -f landing/package.json ]; then
-            echo "landing=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "landing=false" >> "$GITHUB_OUTPUT"
-          fi
-          if [ -f docker-compose.yml ]; then
-            echo "compose=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "compose=false" >> "$GITHUB_OUTPUT"
-          fi
-
   # ── Backend: lint + type-check ──
+  # Self-gated vía output. Steps posteriores al gate usan:
+  #   if: steps.gate.outputs.skip != 'true'
+  # El exit 0 NO detiene el job en GitHub Actions — solo el step actual.
   lint:
     name: Backend lint & types
-    needs: detect
-    if: needs.detect.outputs.backend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -60,30 +36,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Gate — skip si backend no inicializado
+        id: gate
+        run: |
+          if [ ! -f pyproject.toml ]; then
+            echo "⏭️  Backend aún no inicializado (sin pyproject.toml). Nada que lint-ear."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Setup Python
+        if: steps.gate.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Setup uv
+        if: steps.gate.outputs.skip != 'true'
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
 
       - name: Install dependencies
+        if: steps.gate.outputs.skip != 'true'
         run: uv sync --dev
 
       - name: Ruff (lint + format check)
+        if: steps.gate.outputs.skip != 'true'
         run: uv run ruff check app/
 
       - name: mypy (strict)
+        if: steps.gate.outputs.skip != 'true'
         run: uv run mypy app/
 
   # ── Backend: tests ──
   test:
     name: Backend tests
-    needs: detect
-    if: needs.detect.outputs.backend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -91,20 +78,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Gate — skip si backend no inicializado
+        id: gate
+        run: |
+          if [ ! -f pyproject.toml ]; then
+            echo "⏭️  Backend aún no inicializado (sin pyproject.toml). Nada que testear."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Setup Python
+        if: steps.gate.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Setup uv
+        if: steps.gate.outputs.skip != 'true'
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
 
       - name: Install dependencies
+        if: steps.gate.outputs.skip != 'true'
         run: uv sync --dev
 
       - name: pytest
+        if: steps.gate.outputs.skip != 'true'
         run: uv run pytest tests/ -v --cov=app --cov-report=term-missing
 
       - name: Upload coverage
@@ -118,8 +117,6 @@ jobs:
   # ── Landing: build Astro ──
   landing:
     name: Landing build
-    needs: detect
-    if: needs.detect.outputs.landing == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -127,27 +124,45 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Gate — skip si landing no inicializada
+        id: gate
+        run: |
+          if [ ! -f package.json ]; then
+            echo "⏭️  Landing aún no inicializada (sin package.json). Nada que build-ear."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Setup bun
+        if: steps.gate.outputs.skip != 'true'
         uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
+        if: steps.gate.outputs.skip != 'true'
         run: bun install --frozen-lockfile
 
       - name: Build
+        if: steps.gate.outputs.skip != 'true'
         run: bun run build
 
   # ── Docker: validar compose ──
   compose-check:
     name: Docker Compose config
-    needs: detect
-    if: needs.detect.outputs.compose == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - name: Gate — skip si compose no inicializado
+        id: gate
+        run: |
+          if [ ! -f docker-compose.yml ]; then
+            echo "⏭️  Docker Compose aún no configurado. Nada que validar."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Validate dev compose
+        if: steps.gate.outputs.skip != 'true'
         run: docker compose -f docker-compose.yml config --quiet
 
       - name: Validate prod compose
-        if: hashFiles('docker-compose.prod.yml') != ''
+        if: steps.gate.outputs.skip != 'true'
         run: docker compose -f docker-compose.prod.yml config --quiet

@@ -1,0 +1,66 @@
+# AgroVoz — EditorConfig
+# Consistencia automática de formato entre VS Code, PyCharm, Vim, etc.
+# Docs: https://editorconfig.org
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Python
+[*.py]
+indent_style = space
+indent_size = 4
+max_line_length = 120
+
+# JavaScript / TypeScript / JSX / TSX / Astro
+[*.{js,jsx,ts,tsx,astro,mjs,cjs}]
+indent_style = space
+indent_size = 2
+max_line_length = 100
+
+# JSON / YAML / TOML
+[*.{json,yaml,yml,toml}]
+indent_style = space
+indent_size = 2
+
+# Markdown
+[*.md]
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = false
+
+# HTML / CSS
+[*.{html,css}]
+indent_style = space
+indent_size = 2
+
+# Docker
+[Dockerfile]
+indent_style = space
+indent_size = 4
+
+# Makefile (requiere tabs reales)
+[Makefile]
+indent_style = tab
+indent_size = 4
+
+# Shell scripts
+[*.{sh,bash}]
+indent_style = space
+indent_size = 2
+
+# Dotfiles
+[.{gitignore,gitattributes,editorconfig,env*}]
+indent_style = space
+indent_size = 2
+
+# YAML de CI/CD (GitHub Actions)
+[.github/workflows/*.{yml,yaml}]
+indent_style = space
+indent_size = 2
