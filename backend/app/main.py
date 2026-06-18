@@ -8,13 +8,14 @@ import logging
 import re
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.responses import Response
 
 from app import __version__
 from app.api.health import router as health_router
@@ -56,7 +57,9 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
     El header se agrega a la respuesta para trazabilidad end-to-end.
     """
 
-    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         """Procesa request inyectando X-Request-ID."""
         request_id = request.headers.get("X-Request-ID")
         # Sanitizar: solo alfanumérico + guiones, max 64 chars.
@@ -95,12 +98,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         force=True,
     )
 
-    # Validar configuración crítica en producción
-    if settings.app_env == "production" and not settings.openweathermap_api_key:
-        raise ValueError(
-            "OPENWEATHERMAP_API_KEY es requerida en producción. "
-            "Defínela en el entorno o .env."
-        )
+    # Validar configuración crítica en producción.
+    # Falla rápido si secrets requeridos no están configurados, en vez de
+    # arrancar silenciosamente y fallar en runtime con errores oscuros.
+    if settings.app_env == "production":
+        missing = []
+        if not settings.openweathermap_api_key:
+            missing.append("OPENWEATHERMAP_API_KEY")
+        if not settings.openwa_api_key:
+            missing.append("OPENWA_API_KEY")
+        if missing:
+            raise ValueError(
+                f"Secrets requeridos no configurados: {', '.join(missing)}. "
+                "Defínelos en Dokploy Secrets UI o en el entorno de producción."
+            )
 
     logger.info(
         "AgroVoz iniciando — app_env=%s debug=%s",

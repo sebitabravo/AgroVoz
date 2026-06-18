@@ -12,31 +12,41 @@ async def test_health_liveness_retorna_200_y_status_ok(client: AsyncClient) -> N
     assert response.json() == {"status": "ok"}
 
 
-async def test_health_readiness_incluye_db_y_ffmpeg(client: AsyncClient) -> None:
-    """GET /api/v1/health?probe=readiness debe incluir chequeo de DB y ffmpeg.
+async def test_health_readiness_ffmpeg_disponible(
+    monkeypatch: pytest.MonkeyPatch, client: AsyncClient
+) -> None:
+    """Readiness con ffmpeg disponible debe retornar 200, status=ok, ffmpeg=available.
 
-    La DB siempre debe responder en entorno de test (SQLite en memoria/archivo).
-    ffmpeg puede no estar instalado en CI — solo validamos que la key existe.
-    El status será "ok" si ambas dependencias están listas, "degraded" si no.
+    Usa monkeypatch para forzar el path deterministicamente, sin depender
+    de si ffmpeg está instalado en el entorno (CI vs dev local).
     """
-    import shutil
+    monkeypatch.setattr("app.api.health._check_ffmpeg", lambda: True)
 
     response = await client.get("/api/v1/health?probe=readiness")
 
+    assert response.status_code == 200
     data = response.json()
+    assert data["status"] == "ok"
     assert data["database"] == "connected"
-    assert "ffmpeg" in data
+    assert data["ffmpeg"] == "available"
 
-    # En entorno con ffmpeg: status ok + available + 200
-    # En CI sin ffmpeg: status degraded + missing + 503
-    if shutil.which("ffmpeg"):
-        assert response.status_code == 200
-        assert data["status"] == "ok"
-        assert data["ffmpeg"] == "available"
-    else:
-        assert response.status_code == 503
-        assert data["status"] == "degraded"
-        assert data["ffmpeg"] == "missing"
+
+async def test_health_readiness_ffmpeg_faltante(
+    monkeypatch: pytest.MonkeyPatch, client: AsyncClient
+) -> None:
+    """Readiness con ffmpeg faltante debe retornar 503, status=degraded, ffmpeg=missing.
+
+    Usa monkeypatch para forzar el path deterministicamente.
+    """
+    monkeypatch.setattr("app.api.health._check_ffmpeg", lambda: False)
+
+    response = await client.get("/api/v1/health?probe=readiness")
+
+    assert response.status_code == 503
+    data = response.json()
+    assert data["status"] == "degraded"
+    assert data["database"] == "connected"
+    assert data["ffmpeg"] == "missing"
 
 
 async def test_health_readiness_degraded_db_down(monkeypatch: pytest.MonkeyPatch, client: AsyncClient) -> None:

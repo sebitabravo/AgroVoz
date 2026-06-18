@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     audio_retention_hours: int = 24
 
     # ── Logging ──────────────────────────
-    log_level: str = "INFO"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
 
 settings = Settings()

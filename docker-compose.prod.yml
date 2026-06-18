@@ -30,7 +30,7 @@ services:
       - PORT=8000
       - PYTHONDONTWRITEBYTECODE=1       # Sin .pyc en filesystem read-only
       # ── Base de datos ────────────────
-      - DATABASE_URL=${DATABASE_URL:-sqlite:///app/data/agrovoz.db}
+      - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/agrovoz.db}
       # ── Secrets — Dokploy Secrets UI ──
       - OPENWA_API_KEY=${OPENWA_API_KEY}
       - OPENWA_WEBHOOK_SECRET=${OPENWA_WEBHOOK_SECRET}

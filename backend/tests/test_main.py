@@ -158,3 +158,57 @@ async def test_request_id_rechaza_header_demasiado_largo(
     assert response_id is not None
     assert response_id != long_id
     assert len(response_id) <= 64
+
+
+# ── RequestIDFormatter ──
+
+
+def test_request_id_formatter_inyecta_request_id_desde_contextvar() -> None:
+    """RequestIDFormatter inyecta request_id en LogRecord desde el ContextVar."""
+    import logging
+
+    formatter = app_main.RequestIDFormatter("%(request_id)s — %(message)s")
+    record = logging.LogRecord(
+        name="test", level=logging.INFO, pathname="", lineno=0,
+        msg="test message", args=(), exc_info=None,
+    )
+    # Simular ContextVar con un request_id real
+    token = app_main.request_id_ctx.set("abc123-test")
+    try:
+        result = formatter.format(record)
+        assert result == "abc123-test — test message"
+    finally:
+        app_main.request_id_ctx.reset(token)
+
+
+def test_request_id_formatter_no_sobreescribe_request_id_existente() -> None:
+    """Si el LogRecord ya tiene request_id, el formatter no lo sobreescribe."""
+    import logging
+
+    formatter = app_main.RequestIDFormatter("%(request_id)s — %(message)s")
+    record = logging.LogRecord(
+        name="test", level=logging.INFO, pathname="", lineno=0,
+        msg="test message", args=(), exc_info=None,
+    )
+    record.request_id = "pre-existente"
+    # ContextVar tiene otro valor — el formatter no debe sobreescribir
+    token = app_main.request_id_ctx.set("contextvar-value")
+    try:
+        result = formatter.format(record)
+        assert result == "pre-existente — test message"
+    finally:
+        app_main.request_id_ctx.reset(token)
+
+
+def test_request_id_formatter_default_sin_contextvar() -> None:
+    """Si ContextVar no está seteada, usa el default '-'."""
+    import logging
+
+    formatter = app_main.RequestIDFormatter("%(request_id)s — %(message)s")
+    record = logging.LogRecord(
+        name="test", level=logging.INFO, pathname="", lineno=0,
+        msg="test message", args=(), exc_info=None,
+    )
+    # No seteamos ContextVar — debe usar el default "-"
+    result = formatter.format(record)
+    assert result == "- — test message"
