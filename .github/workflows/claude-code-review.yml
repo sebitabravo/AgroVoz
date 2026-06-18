@@ -1,0 +1,56 @@
+# Claude Code Review — reemplaza Copilot code review.
+# Usa tu propio endpoint Anthropic (z.ai) para revisar PRs con Claude.
+#
+# Setup único (Settings → Secrets and variables → Actions):
+#   Secrets:
+#     ANTHROPIC_API_KEY                 — tu API key de z.ai
+#     ANTHROPIC_BASE_URL                — https://api.z.ai/api/anthropic
+#   Variables (opcional):
+#     ANTHROPIC_DEFAULT_OPUS_MODEL      — modelo a usar (default: glm-5.2, el más capaz)
+#     ANTHROPIC_DEFAULT_SONNET_MODEL    — alternativa balanceada (glm-5-turbo)
+#     ANTHROPIC_DEFAULT_HAIKU_MODEL     — modelo rápido para tareas chicas (glm-4.5-air)
+#
+# Para que este check sea REQUIRED en el ruleset, agregar "Claude PR Review"
+# en Settings → Rules → Rulesets → main-protection → Required status checks.
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# Cancela runs anteriores del mismo PR (ahorra tokens).
+concurrency:
+  group: claude-review-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write  # Para postear la review con gh pr review
+
+jobs:
+  review:
+    name: Claude PR Review
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Necesario para git diff contra origin/main
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies (anthropic SDK + ruff)
+        run: pip install 'anthropic>=0.39,<1.0' ruff
+
+      - name: Run Claude Code Review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+          ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ vars.ANTHROPIC_DEFAULT_OPUS_MODEL || 'glm-5.2' }}
+          ANTHROPIC_VERIFY_MODEL: ${{ vars.ANTHROPIC_VERIFY_MODEL || '' }}
+          GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/scripts/claude-review.py
