@@ -5,13 +5,15 @@ Distingue entre liveness (¿está vivo el proceso?) y readiness
 (¿está listo para recibir tráfico? DB + modelos + ffmpeg).
 """
 
+import logging
 import shutil
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Response
 
 from app.core.database import engine
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _check_db() -> bool:
@@ -21,6 +23,7 @@ def _check_db() -> bool:
             result = conn.exec_driver_sql("SELECT 1")
             return result.scalar() == 1
     except Exception:
+        logger.exception("Health check: DB no responde")
         return False
 
 
@@ -30,7 +33,10 @@ def _check_ffmpeg() -> bool:
 
 
 @router.get("/health")
-async def health(probe: str = Query(default="readiness", pattern="^(liveness|readiness)$")) -> dict[str, str]:
+async def health(
+    response: Response,
+    probe: str = Query(default="readiness", pattern="^(liveness|readiness)$"),
+) -> dict[str, str]:
     """Health check endpoint con distinción liveness vs readiness.
 
     - probe=liveness: chequeo rápido, solo verifica que el proceso responde.
@@ -49,6 +55,7 @@ async def health(probe: str = Query(default="readiness", pattern="^(liveness|rea
         return {"status": "ok", "database": "connected", "ffmpeg": "available"}
 
     # Al menos una dependencia falló — 503 Service Unavailable
+    response.status_code = 503
     return {
         "status": "degraded",
         "database": "connected" if db_ok else "unavailable",

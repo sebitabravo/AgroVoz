@@ -13,19 +13,51 @@ async def test_health_liveness_retorna_200_y_status_ok(client: AsyncClient) -> N
 
 
 async def test_health_readiness_incluye_db_y_ffmpeg(client: AsyncClient) -> None:
-    """GET /api/v1/health?probe=readiness debe incluir chequeo de DB y ffmpeg."""
+    """GET /api/v1/health?probe=readiness debe incluir chequeo de DB y ffmpeg.
+
+    La DB siempre debe responder en entorno de test (SQLite en memoria/archivo).
+    ffmpeg puede no estar instalado en CI — solo validamos que la key existe.
+    El status será "ok" si ambas dependencias están listas, "degraded" si no.
+    """
+    import shutil
+
     response = await client.get("/api/v1/health?probe=readiness")
 
-    assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "ok"
     assert data["database"] == "connected"
-    assert data["ffmpeg"] == "available"
+    assert "ffmpeg" in data
+
+    # En entorno con ffmpeg: status ok + available + 200
+    # En CI sin ffmpeg: status degraded + missing + 503
+    if shutil.which("ffmpeg"):
+        assert response.status_code == 200
+        assert data["status"] == "ok"
+        assert data["ffmpeg"] == "available"
+    else:
+        assert response.status_code == 503
+        assert data["status"] == "degraded"
+        assert data["ffmpeg"] == "missing"
+
+
+async def test_health_readiness_degraded_db_down(monkeypatch: pytest.MonkeyPatch, client: AsyncClient) -> None:
+    """Cuando la DB no responde, readiness debe retornar 503 con status=degraded y database=unavailable."""
+    # Simular DB caída
+    monkeypatch.setattr("app.api.health._check_db", lambda: False)
+
+    response = await client.get("/api/v1/health?probe=readiness")
+    assert response.status_code == 503
+
+    data = response.json()
+    assert data["status"] == "degraded"
+    assert data["database"] == "unavailable"
 
 
 async def test_health_retorna_content_type_json(client: AsyncClient) -> None:
-    """El endpoint de health debe retornar Content-Type application/json."""
-    response = await client.get("/api/v1/health")
+    """El endpoint de health debe retornar Content-Type application/json.
+
+    Usa probe=liveness para evitar depender de ffmpeg/DB en CI.
+    """
+    response = await client.get("/api/v1/health?probe=liveness")
 
     assert response.status_code == 200
     assert "application/json" in response.headers["content-type"]
@@ -70,8 +102,11 @@ async def test_docs_oculto_en_production(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 async def test_health_tiene_security_headers(client: AsyncClient) -> None:
-    """El endpoint de health debe incluir headers de seguridad."""
-    response = await client.get("/api/v1/health")
+    """El endpoint de health debe incluir headers de seguridad.
+
+    Usa probe=liveness para evitar depender de ffmpeg/DB en CI.
+    """
+    response = await client.get("/api/v1/health?probe=liveness")
 
     assert response.headers.get("x-content-type-options") == "nosniff"
     assert response.headers.get("x-frame-options") == "DENY"

@@ -36,11 +36,15 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
         """Procesa request inyectando X-Request-ID."""
+        import re
         import time
 
         request_id = request.headers.get("X-Request-ID")
+        # Sanitizar: solo alfanumérico + guiones, max 64 chars.
+        # Previene log injection vía headers maliciosos.
+        if request_id and not re.match(r"^[a-zA-Z0-9\-]{1,64}$", request_id):
+            request_id = None
         if not request_id:
-            # ID simple: timestamp + random para unicidad
             request_id = f"{int(time.time() * 1000):x}-{uuid.uuid4().hex[:8]}"
 
         request.state.request_id = request_id
