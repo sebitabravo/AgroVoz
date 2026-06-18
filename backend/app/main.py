@@ -5,6 +5,8 @@ Punto de entrada del backend. Registra routers, middlewares y handlers.
 
 import contextvars
 import logging
+import re
+import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -56,9 +58,6 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
         """Procesa request inyectando X-Request-ID."""
-        import re
-        import time
-
         request_id = request.headers.get("X-Request-ID")
         # Sanitizar: solo alfanumérico + guiones, max 64 chars.
         # Previene log injection vía headers maliciosos.
@@ -125,14 +124,17 @@ app = FastAPI(
 )
 
 # Middlewares — el orden importa: el último agregado es el más externo.
-# RequestIDMiddleware va primero (más externo) para que todos los middlewares
-# internos tengan acceso a request_id en los logs.
-# SecurityHeadersMiddleware envuelve a RateLimitMiddleware para que las
-# respuestas 429 también reciban headers de seguridad.
-app.add_middleware(RequestIDMiddleware)
+# Starlette usa insert(0, ...) en add_middleware, así que el middleware
+# agregado primero termina siendo el más interno (innermost) y el último
+# el más externo (outermost).
+# RequestIDMiddleware debe ser el MÁS EXTERNO para setear el ContextVar
+# antes de que RateLimitMiddleware, SecurityHeadersMiddleware y
+# TrustedHostMiddleware procesen el request. Así los logs de rate limiting
+# y security headers también tienen request_id.
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+app.add_middleware(RequestIDMiddleware)
 
 # Routers
 app.include_router(health_router, prefix="/api/v1")
