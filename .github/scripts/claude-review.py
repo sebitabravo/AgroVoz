@@ -1332,7 +1332,7 @@ def verify_findings(client: Anthropic, findings: list[dict],
         else:
             # Sin file_path no hay código que verificar — omitir igual que el caso no legible.
             # Consistente: solo verificamos hallazgos con código real accesible.
-            print(f"   ⚠️  Hallazgo sin file_path — omitido por no verificable.")
+            print("   ⚠️  Hallazgo sin file_path — omitido por no verificable.")
             continue
 
         enriched.append({
