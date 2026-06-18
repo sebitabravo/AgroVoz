@@ -30,7 +30,7 @@ from anthropic import (
     Anthropic,
     APIError, APIConnectionError, RateLimitError,
     AuthenticationError, PermissionDeniedError, NotFoundError,
-    BadRequestError, RequestTooLargeError, UnprocessableEntityError,
+    BadRequestError, UnprocessableEntityError,
 )
 
 # ── Config ──────────────────────────────────────────────────────────────────
@@ -1183,7 +1183,6 @@ def api_call(client: Anthropic, system: str, prompt: str,
             PermissionDeniedError,  # 403 — sin permiso al recurso
             NotFoundError,          # 404 — endpoint/modelo no encontrado
             BadRequestError,        # 400 — request mal formado
-            RequestTooLargeError,   # 413 — prompt demasiado grande
             UnprocessableEntityError,  # 422 — parámetros inválidos
         ) as e:
             print(f"❌ [{label}] Error no reintentable ({type(e).__name__}): "
