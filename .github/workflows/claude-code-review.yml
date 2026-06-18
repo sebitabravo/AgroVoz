@@ -31,6 +31,7 @@ jobs:
   review:
     name: Claude PR Review
     runs-on: ubuntu-latest
+    timeout-minutes: 35  # GLM-5.2 + reasoning_effort=max: cada llamada puede tomar hasta 30 min
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4 (SHA pinning: anti-tag-takeover)
         with:
@@ -50,6 +51,7 @@ jobs:
           ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
           ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ vars.ANTHROPIC_DEFAULT_OPUS_MODEL || 'glm-5.2' }}
           ANTHROPIC_VERIFY_MODEL: ${{ vars.ANTHROPIC_VERIFY_MODEL || '' }}
+          REVIEW_API_TIMEOUT: '1800'  # 30 min: GLM-5.2 reasoning_effort=max necesita tiempo
           GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
           GITHUB_BASE_REF: ${{ github.base_ref }}
           GH_TOKEN: ${{ github.token }}

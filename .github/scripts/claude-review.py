@@ -59,6 +59,10 @@ MAX_TOKENS_ASSESS = 32768  # Reasoning max + checklist 6 dims + riesgos. Truncar
 # El reasoning cuenta como output tokens (ver caps arriba). Configurable por env.
 # Ref: https://github.com/NousResearch/hermes-agent/pull/46446
 REASONING_EFFORT = os.environ.get("REASONING_EFFORT", "max")
+# Timeout HTTP para llamadas a la API (segundos). GLM-5.2 con reasoning_effort=max
+# genera thinking tokens ANTES del texto visible — 300s es insuficiente para lotes grandes.
+# Claude Code usa 3.000.000 ms (50 min). Nosotros usamos 1800s (30 min) por llamada.
+API_TIMEOUT = int(os.environ.get("REVIEW_API_TIMEOUT", "1800"))
 MAX_RETRIES = 3
 RETRY_BACKOFF = 5  # segundos base entre reintentos (+ jitter aleatorio 0-2s)
 API_PASS_DELAY = 1  # segundos entre passes (Find→Verify→Assess) para evitar rate limit
@@ -282,50 +286,73 @@ FIND_PROMPT = textwrap.dedent("""\
 
 # ── Pass 2: Verify findings (adversarial) ────────────────────────────────────
 VERIFY_PROMPT = textwrap.dedent("""\
-    Sos un verificador ADVERSARIAL de hallazgos de code review. Tu ÚNICO trabajo es
-    encontrar FALSOS POSITIVOS — hallazgos que un revisor reportó pero que NO
-    son bugs reales.
-
-    **Regla de operación:** Sos ESCÉPTICO por defecto. Asumí que cada hallazgo
-    es un falso positivo hasta que el código real demuestre lo contrario.
-    Tu misión es REFUTAR hallazgos, no confirmarlos.
+    Sos un verificador RIGUROSO de hallazgos de code review. Tu trabajo es determinar
+    LA VERDAD de cada hallazgo — ni confirmar todo ni refutar todo.
 
     Para cada hallazgo, se te proporciona:
     1. El hallazgo original (archivo, línea, descripción, código reportado)
     2. El código REAL del archivo (COMPLETO si es chico; ventana amplia si es grande)
 
-    ## Estrategia de verificación (OBLIGATORIO seguir estos pasos)
+    ## ⚠️ PASO 0 — Clasificar el hallazgo (OBLIGATORIO antes de verificar)
 
-    Para CADA hallazgo, ANTES de clasificarlo como "real", ejecutá estos pasos:
+    Determiná la NATURALEZA del hallazgo. La estrategia de verificación
+    DEPENDE de esta clasificación:
 
-    1. **Trazar 3 ejecuciones mentales**: Simulá el código con valores concretos.
-       - Una ejecución con valores típicos (happy path)
-       - Una ejecución con valores límite (null, vacío, máximo)
-       - Una ejecución con valores maliciosos (si aplica a seguridad)
-       Si las 3 ejecuciones sobreviven sin comportamiento incorrecto → NO es real.
+    ### Tipo A: OMISIÓN — "Falta algo que debería estar"
+    El hallazgo dice que el código es INCOMPLETO: falta validación, sanitización,
+    cobertura de regex, manejo de errores, guard condition, o mitigación de amenaza.
+    El código existente PUEDE ser correcto para lo que cubre — pero no cubre todo.
 
-    2. **Verificar imports y jerarquías**: Si el hallazgo menciona excepciones
-       no manejadas, verificá la jerarquía de clases. Ej: `APIConnectionError`
+    **Estrategia para OMISIONES:**
+    1. NO verifiques si el código existente es correcto — probablemente lo sea.
+       El problema es lo que NO está, no lo que está.
+    2. Verificá contra la ESPECIFICACIÓN, ESTÁNDAR o AMENAZA citada en el hallazgo.
+    3. Si el hallazgo referencia un CVE, OWASP, o estándar de seguridad: verificá
+       el ALCANCE COMPLETO de esa amenaza, no solo lo que el código cubre.
+       - CVE-2021-42574 (Trojan Source): cubre U+202A–U+202E (embeddings/overrides)
+         Y U+2066–U+2069 (isolates). Ambos rangos son vectores independientes.
+       - OWASP Top 10 injection: validar contra TODOS los vectores de esa categoría.
+    4. Preguntate: "¿Existe ALGÚN input/ataque concreto que el código NO maneje?"
+       Si la respuesta es sí → "real". Si el código YA cubre todo lo que el
+       hallazgo pide → "false_positive".
+    5. Citá el estándar, CVE, o documentación que define el scope completo.
+
+    ### Tipo B: INCORRECCIÓN — "El código existente está mal"
+    El hallazgo dice que hay un bug en el código: lógica invertida, race condition,
+    tipo incorrecto, API mal usada, condición faltante en un flujo existente.
+
+    **Estrategia para INCORRECCIONES:**
+    1. Trazá 3 ejecuciones mentales con valores concretos:
+       - Happy path (valores típicos)
+       - Valores límite (null, vacío, máximo)
+       - Valores maliciosos (si aplica a seguridad)
+       Si NINGUNA ejecución produce comportamiento incorrecto → "false_positive".
+    2. Verificá imports y jerarquías de clases. Ej: `APIConnectionError`
        extiende `APIError` en el SDK de Anthropic — si el código atrapa
        `APIError`, YA cubre `APIConnectionError`.
+    3. Verificá semántica del contexto (CI/CD working-directory, defaults, env).
+    4. Aplicá la regla de 2 condiciones: si necesitás 2+ condiciones hipotéticas
+       para que el bug exista → "speculative", no "real".
 
-    3. **Verificar semántica del contexto**: Si el hallazgo involucra configs
-       de CI/CD (working-directory, defaults, env), asegurate de entender
-       cómo GitHub Actions resuelve esos settings. `defaults.run.working-directory`
-       aplica a TODOS los steps `run:` del job — un path relativo en un step
-       se resuelve relativo a ese working-directory.
+    ## Requisito de EVIDENCIA (OBLIGATORIO para CADA veredicto)
 
-    4. **Aplicar la regla de 2 condiciones**: Si para que el bug exista necesitás
-       asumir 2+ condiciones que no son el flujo normal → es "speculative", no "real".
+    Cada `explanation` DEBE incluir evidencia concreta y verificable:
+    - Para **"real"**: citá la línea de código que CONFIRMA el bug, O el estándar/CVE
+      cuyo scope el código no cubre completamente. Ej: "El regex en L545 cubre U+202A–U+202E
+      pero omite U+2066–U+2069, ambos requeridos por CVE-2021-42574."
+    - Para **"false_positive"**: citá la línea de código que PRUEBA que el bug no existe
+      (el guard, el import, la validación que el revisor no vio).
+    - Para **"speculative"**: enumerá las condiciones hipotéticas necesarias.
 
-    ## Clasificación
+    ## Clasificación final
 
-    - **real**: El código ACTUALMENTE tiene este bug. Se puede demostrar con una
-      traza de ejecución concreta. El comportamiento incorrecto es INEVITABLE.
-    - **false_positive**: El revisor malinterpretó el código. La lógica es correcta,
-      el supuesto bug no existe, o el código ya maneja el caso reportado.
+    - **real**: El código tiene este bug o está INCOMPLETO frente al estándar citado.
+      Para omisiones: el código genuinamente no cubre el caso reportado.
+    - **false_positive**: El revisor malinterpretó el código, o el código YA cubre
+      el caso reportado. Para omisiones: el código SÍ incluye lo que el hallazgo
+      dice que falta.
     - **speculative**: El bug SOLO ocurre si se dan condiciones hipotéticas que no
-      son el flujo normal. El código es razonablemente correcto.
+      son el flujo normal. No aplica a omisiones contra estándares documentados.
 
     ## Conocimiento de dominio específico
 
@@ -359,7 +386,7 @@ VERIFY_PROMPT = textwrap.dedent("""\
         {
           "finding_id": 1,
           "verdict": "real|false_positive|speculative",
-          "explanation": "Una oración explicando por qué. Citá la línea del código real que confirma o refuta el hallazgo."
+          "explanation": "Una oración con evidencia concreta. Citá línea de código o referencia externa."
         }
       ]
     }
@@ -1189,7 +1216,7 @@ def api_call(client: Anthropic, system: str, prompt: str,
                 temperature=temperature,
                 system=system,
                 messages=[{"role": "user", "content": prompt}],
-                timeout=300,  # 5 min: razonamiento max necesita más tiempo
+                timeout=API_TIMEOUT,  # Configurable: default 1800s (30 min) para GLM-5.2 + reasoning max
                 # z.ai usa formato Anthropic-compatible PERO con thinking block propio:
                 #   {"thinking": {"type": "enabled", "effort": "max"}}
                 # NO usa reasoning_effort (ese es Anthropic nativo, z.ai lo ignora).
@@ -1210,15 +1237,19 @@ def api_call(client: Anthropic, system: str, prompt: str,
             last_error = e
             wait = RETRY_BACKOFF * attempt + random.uniform(0, 2)
             print(f"⏳ [{label}] Rate limit (intento {attempt}/{MAX_RETRIES}). "
-                  f"Esperando {wait:.1f}s...", file=sys.stderr)
+                  f"Esperando {wait:.1f}s...", file=sys.stderr, flush=True)
             time.sleep(wait)
+            print(f"↻ [{label}] Reintentando (intento {attempt + 1}/{MAX_RETRIES})...",
+                  file=sys.stderr, flush=True)
 
         except APIConnectionError as e:
             last_error = e
             wait = RETRY_BACKOFF * attempt + random.uniform(0, 2)
             print(f"🔌 [{label}] Error de conexión (intento {attempt}/{MAX_RETRIES}). "
-                  f"Esperando {wait:.1f}s...", file=sys.stderr)
+                  f"Esperando {wait:.1f}s...", file=sys.stderr, flush=True)
             time.sleep(wait)
+            print(f"↻ [{label}] Reintentando (intento {attempt + 1}/{MAX_RETRIES})...",
+                  file=sys.stderr, flush=True)
 
         # Errores no reintentables: fallas permanentes del cliente (4xx excepto 429).
         # Reintentar sería perder ~30s en algo que nunca va a funcionar.
@@ -1230,21 +1261,23 @@ def api_call(client: Anthropic, system: str, prompt: str,
             UnprocessableEntityError,  # 422 — parámetros inválidos
         ) as e:
             print(f"❌ [{label}] Error no reintentable ({type(e).__name__}): "
-                  f"{_sanitize_error(str(e))}", file=sys.stderr)
+                  f"{_sanitize_error(str(e))}", file=sys.stderr, flush=True)
             raise
 
         except APIError as e:
             # Errores reintentables: del servidor (5xx) o genéricos.
             # Error 1211 = unknown model → tratarlo como no reintentable.
             if "1211" in str(e) or "Unknown Model" in str(e):
-                print(f"❌ [{label}] Modelo '{effective_model}' no reconocido por z.ai.", file=sys.stderr)
-                print("   Modelos válidos: glm-5.2, glm-5.1, glm-5-turbo, glm-4.5-air", file=sys.stderr)
+                print(f"❌ [{label}] Modelo '{effective_model}' no reconocido por z.ai.", file=sys.stderr, flush=True)
+                print("   Modelos válidos: glm-5.2, glm-5.1, glm-5-turbo, glm-4.5-air", file=sys.stderr, flush=True)
                 raise
             last_error = e
             wait = RETRY_BACKOFF * attempt + random.uniform(0, 2)
             print(f"⚠️  [{label}] API error (intento {attempt}/{MAX_RETRIES}): "
-                  f"{_sanitize_error(str(e))}", file=sys.stderr)
+                  f"{_sanitize_error(str(e))}", file=sys.stderr, flush=True)
             time.sleep(wait)
+            print(f"↻ [{label}] Reintentando (intento {attempt + 1}/{MAX_RETRIES})...",
+                  file=sys.stderr, flush=True)
 
     raise RuntimeError(
         f"❌ [{label}] No se pudo completar la llamada tras {MAX_RETRIES} intentos. "
@@ -1400,17 +1433,20 @@ def verify_findings(client: Anthropic, findings: list[dict],
 
     # System: REVIEW.md como highest priority + instrucciones de verificación
     system = (
-        "# ⚠️ HIGHEST PRIORITY — Adversarial Verification Mode\n\n"
-        "Sos un verificador ESCÉPTICO. Tu ÚNICA misión es encontrar FALSOS POSITIVOS.\n"
-        "Asumí que CADA hallazgo es FALSO hasta que el código real demuestre lo contrario.\n"
-        "Solo clasificá como 'real' si el bug es INEVITABLE con el código actual.\n\n"
-        "**ANTES de marcar 'real', intentá REFUTAR el hallazgo con al menos 3 trazas "
-        "de ejecución concretas.** Si sobrevive a las 3, NO es real.\n\n"
-        "**Verificá imports y jerarquías de clases.** Ej: en anthropic SDK, "
-        "APIConnectionError extiende APIError → except APIError lo cubre.\n\n"
-        "**Entendé el contexto técnico.** GitHub Actions: `exit 0` solo detiene el step, "
-        "NO el job. El self-gating correcto usa `GITHUB_OUTPUT` + `if:` en steps posteriores. "
-        "No asumas — verificá contra la doc.\n\n"
+        "# ⚠️ HIGHEST PRIORITY — Evidence-Based Verification Mode\n\n"
+        "Sos un verificador RIGUROSO. Tu misión es determinar LA VERDAD de cada hallazgo.\n"
+        "Ni asumas que todo es real ni refutes todo — verificá con evidencia concreta.\n\n"
+        "**Estrategia según tipo de hallazgo:**\n"
+        "- OMISIÓN (falta algo): verificá contra el estándar, CVE o especificación citada.\n"
+        "  El código existente puede ser correcto pero INCOMPLETO. No lo des por bueno.\n"
+        "- INCORRECCIÓN (código mal): asumí escepticismo. Trazá ejecuciones, verificá imports.\n\n"
+        "**Para OMISIONES de seguridad con CVE/estándar:** verificá el scope COMPLETO de la\n"
+        "amenaza. Un código que mitiga PARCIALMENTE un CVE sigue siendo vulnerable.\n"
+        "Ej: CVE-2021-42574 cubre U+202A–U+202E Y U+2066–U+2069 — ambos rangos.\n\n"
+        "**Para INCORRECCIONES:** verificá imports y jerarquías de clases.\n"
+        "Ej: APIConnectionError extiende APIError → except APIError lo cubre.\n\n"
+        "**Contexto técnico:** GitHub Actions `exit 0` solo detiene el step, NO el job.\n"
+        "El self-gating correcto usa `GITHUB_OUTPUT` + `if:` en steps posteriores.\n\n"
         "**Si necesitás 2+ condiciones hipotéticas para que el bug exista → "
         "speculative, NO real.**\n\n"
     )
