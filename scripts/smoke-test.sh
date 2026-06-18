@@ -73,7 +73,18 @@ else
     FAILED=$((FAILED + 1))
 fi
 
-# 3. Security headers
+# 3. X-Request-ID (trazabilidad end-to-end)
+headers=$(curl -sI "$API_URL/api/v1/health?probe=liveness" 2>/dev/null || echo "")
+request_id=$(echo "$headers" | grep -i "^x-request-id:" | sed 's/.*: //' | tr -d '\r\n')
+if [ -n "$request_id" ] && echo "$request_id" | grep -qE '^[0-9a-f-]{36}$'; then
+    green "X-Request-ID presente — $request_id"
+    PASSED=$((PASSED + 1))
+else
+    red "X-Request-ID ausente o formato inválido"
+    FAILED=$((FAILED + 1))
+fi
+
+# 4. Security headers
 check "Security header X-Content-Type-Options" "$API_URL/api/v1/health?probe=liveness" 200 \
     'true' || true  # Solo verifica HTTP 200, headers los pone Traefik en prod
 headers=$(curl -sI "$API_URL/api/v1/health?probe=liveness" 2>/dev/null || echo "")
@@ -85,7 +96,7 @@ else
     FAILED=$((FAILED + 1))
 fi
 
-# 4. OpenAPI docs no expuestas en prod (solo si API_URL es remota)
+# 5. OpenAPI docs no expuestas en prod (solo si API_URL es remota)
 if [[ "$API_URL" != "http://localhost"* ]] && [[ "$API_URL" != "http://127.0.0.1"* ]]; then
     check "OpenAPI docs NO expuestas en prod" "$API_URL/docs" 404 || true
 fi

@@ -5,11 +5,14 @@ from httpx import ASGITransport, AsyncClient
 
 
 async def test_health_liveness_retorna_200_y_status_ok(client: AsyncClient) -> None:
-    """GET /api/v1/health?probe=liveness debe retornar 200 con {"status": "ok"}."""
+    """GET /api/v1/health?probe=liveness debe retornar 200 con status=ok y version presente."""
     response = await client.get("/api/v1/health?probe=liveness")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    data = response.json()
+    assert data["status"] == "ok"
+    assert "version" in data
+    assert len(data["version"]) > 0
 
 
 async def test_health_readiness_ffmpeg_disponible(
@@ -29,6 +32,7 @@ async def test_health_readiness_ffmpeg_disponible(
     assert data["status"] == "ok"
     assert data["database"] == "connected"
     assert data["ffmpeg"] == "available"
+    assert "version" in data
 
 
 async def test_health_readiness_ffmpeg_faltante(
@@ -47,6 +51,7 @@ async def test_health_readiness_ffmpeg_faltante(
     assert data["status"] == "degraded"
     assert data["database"] == "connected"
     assert data["ffmpeg"] == "missing"
+    assert "version" in data
 
 
 async def test_health_readiness_degraded_db_down(monkeypatch: pytest.MonkeyPatch, client: AsyncClient) -> None:
@@ -60,6 +65,7 @@ async def test_health_readiness_degraded_db_down(monkeypatch: pytest.MonkeyPatch
     data = response.json()
     assert data["status"] == "degraded"
     assert data["database"] == "unavailable"
+    assert "version" in data
 
 
 async def test_health_retorna_content_type_json(client: AsyncClient) -> None:

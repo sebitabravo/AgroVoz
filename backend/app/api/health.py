@@ -11,6 +11,7 @@ import shutil
 from fastapi import APIRouter, Query, Response
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.config import settings
 from app.core.database import engine
 
 router = APIRouter()
@@ -46,14 +47,19 @@ def health(
       el servicio está listo para recibir tráfico después del startup.
     """
     if probe == "liveness":
-        return {"status": "ok"}
+        return {"status": "ok", "version": settings.app_version}
 
     # Readiness: verificar dependencias
     db_ok = _check_db()
     ffmpeg_ok = _check_ffmpeg()
 
     if db_ok and ffmpeg_ok:
-        return {"status": "ok", "database": "connected", "ffmpeg": "available"}
+        return {
+            "status": "ok",
+            "database": "connected",
+            "ffmpeg": "available",
+            "version": settings.app_version,
+        }
 
     # Al menos una dependencia falló — 503 Service Unavailable
     response.status_code = 503
@@ -61,4 +67,5 @@ def health(
         "status": "degraded",
         "database": "connected" if db_ok else "unavailable",
         "ffmpeg": "available" if ffmpeg_ok else "missing",
+        "version": settings.app_version,
     }
