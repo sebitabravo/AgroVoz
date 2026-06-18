@@ -1150,11 +1150,22 @@ def _extract_text(content_blocks: list) -> str:
 
     Raises RuntimeError si no hay ningún bloque de texto.
     """
-    text_parts = [b.text for b in content_blocks if hasattr(b, "text")]
-    if not text_parts:
+    text_blocks = [b for b in content_blocks if hasattr(b, "text")]
+    thinking_blocks = [b for b in content_blocks if not hasattr(b, "text")]
+    if thinking_blocks:
+        tipos_thinking = ", ".join(sorted({type(b).__name__ for b in thinking_blocks}))
+        chars_thinking = sum(
+            len(getattr(b, "thinking", "") or "") for b in thinking_blocks
+        )
+        # Estimación cruda: ~4 chars por token en español/código.
+        est_tokens = chars_thinking // 4
+        print(f"   🧠 Razonamiento activo: {len(thinking_blocks)} bloque(s) {tipos_thinking} "
+              f"(~{est_tokens} tokens estimados, {chars_thinking} chars)")
+    if not text_blocks:
         tipos = [type(b).__name__ for b in content_blocks]
         raise RuntimeError(f"API response sin bloque de texto: {tipos}")
-    return "".join(text_parts)
+    print(f"   📝 {len(text_blocks)} bloque(s) de texto extraído(s)")
+    return "".join(b.text for b in text_blocks)
 
 
 def api_call(client: Anthropic, system: str, prompt: str,
