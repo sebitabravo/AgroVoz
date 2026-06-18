@@ -1,10 +1,11 @@
-"""Tests de main.py — exception handler y lifespan."""
+"""Tests de main.py — exception handler, lifespan y RequestIDMiddleware."""
 
 import json
 from importlib import reload
 from unittest.mock import MagicMock
 
 import pytest
+from httpx import AsyncClient
 
 import app.main as app_main
 from app.core import config
@@ -86,3 +87,128 @@ async def test_lifespan_falla_sin_api_key_en_production(
         monkeypatch.setattr(config.settings, "app_env", original_env)
         monkeypatch.setattr(config.settings, "openweathermap_api_key", original_key)
         reload(app_main)
+
+
+# ── RequestIDMiddleware ──
+
+
+async def test_request_id_generado_cuando_cliente_no_envia_header(
+    client: AsyncClient,
+) -> None:
+    """RequestIDMiddleware genera X-Request-ID cuando el cliente no envía header."""
+    response = await client.get("/api/v1/health?probe=liveness")
+
+    assert response.status_code == 200
+    request_id = response.headers.get("X-Request-ID")
+    assert request_id is not None
+    # UUID7-like: timestamp_hex-UUID_hex (ej: "195b7e3a0a0-a1b2c3d4")
+    # Al menos 16 caracteres con al menos un guion
+    assert len(request_id) >= 16
+    assert "-" in request_id
+
+
+async def test_request_id_propaga_header_valido_del_cliente(
+    client: AsyncClient,
+) -> None:
+    """RequestIDMiddleware reusa X-Request-ID válido enviado por el cliente."""
+    custom_id = "test-request-id-001"
+    response = await client.get(
+        "/api/v1/health?probe=liveness",
+        headers={"X-Request-ID": custom_id},
+    )
+
+    assert response.status_code == 200
+    assert response.headers.get("X-Request-ID") == custom_id
+
+
+async def test_request_id_sanitiza_input_malicioso(
+    client: AsyncClient,
+) -> None:
+    """RequestIDMiddleware rechaza X-Request-ID con caracteres no alfanuméricos.
+
+    Previene log injection vía headers maliciosos (CWE-117).
+    """
+    malicious_id = "bad\nid<script>\x00"
+    response = await client.get(
+        "/api/v1/health?probe=liveness",
+        headers={"X-Request-ID": malicious_id},
+    )
+
+    assert response.status_code == 200
+    response_id = response.headers.get("X-Request-ID")
+    assert response_id is not None
+    assert response_id != malicious_id
+    # Debe generar uno nuevo con formato válido
+    assert "-" in response_id
+    assert len(response_id) >= 16
+
+
+async def test_request_id_rechaza_header_demasiado_largo(
+    client: AsyncClient,
+) -> None:
+    """RequestIDMiddleware rechaza X-Request-ID de más de 64 caracteres."""
+    long_id = "a" * 65
+    response = await client.get(
+        "/api/v1/health?probe=liveness",
+        headers={"X-Request-ID": long_id},
+    )
+
+    assert response.status_code == 200
+    response_id = response.headers.get("X-Request-ID")
+    assert response_id is not None
+    assert response_id != long_id
+    assert len(response_id) <= 64
+
+
+# ── RequestIDFormatter ──
+
+
+def test_request_id_formatter_inyecta_request_id_desde_contextvar() -> None:
+    """RequestIDFormatter inyecta request_id en LogRecord desde el ContextVar."""
+    import logging
+
+    formatter = app_main.RequestIDFormatter("%(request_id)s — %(message)s")
+    record = logging.LogRecord(
+        name="test", level=logging.INFO, pathname="", lineno=0,
+        msg="test message", args=(), exc_info=None,
+    )
+    # Simular ContextVar con un request_id real
+    token = app_main.request_id_ctx.set("abc123-test")
+    try:
+        result = formatter.format(record)
+        assert result == "abc123-test — test message"
+    finally:
+        app_main.request_id_ctx.reset(token)
+
+
+def test_request_id_formatter_no_sobreescribe_request_id_existente() -> None:
+    """Si el LogRecord ya tiene request_id, el formatter no lo sobreescribe."""
+    import logging
+
+    formatter = app_main.RequestIDFormatter("%(request_id)s — %(message)s")
+    record = logging.LogRecord(
+        name="test", level=logging.INFO, pathname="", lineno=0,
+        msg="test message", args=(), exc_info=None,
+    )
+    record.request_id = "pre-existente"
+    # ContextVar tiene otro valor — el formatter no debe sobreescribir
+    token = app_main.request_id_ctx.set("contextvar-value")
+    try:
+        result = formatter.format(record)
+        assert result == "pre-existente — test message"
+    finally:
+        app_main.request_id_ctx.reset(token)
+
+
+def test_request_id_formatter_default_sin_contextvar() -> None:
+    """Si ContextVar no está seteada, usa el default '-'."""
+    import logging
+
+    formatter = app_main.RequestIDFormatter("%(request_id)s — %(message)s")
+    record = logging.LogRecord(
+        name="test", level=logging.INFO, pathname="", lineno=0,
+        msg="test message", args=(), exc_info=None,
+    )
+    # No seteamos ContextVar — debe usar el default "-"
+    result = formatter.format(record)
+    assert result == "- — test message"

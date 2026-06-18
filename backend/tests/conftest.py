@@ -38,8 +38,21 @@ async def client(tmp_path: Path) -> AsyncGenerator[AsyncClient, None]:
 
     app.dependency_overrides[original_get_db] = override_get_db
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        yield c
+    # _check_db() en health.py usa el engine global directamente.
+    # Lo redirigimos al test_engine para aislamiento completo de tests.
+    import app.api.health as health_module
 
-    test_engine.dispose()
-    app.dependency_overrides.clear()
+    _original_health_engine = health_module.engine
+    health_module.engine = test_engine
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        try:
+            yield c
+        finally:
+            # try/finally asegura que el estado se restaura incluso si el test falla.
+            # Sin esto, una excepción durante el test dejaría health_module.engine
+            # apuntando al test_engine (ya dispuesto) y dependency_overrides sucio,
+            # contaminando los tests siguientes.
+            health_module.engine = _original_health_engine
+            test_engine.dispose()
+            app.dependency_overrides.clear()

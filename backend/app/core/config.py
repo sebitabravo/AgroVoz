@@ -60,9 +60,18 @@ class Settings(BaseSettings):
     # ── Admin ────────────────────────────
     admin_api_key: str = ""
 
+    # ── Modelos IA (paths) ───────────────
+    piper_model_path: str = "/app/models/es_ES-carlfm-x_low.voice"
+
     # ── Seguridad ────────────────────────
     rate_limit_per_minute: int = 60
     audio_retention_hours: int = 24
+
+    # ── Versión ──────────────────────────
+    app_version: str = "0.1.0-dev"
+
+    # ── Logging ──────────────────────────
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
 
 settings = Settings()
