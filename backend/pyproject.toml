@@ -1,0 +1,83 @@
+[project]
+name = "agrovoz"
+version = "0.1.0"
+description = "Asistente de voz para la Agricultura Familiar Campesina"
+requires-python = ">=3.12"
+readme = "../README.md"
+license = { text = "AGPL-3.0-only" }
+authors = [
+    { name = "Sebastián Bravo", email = "sebitabravo@duck.com" },
+]
+
+dependencies = [
+    "fastapi==0.137.1",
+    "uvicorn[standard]==0.49.0",
+    "sqlalchemy==2.0.51",
+    "alembic==1.18.4",
+    "pydantic-settings==2.14.1",
+    "httpx==0.28.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.0",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==7.1.0",
+    "ruff==0.15.17",
+    "mypy==2.1.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "W",   # pycodestyle warnings
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific
+]
+ignore = []
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+disallow_any_generics = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = [
+    "uvicorn.*",
+    "alembic.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+python_files = "test_*.py"
+addopts = ["-v", "--strict-markers", "--tb=short"]
+asyncio_mode = "auto"
+markers = [
+    "slow: tests lentos (audio, modelos IA)",
+    "e2e: tests end-to-end con servicios reales",
+]
