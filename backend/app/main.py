@@ -149,11 +149,17 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     """
     logger.exception("Error no manejado en %s %s", request.method, request.url.path)
     if settings.app_env == "development":
-        return JSONResponse(
+        response = JSONResponse(
             status_code=500,
             content={"detail": str(exc)},
         )
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Error interno del servidor."},
-    )
+    else:
+        response = JSONResponse(
+            status_code=500,
+            content={"detail": "Error interno del servidor."},
+        )
+    # X-Request-ID en respuestas 500: si call_next levanta excepción,
+    # el middleware no alcanza a setear el header. Lo seteamos acá
+    # para que el cliente pueda correlacionar errores con logs.
+    response.headers["X-Request-ID"] = request_id_ctx.get()
+    return response
