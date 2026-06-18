@@ -17,10 +17,10 @@ data/
 *.sqlite3
 
 # ── Secrets y config local ──
+# .env.production.example NO se whitelistea: no debe ir en la imagen de prod.
 .env
 .env.*
 !.env.example
-!.env.production.example
 
 # ── Python cache y artefactos ──
 __pycache__/

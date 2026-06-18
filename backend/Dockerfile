@@ -33,8 +33,9 @@ FROM python:3.12-slim AS runtime
 # Instalar dependencias de sistema en runtime
 # - ffmpeg: conversión .ogg ↔ .wav para pipeline de voz
 # - curl: HEALTHCHECK y debugging
-# - ca-certificates: SSL para APIs externas (OpenWeatherMap, ODEPA)
+# - ca-certificates: TLS para APIs externas (OpenWeatherMap, ODEPA)
 RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
     apt-get install -y --no-install-recommends \
         ffmpeg \
         curl \
@@ -56,8 +57,8 @@ WORKDIR /app
 # .dockerignore excluye models/, data/, .env*, __pycache__, .git, etc.
 COPY --chown=agrovoz:agrovoz . .
 
-# Crear directorio data/ para SQLite y audio temporal (el volumen se monta aquí)
-RUN mkdir -p /app/data && chown agrovoz:agrovoz /app/data
+# Crear directorios para volúmenes (data/ para SQLite + audio, models/ para modelos IA)
+RUN mkdir -p /app/data /app/models && chown agrovoz:agrovoz /app/data /app/models
 
 # Cambiar a usuario no-root
 USER agrovoz
@@ -66,10 +67,12 @@ USER agrovoz
 EXPOSE 8000
 
 # Health check: el endpoint /api/v1/health retorna {"status": "ok"} si la app
-# y la DB responden correctamente.
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:8000/api/v1/health || exit 1
+# y la DB responden correctamente. usa probe=liveness para chequeo rápido
+# (solo proceso vivo) y probe=readiness para chequeo completo (DB + modelos + ffmpeg).
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/api/v1/health?probe=liveness || exit 1
 
-# Entry point: uvicorn con workers ajustados al VPS (8 vCPU → 4 workers en prod)
-# En dev se puede sobreescribir con --reload vía docker-compose command.
+# Entry point: uvicorn con workers ajustados a RAM disponible.
+# 1 worker intencional: los modelos IA cargan ~3.2 GB por worker en memoria.
+# En prod, docker-compose.prod.yml sobreescribe con --workers 2 via command:.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

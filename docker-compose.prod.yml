@@ -7,7 +7,14 @@
 #   - NO usar `ports` (Traefik reserva 80/443 del host). Usar `expose`.
 #   - NO definir `container_name` (Dokploy gestiona los nombres).
 #   - Red externa `dokploy-network` (`external: true`).
-#   - Variables de entorno via secrets de Dokploy (NO .env commiteado).
+#   - Variables de entorno via Secrets UI de Dokploy (NO .env commiteado).
+#     Cada ${VAR} en `environment:` lo inyecta Dokploy desde su vault de secrets.
+#     Referencia: .env.production.example para ver TODAS las variables a configurar.
+#
+# Dashboard de Open-WA (puerto 2886) NO se expone públicamente.
+# Para escanear QR por primera vez:
+#   ssh -L 2886:localhost:2886 ubuntu@api.agrovoz.cl
+#   Luego abrir http://localhost:2886 y escanear QR con WhatsApp.
 
 services:
   backend:
@@ -15,13 +22,41 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    env_file:
-      - .env.production
     environment:
+      # ── Entorno ──────────────────────
       - APP_ENV=production
       - DEBUG=false
       - HOST=0.0.0.0
       - PORT=8000
+      - PYTHONDONTWRITEBYTECODE=1       # Sin .pyc en filesystem read-only
+      # ── Secrets — Dokploy Secrets UI ──
+      - OPENWA_API_KEY=${OPENWA_API_KEY}
+      - OPENWA_WEBHOOK_SECRET=${OPENWA_WEBHOOK_SECRET}
+      - OPENWA_API_URL=http://openwa:2785
+      - OPENWEATHERMAP_API_KEY=${OPENWEATHERMAP_API_KEY}
+      - ADMIN_API_KEY=${ADMIN_API_KEY}
+      # ── Modelos IA (paths dentro del contenedor) ──
+      - WHISPER_MODEL=${WHISPER_MODEL:-small}
+      - LLM_MODEL_PATH=${LLM_MODEL_PATH:-/app/models/qwen2.5-3b-q4_k_m.gguf}
+      - PIPER_VOICE=${PIPER_VOICE:-es_ES-carlfm-x_low}
+      # ── ODEPA ────────────────────────
+      - ODEPA_SYNC_HOUR=${ODEPA_SYNC_HOUR:-6}
+      - ODEPA_SYNC_MINUTE=${ODEPA_SYNC_MINUTE:-0}
+      # ── Seguridad ────────────────────
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-60}
+      - AUDIO_RETENTION_HOURS=${AUDIO_RETENTION_HOURS:-24}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--workers",
+        "2",
+      ]
     volumes:
       - backend_models:/app/models    # Modelos IA (persisten entre deploys)
       - backend_data:/app/data        # SQLite DB + audio temporal
@@ -30,7 +65,13 @@ services:
     networks:
       - dokploy-network               # Red externa de Dokploy para dominio
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "http://localhost:8000/api/v1/health?probe=liveness",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -38,19 +79,33 @@ services:
     logging:
       driver: json-file
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: "6"
+        reservations:
+          memory: 4G
+          cpus: "2"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
 
   # Open-WA: gateway WhatsApp self-hosted
-  # Dashboard (puerto 2886) NO se expone públicamente.
-  # Para escanear QR por primera vez:
-  #   ssh -L 2886:localhost:2886 -L 2785:localhost:2785 ubuntu@api.agrovoz.cl
-  #   Luego abrir http://localhost:2886 y escanear QR con WhatsApp.
   openwa:
+    # ⚠️  PENDIENTE: Reemplazar :latest por digest SHA256 después del primer pull:
+    #   docker pull ghcr.io/rmyndharis/openwa:latest
+    #   docker inspect ghcr.io/rmyndharis/openwa:latest --format='{{index .RepoDigests 0}}'
+    #   Reemplazar la línea de abajo con: image: ghcr.io/rmyndharis/openwa@sha256:<digest>
+    #   Esto previene supply chain attacks via tag mutability.
     image: ghcr.io/rmyndharis/openwa:latest
     restart: unless-stopped
-    env_file:
-      - .env.production
     environment:
       - NODE_ENV=production
       - DATABASE_PROVIDER=sqlite
@@ -63,11 +118,29 @@ services:
       - "2785"                        # API interna (solo backend accede)
     networks:
       - dokploy-network
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:2785/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     logging:
       driver: json-file
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   backend_models:

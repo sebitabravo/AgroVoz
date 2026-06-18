@@ -3,6 +3,8 @@
 # Levanta backend FastAPI + Open-WA (gateway WhatsApp).
 # Usa .env para variables de entorno.
 #
+# Requisito: .env existe. Si no, ejecutá 'make setup-env'.
+#
 # Comandos:
 #   docker compose up -d              # Levantar todo
 #   docker compose up -d backend      # Solo backend
@@ -22,12 +24,28 @@ services:
       - DEBUG=true
       - HOST=0.0.0.0
       - PORT=8000
+      - OPENWA_API_URL=http://openwa:2785
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--reload",
+        "--reload-dir",
+        "/app/app",
+      ]
     ports:
-      - "8000:8000"                   # Dev: expuesto en host para debug y curl
+      - "8000:8000"
     volumes:
-      - ./backend/data:/app/data      # SQLite DB + audio temporal (persiste entre reinicios)
+      - ./backend/data:/app/data        # SQLite DB + audio temporal (persiste entre reinicios)
+      - ./backend/models:/app/models    # Modelos IA (persisten entre reinicios)
+      - ./backend/app:/app/app          # Hot reload: montar código fuente
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      test:
+        ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health?probe=liveness"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -41,6 +59,7 @@ services:
   # Open-WA: gateway WhatsApp self-hosted (protocolo WhatsApp Web)
   # Dashboard en puerto 2886 para escanear QR (primera vez).
   # API interna en puerto 2785 (el backend se conecta a este).
+  # Ambos puertos bindeados solo a localhost por seguridad.
   openwa:
     image: ghcr.io/rmyndharis/openwa:latest
     restart: unless-stopped
@@ -53,10 +72,19 @@ services:
       - WEBHOOK_URL=http://backend:8000/api/v1/webhook/whatsapp
       - WEBHOOK_SECRET=${OPENWA_WEBHOOK_SECRET:-dev-webhook-secret}
     ports:
-      - "2886:2886"                   # Dashboard (escanear QR: http://localhost:2886)
-      - "2785:2785"                   # API interna
+      - "127.0.0.1:2886:2886"          # Dashboard (solo localhost, escanear QR)
+      - "127.0.0.1:2785:2785"          # API interna (solo localhost)
     volumes:
-      - openwa_data:/app/data         # Sesión WhatsApp persiste entre reinicios
+      - openwa_data:/app/data           # Sesión WhatsApp persiste entre reinicios
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:2785/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     logging:
       driver: json-file
       options:

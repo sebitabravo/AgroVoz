@@ -4,12 +4,23 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 
-async def test_health_retorna_200_y_status_ok(client: AsyncClient) -> None:
-    """El endpoint GET /api/v1/health debe retornar 200 con {"status": "ok"}."""
-    response = await client.get("/api/v1/health")
+async def test_health_liveness_retorna_200_y_status_ok(client: AsyncClient) -> None:
+    """GET /api/v1/health?probe=liveness debe retornar 200 con {"status": "ok"}."""
+    response = await client.get("/api/v1/health?probe=liveness")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+async def test_health_readiness_incluye_db_y_ffmpeg(client: AsyncClient) -> None:
+    """GET /api/v1/health?probe=readiness debe incluir chequeo de DB y ffmpeg."""
+    response = await client.get("/api/v1/health?probe=readiness")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["database"] == "connected"
+    assert data["ffmpeg"] == "available"
 
 
 async def test_health_retorna_content_type_json(client: AsyncClient) -> None:
