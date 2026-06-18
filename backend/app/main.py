@@ -3,6 +3,7 @@
 Punto de entrada del backend. Registra routers, middlewares y handlers.
 """
 
+import contextvars
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -24,6 +25,25 @@ from app.core.security import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ContextVar para propagar el request_id a los logs.
+# El middleware lo setea por request; el logging.Filter lo inyecta en cada LogRecord.
+request_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "request_id", default="-"
+)
+
+
+class RequestIDFormatter(logging.Formatter):
+    """Formatter que inyecta request_id en cada LogRecord al formatear.
+
+    Más robusto que un Filter porque no depende del orden de ejecución
+    de los filtros del logger ni de que basicConfig sea un no-op.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        if not hasattr(record, "request_id"):
+            record.request_id = request_id_ctx.get()
+        return super().format(record)
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
@@ -48,6 +68,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
             request_id = f"{int(time.time() * 1000):x}-{uuid.uuid4().hex[:8]}"
 
         request.state.request_id = request_id
+        request_id_ctx.set(request_id)
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         return response
@@ -60,13 +81,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     Al iniciar: configura logging, valida configuración crítica en producción.
     Al cerrar: libera conexiones del pool SQLite.
     """
-    # Configurar logging según entorno
+    # Configurar logging según entorno.
+    # RequestIDFormatter inyecta request_id en cada línea de log desde el ContextVar.
+    log_format = (
+        "%(asctime)s [%(levelname)s] [%(request_id)s] %(name)s: %(message)s"
+        if settings.app_env == "production"
+        else "%(asctime)s [%(levelname)s] [%(request_id)s] %(name)s %(filename)s:%(lineno)d: %(message)s"
+    )
+    handler = logging.StreamHandler()
+    handler.setFormatter(RequestIDFormatter(log_format, datefmt="%Y-%m-%dT%H:%M:%S"))
     logging.basicConfig(
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-        if settings.app_env == "production"
-        else "%(asctime)s [%(levelname)s] %(name)s %(filename)s:%(lineno)d: %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S",
+        handlers=[handler],
+        force=True,
     )
 
     # Validar configuración crítica en producción

@@ -89,8 +89,9 @@ async def test_docs_oculto_en_production(monkeypatch: pytest.MonkeyPatch) -> Non
         async with AsyncClient(
             transport=ASGITransport(app=app_main.app), base_url="http://test"
         ) as c:
-            # Health debe seguir funcionando
-            health_response = await c.get("/api/v1/health")
+            # Health debe seguir funcionando en cualquier entorno.
+            # Usamos probe=liveness para no depender de ffmpeg/DB en CI.
+            health_response = await c.get("/api/v1/health?probe=liveness")
             assert health_response.status_code == 200
 
             # /docs debe retornar 404

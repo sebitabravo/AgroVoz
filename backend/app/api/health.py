@@ -33,7 +33,7 @@ def _check_ffmpeg() -> bool:
 
 
 @router.get("/health")
-async def health(
+def health(
     response: Response,
     probe: str = Query(default="readiness", pattern="^(liveness|readiness)$"),
 ) -> dict[str, str]:
