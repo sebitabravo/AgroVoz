@@ -68,7 +68,7 @@ EXPOSE 8000
 
 # Health check: el endpoint /api/v1/health retorna {"status": "ok"} si la app
 # y la DB responden correctamente. usa probe=liveness para chequeo rápido
-# (solo proceso vivo) y probe=readiness para chequeo completo (DB + modelos + ffmpeg).
+# (solo proceso vivo) y probe=readiness para chequeo completo (DB + ffmpeg).
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8000/api/v1/health?probe=liveness || exit 1
 

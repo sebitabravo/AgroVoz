@@ -3,8 +3,9 @@
 import time
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
+from starlette.responses import Response as StarletteResponse
 
 from app.core.config import settings
 from app.core.security import RateLimitMiddleware
@@ -48,26 +49,64 @@ async def test_rate_limit_ips_independientes(
 ) -> None:
     """Cada IP tiene su propio contador de rate limiting.
 
-    Verifica que el diccionario _requests aísla IPs correctamente,
-    sin contaminación cruzada entre contadores.
+    Verifica que dispatch() aísla IPs correctamente: una IP que excede
+    el límite no bloquea a otras IPs. Usa Request con scopes mock
+    para simular distintas IPs sin depender de ASGITransport.
     """
     monkeypatch.setattr(settings, "rate_limit_per_minute", 2)
 
     app_test = FastAPI()
     middleware = RateLimitMiddleware(app_test)
 
-    # Simular requests de distintas IPs manipulando _requests directamente.
-    # En producción, request.client.host provee la IP real.
-    # En tests con ASGITransport, request.client.host siempre es "testserver".
-    now = 1000.0
+    # Mock call_next: simula el resto de la cadena de middlewares + router.
+    # Retorna 200 OK sin leer el body del request.
+    async def call_next(request: Request) -> StarletteResponse:
+        return StarletteResponse(
+            content='{"status":"ok"}',
+            status_code=200,
+            media_type="application/json",
+        )
 
-    # IP 10.0.0.1: 2 requests → no bloqueada aún
-    middleware._requests["10.0.0.1"] = [now - 10, now - 5]
-    assert len(middleware._requests["10.0.0.1"]) == 2
+    # Scope base para construir Request con distintas IPs.
+    # client[0] es la IP que dispatch() extrae vía request.client.host.
+    base_scope: dict[str, object] = {
+        "type": "http",
+        "method": "GET",
+        "path": "/api/v1/health",
+        "scheme": "http",
+        "server": ("testserver", 80),
+        "headers": [],
+    }
 
-    # IP 10.0.0.2: 1 request → aún puede hacer más
-    middleware._requests["10.0.0.2"] = [now - 3]
-    assert len(middleware._requests["10.0.0.2"]) == 1
+    # IP 10.0.0.1: 2 requests (llega al límite pero no lo excede)
+    scope_ip1 = {**base_scope, "client": ("10.0.0.1", 12345)}
+    for _ in range(2):
+        request_ip1 = Request(scope_ip1)
+        response = await middleware.dispatch(request_ip1, call_next)
+        assert response.status_code == 200
+
+    # 3er request de 10.0.0.1: debe ser bloqueada (429)
+    request_ip1 = Request(scope_ip1)
+    response = await middleware.dispatch(request_ip1, call_next)
+    assert response.status_code == 429
+    # response.body puede ser bytes | memoryview[int].
+    # bytes() convierte ambos a bytes para el assert.
+    datos = bytes(response.body).decode()
+    assert "Demasiadas solicitudes" in datos
+
+    # IP 10.0.0.2: contador independiente — no debe ser bloqueada
+    scope_ip2 = {**base_scope, "client": ("10.0.0.2", 54321)}
+    request_ip2 = Request(scope_ip2)
+    response = await middleware.dispatch(request_ip2, call_next)
+    assert response.status_code == 200
+
+    # IP 10.0.0.2: 2do request (límite es 2) — aún debe pasar
+    response = await middleware.dispatch(request_ip2, call_next)
+    assert response.status_code == 200
+
+    # IP 10.0.0.2: 3er request — ahora sí debe ser bloqueada
+    response = await middleware.dispatch(request_ip2, call_next)
+    assert response.status_code == 429
 
     # Limpiar estado para no contaminar otros tests
     middleware._requests.clear()
