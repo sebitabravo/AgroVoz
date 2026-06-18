@@ -1,0 +1,79 @@
+# AgroVoz — Docker Compose para PRODUCCIÓN (Dokploy)
+#
+# Dokploy deploya este compose automáticamente al detectar cambios en main.
+# Traefik (gestionado por Dokploy) hace reverse proxy + SSL Let's Encrypt.
+#
+# REGLAS DOKPLOY (decisión #12):
+#   - NO usar `ports` (Traefik reserva 80/443 del host). Usar `expose`.
+#   - NO definir `container_name` (Dokploy gestiona los nombres).
+#   - Red externa `dokploy-network` (`external: true`).
+#   - Variables de entorno via secrets de Dokploy (NO .env commiteado).
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      - APP_ENV=production
+      - DEBUG=false
+      - HOST=0.0.0.0
+      - PORT=8000
+    volumes:
+      - backend_models:/app/models    # Modelos IA (persisten entre deploys)
+      - backend_data:/app/data        # SQLite DB + audio temporal
+    expose:
+      - "8000"                        # Expuesto a Traefik, NO bind host port
+    networks:
+      - dokploy-network               # Red externa de Dokploy para dominio
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Open-WA: gateway WhatsApp self-hosted
+  # Dashboard (puerto 2886) NO se expone públicamente.
+  # Para escanear QR por primera vez:
+  #   ssh -L 2886:localhost:2886 -L 2785:localhost:2785 ubuntu@api.agrovoz.cl
+  #   Luego abrir http://localhost:2886 y escanear QR con WhatsApp.
+  openwa:
+    image: ghcr.io/rmyndharis/openwa:latest
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      - NODE_ENV=production
+      - DATABASE_PROVIDER=sqlite
+      - API_KEY=${OPENWA_API_KEY}
+      - WEBHOOK_URL=http://backend:8000/api/v1/webhook/whatsapp
+      - WEBHOOK_SECRET=${OPENWA_WEBHOOK_SECRET}
+    volumes:
+      - openwa_data:/app/data         # Sesión WhatsApp persiste entre reinicios
+    expose:
+      - "2785"                        # API interna (solo backend accede)
+    networks:
+      - dokploy-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  backend_models:
+  backend_data:
+  openwa_data:
+
+networks:
+  dokploy-network:
+    external: true                    # Creada por Dokploy automáticamente
