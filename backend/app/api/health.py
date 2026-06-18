@@ -9,6 +9,7 @@ import logging
 import shutil
 
 from fastapi import APIRouter, Query, Response
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.database import engine
 
@@ -22,7 +23,7 @@ def _check_db() -> bool:
         with engine.connect() as conn:
             result = conn.exec_driver_sql("SELECT 1")
             return result.scalar() == 1
-    except Exception:
+    except (SQLAlchemyError, OSError):
         logger.exception("Health check: DB no responde")
         return False
 

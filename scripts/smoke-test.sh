@@ -65,8 +65,8 @@ if echo "$headers" | grep -qi "x-content-type-options: nosniff"; then
     green "Security header X-Content-Type-Options presente"
     PASSED=$((PASSED + 1))
 else
-    red "Security header X-Content-Type-Options ausente (esperado en dev sin Traefik: OK)"
-    PASSED=$((PASSED + 1))  # No es fail en dev
+    red "Security header X-Content-Type-Options ausente"
+    FAILED=$((FAILED + 1))
 fi
 
 # 4. OpenAPI docs no expuestas en prod (solo si API_URL es remota)
