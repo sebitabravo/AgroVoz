@@ -34,7 +34,7 @@ from anthropic import (
 )
 
 # ── Config ──────────────────────────────────────────────────────────────────
-MAX_DIFF_CHARS = 80_000  # ~20K tokens para el diff
+MAX_DIFF_CHARS = 120_000  # ~30K tokens. 80K truncaba diffs grandes; glm-5.2 tiene 200K de context
 MAX_PR_DESC_CHARS = 10_000  # PR description típica: 500-2000 chars. Limitar para no saturar el prompt.
 MODEL = os.environ.get("ANTHROPIC_DEFAULT_OPUS_MODEL", "glm-5.2")
 # Modelo para verificación (mismo que principal por defecto, puede ser más barato)
@@ -46,9 +46,17 @@ API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 INCLUDE_SUGGESTIONS = os.environ.get("REVIEW_INCLUDE_SUGGESTIONS", "false").lower() == "true"
 TEMPERATURE_FIND = 0.0   # Determinista: misma diff → mismo veredicto. Mata BLOCK/APPROVE contradictorios.
 TEMPERATURE_VERIFY = 0.0  # Determinista: verificación reproducible, sin creatividad
-MAX_TOKENS_FIND = 16384  # 8192 era insuficiente: JSON se truncaba con diffs grandes + system prompt largo
-MAX_TOKENS_VERIFY = 4096
-MAX_TOKENS_ASSESS = 4096
+TEMPERATURE_ASSESS = 0.2  # Algo de margen para redactar la evaluación, sin afectar los veredictos deterministas
+# reasoning_effort=max hace que GLM-5.2 razone profundo, PERO esos tokens de
+# razonamiento cuentan como output → comen el max_tokens. Si el reasoning se
+# traga el budget, el JSON se trunca y el fail-closed descarta hallazgos.
+# Por eso estos caps son 2-4x más altos que sin reasoning. glm-5.2: output ≤128K.
+MAX_TOKENS_FIND = 65536  # Reasoning max + lista completa de hallazgos. Truncar = fail-closed descarta TODO el PR
+MAX_TOKENS_VERIFY = 49152  # Reasoning max sobre TODOS los hallazgos batcheados. Truncar = pierde los reales (falso neg)
+MAX_TOKENS_ASSESS = 32768  # Reasoning max + checklist 6 dims + riesgos. Truncar = fallback programático (review pobre)
+# Profundidad de razonamiento GLM-5.2: "high" | "max". z.ai recomienda max para coding.
+# El reasoning cuenta como output tokens (ver caps arriba). Configurable por env.
+REASONING_EFFORT = os.environ.get("REASONING_EFFORT", "max")
 MAX_RETRIES = 3
 RETRY_BACKOFF = 5  # segundos base entre reintentos (+ jitter aleatorio 0-2s)
 API_PASS_DELAY = 1  # segundos entre passes (Find→Verify→Assess) para evitar rate limit
@@ -658,7 +666,7 @@ def _run_ruff(file_path: str, start_id: int) -> list[dict]:
         print("   ⚠️  ruff no está instalado (comando no encontrado). Saltando lint check.")
         return []
     except subprocess.TimeoutExpired:
-        print("   ⚠️  ruff --version timeout (>{10}s). Posible sistema sobrecargado. Saltando lint check.")
+        print("   ⚠️  ruff --version timeout (>10s). Posible sistema sobrecargado. Saltando lint check.")
         return []
 
     try:
@@ -1133,6 +1141,22 @@ def parse_json_response(text: str) -> dict | None:
     return _repair_truncated_json(text)
 
 
+def _extract_text(content_blocks: list) -> str:
+    """Extrae el texto de la respuesta saltando bloques de razonamiento.
+
+    Con reasoning_effort=max, GLM-5.2 puede anteponer bloques de pensamiento
+    (sin atributo .text) antes del texto real. No se puede asumir que
+    content_blocks[0] es la respuesta. Concatena todos los bloques con .text.
+
+    Raises RuntimeError si no hay ningún bloque de texto.
+    """
+    text_parts = [b.text for b in content_blocks if hasattr(b, "text")]
+    if not text_parts:
+        tipos = [type(b).__name__ for b in content_blocks]
+        raise RuntimeError(f"API response sin bloque de texto: {tipos}")
+    return "".join(text_parts)
+
+
 def api_call(client: Anthropic, system: str, prompt: str,
              max_tokens: int, temperature: float,
              label: str = "", model: str | None = None) -> str:
@@ -1150,17 +1174,15 @@ def api_call(client: Anthropic, system: str, prompt: str,
                 temperature=temperature,
                 system=system,
                 messages=[{"role": "user", "content": prompt}],
-                timeout=120,  # 2 min max por llamada (default SDK: 10 min)
+                timeout=300,  # 5 min: reasoning_effort=max razona más lento (default SDK: 10 min)
+                # reasoning_effort va por extra_body: el SDK lo mergea al top-level
+                # del body, que es donde z.ai lo lee (no es param nativo de Anthropic).
+                extra_body={"reasoning_effort": REASONING_EFFORT},
             )
             content_blocks = response.content
             if not content_blocks:
                 raise RuntimeError("API response sin content blocks (vacio)")
-            first_block = content_blocks[0]
-            if not hasattr(first_block, "text"):
-                raise RuntimeError(
-                    f"API response content inesperado: {type(first_block).__name__}"
-                )
-            return first_block.text
+            return _extract_text(content_blocks)
 
         except RateLimitError as e:
             last_error = e
@@ -1301,6 +1323,13 @@ def verify_findings(client: Anthropic, findings: list[dict],
     if not findings:
         return []
 
+    # Asignar id determinista ANTES de verificar — no confiar en el id que emitió el LLM.
+    # Mata 3 fallas silenciosas del join Find<->Verify: id omitido, id duplicado, o id
+    # con tipo inconsistente (int en Find, str en Verify). Sin esto, un hallazgo REAL
+    # podría caer al default 'false_positive' y descartarse en silencio (falso negativo).
+    for idx, f in enumerate(findings):
+        f["id"] = idx
+
     # Enriquecer cada finding con el código real
     enriched: list[dict] = []
     for f in findings:
@@ -1412,20 +1441,22 @@ def verify_findings(client: Anthropic, findings: list[dict],
 
     verified_list = result.get("verified", [])
     _VERDICT_EMOJI = {"real": "✅", "false_positive": "❌", "speculative": "🤔"}
-    verdicts: dict[int, str] = {}
+    # Clave normalizada a str: el LLM puede devolver finding_id como int o str.
+    # str(fid) en ambos lados garantiza que el join no falle por tipo.
+    verdicts: dict[str, str] = {}
     for v in verified_list:
         fid = v.get("finding_id")
         verdict = v.get("verdict", "false_positive")
         explanation = v.get("explanation", "")
         if fid is not None:
-            verdicts[fid] = verdict
+            verdicts[str(fid)] = verdict
             print(f"   {_VERDICT_EMOJI.get(verdict, '❓')} Finding #{fid}: {verdict} — {explanation[:100]}")
 
     # Solo hallazgos verificados como reales
     verified_findings = []
     for f in findings:
         fid = f.get("id")
-        v = verdicts.get(fid, "false_positive")  # Default: descartar si no se verificó
+        v = verdicts.get(str(fid), "false_positive")  # Default: descartar si no se verificó
         if v == "real":
             verified_findings.append(f)
         else:
@@ -1491,10 +1522,10 @@ def assess_code(client: Anthropic, verified_findings: list[dict],
             f"{review_md}\n\n"
         )
 
-    print(f"\n📊 Pass 3/3 — Evaluación objetiva ({MODEL}, temp=0.2)...")
+    print(f"\n📊 Pass 3/3 — Evaluación objetiva ({MODEL}, temp={TEMPERATURE_ASSESS})...")
 
     try:
-        response = api_call(client, system, prompt, MAX_TOKENS_ASSESS, 0.2, "Assess")
+        response = api_call(client, system, prompt, MAX_TOKENS_ASSESS, TEMPERATURE_ASSESS, "Assess")
     except (RuntimeError, APIError) as e:
         print(f"⚠️  Pass 3 (Assess) falló: {e}", file=sys.stderr)
         print("   Usando assessment programático como fallback.", file=sys.stderr)
@@ -1713,6 +1744,17 @@ def build_review_markdown(parsed: dict, verified_findings: list[dict],
 
     # ── Del Pass 1 (Find) — solo strengths ──
     strengths = parsed.get("strengths", [])
+
+    # Normalizar severidad ANTES de agrupar — el LLM puede emitir "p0", "P1 ", "Critical".
+    # Se escribe de vuelta en el finding para que todo el display downstream vea el valor
+    # canónico. Off-schema → P0 (fail-safe: un hallazgo real jamás cae fuera de todo bucket
+    # y se pierde en silencio; preferimos sobre-alertar a perder un bug verificado).
+    for f in verified_findings:
+        sev = str(f.get("severity", "")).strip().upper()
+        if sev not in ("P0", "P1", "P2"):
+            print(f"   ⚠️  Severidad off-schema '{f.get('severity')}' → tratada como P0 (fail-safe).")
+            sev = "P0"
+        f["severity"] = sev
 
     # Agrupar findings verificados por severidad
     p0_list = [f for f in verified_findings if f.get("severity") == "P0"]
