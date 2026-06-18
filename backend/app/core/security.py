@@ -71,6 +71,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: "ASGIApp") -> None:
         super().__init__(app)
         self._requests: dict[str, list[float]] = {}
+        self._last_cleanup: float = 0.0  # Timestamp de la última limpieza global
 
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
@@ -79,13 +80,26 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         now = time.time()
         window = 60  # 1 minuto
 
-        # Limpiar timestamps fuera de la ventana de 1 minuto
+        # Barrido global de IPs inactivas cada 60s para evitar memory leak.
+        # Sin esto, IPs que hacen 1 request y no vuelven acumulan entradas
+        # con timestamps expirados que nunca se limpian (scanners, bots).
+        if now - self._last_cleanup >= 60:
+            dead_ips = [
+                ip
+                for ip, timestamps in self._requests.items()
+                if not [t for t in timestamps if now - t < window]
+            ]
+            for ip in dead_ips:
+                del self._requests[ip]
+            self._last_cleanup = now
+
+        # Limpiar timestamps fuera de la ventana de 1 minuto para la IP actual
         self._requests.setdefault(client_ip, [])
         self._requests[client_ip] = [
             t for t in self._requests[client_ip] if now - t < window
         ]
 
-        # Poda entradas vacías para evitar memory leak de IPs inactivas
+        # Poda la IP actual si quedó vacía después de limpiar
         if not self._requests[client_ip]:
             del self._requests[client_ip]
 
