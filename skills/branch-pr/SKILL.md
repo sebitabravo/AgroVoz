@@ -44,20 +44,29 @@ Ejemplos:
 
 1. Branch desde main actualizada: `git checkout main && git pull && git checkout -b type/descripcion`
 2. Programar siguiendo skills relevantes (python-standards, testing-coverage).
-3. Validar local: `make lint && make typecheck && make test-backend`.
-4. **Squash** a 1 commit limpio (ver abajo).
+3. **Commits atómicos y descriptivos.** Cada cambio lógico su propio commit. Múltiples commits en la branch están bien — no hay que aplastarlos manualmente. Lo ÚNICO prohibido: commits WIP, `auto-save:`, o basura temporal.
+4. Validar local: `make lint && make typecheck && make test-backend`.
 5. Push: `git push -u origin type/descripcion`
 6. Crear PR: `gh pr create` — GitHub carga la plantilla automáticamente.
 
-## Squash obligatorio (1 commit limpio por branch)
+## Squash lo hace GitHub, no tú
 
-```bash
-git rebase -i origin/main              # marcar todos menos el primero como `squash`
-git log origin/main..HEAD --oneline    # verificar: 1 línea
-git push --force-with-lease            # si ya estaba pusheada
-```
+La branch puede tener **varios commits atómicos** (1 por cambio lógico). Eso es normal y deseable durante el review: cada commit cuenta una historia clara, reversible, revisable.
 
-Merge en GitHub: **"Squash and merge"**. `main` queda con 1 commit por PR.
+Al aprobar el PR, el botón **"Squash and merge"** de GitHub aplasta todos los commits de la branch en **1 solo commit en `main`** con el mensaje Conventional Commits que elijas. El historial de `main` queda limpio sin que tengas que reescribir la branch.
+
+### Lo que NO se hace
+
+- **NUNCA `git push --force-with-lease` ni `--force`.** Reescribir historia remota compartida rompe el flujo de review, invalida comentarios línea-por-línea, y es mala práctica en equipos.
+- **NUNCA commit de WIP, `auto-save:`, `tmp:`, o basura.** Si generaste basura local, hace `git reset -p` o `git rebase -i` ANTES del primer push. Una vez pusheado, commits nuevos encima, sin reescribir.
+- **NUNCA `git commit --amend` de un commit ya pusheado.** Si necesitás ajustar algo, commit nuevo encima. GitHub lo aplasta todo al mergear.
+
+### Lo que SÍ se hace
+
+- **Commits atómicos durante el desarrollo.** 3 cambios independientes = 3 commits. Cada uno compila y pasa tests.
+- **Push normal (`git push`).** Sin flags raros.
+- **Si el PR pide cambios en review:** commit nuevo con el fix, push normal. El historial de la branch refleja fielmente lo que pasó.
+- **Al mergear:** "Squash and merge" → 1 commit limpio en `main`.
 
 ## Reglas críticas
 
