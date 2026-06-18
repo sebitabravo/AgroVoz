@@ -60,7 +60,6 @@ check "Readiness probe"                "$API_URL/api/v1/health?probe=readiness" 
 # 3. Security headers
 check "Security header X-Content-Type-Options" "$API_URL/api/v1/health?probe=liveness" 200 \
     'true' || true  # Solo verifica HTTP 200, headers los pone Traefik en prod
-http_code=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/api/v1/health?probe=liveness")
 headers=$(curl -sI "$API_URL/api/v1/health?probe=liveness" 2>/dev/null || echo "")
 if echo "$headers" | grep -qi "x-content-type-options: nosniff"; then
     green "Security header X-Content-Type-Options presente"
