@@ -3,6 +3,7 @@
 Punto de entrada del backend. Registra routers, middlewares y handlers.
 """
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -19,6 +20,8 @@ from app.core.security import (
     RateLimitMiddleware,
     SecurityHeadersMiddleware,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -49,8 +52,10 @@ app = FastAPI(
 )
 
 # Middlewares — el orden importa: el último agregado es el más externo.
-app.add_middleware(SecurityHeadersMiddleware)
+# SecurityHeadersMiddleware envuelve a RateLimitMiddleware para que las
+# respuestas 429 también reciban headers de seguridad.
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 
 # Routers
@@ -64,6 +69,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     En desarrollo: expone el mensaje real para debug.
     En producción: mensaje genérico para no leakear información interna.
     """
+    logger.exception("Error no manejado en %s %s", request.method, request.url.path)
     if settings.app_env == "development":
         return JSONResponse(
             status_code=500,

@@ -64,7 +64,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Rate limiting básico en memoria (MVP).
 
-    Límite: 100 solicitudes por minuto por IP.
+    Límite configurable vía settings.rate_limit_per_minute (default: 60/min por IP).
     Para producción, delegar a Traefik/Nginx o usar slowapi.
     """
 

@@ -41,4 +41,5 @@ async def client(tmp_path: Path) -> AsyncGenerator[AsyncClient, None]:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
 
+    test_engine.dispose()
     app.dependency_overrides.clear()
