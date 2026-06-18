@@ -540,7 +540,9 @@ def _sanitize_for_prompt(text: str) -> str:
     sanitized = re.sub(r'[\ud800-\udfff]', '�', sanitized)
     # Eliminar caracteres Unicode bidi override (LRE, RLE, PDF, LRO, RLO)
     # que pueden alterar la dirección de lectura del código en el LLM.
-    sanitized = re.sub(r'[‪-‮]', '', sanitized)
+    # Cubre U+202A–U+202E (embeddings/overrides) Y U+2066–U+2069 (isolates).
+    # Ambos rangos son vectores de CVE-2021-42574 (Trojan Source).
+    sanitized = re.sub(r'[‪-‮⁦-⁩]', '', sanitized)
     return sanitized
 
 
