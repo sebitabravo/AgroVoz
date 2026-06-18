@@ -260,13 +260,9 @@ Regla simple: **si tu tarea calza con una fila, esa skill es lectura obligatoria
 ### Pull Requests
 - **Usar la plantilla.** GitHub carga automáticamente `.github/pull_request_template.md` al abrir un PR. Completar TODAS las secciones (Resumen, Tipo, Issue, Módulos, Checklist, Cómo probar, Riesgos). No borrar headers ni comentarios `<!-- -->`.
 - **1 PR = 1 cambio.** Mismo principio que los issues: un objetivo claro por PR. Si el cambio creció, dividir en varios PRs.
-- **Squash obligatorio.** La branch debe llegar al PR con **1 commit limpio**. Si tenés varios commits locales, hacé squash ANTES de abrir o pushear:
-  ```bash
-  git rebase -i origin/main              # marcar todos menos el primero como `squash`
-  git log origin/main..HEAD --oneline    # verificar: debe quedar 1 línea
-  ```
+- **Commits atómicos, no un solo commit.** La branch puede tener varios commits limpios (1 por cambio lógico). No hay que aplastarlos manualmente: GitHub hace "Squash and merge" al aprobar y `main` recibe 1 solo commit con el mensaje Conventional Commits que elijas. Lo ÚNICO prohibido: commits WIP, `auto-save:`, o basura temporal.
+- **NUNCA force-push.** `git push --force-with-lease` y `git push --force` reescriben historia remota compartida, invalidan comentarios de review, y rompen el flujo del equipo. Si necesitás ajustar algo ya pusheado: commit nuevo encima. GitHub lo aplasta todo al mergear.
 - **Merge por squash.** Al aprobar, usar "Squash and merge" en GitHub. El `main` queda con 1 commit por PR y mensaje Conventional Commits.
-- **Antes de pushear:** revisar `git log origin/main..HEAD --oneline`. Si hay más de 1 commit, squash primero.
 
 ## Useful commands
 
@@ -291,10 +287,8 @@ make sync-odepa  # Forzar sync de precios ODEPA
 make tunnel      # ngrok para exponer webhook local (desarrollo)
 make clean       # Limpiar archivos temporales
 
-# Git — squash de branch antes de PR (1 commit limpio)
-git rebase -i origin/main              # marcar todos menos el primero como `squash`
-git log origin/main..HEAD --oneline    # verificar: 1 línea
-git push --force-with-lease            # reescribir branch remota ya pusheada
+# Git — revisar commits antes de pushear
+git log origin/main..HEAD --oneline    # verificar: commits atómicos, sin WIP ni auto-save
 ```
 
 ## Before closing a task

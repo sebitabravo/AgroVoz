@@ -3,24 +3,10 @@
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 
-import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
-
-from app.core.config import Settings
-
-
-@pytest.fixture
-def settings_override(tmp_path: Path) -> Settings:
-    """Settings con base de datos temporal para tests."""
-    db_path = tmp_path / "test_agrovoz.db"
-    return Settings(
-        app_env="test",
-        database_url=f"sqlite:///{db_path}",
-        openweathermap_api_key="test_key",
-    )
 
 
 @pytest_asyncio.fixture

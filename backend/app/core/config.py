@@ -4,6 +4,7 @@ Lee variables de entorno desde .env (desarrollo) o entorno real (producción).
 """
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -29,7 +30,7 @@ class Settings(BaseSettings):
     )
 
     # ── Entorno ──────────────────────────
-    app_env: str = "development"
+    app_env: Literal["development", "test", "production"] = "development"
     debug: bool = True
 
     # ── Base de datos ────────────────────

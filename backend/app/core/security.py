@@ -13,6 +13,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
+from app.core.config import settings
+
 # Hosts permitidos para TrustedHostMiddleware.
 # El middleware se registra en main.py con esta lista.
 ALLOWED_HOSTS: tuple[str, ...] = (
@@ -87,8 +89,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if not self._requests[client_ip]:
             del self._requests[client_ip]
 
-        # Rate-limit check: máximo 100 solicitudes por minuto por IP
-        if len(self._requests.get(client_ip, [])) >= 100:
+        # Rate-limit check: límite configurable vía settings.rate_limit_per_minute
+        if len(self._requests.get(client_ip, [])) >= settings.rate_limit_per_minute:
             return JSONResponse(
                 status_code=429,
                 content={
