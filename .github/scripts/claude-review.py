@@ -54,8 +54,10 @@ TEMPERATURE_ASSESS = 0.2  # Algo de margen para redactar la evaluación, sin afe
 MAX_TOKENS_FIND = 65536  # Reasoning max + lista completa de hallazgos. Truncar = fail-closed descarta TODO el PR
 MAX_TOKENS_VERIFY = 49152  # Reasoning max sobre TODOS los hallazgos batcheados. Truncar = pierde los reales (falso neg)
 MAX_TOKENS_ASSESS = 32768  # Reasoning max + checklist 6 dims + riesgos. Truncar = fallback programático (review pobre)
-# Profundidad de razonamiento GLM-5.2: "high" | "max". z.ai recomienda max para coding.
+# Profundidad de razonamiento GLM-5.2 vía z.ai: "high" | "max".
+# Formato z.ai: {"thinking": {"type": "enabled", "effort": "max"}} — NO es reasoning_effort Anthropic.
 # El reasoning cuenta como output tokens (ver caps arriba). Configurable por env.
+# Ref: https://github.com/NousResearch/hermes-agent/pull/46446
 REASONING_EFFORT = os.environ.get("REASONING_EFFORT", "max")
 MAX_RETRIES = 3
 RETRY_BACKOFF = 5  # segundos base entre reintentos (+ jitter aleatorio 0-2s)
@@ -1185,10 +1187,17 @@ def api_call(client: Anthropic, system: str, prompt: str,
                 temperature=temperature,
                 system=system,
                 messages=[{"role": "user", "content": prompt}],
-                timeout=300,  # 5 min: reasoning_effort=max razona más lento (default SDK: 10 min)
-                # reasoning_effort va por extra_body: el SDK lo mergea al top-level
-                # del body, que es donde z.ai lo lee (no es param nativo de Anthropic).
-                extra_body={"reasoning_effort": REASONING_EFFORT},
+                timeout=300,  # 5 min: razonamiento max necesita más tiempo
+                # z.ai usa formato Anthropic-compatible PERO con thinking block propio:
+                #   {"thinking": {"type": "enabled", "effort": "max"}}
+                # NO usa reasoning_effort (ese es Anthropic nativo, z.ai lo ignora).
+                # Ref: https://github.com/NousResearch/hermes-agent/pull/46446
+                extra_body={
+                    "thinking": {
+                        "type": "enabled",
+                        "effort": REASONING_EFFORT,  # "max" por defecto
+                    }
+                },
             )
             content_blocks = response.content
             if not content_blocks:
