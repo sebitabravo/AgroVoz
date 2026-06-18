@@ -50,14 +50,16 @@ echo "API URL: $API_URL"
 echo ""
 
 # 1. Health check liveness
-check "Liveness probe"                 "$API_URL/api/v1/health?probe=liveness" 200 '.status == "ok"'
+# || true previene que set -e aborte el script. El counter FAILED + exit 1 al final
+# asegura que el script falle si algún check falló.
+check "Liveness probe"                 "$API_URL/api/v1/health?probe=liveness" 200 '.status == "ok"' || true
 
 # 2. Health check readiness (verifica DB + modelos + ffmpeg)
-check "Readiness probe"                "$API_URL/api/v1/health?probe=readiness" 200 '.status == "ok"'
+check "Readiness probe"                "$API_URL/api/v1/health?probe=readiness" 200 '.status == "ok"' || true
 
 # 3. Security headers
 check "Security header X-Content-Type-Options" "$API_URL/api/v1/health?probe=liveness" 200 \
-    'true'  # Solo verifica HTTP 200, headers los pone Traefik en prod
+    'true' || true  # Solo verifica HTTP 200, headers los pone Traefik en prod
 http_code=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/api/v1/health?probe=liveness")
 headers=$(curl -sI "$API_URL/api/v1/health?probe=liveness" 2>/dev/null || echo "")
 if echo "$headers" | grep -qi "x-content-type-options: nosniff"; then
@@ -70,7 +72,7 @@ fi
 
 # 4. OpenAPI docs no expuestas en prod (solo si API_URL es remota)
 if [[ "$API_URL" != "http://localhost"* ]] && [[ "$API_URL" != "http://127.0.0.1"* ]]; then
-    check "OpenAPI docs NO expuestas en prod" "$API_URL/docs" 404
+    check "OpenAPI docs NO expuestas en prod" "$API_URL/docs" 404 || true
 fi
 
 echo ""

@@ -159,6 +159,10 @@ jobs:
             echo "skip=true" >> $GITHUB_OUTPUT
           fi
 
+      - name: Create .env for compose validation
+        if: steps.gate.outputs.skip != 'true'
+        run: cp .env.example .env
+
       - name: Validate dev compose
         if: steps.gate.outputs.skip != 'true'
         run: docker compose -f docker-compose.yml config --quiet
