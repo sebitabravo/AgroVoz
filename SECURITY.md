@@ -93,7 +93,7 @@ GitHub Private Vulnerability Reporting. Mientras tanto, contactar a
 | Dependabot alerts + malware   | ✅ Activo                                          |
 | Dependabot security updates   | ✅ Activo                                          |
 | Dependabot version updates    | ✅ Configurado (cooldown 7d)                       |
-| GitHub Copilot code review    | ✅ Ruleset #17787479 (auto-review en cada PR)     |
+| Claude Code Review            | ✅ GitHub Actions (four-pass: Find → Verify → Assess) |
 | CI: ruff lint + mypy strict   | ✅ GitHub Actions (se activa con `pyproject.toml`) |
 | CI: pytest + coverage         | ✅ GitHub Actions                                  |
 | PR gate: issue-first + labels | ✅ `pr-check.yml`                                  |
