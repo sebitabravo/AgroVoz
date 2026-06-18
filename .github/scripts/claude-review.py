@@ -41,6 +41,7 @@ TEMPERATURE_FIND = 0.0   # Determinista: misma diff → mismo veredicto. Mata BL
 TEMPERATURE_VERIFY = 0.0  # Determinista: verificación reproducible, sin creatividad
 MAX_TOKENS_FIND = 16384  # 8192 era insuficiente: JSON se truncaba con diffs grandes + system prompt largo
 MAX_TOKENS_VERIFY = 4096
+MAX_TOKENS_ASSESS = 4096
 MAX_RETRIES = 3
 RETRY_BACKOFF = 5  # segundos base entre reintentos
 CODE_CONTEXT_LINES = 40  # líneas de contexto alrededor del hallazgo (solo archivos grandes)
@@ -757,15 +758,156 @@ def get_code_context(file_path: str, line: int, context: int = CODE_CONTEXT_LINE
     return '\n'.join(excerpt)
 
 
+def _repair_truncated_json(text: str) -> dict | None:
+    """Intenta reparar JSON truncado cerrando brackets/braces abiertos.
+
+    El modelo a veces corta la respuesta a mitad del JSON por max_tokens.
+    Esta función intenta salvar lo que se pueda.
+
+    Estrategia: extrae el primer { } completo contando braces. Si está
+    truncado, cierra strings, arrays y objetos pendientes.
+    """
+    # Encontrar el primer '{' y desde ahí contar braces
+    start = text.find('{')
+    if start == -1:
+        return None
+
+    # Extraer desde el primer { e intentar cerrar
+    json_candidate = text[start:]
+
+    # Contar braces/brackets no balanceados y cerrarlos
+    stack: list[str] = []
+    in_string = False
+    escape_next = False
+    last_valid_pos = 0
+
+    for i, ch in enumerate(json_candidate):
+        if escape_next:
+            escape_next = False
+            last_valid_pos = i + 1
+            continue
+        if ch == '\\' and in_string:
+            escape_next = True
+            last_valid_pos = i + 1
+            continue
+        if ch == '"':
+            in_string = not in_string
+            last_valid_pos = i + 1
+            continue
+        if in_string:
+            last_valid_pos = i + 1
+            continue
+        if ch in ('{', '['):
+            stack.append(ch)
+            last_valid_pos = i + 1
+        elif ch == '}':
+            if stack and stack[-1] == '{':
+                stack.pop()
+                last_valid_pos = i + 1
+        elif ch == ']':
+            if stack and stack[-1] == '[':
+                stack.pop()
+                last_valid_pos = i + 1
+
+    if not stack:
+        # Ya está balanceado, intentar parse directo
+        try:
+            return json.loads(json_candidate)
+        except json.JSONDecodeError:
+            pass
+
+    # Truncado: cerrar lo que quedó abierto
+    # Cortar en last_valid_pos y cerrar
+    truncated = json_candidate[:last_valid_pos]
+
+    # Si terminamos en medio de un string, cerrarlo
+    if in_string:
+        truncated += '"'
+
+    # Cerrar brackets/braces en orden inverso
+    close_map = {'{': '}', '[': ']'}
+    closing = ''
+    for bracket in reversed(stack):
+        closing += close_map[bracket]
+
+    repaired = truncated + closing
+
+    try:
+        return json.loads(repaired)
+    except json.JSONDecodeError:
+        pass
+
+    # Último intento: extraer objetos completos del array "findings"
+    # si el JSON principal está roto pero algunos findings están completos
+    findings_match = re.search(
+        r'"findings"\s*:\s*\[(.*?)(?:\]|$)', truncated, re.DOTALL
+    )
+    if findings_match:
+        findings_str = findings_match.group(1)
+        # Extraer objetos completos con brace counting
+        complete_objects = _extract_complete_objects(findings_str)
+        if complete_objects:
+            return {
+                "findings": complete_objects,
+                "strengths": [],
+                "improvement_suggestions": [],
+                "overall_assessment": "REVISIÓN PARCIAL — JSON truncado, se recuperaron hallazgos completos.",
+            }
+
+    return None
+
+
+def _extract_complete_objects(text: str) -> list[dict]:
+    """Extrae objetos JSON completos de un string que puede estar truncado."""
+    objects = []
+    depth = 0
+    in_string = False
+    escape_next = False
+    obj_start = -1
+
+    for i, ch in enumerate(text):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == '\\' and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == '{':
+            if depth == 0:
+                obj_start = i
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0 and obj_start >= 0:
+                try:
+                    obj = json.loads(text[obj_start:i + 1])
+                    objects.append(obj)
+                except json.JSONDecodeError:
+                    pass
+                obj_start = -1
+
+    return objects
+
+
 def parse_json_response(text: str) -> dict | None:
-    """Intenta parsear JSON de la respuesta del modelo. Maneja markdown wrapping."""
-    # Intentar parse directo primero
+    """Intenta parsear JSON de la respuesta del modelo. 4 estrategias en orden:
+    1. Parse directo
+    2. Extraer de ```json ... ``` block
+    3. Extraer primer { hasta último } vía regex
+    4. Reparar JSON truncado (cierra brackets/braces, extrae findings completos)
+    """
+    # 1. Intentar parse directo primero
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
 
-    # Buscar JSON dentro de ```json ... ``` blocks
+    # 2. Buscar JSON dentro de ```json ... ``` blocks
     match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
     if match:
         try:
@@ -773,7 +915,7 @@ def parse_json_response(text: str) -> dict | None:
         except json.JSONDecodeError:
             pass
 
-    # Buscar primer { hasta último }
+    # 3. Buscar primer { hasta último }
     match = re.search(r'\{.*\}', text, re.DOTALL)
     if match:
         try:
@@ -781,7 +923,8 @@ def parse_json_response(text: str) -> dict | None:
         except json.JSONDecodeError:
             pass
 
-    return None
+    # 4. Intentar reparar JSON truncado
+    return _repair_truncated_json(text)
 
 
 def api_call(client: Anthropic, system: str, prompt: str,
@@ -868,9 +1011,43 @@ def find_issues(client: Anthropic, diff: str, pr_description: str,
 
     parsed = parse_json_response(response)
     if parsed is None:
-        print("⚠️  Pass 1: No se pudo parsear JSON. Respuesta cruda:", file=sys.stderr)
-        print(response[:500], file=sys.stderr)
-        return None
+        print("⚠️  Pass 1: No se pudo parsear JSON en primer intento. "
+              "Reintentando con prompt de reparación...", file=sys.stderr)
+        print(f"   Respuesta cruda (últimos 200 chars): ...{response[-200:]}", file=sys.stderr)
+
+        # Reintento: pedir JSON válido con prompt más compacto
+        repair_prompt = (
+            "Tu respuesta anterior NO era JSON válido. Generá SOLO el JSON "
+            "de review, sin markdown, sin texto fuera de las llaves.\n\n"
+            "**Reglas para el JSON:**\n"
+            "- Usá comillas dobles, no simples\n"
+            "- Cerrá TODOS los brackets y braces\n"
+            "- No dejés strings sin cerrar\n"
+            "- Reportá SOLO issues REALES, no inventes\n\n"
+            "Diff a revisar:\n```diff\n" + diff[:60000] + "\n```\n\n"
+            "Respondé EXCLUSIVAMENTE con el JSON."
+        )
+        # Usar más tokens en el reintento y el mismo system prompt
+        retry_system = (
+            "# ⚠️ CRITICAL: JSON VÁLIDO REQUERIDO\n\n"
+            "Respondé ÚNICAMENTE con JSON. Sin markdown. Sin explicaciones.\n\n"
+            + system
+        )
+        try:
+            retry_response = api_call(
+                client, retry_system, repair_prompt,
+                MAX_TOKENS_FIND, TEMPERATURE_FIND, "Find-repair"
+            )
+            parsed = parse_json_response(retry_response)
+            if parsed is None:
+                print("⚠️  Pass 1 (reintento): JSON todavía inválido.", file=sys.stderr)
+                print(f"   Respuesta cruda (últimos 200 chars): ...{retry_response[-200:]}",
+                      file=sys.stderr)
+                return None
+            print("   ✅ JSON reparado en reintento.")
+        except (RuntimeError, APIError) as e:
+            print(f"⚠️  Pass 1 (reintento): API falló: {e}", file=sys.stderr)
+            return None
 
     findings = parsed.get("findings", [])
     print(f"   Encontrados {len(findings)} hallazgo(s) potencial(es).")
@@ -949,13 +1126,37 @@ def verify_findings(client: Anthropic, findings: list[dict],
 
     result = parse_json_response(response)
     if result is None:
-        print("⚠️  Pass 2: No se pudo parsear JSON de verificación. "
-              "Descartando hallazgos no verificables (fail-closed: silencio > ruido).",
-              file=sys.stderr)
-        # Política fail-closed: un hallazgo que NO se pudo verificar NO se reporta.
-        # El usuario prefiere falsos negativos (silencio) sobre falsos positivos (ruido).
-        # api_call ya reintentó MAX_RETRIES veces: si llegamos acá es fallo persistente.
-        return []
+        print("⚠️  Pass 2: No se pudo parsear JSON en primer intento. "
+              "Reintentando con prompt de reparación...", file=sys.stderr)
+        print(f"   Respuesta cruda (últimos 200 chars): ...{response[-200:]}", file=sys.stderr)
+
+        # Reintento: pedir JSON de verificación válido
+        repair_prompt = (
+            "Tu respuesta anterior NO era JSON válido. Generá SOLO el JSON "
+            "de verificación, sin markdown.\n\n"
+            "Respondé EXCLUSIVAMENTE con:\n"
+            '{"verified": [{"finding_id": <id>, "verdict": "<real|false_positive|speculative>", '
+            '"explanation": "<razón>"}]}\n\n'
+            "Hallazgos a verificar:\n" + findings_json
+        )
+        try:
+            retry_response = api_call(
+                client, system, repair_prompt,
+                MAX_TOKENS_VERIFY, TEMPERATURE_VERIFY, "Verify-repair",
+                model=VERIFY_MODEL
+            )
+            result = parse_json_response(retry_response)
+            if result is None:
+                print("⚠️  Pass 2 (reintento): JSON todavía inválido. "
+                      "Descartando hallazgos (fail-closed).", file=sys.stderr)
+                print(f"   Respuesta cruda (últimos 200 chars): ...{retry_response[-200:]}",
+                      file=sys.stderr)
+                return []
+            print("   ✅ JSON reparado en reintento.")
+        except (RuntimeError, APIError) as e:
+            print(f"⚠️  Pass 2 (reintento): API falló: {e}. "
+                  "Descartando hallazgos (fail-closed).", file=sys.stderr)
+            return []
 
     verified_list = result.get("verified", [])
     verdicts: dict[int, str] = {}
@@ -1041,7 +1242,7 @@ def assess_code(client: Anthropic, verified_findings: list[dict],
     print(f"\n📊 Pass 3/3 — Evaluación objetiva ({MODEL}, temp=0.2)...")
 
     try:
-        response = api_call(client, system, prompt, 4096, 0.2, "Assess")
+        response = api_call(client, system, prompt, MAX_TOKENS_ASSESS, 0.2, "Assess")
     except (RuntimeError, APIError) as e:
         print(f"⚠️  Pass 3 (Assess) falló: {e}", file=sys.stderr)
         print("   Usando assessment programático como fallback.", file=sys.stderr)
@@ -1049,9 +1250,31 @@ def assess_code(client: Anthropic, verified_findings: list[dict],
 
     result = parse_json_response(response)
     if result is None:
-        print("⚠️  Pass 3: No se pudo parsear JSON. Usando assessment programático.",
-              file=sys.stderr)
-        return _programmatic_assessment(verified_findings, preliminary_suggestions)
+        print("⚠️  Pass 3: No se pudo parsear JSON. Reintentando...", file=sys.stderr)
+        print(f"   Respuesta cruda (últimos 200 chars): ...{response[-200:]}", file=sys.stderr)
+        # Reintento: pedir JSON de assessment válido
+        repair_prompt = (
+            "Tu respuesta anterior NO era JSON válido. Generá SOLO el JSON "
+            "de evaluación, sin markdown, sin texto fuera de las llaves.\n\n"
+            + prompt
+        )
+        try:
+            retry_response = api_call(
+                client, system, repair_prompt,
+                MAX_TOKENS_ASSESS, 0.2, "Assess-repair"
+            )
+            result = parse_json_response(retry_response)
+            if result is None:
+                print("⚠️  Pass 3 (reintento): JSON todavía inválido. "
+                      "Usando assessment programático.", file=sys.stderr)
+                print(f"   Respuesta cruda (últimos 200 chars): ...{retry_response[-200:]}",
+                      file=sys.stderr)
+                return _programmatic_assessment(verified_findings, preliminary_suggestions)
+            print("   ✅ JSON reparado en reintento.")
+        except (RuntimeError, APIError) as e:
+            print(f"⚠️  Pass 3 (reintento): API falló: {e}. "
+                  "Usando assessment programático.", file=sys.stderr)
+            return _programmatic_assessment(verified_findings, preliminary_suggestions)
 
     print(f"   Evaluación completa: quality={result.get('quality_score', '?')}/10, "
           f"verdict={result.get('verdict', '?')}")
