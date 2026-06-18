@@ -1,5 +1,6 @@
 """Tests del endpoint de health check."""
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 
 
@@ -26,33 +27,35 @@ async def test_docs_disponibles_en_development(client: AsyncClient) -> None:
     assert response.status_code == 200
 
 
-async def test_docs_oculto_en_production() -> None:
-    """En producción, /docs debe retornar 404 (no accesible).
+async def test_docs_oculto_en_production(monkeypatch: pytest.MonkeyPatch) -> None:
+    """/docs debe retornar 404 cuando app_env != development en la app real."""
+    from importlib import reload
 
-    Crea una app fresca con docs_url=None simulando entorno productivo.
-    """
-    from fastapi import FastAPI
+    import app.main as app_main
+    from app.core import config
 
-    app_prod = FastAPI(
-        title="AgroVoz API",
-        version="0.1.0",
-        docs_url=None,
-        redoc_url=None,
-    )
+    original_env = config.settings.app_env
 
-    # Replicar el health endpoint en la app de prueba
-    @app_prod.get("/api/v1/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
+    try:
+        monkeypatch.setattr(config.settings, "app_env", "production")
+        reload(app_main)
 
-    async with AsyncClient(transport=ASGITransport(app=app_prod), base_url="http://test") as c:
-        # Health debe seguir funcionando
-        health_response = await c.get("/api/v1/health")
-        assert health_response.status_code == 200
+        # La app real con app_env="production" debe tener docs_url=None
+        assert app_main.app.docs_url is None
 
-        # Docs debe retornar 404
-        docs_response = await c.get("/docs")
-        assert docs_response.status_code == 404
+        async with AsyncClient(
+            transport=ASGITransport(app=app_main.app), base_url="http://test"
+        ) as c:
+            # Health debe seguir funcionando
+            health_response = await c.get("/api/v1/health")
+            assert health_response.status_code == 200
+
+            # /docs debe retornar 404
+            docs_response = await c.get("/docs")
+            assert docs_response.status_code == 404
+    finally:
+        monkeypatch.setattr(config.settings, "app_env", original_env)
+        reload(app_main)
 
 
 async def test_health_tiene_security_headers(client: AsyncClient) -> None:
