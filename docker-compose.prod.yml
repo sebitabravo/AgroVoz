@@ -29,6 +29,8 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       - PYTHONDONTWRITEBYTECODE=1       # Sin .pyc en filesystem read-only
+      # ── Base de datos ────────────────
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///app/data/agrovoz.db}
       # ── Secrets — Dokploy Secrets UI ──
       - OPENWA_API_KEY=${OPENWA_API_KEY}
       - OPENWA_WEBHOOK_SECRET=${OPENWA_WEBHOOK_SECRET}
@@ -39,6 +41,7 @@ services:
       - WHISPER_MODEL=${WHISPER_MODEL:-small}
       - LLM_MODEL_PATH=${LLM_MODEL_PATH:-/app/models/qwen2.5-3b-q4_k_m.gguf}
       - PIPER_VOICE=${PIPER_VOICE:-es_ES-carlfm-x_low}
+      - PIPER_MODEL_PATH=${PIPER_MODEL_PATH:-/app/models/es_ES-carlfm-x_low.voice}
       # ── ODEPA ────────────────────────
       - ODEPA_SYNC_HOUR=${ODEPA_SYNC_HOUR:-6}
       - ODEPA_SYNC_MINUTE=${ODEPA_SYNC_MINUTE:-0}
