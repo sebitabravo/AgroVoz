@@ -3,9 +3,17 @@
 from collections.abc import Generator
 
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import settings
+
+
+class Base(DeclarativeBase):
+    """Base declarativa para todos los modelos SQLAlchemy.
+
+    Los modelos heredan de esta clase y se registran automáticamente
+    en Base.metadata para que Alembic los detecte con --autogenerate.
+    """
 
 # Motor SQLite con WAL mode para acceso concurrente.
 # Sin WAL mode, lecturas y escrituras simultáneas causan SQLITE_BUSY.
