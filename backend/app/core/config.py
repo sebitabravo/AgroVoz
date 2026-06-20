@@ -3,6 +3,7 @@
 Lee variables de entorno desde .env (desarrollo) o entorno real (producción).
 """
 
+import warnings
 from pathlib import Path
 from typing import Literal
 
@@ -74,5 +75,21 @@ class Settings(BaseSettings):
     # ── Logging ──────────────────────────
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
+    def validate_pepper_not_default(self) -> None:
+        """Advierte si phone_hash_pepper es el default público en entornos no-dev.
+
+        En development el default es aceptable. En test, CI y producción,
+        PHONE_HASH_PEPPER debe setearse vía variable de entorno.
+        """
+        _default_pepper = "agrovoz-dev-pepper"
+        if self.phone_hash_pepper == _default_pepper and self.app_env != "development":
+            warnings.warn(
+                "PHONE_HASH_PEPPER es el valor default público. "
+                "Cámbielo antes de desplegar a producción.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
 
 settings = Settings()
+settings.validate_pepper_not_default()

@@ -50,7 +50,9 @@ def validate_phone_hash(value: str) -> bool:
     """
     if len(value) != 64:
         return False
-    if not value.islower():
+    # islower() retorna False para strings sin letras (ej: "0" * 64).
+    # value != value.lower() cubre el caso de dígitos puros correctamente.
+    if value != value.lower():
         return False
     try:
         int(value, 16)

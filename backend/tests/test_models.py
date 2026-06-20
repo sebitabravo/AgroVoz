@@ -309,6 +309,12 @@ class TestPhoneHash:
         hashed = hash_phone("+56912345678", "dev-pepper")
         assert validate_phone_hash(hashed) is True
 
+    def test_validate_phone_hash_todo_digitos(self) -> None:
+        """Hash de solo dígitos (0-9) es válido. islower() fallaría, value != value.lower() no."""
+        from app.core.phone_hash import validate_phone_hash
+
+        assert validate_phone_hash("0" * 64) is True
+
     def test_validate_phone_hash_mayusculas(self) -> None:
         """Hash con mayúsculas es inválido (formato canónico: minúscula)."""
         from app.core.phone_hash import validate_phone_hash
@@ -330,8 +336,12 @@ class TestPhoneHash:
         assert validate_phone_hash("z" * 64) is False
 
 
-# Ruta al alembic.ini relativa a este archivo de test
+# Ruta al alembic.ini y migrations/ relativas a este archivo de test.
+# script_location en alembic.ini es relativo al CWD, no al archivo .ini.
+# Para que los tests funcionen desde cualquier CWD, sobreescribimos
+# script_location con la ruta absoluta.
 _ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
+_MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
 
 
 class TestMigraciones:
@@ -346,6 +356,7 @@ class TestMigraciones:
 
         alembic_cfg = Config(str(_ALEMBIC_INI))
         alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+        alembic_cfg.set_main_option("script_location", str(_MIGRATIONS_DIR))
 
         command.upgrade(alembic_cfg, "head")
 
@@ -370,6 +381,7 @@ class TestMigraciones:
 
         alembic_cfg = Config(str(_ALEMBIC_INI))
         alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+        alembic_cfg.set_main_option("script_location", str(_MIGRATIONS_DIR))
 
         command.upgrade(alembic_cfg, "head")
         command.upgrade(alembic_cfg, "head")  # segunda vez: no debe lanzar excepción
@@ -385,6 +397,7 @@ class TestMigraciones:
 
         alembic_cfg = Config(str(_ALEMBIC_INI))
         alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+        alembic_cfg.set_main_option("script_location", str(_MIGRATIONS_DIR))
 
         # Aplicar todas las migraciones
         command.upgrade(alembic_cfg, "head")

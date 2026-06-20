@@ -1,13 +1,14 @@
 """Tests de los middlewares de seguridad."""
 
 import time
+import warnings
 
 import pytest
 from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 from starlette.responses import Response as StarletteResponse
 
-from app.core.config import settings
+from app.core.config import Settings, settings
 from app.core.security import RateLimitMiddleware
 
 
@@ -181,3 +182,35 @@ async def test_rate_limit_cero_bloquea_todo(
     ) as c:
         response = await c.get("/api/v1/health")
         assert response.status_code == 429
+
+
+def test_phone_hash_pepper_dev_sin_warning() -> None:
+    """En development, el pepper default no emite warning."""
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        s = Settings(app_env="development", phone_hash_pepper="agrovoz-dev-pepper")
+        s.validate_pepper_not_default()
+        assert len(w) == 0
+
+
+def test_phone_hash_pepper_prod_sin_setear_emite_warning() -> None:
+    """En production, el pepper default emite RuntimeWarning."""
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        s = Settings(app_env="production", phone_hash_pepper="agrovoz-dev-pepper")
+        s.validate_pepper_not_default()
+        assert len(w) == 1
+        assert issubclass(w[0].category, RuntimeWarning)
+        assert "PHONE_HASH_PEPPER" in str(w[0].message)
+
+
+def test_phone_hash_pepper_prod_personalizado_sin_warning() -> None:
+    """En production con pepper propio, no emite warning."""
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        s = Settings(
+            app_env="production",
+            phone_hash_pepper="pepper-secreto-produccion-real",
+        )
+        s.validate_pepper_not_default()
+        assert len(w) == 0
