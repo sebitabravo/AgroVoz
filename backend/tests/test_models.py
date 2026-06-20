@@ -10,7 +10,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import Float, String, create_engine, inspect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -352,7 +352,7 @@ class TestPhoneHash:
         """None o tipos no str retornan False sin crashear."""
         from app.core.phone_hash import validate_phone_hash
 
-        # type: ignore[arg-type] — probamos edge case en runtime
+        # Probamos edge case en runtime: None y no-str retornan False sin crashear
         assert validate_phone_hash(None) is False  # type: ignore[arg-type]
         assert validate_phone_hash(123) is False  # type: ignore[arg-type]
 
@@ -410,7 +410,65 @@ class TestMigraciones:
         assert db_path.exists()
 
     def test_downgrade_funciona(self, tmp_path: Path) -> None:
-        """Downgrade -1 revierte la última migración sin errores."""
+        """Downgrade -1 revierte refine_column_types sin errores.
+
+        Verifica que:
+        - precio_kg vuelve a FLOAT (ya no Numeric)
+        - intent vuelve a VARCHAR(20) (ya no String(50))
+        - UniqueConstraint uq_odepa_producto_mercado_fecha sobrevive
+        """
+        from alembic import command
+        from alembic.config import Config
+
+        db_path = tmp_path / "test_agrovoz.db"
+
+        alembic_cfg = Config(str(_ALEMBIC_INI))
+        alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+        alembic_cfg.set_main_option("script_location", str(_MIGRATIONS_DIR))
+
+        # Aplicar todas las migraciones (head = 37086656cc4e refine_column_types)
+        command.upgrade(alembic_cfg, "head")
+
+        # Downgrade un paso → 9fad6bdb1443 unique_constraint_odepa
+        command.downgrade(alembic_cfg, "-1")
+
+        engine = create_engine(f"sqlite:///{db_path}")
+        inspector = inspect(engine)
+        tablas = inspector.get_table_names()
+
+        # DB y tablas siguen existiendo
+        assert "alembic_version" in tablas
+        assert "consultations" in tablas
+        assert "odepa_prices" in tablas
+
+        # Verificar que precio_kg volvió a FLOAT (downgrade de refine_column_types)
+        columnas_odepa = {c["name"]: c["type"] for c in inspector.get_columns("odepa_prices")}
+        precio_kg_type = columnas_odepa["precio_kg"]
+        assert isinstance(precio_kg_type, Float), (
+            f"precio_kg debería ser Float tras downgrade, es {precio_kg_type}"
+        )
+
+        # Verificar que intent volvió a VARCHAR(20) (downgrade de refine_column_types)
+        columnas_cons = {c["name"]: c["type"] for c in inspector.get_columns("consultations")}
+        intent_type = columnas_cons["intent"]
+        assert isinstance(intent_type, String), (
+            f"intent debería ser String/VARCHAR tras downgrade, es {type(intent_type)}"
+        )
+        assert intent_type.length == 20, (
+            f"intent debería tener length=20 tras downgrade, tiene length={intent_type.length}"
+        )
+
+        # UniqueConstraint agregada en 9fad6bdb1443 debe sobrevivir al downgrade
+        constraints = inspector.get_unique_constraints("odepa_prices")
+        constraint_names = [c["name"] for c in constraints]
+        assert "uq_odepa_producto_mercado_fecha" in constraint_names, (
+            "UniqueConstraint uq_odepa_producto_mercado_fecha debe existir tras downgrade -1"
+        )
+
+        engine.dispose()
+
+    def test_downgrade_completo_vuelve_a_base(self, tmp_path: Path) -> None:
+        """Downgrade total revierte TODAS las migraciones y elimina tablas del modelo."""
         from alembic import command
         from alembic.config import Config
 
@@ -423,13 +481,20 @@ class TestMigraciones:
         # Aplicar todas las migraciones
         command.upgrade(alembic_cfg, "head")
 
-        # Downgrade un paso
-        command.downgrade(alembic_cfg, "-1")
+        # Downgrade a base (antes de la primera migración)
+        command.downgrade(alembic_cfg, "base")
 
-        # La DB sigue existiendo y tiene la tabla alembic_version
+        # Solo queda alembic_version. Las tablas del modelo deben desaparecer.
         engine = create_engine(f"sqlite:///{db_path}")
         inspector = inspect(engine)
         tablas = inspector.get_table_names()
 
         assert "alembic_version" in tablas
+        assert "consultations" not in tablas, (
+            "consultations no debería existir tras downgrade a base"
+        )
+        assert "odepa_prices" not in tablas, (
+            "odepa_prices no debería existir tras downgrade a base"
+        )
+
         engine.dispose()
