@@ -193,6 +193,24 @@ def test_phone_hash_pepper_dev_sin_warning() -> None:
         assert len(w) == 0
 
 
+def test_phone_hash_pepper_vacio_prod_lanza_error() -> None:
+    """Pepper vacío en producción lanza ValueError (Docker sin variable)."""
+    s = Settings(app_env="production", phone_hash_pepper="")
+    with pytest.raises(ValueError, match="PHONE_HASH_PEPPER está vacío"):
+        s.validate_pepper_not_default()
+
+
+def test_phone_hash_pepper_vacio_test_emite_warning() -> None:
+    """Pepper vacío en test/CI emite RuntimeWarning."""
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        s = Settings(app_env="test", phone_hash_pepper="")
+        s.validate_pepper_not_default()
+        assert len(w) == 1
+        assert issubclass(w[0].category, RuntimeWarning)
+        assert "PHONE_HASH_PEPPER está vacío" in str(w[0].message)
+
+
 def test_phone_hash_pepper_prod_sin_setear_lanza_error() -> None:
     """En production, el pepper default lanza ValueError (bloquea arranque)."""
     s = Settings(app_env="production", phone_hash_pepper="agrovoz-dev-pepper")
