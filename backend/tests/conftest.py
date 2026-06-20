@@ -3,10 +3,36 @@
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+
+
+@pytest.fixture
+def db(tmp_path: Path) -> Generator[Session, None, None]:
+    """Engine SQLite temporal con tablas creadas desde los modelos.
+
+    Cada test recibe una DB fresh en un archivo temporal distinto.
+    Los modelos se importan dentro de la fixture para garantizar que
+    Base.metadata los incluya antes de create_all().
+    """
+    from app.core.database import Base
+    from app.models import Consultation, OdepaPrice  # noqa: F401 — registra modelos en Base.metadata
+
+    db_path = tmp_path / "test.db"
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    try:
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
 
 
 @pytest_asyncio.fixture
@@ -42,8 +68,8 @@ async def client(tmp_path: Path) -> AsyncGenerator[AsyncClient, None]:
     # Lo redirigimos al test_engine para aislamiento completo de tests.
     import app.api.health as health_module
 
-    _original_health_engine = health_module.engine
-    health_module.engine = test_engine
+    _original_health_engine = health_module.engine  # type: ignore[attr-defined]
+    health_module.engine = test_engine  # type: ignore[attr-defined]
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         try:
@@ -53,6 +79,6 @@ async def client(tmp_path: Path) -> AsyncGenerator[AsyncClient, None]:
             # Sin esto, una excepción durante el test dejaría health_module.engine
             # apuntando al test_engine (ya dispuesto) y dependency_overrides sucio,
             # contaminando los tests siguientes.
-            health_module.engine = _original_health_engine
+            health_module.engine = _original_health_engine  # type: ignore[attr-defined]
             test_engine.dispose()
             app.dependency_overrides.clear()

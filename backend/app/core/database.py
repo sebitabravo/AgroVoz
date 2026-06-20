@@ -1,4 +1,18 @@
-"""Configuración de base de datos SQLite vía SQLAlchemy."""
+"""Configuración de base de datos SQLite vía SQLAlchemy.
+
+Usa SQLAlchemy síncrono para MVP (sin async/await). Esto bloquea el event
+loop de FastAPI durante las queries. Para el piloto (3-5 agricultores,
+bajo volumen de consultas), el bloqueo es negligible. Antes de escalar a
+>50 usuarios concurrentes, migrar a SQLAlchemy asíncrono (create_async_engine,
+AsyncSession) o PostgreSQL con asyncpg.
+
+Los PRAGMAs aplicados en _optimize_sqlite son específicos de SQLite.
+Para migrar a PostgreSQL:
+  - Eliminar _optimize_sqlite completo
+  - Cambiar NullPool por QueuePool con pool_size=5, max_overflow=10
+  - Eliminar check_same_thread=False (solo SQLite)
+  - Activar application_name para tracing
+"""
 
 from collections.abc import Generator
 

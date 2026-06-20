@@ -26,13 +26,13 @@ from app.models import Consultation, OdepaPrice  # noqa: E402, F401 — necesari
 target_metadata = Base.metadata
 
 # ── URL desde pydantic-settings ─────────────────────────────────
-# Usa la URL de settings (que viene de .env o variable de entorno)
-# en vez del valor default hardcodeado en alembic.ini.
-# Si alguien ya sobreescribió la URL (ej: desde tests con set_main_option),
-# respetamos ese valor.
-_ini_default = "sqlite:///data/agrovoz.db"
-_current_url = config.get_main_option("sqlalchemy.url")
-if _current_url == _ini_default:
+# La URL en alembic.ini es un placeholder. La fuente de verdad es
+# settings.database_url (desde .env o variable de entorno).
+# Si un test ya sobreescribió la URL vía set_main_option (DB temporal
+# en tmp_path), respetamos ese valor: la URL del test no coincide con
+# el placeholder.
+_ALEMBIC_INI_PLACEHOLDER = "sqlite:///data/agrovoz.db"
+if config.get_main_option("sqlalchemy.url") == _ALEMBIC_INI_PLACEHOLDER:
     config.set_main_option("sqlalchemy.url", settings.database_url)
 
 

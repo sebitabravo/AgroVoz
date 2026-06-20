@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     # ── Seguridad ────────────────────────
     rate_limit_per_minute: int = 60
     audio_retention_hours: int = 24
+    phone_hash_pepper: str = "agrovoz-dev-pepper"  # Cambiar en producción (PHONE_HASH_PEPPER en .env)
 
     # ── Versión ──────────────────────────
     app_version: str = "0.1.0-dev"
