@@ -1,11 +1,33 @@
-"""Configuración de base de datos SQLite vía SQLAlchemy."""
+"""Configuración de base de datos SQLite vía SQLAlchemy.
+
+Usa SQLAlchemy síncrono para MVP (sin async/await). Esto bloquea el event
+loop de FastAPI durante las queries. Para el piloto (3-5 agricultores,
+bajo volumen de consultas), el bloqueo es negligible. Antes de escalar a
+>50 usuarios concurrentes, migrar a SQLAlchemy asíncrono (create_async_engine,
+AsyncSession) o PostgreSQL con asyncpg.
+
+Los PRAGMAs aplicados en _optimize_sqlite son específicos de SQLite.
+Para migrar a PostgreSQL:
+  - Eliminar _optimize_sqlite completo
+  - Cambiar NullPool por QueuePool con pool_size=5, max_overflow=10
+  - Eliminar check_same_thread=False (solo SQLite)
+  - Activar application_name para tracing
+"""
 
 from collections.abc import Generator
 
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import settings
+
+
+class Base(DeclarativeBase):
+    """Base declarativa para todos los modelos SQLAlchemy.
+
+    Los modelos heredan de esta clase y se registran automáticamente
+    en Base.metadata para que Alembic los detecte con --autogenerate.
+    """
 
 # Motor SQLite con WAL mode para acceso concurrente.
 # Sin WAL mode, lecturas y escrituras simultáneas causan SQLITE_BUSY.

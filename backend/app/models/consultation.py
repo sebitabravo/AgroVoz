@@ -1,0 +1,51 @@
+"""Modelo SQLAlchemy para consultas de agricultores.
+
+Registra cada interacción del pipeline de voz para métricas anonimizadas.
+El número de teléfono se anonimiza con HMAC-SHA256 + pepper key.
+Ver ``app/core/phone_hash.py`` para la función de hashing.
+
+query_text almacena la transcripción literal del audio. Puede contener
+PII incidental (nombre del agricultor, referencias a ubicación, etc.).
+Para el piloto MVP (3-5 agricultores con consentimiento informado), se
+retiene para depuración del pipeline de voz. El cron de limpieza de audio
+(audio_retention_hours) debe borrar también query_text asociado.
+Pre-producción: encriptar query_text en reposo (AES-256-GCM).
+"""
+
+import datetime
+
+from sqlalchemy import Integer, String, Text, func
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.database import Base
+
+
+class Consultation(Base):
+    """Registro anonimizado de una consulta procesada por el pipeline."""
+
+    __tablename__ = "consultations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # HMAC-SHA256 hex digest (64 caracteres en minúscula).
+    # Hasheado con settings.phone_hash_pepper vía app.core.phone_hash.
+    # Sin la pepper key, el hash no es reversible ni vulnerable a
+    # rainbow tables de números chilenos (~10^8 combinaciones).
+    phone_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    # Clasificación de la consulta: "precio", "clima", "desconocido".
+    # String(50) permite intents compuestos post-MVP sin migración
+    # (ej: "precio_historico", "clima_semanal").
+    intent: Mapped[str] = mapped_column(String(50), nullable=False, default="desconocido")
+    # Transcripción literal del audio. ATENCIÓN: puede contener PII
+    # incidental (nombre, ubicación). Ver docstring del módulo para
+    # política de retención y plan de encriptación pre-producción.
+    query_text: Mapped[str] = mapped_column(Text, nullable=False)
+    response_text: Mapped[str] = mapped_column(Text, nullable=False)
+    audio_duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
+
+    def __repr__(self) -> str:
+        return (
+            f"<Consultation(phone_hash='{self.phone_hash[:8]}...', "
+            f"intent='{self.intent}', latency_ms={self.latency_ms})>"
+        )

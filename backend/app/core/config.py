@@ -3,6 +3,7 @@
 Lee variables de entorno desde .env (desarrollo) o entorno real (producción).
 """
 
+import warnings
 from pathlib import Path
 from typing import Literal
 
@@ -66,6 +67,7 @@ class Settings(BaseSettings):
     # ── Seguridad ────────────────────────
     rate_limit_per_minute: int = 60
     audio_retention_hours: int = 24
+    phone_hash_pepper: str = "agrovoz-dev-pepper"  # Cambiar en producción (PHONE_HASH_PEPPER en .env)
 
     # ── Versión ──────────────────────────
     app_version: str = "0.1.0-dev"
@@ -73,5 +75,51 @@ class Settings(BaseSettings):
     # ── Logging ──────────────────────────
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
+    def validate_pepper_not_default(self) -> None:
+        """Advierte o bloquea si phone_hash_pepper es el default público o está vacío.
+
+        En development el default es aceptable.
+        En producción lanza ValueError (bloquea el arranque).
+        En test/CI emite RuntimeWarning (no bloquea tests).
+
+        El guard de pepper vacío previene que Docker Compose pase ""
+        cuando PHONE_HASH_PEPPER no está seteado en Dokploy.
+        """
+        _default_pepper = "agrovoz-dev-pepper"
+
+        if not self.phone_hash_pepper:
+            if self.app_env == "production":
+                raise ValueError(
+                    "PHONE_HASH_PEPPER está vacío. "
+                    "Debe setear PHONE_HASH_PEPPER con un valor secreto "
+                    "antes de desplegar a producción."
+                )
+            if self.app_env != "development":
+                warnings.warn(
+                    "PHONE_HASH_PEPPER está vacío. "
+                    "Cámbielo antes de desplegar a producción.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            return
+
+        if self.phone_hash_pepper != _default_pepper:
+            return  # Pepper personalizado, todo OK
+
+        if self.app_env == "production":
+            raise ValueError(
+                "PHONE_HASH_PEPPER es el valor default público. "
+                "Debe setear PHONE_HASH_PEPPER con un valor secreto "
+                "antes de desplegar a producción."
+            )
+        if self.app_env != "development":
+            warnings.warn(
+                "PHONE_HASH_PEPPER es el valor default público. "
+                "Cámbielo antes de desplegar a producción.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
 
 settings = Settings()
+settings.validate_pepper_not_default()
