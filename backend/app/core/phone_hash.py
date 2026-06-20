@@ -15,6 +15,7 @@ Uso:
 
 import hashlib
 import hmac
+import re
 
 
 def hash_phone(phone: str, pepper: str) -> str:
@@ -47,15 +48,9 @@ def validate_phone_hash(value: str) -> bool:
 
     Returns:
         True si son exactamente 64 caracteres hexadecimales en minúscula.
+
+    Usa regex para evitar que int(value, 16) acepte prefijos +, -, y whitespace.
     """
-    if len(value) != 64:
+    if not isinstance(value, str):
         return False
-    # islower() retorna False para strings sin letras (ej: "0" * 64).
-    # value != value.lower() cubre el caso de dígitos puros correctamente.
-    if value != value.lower():
-        return False
-    try:
-        int(value, 16)
-        return True
-    except ValueError:
-        return False
+    return bool(re.fullmatch(r"[0-9a-f]{64}", value))

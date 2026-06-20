@@ -335,6 +335,27 @@ class TestPhoneHash:
         assert validate_phone_hash("g" * 64) is False
         assert validate_phone_hash("z" * 64) is False
 
+    def test_validate_phone_hash_prefijo_signos(self) -> None:
+        """Prefijos +, - y whitespace son rechazados.
+
+        int(value, 16) acepta signos y espacios, pero regex no.
+        Verifica que validate_phone_hash no tenga bypass via int().
+        """
+        from app.core.phone_hash import validate_phone_hash
+
+        assert validate_phone_hash("+" + "0" * 63) is False
+        assert validate_phone_hash("-0" + "0" * 62) is False
+        assert validate_phone_hash(" " + "0" * 63) is False
+        assert validate_phone_hash("\t" + "0" * 63) is False
+
+    def test_validate_phone_hash_none_rechazado(self) -> None:
+        """None o tipos no str retornan False sin crashear."""
+        from app.core.phone_hash import validate_phone_hash
+
+        # type: ignore[arg-type] — probamos edge case en runtime
+        assert validate_phone_hash(None) is False  # type: ignore[arg-type]
+        assert validate_phone_hash(123) is False  # type: ignore[arg-type]
+
 
 # Ruta al alembic.ini y migrations/ relativas a este archivo de test.
 # script_location en alembic.ini es relativo al CWD, no al archivo .ini.

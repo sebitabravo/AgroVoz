@@ -76,13 +76,23 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
     def validate_pepper_not_default(self) -> None:
-        """Advierte si phone_hash_pepper es el default público en entornos no-dev.
+        """Advierte o bloquea si phone_hash_pepper es el default público.
 
-        En development el default es aceptable. En test, CI y producción,
-        PHONE_HASH_PEPPER debe setearse vía variable de entorno.
+        En development el default es aceptable.
+        En producción lanza ValueError (bloquea el arranque).
+        En test/CI emite RuntimeWarning (no bloquea tests).
         """
         _default_pepper = "agrovoz-dev-pepper"
-        if self.phone_hash_pepper == _default_pepper and self.app_env != "development":
+        if self.phone_hash_pepper != _default_pepper:
+            return  # Pepper personalizado, todo OK
+
+        if self.app_env == "production":
+            raise ValueError(
+                "PHONE_HASH_PEPPER es el valor default público. "
+                "Debe setear PHONE_HASH_PEPPER con un valor secreto "
+                "antes de desplegar a producción."
+            )
+        if self.app_env != "development":
             warnings.warn(
                 "PHONE_HASH_PEPPER es el valor default público. "
                 "Cámbielo antes de desplegar a producción.",

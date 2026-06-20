@@ -193,19 +193,26 @@ def test_phone_hash_pepper_dev_sin_warning() -> None:
         assert len(w) == 0
 
 
-def test_phone_hash_pepper_prod_sin_setear_emite_warning() -> None:
-    """En production, el pepper default emite RuntimeWarning."""
+def test_phone_hash_pepper_prod_sin_setear_lanza_error() -> None:
+    """En production, el pepper default lanza ValueError (bloquea arranque)."""
+    s = Settings(app_env="production", phone_hash_pepper="agrovoz-dev-pepper")
+    with pytest.raises(ValueError, match="PHONE_HASH_PEPPER"):
+        s.validate_pepper_not_default()
+
+
+def test_phone_hash_pepper_test_sin_setear_emite_warning() -> None:
+    """En test/CI, el pepper default emite RuntimeWarning (no bloquea tests)."""
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        s = Settings(app_env="production", phone_hash_pepper="agrovoz-dev-pepper")
+        s = Settings(app_env="test", phone_hash_pepper="agrovoz-dev-pepper")
         s.validate_pepper_not_default()
         assert len(w) == 1
         assert issubclass(w[0].category, RuntimeWarning)
         assert "PHONE_HASH_PEPPER" in str(w[0].message)
 
 
-def test_phone_hash_pepper_prod_personalizado_sin_warning() -> None:
-    """En production con pepper propio, no emite warning."""
+def test_phone_hash_pepper_prod_personalizado_sin_error() -> None:
+    """En production con pepper propio, no lanza error ni warning."""
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         s = Settings(
