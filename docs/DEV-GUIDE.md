@@ -41,20 +41,25 @@ para vincular el número WhatsApp de prueba. La sesión persiste en el volumen
 ### Escanear QR
 
 1. Abrí el dashboard de Open-WA: [http://localhost:2886](http://localhost:2886)
-2. Hacé clic en **"New Session"** → nombre `default`
-3. Se genera un código QR. Escanealo con WhatsApp en el teléfono de prueba:
+2. Te pide API key. Usá la del docker-compose.yml:
+   ```
+   8d83df90-24ff-4fd7-b2d1-1fa5fcec51d9
+   ```
+   (Si definiste `OPENWA_API_KEY` en tu `.env`, usá ese valor en vez del default)
+3. Hacé clic en **"New Session"** → nombre `default`
+4. Se genera un código QR. Escanealo con WhatsApp en el teléfono de prueba:
    - WhatsApp → Ajustes → Dispositivos vinculados → Vincular dispositivo
-4. El dashboard debe mostrar estado **"connected"** (verde)
+5. El dashboard debe mostrar estado **"connected"** (verde)
 
 ### Verificar conectividad
 
 ```bash
-# Reemplazá OPENWA_API_KEY con el valor real de .env
-source .env
+# Si no definiste OPENWA_API_KEY en .env, usá el default:
+API_KEY="${OPENWA_API_KEY:-8d83df90-24ff-4fd7-b2d1-1fa5fcec51d9}"
 
 # Verificar estado de la sesión
 curl -s http://localhost:2785/api/sessions/default \
-  -H "X-API-Key: $OPENWA_API_KEY" | jq .
+  -H "X-API-Key: $API_KEY" | jq .
 
 # Respuesta esperada: {"name": "default", "status": "connected", ...}
 ```
@@ -62,10 +67,12 @@ curl -s http://localhost:2785/api/sessions/default \
 ### Enviar mensaje de prueba
 
 ```bash
+API_KEY="${OPENWA_API_KEY:-8d83df90-24ff-4fd7-b2d1-1fa5fcec51d9}"
+
 # Enviar texto a un número WhatsApp de prueba
 # Formato: +569XXXXXXXX (número chileno con código país, sin espacios)
 curl -X POST http://localhost:2785/api/sessions/default/messages/send-text \
-  -H "X-API-Key: $OPENWA_API_KEY" \
+  -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"phone": "+56912345678", "text": "Hola desde AgroVoz 🌾"}'
 
@@ -124,8 +131,8 @@ make up                # Requiere escanear QR de nuevo
 
 | Variable | Propósito | Default dev |
 |---|---|---|
-| `OPENWA_API_KEY` | Auth del backend → Open-WA | `dev-api-key` (solo Docker) |
-| `OPENWA_WEBHOOK_SECRET` | HMAC de webhooks entrantes | `dev-webhook-secret` (solo Docker) |
+| `OPENWA_API_KEY` | Auth del backend → Open-WA | UUID v4 (ver docker-compose.yml) |
+| `OPENWA_WEBHOOK_SECRET` | HMAC de webhooks entrantes | UUID v4 (ver docker-compose.yml) |
 | `OPENWA_API_URL` | URL base de Open-WA API | `http://openwa:8000` |
 
 > En producción, las 3 variables se configuran en Dokploy Secrets UI.
