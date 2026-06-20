@@ -102,6 +102,31 @@ class TestOdepaPrice:
 
         assert precio.producto == ""
 
+    def test_unique_constraint_producto_mercado_fecha(
+        self, db: Session
+    ) -> None:
+        """No se pueden insertar dos precios con el mismo (producto, mercado, fecha)."""
+        from sqlalchemy.exc import IntegrityError
+
+        precio1 = OdepaPrice(
+            producto="papa",
+            mercado="Santiago",
+            precio_kg=500,
+            fecha=datetime.date(2026, 6, 15),
+        )
+        db.add(precio1)
+        db.commit()
+
+        precio2 = OdepaPrice(
+            producto="papa",
+            mercado="Santiago",
+            precio_kg=480,
+            fecha=datetime.date(2026, 6, 15),
+        )
+        db.add(precio2)
+        with pytest.raises(IntegrityError):
+            db.commit()
+
 
 class TestConsultation:
     """CRUD y constraints del modelo Consultation."""

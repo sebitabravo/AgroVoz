@@ -7,7 +7,7 @@ Sync diario vía cron job a las 06:00 AM.
 
 import datetime
 
-from sqlalchemy import Date, Float, Integer, String, func
+from sqlalchemy import Date, Float, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -17,6 +17,13 @@ class OdepaPrice(Base):
     """Precio de un producto en un mercado específico para una fecha."""
 
     __tablename__ = "odepa_prices"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "producto", "mercado", "fecha",
+            name="uq_odepa_producto_mercado_fecha",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     producto: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
