@@ -32,8 +32,8 @@ services:
       # ── Base de datos ────────────────
       - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/agrovoz.db}
       # ── Secrets — Dokploy Secrets UI ──
-      - OPENWA_API_KEY=${OPENWA_API_KEY}
-      - OPENWA_WEBHOOK_SECRET=${OPENWA_WEBHOOK_SECRET}
+      - OPENWA_API_KEY=${OPENWA_API_KEY:?OPENWA_API_KEY requerida — configurar en Dokploy Secrets UI}
+      - OPENWA_WEBHOOK_SECRET=${OPENWA_WEBHOOK_SECRET:?OPENWA_WEBHOOK_SECRET requerido — configurar en Dokploy Secrets UI}
       - OPENWA_API_URL=http://openwa:8000
       - OPENWEATHERMAP_API_KEY=${OPENWEATHERMAP_API_KEY}
       - ADMIN_API_KEY=${ADMIN_API_KEY}
@@ -112,8 +112,10 @@ services:
     restart: unless-stopped
     environment:
       - NODE_ENV=production
-      - DATABASE_PROVIDER=sqlite
-      - API_KEY=${OPENWA_API_KEY}
+      - DATABASE_TYPE=sqlite
+      - ALLOW_DEV_API_KEY=false
+      - API_MASTER_KEY=${OPENWA_API_KEY}
+      - AUTO_START_SESSIONS=true
       - WEBHOOK_URL=http://backend:8000/api/v1/webhook/whatsapp
       - WEBHOOK_SECRET=${OPENWA_WEBHOOK_SECRET}
     volumes:

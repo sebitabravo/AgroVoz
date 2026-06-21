@@ -169,4 +169,10 @@ jobs:
 
       - name: Validate prod compose
         if: steps.gate.outputs.skip != 'true'
+        env:
+          OPENWA_API_KEY: ci-placeholder-key
+          OPENWA_WEBHOOK_SECRET: ci-placeholder-secret
+          OPENWEATHERMAP_API_KEY: ci-placeholder-key
+          ADMIN_API_KEY: ci-placeholder-key
+          PHONE_HASH_PEPPER: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2
         run: docker compose -f docker-compose.prod.yml config --quiet

@@ -38,7 +38,7 @@ services:
         "/app/app",
       ]
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./backend/data:/app/data        # SQLite DB + audio temporal (persiste entre reinicios)
       - ./backend/models:/app/models    # Modelos IA (persisten entre reinicios)
@@ -57,29 +57,31 @@ services:
         max-file: "3"
 
   # Open-WA: gateway WhatsApp self-hosted (protocolo WhatsApp Web)
-  # Dashboard en puerto 2886 (host) → 8000 (contenedor) para escanear QR.
-  # API interna mapeada a 2785 (host) → 8000 (contenedor).
+  # Desde v0.4.0: API y dashboard comparten el puerto 2785 (single-port).
+  # API + Dashboard: http://localhost:2785 (API) y http://localhost:2785/ (dashboard SPA).
   # Backend se conecta directamente a http://openwa:8000 (red Docker interna).
-  # Ambos puertos bindeados solo a localhost por seguridad.
+  # Puerto bindeado solo a localhost por seguridad.
+  #
+  # API_MASTER_KEY: seed de API key inicial (SOLO primer arranque, DB vacía).
+  #   ${OPENWA_API_KEY:-dev-admin-key}: usa el valor de .env si existe,
+  #   o dev-admin-key como fallback determinístico para desarrollo.
+  #   Para usar una key custom, definí OPENWA_API_KEY en tu .env (sin editar este archivo).
+  # AUTO_START_SESSIONS: reconecta sesiones WhatsApp previas al reiniciar el contenedor.
   openwa:
     image: ghcr.io/rmyndharis/openwa:latest
     restart: unless-stopped
-    env_file:
-      - .env
     environment:
       - NODE_ENV=development
-      - DATABASE_PROVIDER=sqlite
-      - API_KEY=${OPENWA_API_KEY:-dev-api-key}
+      - DATABASE_TYPE=sqlite
+      - API_MASTER_KEY=${OPENWA_API_KEY:-dev-admin-key}
+      - ALLOW_DEV_API_KEY=true
+      - AUTO_START_SESSIONS=true
       - WEBHOOK_URL=http://backend:8000/api/v1/webhook/whatsapp
       - WEBHOOK_SECRET=${OPENWA_WEBHOOK_SECRET:-dev-webhook-secret}
     ports:
-      - "127.0.0.1:2886:8000"          # Dashboard (solo localhost, escanear QR)
-      - "127.0.0.1:2785:8000"          # API interna (solo localhost)
+      - "127.0.0.1:2785:8000"          # API + Dashboard (unificado desde v0.4.0)
     volumes:
       - openwa_data:/app/data           # Sesión WhatsApp persiste entre reinicios
-    depends_on:
-      backend:
-        condition: service_healthy
     healthcheck:
       # curl no está garantizado en la imagen Open-WA (basada en Node.js).
       # Usamos node -e con http.get para healthcheck sin dependencias externas.

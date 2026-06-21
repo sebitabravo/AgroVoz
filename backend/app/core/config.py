@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     # ── Open-WA (gateway WhatsApp) ───────
     openwa_api_key: str = ""
     openwa_webhook_secret: str = ""
-    openwa_api_url: str = "http://localhost:3000"
+    openwa_api_url: str = "http://localhost:2785"
 
     # ── OpenWeatherMap ───────────────────
     openweathermap_api_key: str = ""
