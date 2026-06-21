@@ -152,6 +152,21 @@ async def test_lifespan_rechaza_key_con_solo_whitespace(
             pass
 
 
+async def test_lifespan_falla_sin_webhook_secret_en_production(
+    monkeypatch: pytest.MonkeyPatch,
+    prod_lifespan: None,
+) -> None:
+    """Lifespan debe raise ValueError si no hay OPENWA_WEBHOOK_SECRET en producción."""
+    monkeypatch.setattr(config.settings, "openwa_webhook_secret", "")
+    monkeypatch.setattr(config.settings, "openwa_api_key", "set-not-empty")
+    monkeypatch.setattr(config.settings, "openweathermap_api_key", "set-not-empty")
+    reload(app_main)
+
+    with pytest.raises(ValueError, match="OPENWA_WEBHOOK_SECRET"):
+        async with app_main.lifespan(app_main.app):
+            pass
+
+
 # ── RequestIDMiddleware ──
 
 
