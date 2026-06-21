@@ -123,9 +123,9 @@ class Settings(BaseSettings):
     def validate_pepper_not_default(self) -> None:
         """Advierte o bloquea si phone_hash_pepper es el default público o está vacío.
 
-        En development el default es aceptable.
+        Siempre emite RuntimeWarning si el pepper es default o está vacío
+        (incluyendo development, para que el equipo sepa que debe cambiarlo).
         En producción lanza ValueError (bloquea el arranque).
-        En test/CI emite RuntimeWarning (no bloquea tests).
 
         El guard de pepper vacío previene que Docker Compose pase ""
         cuando PHONE_HASH_PEPPER no está seteado en Dokploy.
@@ -139,13 +139,12 @@ class Settings(BaseSettings):
                     "Debe setear PHONE_HASH_PEPPER con un valor secreto "
                     "antes de desplegar a producción."
                 )
-            if self.app_env != "development":
-                warnings.warn(
-                    "PHONE_HASH_PEPPER está vacío. "
-                    "Cámbielo antes de desplegar a producción.",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
+            warnings.warn(
+                "PHONE_HASH_PEPPER está vacío. "
+                "Cámbielo antes de desplegar a producción.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
             return
 
         if self.phone_hash_pepper != _default_pepper:
@@ -157,13 +156,12 @@ class Settings(BaseSettings):
                 "Debe setear PHONE_HASH_PEPPER con un valor secreto "
                 "antes de desplegar a producción."
             )
-        if self.app_env != "development":
-            warnings.warn(
-                "PHONE_HASH_PEPPER es el valor default público. "
-                "Cámbielo antes de desplegar a producción.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
+        warnings.warn(
+            "PHONE_HASH_PEPPER es el valor default público. "
+            "Cámbielo antes de desplegar a producción.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
 
 settings = Settings()

@@ -457,46 +457,46 @@ def test_is_audio_message_rechaza_sin_media() -> None:
 
 
 def test_get_audio_duration_ms_overflow_no_crash() -> None:
-    """_get_audio_duration_ms no debe explotar con OverflowError."""
+    """get_audio_duration_ms no debe explotar con OverflowError."""
     from pathlib import Path
 
-    from app.api.webhooks import _get_audio_duration_ms
+    from app.services.audio_service import get_audio_duration_ms
 
     # Path inexistente → ffprobe falla → CalledProcessError → 0
-    result = _get_audio_duration_ms(Path("/tmp/no-existe-xyz.wav"))
+    result = get_audio_duration_ms(Path("/tmp/no-existe-xyz.wav"))
     assert result == 0
 
 
 def test_max_audio_size_constant() -> None:
     """_MAX_AUDIO_SIZE_BYTES debe ser > 0 y representar 25 MB."""
-    from app.api.webhooks import _MAX_AUDIO_SIZE_BYTES
+    from app.services.audio_service import _MAX_AUDIO_SIZE_BYTES
 
     assert _MAX_AUDIO_SIZE_BYTES == 25 * 1024 * 1024
     assert _MAX_AUDIO_SIZE_BYTES > 0
 
 
 def test_sanitize_message_id_preserva_alfanumerico() -> None:
-    """_sanitize_message_id preserva caracteres seguros (alfanuméricos, guiones, underscores)."""
-    from app.api.webhooks import _sanitize_message_id
+    """sanitize_message_id preserva caracteres seguros (alfanuméricos, guiones, underscores)."""
+    from app.services.audio_service import sanitize_message_id
 
-    assert _sanitize_message_id("msg_abc-123_test") == "msg_abc-123_test"
+    assert sanitize_message_id("msg_abc-123_test") == "msg_abc-123_test"
 
 
 def test_sanitize_message_id_reemplaza_arroba() -> None:
-    """_sanitize_message_id reemplaza '@' y '.' por '_' (seguro para file paths)."""
-    from app.api.webhooks import _sanitize_message_id
+    """sanitize_message_id reemplaza '@' y '.' por '_' (seguro para file paths)."""
+    from app.services.audio_service import sanitize_message_id
 
-    result = _sanitize_message_id("true_56912345678@c.us")
+    result = sanitize_message_id("true_56912345678@c.us")
     assert "@" not in result
     assert "." not in result
     assert result == "true_56912345678_c_us"
 
 
 def test_sanitize_message_id_whatsapp_id_real() -> None:
-    """_sanitize_message_id maneja IDs reales de WhatsApp con múltiples '@' y '.'."""
-    from app.api.webhooks import _sanitize_message_id
+    """sanitize_message_id maneja IDs reales de WhatsApp con múltiples '@' y '.'."""
+    from app.services.audio_service import sanitize_message_id
 
-    result = _sanitize_message_id("true_56912345678@c.us_3EB0A5F6C8D9_56912345678@c.us")
+    result = sanitize_message_id("true_56912345678@c.us_3EB0A5F6C8D9_56912345678@c.us")
     assert "@" not in result
     assert "." not in result
     # Estructura preservada con '.' y '@' reemplazados por '_'
@@ -504,44 +504,44 @@ def test_sanitize_message_id_whatsapp_id_real() -> None:
 
 
 def test_sanitize_message_id_vacio_retorna_unknown() -> None:
-    """_sanitize_message_id retorna 'unknown' si el string está vacío."""
-    from app.api.webhooks import _sanitize_message_id
+    """sanitize_message_id retorna 'unknown' si el string está vacío."""
+    from app.services.audio_service import sanitize_message_id
 
-    assert _sanitize_message_id("") == "unknown"
+    assert sanitize_message_id("") == "unknown"
 
 
-def test_sanitize_message_id_solo_especiales_retorna_unknown() -> None:
-    """_sanitize_message_id retorna 'unknown' si solo hay caracteres reemplazados."""
-    from app.api.webhooks import _sanitize_message_id
+def test_sanitize_message_id_solo_especiales_retorna_underscores() -> None:
+    """sanitize_message_id reemplaza caracteres especiales por '_' (no retorna 'unknown' si hay caracteres)."""
+    from app.services.audio_service import sanitize_message_id
 
-    result = _sanitize_message_id("@@@!!!")
+    result = sanitize_message_id("@@@!!!")
     # '@' → '_', '!' → '_', 6 caracteres especiales → 6 underscores
     assert result == "______"
     assert result != "unknown"  # No vacío — el regex reemplaza, no elimina
 
 
 def test_validate_path_in_audio_dir_ruta_valida() -> None:
-    """_validate_path_in_audio_dir acepta un path dentro del directorio de audio."""
+    """validate_path_in_audio_dir acepta un path dentro del directorio de audio."""
     import tempfile
     from pathlib import Path
 
-    from app.api.webhooks import _validate_path_in_audio_dir
+    from app.services.audio_service import validate_path_in_audio_dir
 
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_dir = Path(tmpdir).resolve()
         file_path = audio_dir / "test_audio.wav"
-        result = _validate_path_in_audio_dir(file_path, audio_dir)
+        result = validate_path_in_audio_dir(file_path, audio_dir)
         assert result == file_path.resolve()
 
 
 def test_validate_path_in_audio_dir_path_traversal_detectado() -> None:
-    """_validate_path_in_audio_dir lanza ValueError si el path está fuera del directorio base."""
+    """validate_path_in_audio_dir lanza ValueError si el path está fuera del directorio base."""
     import tempfile
     from pathlib import Path
 
     import pytest
 
-    from app.api.webhooks import _validate_path_in_audio_dir
+    from app.services.audio_service import validate_path_in_audio_dir
 
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_dir = Path(tmpdir).resolve()
@@ -549,7 +549,65 @@ def test_validate_path_in_audio_dir_path_traversal_detectado() -> None:
         traversal = audio_dir / ".." / "etc" / "passwd"
 
         with pytest.raises(ValueError, match="Path fuera del directorio de audio"):
-            _validate_path_in_audio_dir(traversal, audio_dir)
+            validate_path_in_audio_dir(traversal, audio_dir)
+
+
+# ── Tests de AudioService.process_audio ────────────────────
+
+
+@pytest.mark.asyncio
+async def test_audio_service_process_audio_happy_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """AudioService.process_audio descarga, convierte y limpia sin errores."""
+    from app.schemas.webhook import WebhookPayload
+    from app.services.audio_service import AudioService
+
+    fake_ogg = b"FAKE_OGG_DATA"
+
+    # Mock download_media para no llamar a Open-WA
+    async def fake_download(_self: object, _msg_id: str) -> bytes:
+        return fake_ogg
+
+    monkeypatch.setattr(
+        "app.services.openwa_service.OpenWAService.download_media",
+        fake_download,
+    )
+
+    # Mock convert_ogg_to_wav para no ejecutar ffmpeg
+    def fake_convert(input_path: Path, output_path: Path) -> None:
+        output_path.write_bytes(b"FAKE_WAV_DATA")
+
+    monkeypatch.setattr(
+        "app.services.audio_service.convert_ogg_to_wav",
+        fake_convert,
+    )
+
+    # Mock get_audio_duration_ms para no ejecutar ffprobe
+    monkeypatch.setattr(
+        "app.services.audio_service.get_audio_duration_ms",
+        lambda wav_path: 5000,
+    )
+
+    # Mock _get_audio_temp_dir para usar tmp_path (evita crear archivos en data/)
+    monkeypatch.setattr(
+        "app.services.audio_service._get_audio_temp_dir",
+        lambda: tmp_path,
+    )
+
+    raw = _load_fixture("audio_message")
+    payload = WebhookPayload.model_validate(raw)
+
+    service = AudioService()
+    await service.process_audio(payload, "+56912345678", "test-request-id")
+
+    # Verificar que se creó .wav y NO quedó .ogg (se limpia después de convertir)
+    wav_files = list(tmp_path.glob("*.wav"))
+    ogg_files = list(tmp_path.glob("*.ogg"))
+    assert len(wav_files) == 1
+    assert len(ogg_files) == 0
+    assert wav_files[0].read_bytes() == b"FAKE_WAV_DATA"
 
 
 def test_hash_phone_for_log_consistencia() -> None:

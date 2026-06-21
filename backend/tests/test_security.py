@@ -184,13 +184,15 @@ async def test_rate_limit_cero_bloquea_todo(
         assert response.status_code == 429
 
 
-def test_phone_hash_pepper_dev_sin_warning() -> None:
-    """En development, el pepper default no emite warning."""
+def test_phone_hash_pepper_dev_con_warning() -> None:
+    """En development, el pepper default emite RuntimeWarning (avisa que debe cambiarse)."""
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         s = Settings(app_env="development", phone_hash_pepper="agrovoz-dev-pepper")
         s.validate_pepper_not_default()
-        assert len(w) == 0
+        assert len(w) == 1
+        assert issubclass(w[0].category, RuntimeWarning)
+        assert "PHONE_HASH_PEPPER" in str(w[0].message)
 
 
 def test_phone_hash_pepper_vacio_prod_lanza_error() -> None:
