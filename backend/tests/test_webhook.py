@@ -632,6 +632,8 @@ async def test_audio_service_process_audio_happy_path(
         fake_send_audio,
     )
 
+    _mock_whisper_transcribe(monkeypatch)
+
     # P1-5: Inyectar audio_temp_dir en vez de monkeypatch sobre _get_audio_temp_dir
     service = AudioService(audio_temp_dir=tmp_path)
     await service.process_audio(
@@ -653,6 +655,29 @@ async def test_audio_service_process_audio_happy_path(
     assert send_audio_calls[0][1] == str(hello_ogg)
 
 
+# monkeypatch reemplaza el metodo en la clase: al llamar inst.method(arg),
+# Python no pasa self porque la funcion patcheada no es descriptor.
+def _mock_whisper_transcribe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mockea WhisperService.transcribe para tests de audio_service.
+
+    Agrega monkeypatch.setattr sobre el metodo transcribe en el modulo
+    audio_service para evitar cargar el modelo real.
+    """
+
+    def fake_transcribe(_self: object, audio_path: str) -> dict:
+        return {
+            "text": "Hola esta es una prueba",
+            "language": "es",
+            "segments": [],
+            "duration_ms": 100,
+        }
+
+    monkeypatch.setattr(
+        "app.services.audio_service.WhisperService.transcribe",
+        fake_transcribe,
+    )
+
+
 @pytest.mark.asyncio
 async def test_audio_service_hello_ogg_no_existe_no_crashea(
     monkeypatch: pytest.MonkeyPatch,
@@ -666,6 +691,7 @@ async def test_audio_service_hello_ogg_no_existe_no_crashea(
 
     monkeypatch.setattr("app.services.audio_service.convert_ogg_to_wav", fake_convert)
     monkeypatch.setattr("app.services.audio_service.get_audio_duration_ms", lambda wav_path: 3000)
+    _mock_whisper_transcribe(monkeypatch)
 
     # Apuntar a un archivo que NO existe
     monkeypatch.setattr(
@@ -710,6 +736,7 @@ async def test_audio_service_send_audio_falla_logs_pero_no_crashea(
 
     monkeypatch.setattr("app.services.audio_service.convert_ogg_to_wav", fake_convert)
     monkeypatch.setattr("app.services.audio_service.get_audio_duration_ms", lambda wav_path: 3000)
+    _mock_whisper_transcribe(monkeypatch)
 
     hello_ogg = tmp_path / "hello.ogg"
     hello_ogg.write_bytes(b"FAKE_HELLO_OGG")

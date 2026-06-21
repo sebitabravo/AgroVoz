@@ -20,6 +20,7 @@ import httpx
 from app.core.config import settings
 from app.core.phone_hash import hash_phone
 from app.services.openwa_service import OpenWAService
+from app.services.whisper_service import WhisperService
 
 logger = logging.getLogger(__name__)
 
@@ -280,6 +281,20 @@ class AudioService:
                 chat_id_hash,
                 wav_path,
                 audio_duration_ms,
+                request_id,
+            )
+
+            # Transcripcion Whisper (en thread aparte para no bloquear event loop).
+            # El modelo se carga lazy en la primera llamada.
+            whisper = WhisperService()
+            transcription = await asyncio.to_thread(whisper.transcribe, str(wav_path))
+            transcribed_text = transcription.get("text", "")
+            logger.info(
+                "Audio transcrito — message_id=%s text=%s chars=%d whisper_ms=%d request_id=%s",
+                message_id,
+                transcribed_text[:200],
+                len(transcribed_text),
+                transcription.get("duration_ms", 0),
                 request_id,
             )
 

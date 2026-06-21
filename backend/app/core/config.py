@@ -55,6 +55,7 @@ class Settings(BaseSettings):
 
     # ── Modelos IA ───────────────────────
     whisper_model: str = "small"
+    whisper_model_path: str = ""  # Directorio para modelos Whisper (vacio = default ~/.cache/whisper/)
     llm_model_path: str = "models/qwen2.5-3b-q4_k_m.gguf"
     piper_voice: str = "es_ES-carlfm-x_low"
 
