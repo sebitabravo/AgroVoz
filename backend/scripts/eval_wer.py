@@ -157,6 +157,14 @@ def compute_aggregate(results: list[dict]) -> dict:
         return {}
 
     wer_values = [r["wer"] for r in results]
+    wer_sorted = sorted(wer_values)
+    wer_n = len(wer_sorted)
+    wer_median = (
+        (wer_sorted[wer_n // 2 - 1] + wer_sorted[wer_n // 2]) / 2
+        if wer_n % 2 == 0
+        else wer_sorted[wer_n // 2]
+    )
+
     latencies = [r["latency_s"] for r in results]
     durations = [r["duration_s"] for r in results]
     rt_factors = [r["rt_factor"] for r in results]
@@ -168,7 +176,7 @@ def compute_aggregate(results: list[dict]) -> dict:
         "total_latency_s": round(sum(latencies), 1),
         "avg_latency_s": round(sum(latencies) / len(latencies), 3),
         "wer_mean": round(sum(wer_values) / len(wer_values), 4),
-        "wer_median": round(sorted(wer_values)[len(wer_values) // 2], 4),
+        "wer_median": round(wer_median, 4),
         "wer_min": round(min(wer_values), 4),
         "wer_max": round(max(wer_values), 4),
         "wer_std": round(

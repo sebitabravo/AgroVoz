@@ -292,8 +292,9 @@ class AudioService:
             transcribed_text = ""
             try:
                 whisper = WhisperService()
-                transcription: dict[str, object] = await asyncio.to_thread(
-                    whisper.transcribe, str(wav_path)
+                transcription: dict[str, object] = await asyncio.wait_for(
+                    asyncio.to_thread(whisper.transcribe, str(wav_path)),
+                    timeout=30.0,
                 )
                 transcribed_text = str(transcription.get("text", ""))
                 logger.info(
@@ -304,7 +305,7 @@ class AudioService:
                     transcription.get("duration_ms", 0),
                     request_id,
                 )
-            except (RuntimeError, FileNotFoundError, ValueError) as exc:
+            except (RuntimeError, FileNotFoundError, ValueError, TimeoutError) as exc:
                 logger.warning(
                     "Whisper fallo — continuando sin transcripcion: message_id=%s "
                     "error=%s request_id=%s",
