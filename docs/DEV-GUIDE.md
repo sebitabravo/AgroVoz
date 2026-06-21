@@ -42,10 +42,8 @@ para vincular el número WhatsApp de prueba. La sesión persiste en el volumen
 
 1. Abrí el dashboard de Open-WA: [http://localhost:2785](http://localhost:2785)
    (Desde v0.4.0, API y dashboard comparten el mismo puerto 2785.)
-2. Te pide API key. Si no configuraste `OPENWA_API_KEY` en tu `.env`, revisá los logs
-   de arranque (`docker compose logs openwa | grep 'API Key'`) donde Open-WA imprime
-   la key auto-generada `owa_k1_...`. También se guarda en `data/.api-key` dentro del
-   volumen `openwa_data`.
+2. Te pide API key. En desarrollo es `dev-admin-key` (hardcodeada en docker-compose.yml).
+   Si cambiaste la key en producción, usá la que configuraste en Dokploy Secrets UI.
 3. Hacé clic en **"New Session"** → nombre `default`
 4. Se genera un código QR. Escanealo con WhatsApp en el teléfono de prueba:
    - WhatsApp → Ajustes → Dispositivos vinculados → Vincular dispositivo
@@ -54,9 +52,8 @@ para vincular el número WhatsApp de prueba. La sesión persiste en el volumen
 ### Verificar conectividad
 
 ```bash
-# La API key está en los logs de arranque o en data/.api-key dentro del volumen.
-# Si configuraste OPENWA_API_KEY en .env, usala directamente.
-API_KEY="owa_k1_..."  # Reemplazar con la key real de tus logs o .api-key
+# En desarrollo la API key es dev-admin-key (hardcodeada en docker-compose.yml).
+API_KEY="dev-admin-key"
 
 # Verificar estado de la sesión
 curl -s http://localhost:2785/api/sessions/default \
@@ -68,7 +65,7 @@ curl -s http://localhost:2785/api/sessions/default \
 ### Enviar mensaje de prueba
 
 ```bash
-API_KEY="owa_k1_..."  # Reemplazar con la key real
+API_KEY="dev-admin-key"
 
 # Enviar texto a un número WhatsApp de prueba
 # Formato: +569XXXXXXXX (número chileno con código país, sin espacios)
