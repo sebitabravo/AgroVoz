@@ -823,7 +823,7 @@ async def test_audio_service_process_audio_audio_largo_omite_whisper(
     tmp_path: Path,
 ) -> None:
     """Audio > _MAX_WHISPER_AUDIO_MS omite transcripcion Whisper y envia respuesta igual."""
-    from app.services.audio_service import AudioService, _MAX_WHISPER_AUDIO_MS
+    from app.services.audio_service import _MAX_WHISPER_AUDIO_MS, AudioService
 
     def fake_convert(input_path: Path, output_path: Path) -> None:
         output_path.write_bytes(b"FAKE_WAV_DATA")
