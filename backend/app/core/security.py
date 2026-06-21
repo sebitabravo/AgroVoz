@@ -70,19 +70,23 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 def _get_client_ip(request: Request) -> str:
     """Extrae la IP real del cliente, considerando proxy reverso (Traefik/Nginx).
 
-    En Docker detrás de Traefik, request.client es None o 172.x.x.x.
-    Usa el ÚLTIMO valor de X-Forwarded-For (el agregado por el proxy edge),
+    En Docker detrás de Traefik, request.client NO es None — es la IP del
+    contenedor Traefik (ej: 172.18.0.2). Por eso, SIEMPRE revisamos
+    X-Forwarded-For primero. Usa el ÚLTIMO valor (agregado por el proxy edge),
     no el primero (que el cliente puede spoofear).
 
-    En local sin proxy, usa request.client.host directamente.
+    En local sin proxy (request.client es la IP real y no hay X-Forwarded-For),
+    usa request.client.host como fallback.
     """
-    if request.client is None:
-        forwarded = request.headers.get("X-Forwarded-For", "")
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+    if parts:
         # El último valor es el que agrega nuestro proxy de confianza (Traefik).
         # Los valores anteriores pueden ser spoofeados por el cliente.
-        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
-        return parts[-1] if parts else "unknown"
-    return request.client.host
+        return parts[-1]
+    if request.client is not None:
+        return request.client.host
+    return "unknown"
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):

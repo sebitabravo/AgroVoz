@@ -350,8 +350,8 @@ async def test_openwa_download_media_exitoso(
 
     Mockea httpx.AsyncClient con __aenter__/__aexit__ para el patrón
     async with httpx.AsyncClient(...) as client: que usa el servicio."""
-    from app.services.openwa_service import OpenWAService
     import app.services.openwa_service as svc
+    from app.services.openwa_service import OpenWAService
 
     monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:8000")
     monkeypatch.setattr(settings, "openwa_api_key", "test-api-key")
@@ -382,8 +382,8 @@ async def test_openwa_download_media_error_httpx(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """download_media debe propagar httpx.HTTPError cuando Open-WA falla."""
-    from app.services.openwa_service import OpenWAService
     import app.services.openwa_service as svc
+    from app.services.openwa_service import OpenWAService
 
     monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:8000")
     monkeypatch.setattr(settings, "openwa_api_key", "test-api-key")
@@ -644,7 +644,7 @@ async def test_audio_service_process_audio_audio_excede_tamano(
 ) -> None:
     """Audio que excede _MAX_AUDIO_SIZE_BYTES es rechazado sin crear archivos (P2-5)."""
     from app.schemas.webhook import WebhookPayload
-    from app.services.audio_service import AudioService, _MAX_AUDIO_SIZE_BYTES
+    from app.services.audio_service import _MAX_AUDIO_SIZE_BYTES, AudioService
 
     # Audio que excede el límite
     fake_ogg_large = b"X" * (_MAX_AUDIO_SIZE_BYTES + 1)
