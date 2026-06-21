@@ -283,11 +283,17 @@ def main() -> None:
 
     # Inicializar Whisper
     whisper = WhisperService(model_name=args.model)
-    logger.info("Modelo cargado. Dispositivo: %s", whisper._device)
+    logger.info("Modelo cargado. Dispositivo: %s", whisper.device)
 
     # Transcribir
     results = transcribe_batch(whisper, samples, model_name=args.model)
     aggregate = compute_aggregate(results)
+
+    if not aggregate:
+        logger.error(
+            "No se procesaron muestras. Verificá el manifest y los archivos de audio."
+        )
+        sys.exit(1)
 
     # Reporte
     print_report(results, aggregate)

@@ -642,12 +642,11 @@ async def test_audio_service_process_audio_happy_path(
         request_id="test-request-id",
     )
 
-    # Verificar que se creo .wav y NO quedo .ogg (se limpia despues de convertir)
+    # Verificar limpieza: el finally elimina ogg y wav temporales siempre
     wav_files = list(tmp_path.glob("*.wav"))
     ogg_files = [f for f in tmp_path.glob("*.ogg") if f.name != "hello.ogg"]
-    assert len(wav_files) == 1
+    assert len(wav_files) == 0
     assert len(ogg_files) == 0
-    assert wav_files[0].read_bytes() == b"FAKE_WAV_DATA"
 
     # Verificar que se envio hello.ogg al chatId correcto (issue #12)
     assert len(send_audio_calls) == 1
@@ -720,8 +719,8 @@ async def test_audio_service_hello_ogg_no_existe_no_crashea(
 
     # No debe llamar send_audio si el archivo no existe
     assert not send_audio_called
-    # El .wav fue creado (pipeline funciono hasta donde pudo)
-    assert len(list(tmp_path.glob("*.wav"))) == 1
+    # El finally limpia el .wav siempre, incluso cuando hello.ogg no existe
+    assert len(list(tmp_path.glob("*.wav"))) == 0
 
 
 @pytest.mark.asyncio
@@ -816,6 +815,61 @@ async def test_audio_service_process_audio_audio_excede_tamano(
     wav_files = list(tmp_path.glob("*.wav"))
     assert len(ogg_files) == 0
     assert len(wav_files) == 0
+
+
+@pytest.mark.asyncio
+async def test_audio_service_process_audio_audio_largo_omite_whisper(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Audio > _MAX_WHISPER_AUDIO_MS omite transcripcion Whisper y envia respuesta igual."""
+    from app.services.audio_service import AudioService, _MAX_WHISPER_AUDIO_MS
+
+    def fake_convert(input_path: Path, output_path: Path) -> None:
+        output_path.write_bytes(b"FAKE_WAV_DATA")
+
+    monkeypatch.setattr("app.services.audio_service.convert_ogg_to_wav", fake_convert)
+    # Duracion mayor al limite
+    monkeypatch.setattr(
+        "app.services.audio_service.get_audio_duration_ms",
+        lambda wav_path: _MAX_WHISPER_AUDIO_MS + 1,
+    )
+
+    hello_ogg = tmp_path / "hello.ogg"
+    hello_ogg.write_bytes(b"FAKE_HELLO_OGG")
+    monkeypatch.setattr("app.services.audio_service._HELLO_OGG_PATH", hello_ogg)
+
+    whisper_called = False
+
+    def fake_transcribe(_self: object, audio_path: str) -> dict:
+        nonlocal whisper_called
+        whisper_called = True
+        return {"text": "nunca deberia llamarse", "language": "es", "segments": [], "duration_ms": 0}
+
+    monkeypatch.setattr("app.services.audio_service.WhisperService.transcribe", fake_transcribe)
+
+    send_audio_called = False
+
+    async def fake_send_audio(
+        _self: object, target: str, audio_path: str, caption: str | None = None
+    ) -> dict[str, object]:
+        nonlocal send_audio_called
+        send_audio_called = True
+        return {}
+
+    monkeypatch.setattr("app.services.openwa_service.OpenWAService.send_audio", fake_send_audio)
+
+    service = AudioService(audio_temp_dir=tmp_path)
+    await service.process_audio(
+        audio_bytes=b"FAKE_OGG_DATA",
+        chat_id="248069442560050@lid",
+        request_id="req-audio-largo",
+    )
+
+    # Whisper NO se llama para audios muy largos
+    assert not whisper_called
+    # Pipeline continua: send_audio se llama igual
+    assert send_audio_called
 
 
 @pytest.mark.asyncio

@@ -238,6 +238,11 @@ class WhisperService:
         return self._model_name
 
     @property
+    def device(self) -> str:
+        """Dispositivo de inferencia detectado (cpu, cuda, mps)."""
+        return self._device
+
+    @property
     def is_loaded(self) -> bool:
         """Indica si el modelo ya fue cargado en memoria."""
         return self._model_name in _model_cache

@@ -37,6 +37,13 @@ _HELLO_OGG_PATH = Path(__file__).resolve().parent.parent / "static" / "hello.ogg
 # pero este limite es defensivo contra archivos maliciosos o corruptos.
 _MAX_AUDIO_SIZE_BYTES = 25 * 1024 * 1024
 
+# Duracion maxima de audio para transcripcion Whisper.
+# asyncio.wait_for cancela la coroutine pero NO el thread subyacente; Python
+# no soporta terminacion forzada de threads. Con RTF CPU ~2x, un audio de
+# 15s tarda ~30s en transcribir (justo el timeout). Limitamos a 12s para
+# dejar margen y evitar threads zombie que saturen el VPS.
+_MAX_WHISPER_AUDIO_MS = 12_000
+
 
 def sanitize_message_id(message_id: str) -> str:
     """Sanitiza un message_id reemplazando el numero de telefono con un hash.
@@ -240,6 +247,15 @@ class AudioService:
         wav_path: Path | None = None
 
         try:
+            # Validar bytes de audio antes de cualquier procesamiento
+            if not audio_bytes:
+                logger.warning(
+                    "Audio vacio recibido — message_id=%s request_id=%s",
+                    message_id,
+                    request_id,
+                )
+                return
+
             # Validar tamano maximo defensivo
             if len(audio_bytes) > _MAX_AUDIO_SIZE_BYTES:
                 logger.warning(
@@ -290,29 +306,39 @@ class AudioService:
             # pero el pipeline CONTINUA para que el agricultor reciba respuesta
             # de voz (P1 del code review).
             transcribed_text = ""
-            try:
-                whisper = WhisperService()
-                transcription: dict[str, object] = await asyncio.wait_for(
-                    asyncio.to_thread(whisper.transcribe, str(wav_path)),
-                    timeout=30.0,
-                )
-                transcribed_text = str(transcription.get("text", ""))
-                logger.info(
-                    "Audio transcrito — message_id=%s text=%s chars=%d whisper_ms=%d request_id=%s",
-                    message_id,
-                    transcribed_text[:200],
-                    len(transcribed_text),
-                    transcription.get("duration_ms", 0),
-                    request_id,
-                )
-            except (RuntimeError, FileNotFoundError, ValueError, TimeoutError) as exc:
+            if audio_duration_ms > _MAX_WHISPER_AUDIO_MS:
                 logger.warning(
-                    "Whisper fallo — continuando sin transcripcion: message_id=%s "
-                    "error=%s request_id=%s",
+                    "Audio demasiado largo para transcripcion Whisper — "
+                    "message_id=%s duration_ms=%d limite_ms=%d request_id=%s",
                     message_id,
-                    exc,
+                    audio_duration_ms,
+                    _MAX_WHISPER_AUDIO_MS,
                     request_id,
                 )
+            else:
+                try:
+                    whisper = WhisperService()
+                    transcription: dict[str, object] = await asyncio.wait_for(
+                        asyncio.to_thread(whisper.transcribe, str(wav_path)),
+                        timeout=30.0,
+                    )
+                    transcribed_text = str(transcription.get("text", ""))
+                    logger.info(
+                        "Audio transcrito — message_id=%s text=%s chars=%d whisper_ms=%d request_id=%s",
+                        message_id,
+                        transcribed_text[:200],
+                        len(transcribed_text),
+                        transcription.get("duration_ms", 0),
+                        request_id,
+                    )
+                except (RuntimeError, FileNotFoundError, ValueError, TimeoutError) as exc:
+                    logger.warning(
+                        "Whisper fallo — continuando sin transcripcion: message_id=%s "
+                        "error=%s request_id=%s",
+                        message_id,
+                        exc,
+                        request_id,
+                    )
 
             # Enviar respuesta de audio fija (hola mundo end-to-end).
             # Punto de medicion de latencia E2E: desde recepcion del webhook hasta envio.
@@ -351,10 +377,6 @@ class AudioService:
                 int(elapsed_ms),
                 request_id,
             )
-            if ogg_path is not None:
-                ogg_path.unlink(missing_ok=True)
-            if wav_path is not None:
-                wav_path.unlink(missing_ok=True)
         except asyncio.CancelledError:
             logger.warning(
                 "Procesamiento de audio cancelado — message_id=%s chat_id_hash=%s request_id=%s",
@@ -362,10 +384,6 @@ class AudioService:
                 chat_id_hash,
                 request_id,
             )
-            if ogg_path is not None:
-                ogg_path.unlink(missing_ok=True)
-            if wav_path is not None:
-                wav_path.unlink(missing_ok=True)
             raise
         finally:
             # Limpiar archivos temporales SIEMPRE, incluso si la excepcion
@@ -373,3 +391,5 @@ class AudioService:
             # de archivos huerfanos en disco (P1-4).
             if ogg_path is not None:
                 ogg_path.unlink(missing_ok=True)
+            if wav_path is not None:
+                wav_path.unlink(missing_ok=True)
