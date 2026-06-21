@@ -32,6 +32,8 @@ audio/
 *.ogg
 *.wav
 *.mp3
+# Archivos de audio estático comprometidos (respuestas pregrabadas)
+!/backend/app/static/*.ogg
 
 # ── Python ────────────────────────────
 __pycache__/

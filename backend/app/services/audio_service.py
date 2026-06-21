@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 # En local: backend/data/audio_temp/.
 _AUDIO_TEMP_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "audio_temp"
 
+# Audio de respuesta fijo: se envía mientras el pipeline TTS completo no está implementado.
+# Pregrabado con macOS TTS (Eddy es_ES) → libopus@48kHz mono.
+_HELLO_OGG_PATH = Path(__file__).resolve().parent.parent / "static" / "hello.ogg"
+
 # Tamaño máximo de archivo de audio (25 MB). WhatsApp limita audios a ~16 MB,
 # pero este límite es defensivo contra archivos maliciosos o corruptos.
 _MAX_AUDIO_SIZE_BYTES = 25 * 1024 * 1024
@@ -265,17 +269,33 @@ class AudioService:
             # Convertir .ogg → .wav 16kHz mono (en thread aparte para no bloquear event loop)
             await asyncio.to_thread(convert_ogg_to_wav, ogg_path, wav_path)
 
-            elapsed_ms = (time.monotonic() - start_time) * 1000
             audio_duration_ms = await asyncio.to_thread(get_audio_duration_ms, wav_path)
             logger.info(
                 "Audio listo para pipeline — message_id=%s phone_hash=%s wav_path=%s "
-                "duration_ms=%d elapsed_ms=%d",
+                "duration_ms=%d",
                 message_id,
                 phone_hash,
                 wav_path,
                 audio_duration_ms,
-                elapsed_ms,
             )
+
+            # Enviar respuesta de audio fija (hola mundo end-to-end).
+            # Punto de medición de latencia E2E: desde recepción del webhook hasta envío.
+            if _HELLO_OGG_PATH.exists():
+                await openwa.send_audio(phone, str(_HELLO_OGG_PATH))
+                e2e_ms = int((time.monotonic() - start_time) * 1000)
+                logger.info(
+                    "Respuesta enviada — message_id=%s phone_hash=%s e2e_ms=%d",
+                    message_id,
+                    phone_hash,
+                    e2e_ms,
+                )
+            else:
+                logger.warning(
+                    "hello.ogg no encontrado — message_id=%s path=%s",
+                    message_id,
+                    _HELLO_OGG_PATH,
+                )
 
             # .ogg se limpia en finally — no duplicar cleanup acá
 

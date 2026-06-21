@@ -557,7 +557,7 @@ async def test_audio_service_process_audio_happy_path(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """AudioService.process_audio descarga, convierte y limpia sin errores.
+    """AudioService.process_audio descarga, convierte, envía respuesta y limpia sin errores.
 
     Usa inyección de audio_temp_dir en vez de monkeypatch sobre
     _get_audio_temp_dir (P1-5 DI)."""
@@ -590,6 +590,25 @@ async def test_audio_service_process_audio_happy_path(
         lambda wav_path: 5000,
     )
 
+    # Crear hello.ogg falso y apuntar la constante al directorio tmp
+    hello_ogg = tmp_path / "hello.ogg"
+    hello_ogg.write_bytes(b"FAKE_HELLO_OGG")
+    monkeypatch.setattr("app.services.audio_service._HELLO_OGG_PATH", hello_ogg)
+
+    # Capturar llamada a send_audio sin llamar a Open-WA real
+    send_audio_calls: list[tuple[str, str]] = []
+
+    async def fake_send_audio(
+        _self: object, phone: str, audio_path: str, caption: str | None = None
+    ) -> dict[str, object]:
+        send_audio_calls.append((phone, audio_path))
+        return {"status": "sent"}
+
+    monkeypatch.setattr(
+        "app.services.openwa_service.OpenWAService.send_audio",
+        fake_send_audio,
+    )
+
     raw = _load_fixture("audio_message")
     payload = WebhookPayload.model_validate(raw)
 
@@ -599,10 +618,103 @@ async def test_audio_service_process_audio_happy_path(
 
     # Verificar que se creó .wav y NO quedó .ogg (se limpia después de convertir)
     wav_files = list(tmp_path.glob("*.wav"))
-    ogg_files = list(tmp_path.glob("*.ogg"))
+    ogg_files = [f for f in tmp_path.glob("*.ogg") if f.name != "hello.ogg"]
     assert len(wav_files) == 1
     assert len(ogg_files) == 0
     assert wav_files[0].read_bytes() == b"FAKE_WAV_DATA"
+
+    # Verificar que se envió hello.ogg al número correcto (issue #12)
+    assert len(send_audio_calls) == 1
+    assert send_audio_calls[0][0] == "+56912345678"
+    assert send_audio_calls[0][1] == str(hello_ogg)
+
+
+@pytest.mark.asyncio
+async def test_audio_service_hello_ogg_no_existe_no_crashea(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Si hello.ogg no existe, process_audio loguea warning pero no falla."""
+    from app.schemas.webhook import WebhookPayload
+    from app.services.audio_service import AudioService
+
+    async def fake_download(_self: object, _msg_id: str) -> bytes:
+        return b"FAKE_OGG_DATA"
+
+    monkeypatch.setattr("app.services.openwa_service.OpenWAService.download_media", fake_download)
+
+    def fake_convert(input_path: Path, output_path: Path) -> None:
+        output_path.write_bytes(b"FAKE_WAV_DATA")
+
+    monkeypatch.setattr("app.services.audio_service.convert_ogg_to_wav", fake_convert)
+    monkeypatch.setattr("app.services.audio_service.get_audio_duration_ms", lambda wav_path: 3000)
+
+    # Apuntar a un archivo que NO existe
+    monkeypatch.setattr(
+        "app.services.audio_service._HELLO_OGG_PATH",
+        tmp_path / "no-existe.ogg",
+    )
+
+    send_audio_called = False
+
+    async def fake_send_audio(
+        _self: object, phone: str, audio_path: str, caption: str | None = None
+    ) -> dict[str, object]:
+        nonlocal send_audio_called
+        send_audio_called = True
+        return {}
+
+    monkeypatch.setattr("app.services.openwa_service.OpenWAService.send_audio", fake_send_audio)
+
+    raw = _load_fixture("audio_message")
+    payload = WebhookPayload.model_validate(raw)
+
+    service = AudioService(audio_temp_dir=tmp_path)
+    await service.process_audio(payload, "+56912345678", "req-id")
+
+    # No debe llamar send_audio si el archivo no existe
+    assert not send_audio_called
+    # El .wav fue creado (pipeline funcionó hasta donde pudo)
+    assert len(list(tmp_path.glob("*.wav"))) == 1
+
+
+@pytest.mark.asyncio
+async def test_audio_service_send_audio_falla_logs_pero_no_crashea(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Si send_audio lanza HTTPError, process_audio loguea el error sin propagar."""
+    from app.schemas.webhook import WebhookPayload
+    from app.services.audio_service import AudioService
+
+    async def fake_download(_self: object, _msg_id: str) -> bytes:
+        return b"FAKE_OGG_DATA"
+
+    monkeypatch.setattr("app.services.openwa_service.OpenWAService.download_media", fake_download)
+
+    def fake_convert(input_path: Path, output_path: Path) -> None:
+        output_path.write_bytes(b"FAKE_WAV_DATA")
+
+    monkeypatch.setattr("app.services.audio_service.convert_ogg_to_wav", fake_convert)
+    monkeypatch.setattr("app.services.audio_service.get_audio_duration_ms", lambda wav_path: 3000)
+
+    hello_ogg = tmp_path / "hello.ogg"
+    hello_ogg.write_bytes(b"FAKE_HELLO_OGG")
+    monkeypatch.setattr("app.services.audio_service._HELLO_OGG_PATH", hello_ogg)
+
+    async def fake_send_audio_error(
+        _self: object, phone: str, audio_path: str, caption: str | None = None
+    ) -> dict[str, object]:
+        raise httpx.ConnectError("Open-WA no disponible")
+
+    monkeypatch.setattr("app.services.openwa_service.OpenWAService.send_audio", fake_send_audio_error)
+
+    raw = _load_fixture("audio_message")
+    payload = WebhookPayload.model_validate(raw)
+
+    service = AudioService(audio_temp_dir=tmp_path)
+    # No debe lanzar excepción — el except captura el ConnectError
+    await service.process_audio(payload, "+56912345678", "req-id")
 
 
 @pytest.mark.asyncio
