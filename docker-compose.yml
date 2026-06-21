@@ -38,7 +38,7 @@ services:
         "/app/app",
       ]
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./backend/data:/app/data        # SQLite DB + audio temporal (persiste entre reinicios)
       - ./backend/models:/app/models    # Modelos IA (persisten entre reinicios)
@@ -63,20 +63,17 @@ services:
   # Puerto bindeado solo a localhost por seguridad.
   #
   # API_MASTER_KEY: seed de API key inicial (SOLO primer arranque, DB vacía).
-  #   En desarrollo usamos dev-admin-key hardcodeado. Determinístico, sin depender
-  #   de sintaxis de substitución de Docker Compose que puede variar entre versiones.
-  #   Si querés sobreescribirlo, definí OPENWA_API_KEY en tu .env y cambiá esta línea
-  #   a: API_MASTER_KEY=${OPENWA_API_KEY:-dev-admin-key}
+  #   ${OPENWA_API_KEY:-dev-admin-key}: usa el valor de .env si existe,
+  #   o dev-admin-key como fallback determinístico para desarrollo.
+  #   Para usar una key custom, definí OPENWA_API_KEY en tu .env (sin editar este archivo).
   # AUTO_START_SESSIONS: reconecta sesiones WhatsApp previas al reiniciar el contenedor.
   openwa:
     image: ghcr.io/rmyndharis/openwa:latest
     restart: unless-stopped
-    env_file:
-      - .env
     environment:
       - NODE_ENV=development
       - DATABASE_TYPE=sqlite
-      - API_MASTER_KEY=dev-admin-key
+      - API_MASTER_KEY=${OPENWA_API_KEY:-dev-admin-key}
       - ALLOW_DEV_API_KEY=true
       - AUTO_START_SESSIONS=true
       - WEBHOOK_URL=http://backend:8000/api/v1/webhook/whatsapp
@@ -85,9 +82,6 @@ services:
       - "127.0.0.1:2785:8000"          # API + Dashboard (unificado desde v0.4.0)
     volumes:
       - openwa_data:/app/data           # Sesión WhatsApp persiste entre reinicios
-    depends_on:
-      backend:
-        condition: service_healthy
     healthcheck:
       # curl no está garantizado en la imagen Open-WA (basada en Node.js).
       # Usamos node -e con http.get para healthcheck sin dependencias externas.

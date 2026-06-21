@@ -18,11 +18,12 @@ git clone git@github.com:sebitabravo/AgroVoz.git
 cd AgroVoz
 make setup-dev          # Crea .env + instala dependencias Python y Astro
 
-# 2. Editar .env con tus claves
-#    Generá API key y webhook secret:
+# 2. (Opcional) Editar .env con claves custom.
+#    Si no definís OPENWA_API_KEY, docker-compose usa dev-admin-key como fallback.
+#    Para generar claves propias:
 uuidgen | tr '[:upper:]' '[:lower:]'    # → OPENWA_API_KEY
 uuidgen | tr '[:upper:]' '[:lower:]'    # → OPENWA_WEBHOOK_SECRET
-#    Copiá los valores a .env
+#    Copiá los valores a .env (docker-compose.yml los toma vía ${VAR:-default})
 
 # 3. Levantar servicios
 make up                 # docker compose up -d (backend + openwa)
@@ -42,8 +43,8 @@ para vincular el número WhatsApp de prueba. La sesión persiste en el volumen
 
 1. Abrí el dashboard de Open-WA: [http://localhost:2785](http://localhost:2785)
    (Desde v0.4.0, API y dashboard comparten el mismo puerto 2785.)
-2. Te pide API key. En desarrollo es `dev-admin-key` (hardcodeada en docker-compose.yml).
-   Si cambiaste la key en producción, usá la que configuraste en Dokploy Secrets UI.
+2. Te pide API key. En desarrollo es `dev-admin-key` (default en docker-compose.yml).
+   Si definiste `OPENWA_API_KEY` en tu `.env`, usá ese valor en vez del default.
 3. Hacé clic en **"New Session"** → nombre `default`
 4. Se genera un código QR. Escanealo con WhatsApp en el teléfono de prueba:
    - WhatsApp → Ajustes → Dispositivos vinculados → Vincular dispositivo
@@ -52,7 +53,8 @@ para vincular el número WhatsApp de prueba. La sesión persiste en el volumen
 ### Verificar conectividad
 
 ```bash
-# En desarrollo la API key es dev-admin-key (hardcodeada en docker-compose.yml).
+# En desarrollo la API key es dev-admin-key (default en docker-compose.yml).
+# Si definiste OPENWA_API_KEY en .env, usá ese valor.
 API_KEY="dev-admin-key"
 
 # Verificar estado de la sesión
@@ -85,7 +87,8 @@ Si preferís correr solo el backend localmente (sin Docker para Python):
 # Terminal 1: Backend FastAPI
 make dev-backend        # uvicorn con hot reload en :8000
 
-# Open-WA sigue en Docker (necesitás WhatsApp)
+# Open-WA sigue en Docker (necesitás WhatsApp).
+# Funciona standalone: sin depends_on, podés levantar openwa sin el backend.
 docker compose up -d openwa
 ```
 
@@ -129,15 +132,15 @@ make up                # Requiere escanear QR de nuevo
 
 | Variable | Propósito | Default en docker-compose |
 |---|---|---|
-| `OPENWA_API_KEY` | API_MASTER_KEY: seed de API key inicial (1er arranque) | `dev-admin-key` (ver docker-compose.yml) |
-| `OPENWA_WEBHOOK_SECRET` | HMAC de webhooks entrantes | UUID v4 (ver docker-compose.yml) |
-| `OPENWA_API_URL` | URL base de Open-WA API | `http://openwa:8000` |
+| `OPENWA_API_KEY` | API_MASTER_KEY: seed de API key inicial (1er arranque) | `dev-admin-key` (fallback si .env no lo define) |
+| `OPENWA_WEBHOOK_SECRET` | HMAC de webhooks entrantes | `dev-webhook-secret` (fallback si .env no lo define) |
+| `OPENWA_API_URL` | URL base de Open-WA API | `http://localhost:2785` desde host, `http://openwa:8000` en Docker |
 
 **Variables solo para desarrollo (docker-compose.yml):**
 
 | Variable | Efecto |
 |---|---|
-| `ALLOW_DEV_API_KEY=true` | Si no hay API_MASTER_KEY, usa `dev-admin-key` como fallback |
+| `ALLOW_DEV_API_KEY=true` | Registra `dev-admin-key` como API key válida en cada arranque |
 | `AUTO_START_SESSIONS=true` | Reconecta sesiones WhatsApp previas al reiniciar el contenedor |
 
 > **Importante:** `API_MASTER_KEY` solo se usa en el primer arranque (cuando la DB
