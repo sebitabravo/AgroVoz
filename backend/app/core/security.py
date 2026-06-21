@@ -1,19 +1,24 @@
 """Middleware de seguridad para FastAPI.
 
-Encapsula rate limiting, headers de seguridad HTTP y constantes
-de hardening que usa la capa HTTP en main.py.
+Encapsula rate limiting, headers de seguridad HTTP, validación HMAC
+de webhooks de Open-WA y constantes de hardening.
 """
 
+import hashlib
+import hmac as hmac_mod
+import logging
 import time
 from collections.abc import Awaitable, Callable
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 # Hosts permitidos para TrustedHostMiddleware.
 # El middleware se registra en main.py con esta lista.
@@ -114,3 +119,83 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         self._requests.setdefault(client_ip, []).append(now)
         return await call_next(request)
+
+
+# ── Validación HMAC de webhooks de Open-WA ──────────────────────
+
+
+def validate_openwa_hmac(body: bytes, signature: str, secret: str) -> bool:
+    """Valida la firma HMAC-SHA256 de un webhook de Open-WA.
+
+    Open-WA envía el header X-OpenWA-Signature con el HMAC-SHA256
+    del body del request, calculado con WEBHOOK_SECRET como clave.
+
+    Usa hmac.compare_digest() para prevenir timing attacks.
+
+    Args:
+        body: Cuerpo crudo del request HTTP (bytes).
+        signature: Valor del header X-OpenWA-Signature.
+        secret: Clave secreta compartida (WEBHOOK_SECRET).
+
+    Returns:
+        True si la firma es válida o si no hay secret configurado (dev).
+        False si la firma no coincide.
+    """
+    if not secret:
+        logger.warning(
+            "OPENWA_WEBHOOK_SECRET no configurado — webhooks aceptados sin validación. "
+            "Esto es inseguro en producción."
+        )
+        return True
+
+    expected = hmac_mod.new(
+        secret.encode("utf-8"),
+        body,
+        hashlib.sha256,
+    ).hexdigest()
+
+    return hmac_mod.compare_digest(expected, signature)
+
+
+async def verify_openwa_webhook(request: Request) -> dict[str, object]:
+    """Dependencia de FastAPI: valida HMAC del webhook y retorna el payload parseado.
+
+    Lee el body crudo del request, valida la firma HMAC contra
+    OPENWA_WEBHOOK_SECRET, y parsea el JSON.
+
+    Si OPENWA_WEBHOOK_SECRET no está configurado (vacío), se aceptan
+    webhooks sin validación HMAC. Esto es seguro solo en desarrollo local.
+
+    Returns:
+        Payload JSON del webhook como diccionario.
+
+    Raises:
+        HTTPException 401: Si la firma HMAC está ausente o es inválida.
+        HTTPException 400: Si el body no es JSON válido.
+    """
+    body = await request.body()
+
+    # Dev mode: sin secret configurado, aceptar sin validación HMAC.
+    if not settings.openwa_webhook_secret:
+        logger.warning(
+            "OPENWA_WEBHOOK_SECRET no configurado — webhooks aceptados sin validación HMAC"
+        )
+    else:
+        signature = request.headers.get("X-OpenWA-Signature", "")
+        if not signature:
+            logger.warning("Webhook rechazado: header X-OpenWA-Signature ausente")
+            raise HTTPException(status_code=401, detail="Firma HMAC requerida")
+
+        if not validate_openwa_hmac(body, signature, settings.openwa_webhook_secret):
+            logger.warning("Webhook rechazado: firma HMAC inválida")
+            raise HTTPException(status_code=401, detail="Firma HMAC inválida")
+
+    # El body ya fue leído. Devolvemos el dict parseado para que el endpoint lo use.
+    import json
+
+    try:
+        payload: dict[str, object] = json.loads(body)
+    except json.JSONDecodeError as err:
+        logger.warning("Webhook rechazado: body no es JSON válido")
+        raise HTTPException(status_code=400, detail="Body debe ser JSON válido") from err
+    return payload
