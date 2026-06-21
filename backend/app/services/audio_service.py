@@ -262,11 +262,12 @@ class AudioService:
             # Guardar .ogg temporal desde los bytes recibidos
             ogg_path.write_bytes(audio_bytes)
             logger.info(
-                "Audio guardado — message_id=%s chat_id_hash=%s size_bytes=%d path=%s",
+                "Audio guardado — message_id=%s chat_id_hash=%s size_bytes=%d path=%s request_id=%s",
                 message_id,
                 chat_id_hash,
                 len(audio_bytes),
                 ogg_path,
+                request_id,
             )
 
             # Convertir .ogg -> .wav 16kHz mono (en thread aparte para no bloquear event loop)
@@ -274,11 +275,12 @@ class AudioService:
 
             audio_duration_ms = await asyncio.to_thread(get_audio_duration_ms, wav_path)
             logger.info(
-                "Audio listo para pipeline — message_id=%s chat_id_hash=%s wav_path=%s duration_ms=%d",
+                "Audio listo para pipeline — message_id=%s chat_id_hash=%s wav_path=%s duration_ms=%d request_id=%s",
                 message_id,
                 chat_id_hash,
                 wav_path,
                 audio_duration_ms,
+                request_id,
             )
 
             # Enviar respuesta de audio fija (hola mundo end-to-end).
@@ -288,10 +290,11 @@ class AudioService:
                 await openwa.send_audio(chat_id, str(_HELLO_OGG_PATH))
                 e2e_ms = int((time.monotonic() - start_time) * 1000)
                 logger.info(
-                    "Respuesta enviada — message_id=%s chat_id_hash=%s e2e_ms=%d",
+                    "Respuesta enviada — message_id=%s chat_id_hash=%s e2e_ms=%d request_id=%s",
                     message_id,
                     chat_id_hash,
                     e2e_ms,
+                    request_id,
                 )
             else:
                 logger.warning(
