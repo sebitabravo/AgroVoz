@@ -1,6 +1,7 @@
 """Tests de main.py — exception handler, lifespan y RequestIDMiddleware."""
 
 import json
+from collections.abc import Iterator
 from importlib import reload
 from unittest.mock import MagicMock
 
@@ -9,6 +10,29 @@ from httpx import AsyncClient
 
 import app.main as app_main
 from app.core import config
+
+# Settings que los tests de lifespan modifican y deben restaurar.
+_LIFESPAN_SETTINGS = (
+    "app_env",
+    "openwa_api_key",
+    "openweathermap_api_key",
+    "openwa_webhook_secret",
+)
+
+
+@pytest.fixture
+def prod_lifespan(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Configura app_env=production y restaura todas las settings al final.
+
+    Elimina ~9 líneas de boilerplate save/restore por cada test de lifespan.
+    """
+    originals = {attr: getattr(config.settings, attr) for attr in _LIFESPAN_SETTINGS}
+    monkeypatch.setattr(config.settings, "app_env", "production")
+    reload(app_main)
+    yield
+    for attr, value in originals.items():
+        monkeypatch.setattr(config.settings, attr, value)
+    reload(app_main)
 
 
 async def test_exception_handler_no_leakea_info_en_production(
@@ -70,110 +94,62 @@ async def test_exception_handler_expone_detalle_en_development(
 
 async def test_lifespan_falla_sin_openweathermap_api_key_en_production(
     monkeypatch: pytest.MonkeyPatch,
+    prod_lifespan: None,
 ) -> None:
     """Lifespan debe raise ValueError si app_env=production y no hay OpenWeatherMap key."""
-    original_env = config.settings.app_env
-    original_key = config.settings.openweathermap_api_key
-    original_openwa_key = config.settings.openwa_api_key
-    original_webhook_secret = config.settings.openwa_webhook_secret
+    monkeypatch.setattr(config.settings, "openweathermap_api_key", "")
+    monkeypatch.setattr(config.settings, "openwa_api_key", "set-not-empty")
+    monkeypatch.setattr(config.settings, "openwa_webhook_secret", "set-not-empty")
+    reload(app_main)
 
-    try:
-        monkeypatch.setattr(config.settings, "app_env", "production")
-        monkeypatch.setattr(config.settings, "openweathermap_api_key", "")
-        monkeypatch.setattr(config.settings, "openwa_api_key", "set-not-empty")
-        monkeypatch.setattr(config.settings, "openwa_webhook_secret", "set-not-empty")
-        reload(app_main)
-
-        with pytest.raises(ValueError, match="OPENWEATHERMAP_API_KEY"):
-            async with app_main.lifespan(app_main.app):
-                pass  # No debería llegar acá — lifespan raisea antes del yield
-    finally:
-        monkeypatch.setattr(config.settings, "app_env", original_env)
-        monkeypatch.setattr(config.settings, "openweathermap_api_key", original_key)
-        monkeypatch.setattr(config.settings, "openwa_api_key", original_openwa_key)
-        monkeypatch.setattr(config.settings, "openwa_webhook_secret", original_webhook_secret)
-        reload(app_main)
+    with pytest.raises(ValueError, match="OPENWEATHERMAP_API_KEY"):
+        async with app_main.lifespan(app_main.app):
+            pass
 
 
 async def test_lifespan_falla_sin_openwa_api_key_en_production(
     monkeypatch: pytest.MonkeyPatch,
+    prod_lifespan: None,
 ) -> None:
     """Lifespan debe raise ValueError si app_env=production y no hay OPENWA_API_KEY."""
-    original_env = config.settings.app_env
-    original_key = config.settings.openwa_api_key
-    original_weather_key = config.settings.openweathermap_api_key
-    original_webhook_secret = config.settings.openwa_webhook_secret
+    monkeypatch.setattr(config.settings, "openwa_api_key", "")
+    monkeypatch.setattr(config.settings, "openweathermap_api_key", "set-not-empty")
+    monkeypatch.setattr(config.settings, "openwa_webhook_secret", "set-not-empty")
+    reload(app_main)
 
-    try:
-        monkeypatch.setattr(config.settings, "app_env", "production")
-        monkeypatch.setattr(config.settings, "openwa_api_key", "")
-        monkeypatch.setattr(config.settings, "openweathermap_api_key", "set-not-empty")
-        monkeypatch.setattr(config.settings, "openwa_webhook_secret", "set-not-empty")
-        reload(app_main)
-
-        with pytest.raises(ValueError, match="OPENWA_API_KEY"):
-            async with app_main.lifespan(app_main.app):
-                pass  # No debería llegar acá — lifespan raisea antes del yield
-    finally:
-        monkeypatch.setattr(config.settings, "app_env", original_env)
-        monkeypatch.setattr(config.settings, "openwa_api_key", original_key)
-        monkeypatch.setattr(config.settings, "openweathermap_api_key", original_weather_key)
-        monkeypatch.setattr(config.settings, "openwa_webhook_secret", original_webhook_secret)
-        reload(app_main)
+    with pytest.raises(ValueError, match="OPENWA_API_KEY"):
+        async with app_main.lifespan(app_main.app):
+            pass
 
 
 async def test_lifespan_falla_sin_ambas_api_keys_en_production(
     monkeypatch: pytest.MonkeyPatch,
+    prod_lifespan: None,
 ) -> None:
     """Lifespan debe raise ValueError con ambas keys faltantes en producción."""
-    original_env = config.settings.app_env
-    original_key = config.settings.openwa_api_key
-    original_weather_key = config.settings.openweathermap_api_key
-    original_webhook_secret = config.settings.openwa_webhook_secret
+    monkeypatch.setattr(config.settings, "openwa_api_key", "")
+    monkeypatch.setattr(config.settings, "openweathermap_api_key", "")
+    monkeypatch.setattr(config.settings, "openwa_webhook_secret", "set-not-empty")
+    reload(app_main)
 
-    try:
-        monkeypatch.setattr(config.settings, "app_env", "production")
-        monkeypatch.setattr(config.settings, "openwa_api_key", "")
-        monkeypatch.setattr(config.settings, "openweathermap_api_key", "")
-        monkeypatch.setattr(config.settings, "openwa_webhook_secret", "set-not-empty")
-        reload(app_main)
-
-        with pytest.raises(ValueError, match=r"(?=.*OPENWEATHERMAP_API_KEY)(?=.*OPENWA_API_KEY)"):
-            async with app_main.lifespan(app_main.app):
-                pass  # No debería llegar acá — lifespan raisea antes del yield
-    finally:
-        monkeypatch.setattr(config.settings, "app_env", original_env)
-        monkeypatch.setattr(config.settings, "openwa_api_key", original_key)
-        monkeypatch.setattr(config.settings, "openweathermap_api_key", original_weather_key)
-        monkeypatch.setattr(config.settings, "openwa_webhook_secret", original_webhook_secret)
-        reload(app_main)
+    with pytest.raises(ValueError, match=r"(?=.*OPENWEATHERMAP_API_KEY)(?=.*OPENWA_API_KEY)"):
+        async with app_main.lifespan(app_main.app):
+            pass
 
 
 async def test_lifespan_rechaza_key_con_solo_whitespace(
     monkeypatch: pytest.MonkeyPatch,
+    prod_lifespan: None,
 ) -> None:
     """Lifespan debe rechazar keys que son solo whitespace (no solo vacías)."""
-    original_env = config.settings.app_env
-    original_key = config.settings.openwa_api_key
-    original_weather_key = config.settings.openweathermap_api_key
-    original_webhook_secret = config.settings.openwa_webhook_secret
+    monkeypatch.setattr(config.settings, "openwa_api_key", "   ")
+    monkeypatch.setattr(config.settings, "openweathermap_api_key", "real-key")
+    monkeypatch.setattr(config.settings, "openwa_webhook_secret", "real-secret")
+    reload(app_main)
 
-    try:
-        monkeypatch.setattr(config.settings, "app_env", "production")
-        monkeypatch.setattr(config.settings, "openwa_api_key", "   ")
-        monkeypatch.setattr(config.settings, "openweathermap_api_key", "real-key")
-        monkeypatch.setattr(config.settings, "openwa_webhook_secret", "real-secret")
-        reload(app_main)
-
-        with pytest.raises(ValueError, match="OPENWA_API_KEY"):
-            async with app_main.lifespan(app_main.app):
-                pass
-    finally:
-        monkeypatch.setattr(config.settings, "app_env", original_env)
-        monkeypatch.setattr(config.settings, "openwa_api_key", original_key)
-        monkeypatch.setattr(config.settings, "openweathermap_api_key", original_weather_key)
-        monkeypatch.setattr(config.settings, "openwa_webhook_secret", original_webhook_secret)
-        reload(app_main)
+    with pytest.raises(ValueError, match="OPENWA_API_KEY"):
+        async with app_main.lifespan(app_main.app):
+            pass
 
 
 # ── RequestIDMiddleware ──
