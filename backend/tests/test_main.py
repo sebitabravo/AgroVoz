@@ -11,28 +11,18 @@ from httpx import AsyncClient
 import app.main as app_main
 from app.core import config
 
-# Settings que los tests de lifespan modifican y deben restaurar.
-_LIFESPAN_SETTINGS = (
-    "app_env",
-    "openwa_api_key",
-    "openweathermap_api_key",
-    "openwa_webhook_secret",
-)
-
 
 @pytest.fixture
 def prod_lifespan(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Configura app_env=production y restaura todas las settings al final.
+    """Configura app_env=production. monkeypatch auto-undo revierte al final.
 
-    Elimina ~9 líneas de boilerplate save/restore por cada test de lifespan.
+    Solo reload(app_main) en teardown — la restauración de attributes la
+    hace monkeypatch automáticamente al terminar cada test.
     """
-    originals = {attr: getattr(config.settings, attr) for attr in _LIFESPAN_SETTINGS}
     monkeypatch.setattr(config.settings, "app_env", "production")
     reload(app_main)
     yield
-    for attr, value in originals.items():
-        monkeypatch.setattr(config.settings, attr, value)
-    reload(app_main)
+    reload(app_main)  # Recargar módulo con settings restauradas por monkeypatch
 
 
 async def test_exception_handler_no_leakea_info_en_production(
@@ -133,6 +123,24 @@ async def test_lifespan_falla_sin_ambas_api_keys_en_production(
     reload(app_main)
 
     with pytest.raises(ValueError, match=r"(?=.*OPENWEATHERMAP_API_KEY)(?=.*OPENWA_API_KEY)"):
+        async with app_main.lifespan(app_main.app):
+            pass
+
+
+async def test_lifespan_falla_sin_ningun_secret_en_production(
+    monkeypatch: pytest.MonkeyPatch,
+    prod_lifespan: None,
+) -> None:
+    """Lifespan debe raise ValueError con los 3 secrets vacíos en producción."""
+    monkeypatch.setattr(config.settings, "openwa_api_key", "")
+    monkeypatch.setattr(config.settings, "openweathermap_api_key", "")
+    monkeypatch.setattr(config.settings, "openwa_webhook_secret", "")
+    reload(app_main)
+
+    with pytest.raises(
+        ValueError,
+        match=r"(?=.*OPENWEATHERMAP_API_KEY)(?=.*OPENWA_API_KEY)(?=.*OPENWA_WEBHOOK_SECRET)",
+    ):
         async with app_main.lifespan(app_main.app):
             pass
 
