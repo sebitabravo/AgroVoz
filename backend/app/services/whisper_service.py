@@ -5,21 +5,26 @@ Implementa un wrapper thread-safe sobre openai-whisper con:
 - Singleton por nombre de modelo (evita tener multiples copias en memoria)
 - Soporte para CPU, CUDA y MPS (Apple Silicon)
 - Manejo de errores: archivo corrupto, audio vacio, timeout
+
+Nota: `import whisper` es lazy (dentro de _load_model) para que CI
+pueda ejecutar tests sin tener openai-whisper instalado. Los tests
+mockean WhisperService a nivel de clase, no de modulo.
 """
 
 import logging
+import threading
 import time
 from pathlib import Path
-
-import whisper
-from whisper import Whisper
+from typing import Any
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 # Cache de modelos cargados: {model_name: Whisper}
-_model_cache: dict[str, Whisper] = {}
+# Usamos Any porque Whisper se importa lazy (no disponible en module scope).
+_model_cache: dict[str, Any] = {}
+_model_cache_lock = threading.Lock()
 
 
 def _get_device() -> str:
@@ -71,42 +76,49 @@ class WhisperService:
         self._device = _get_device()
         self._language = "es"  # Fijo: espanol chileno
 
-    def _load_model(self) -> Whisper:
+    def _load_model(self) -> Any:
         """Carga el modelo Whisper en cache (singleton por nombre de modelo).
 
-        Thread-safe: si dos threads llaman simultaneamente con el mismo nombre,
-        solo uno carga el modelo y el otro reusa el cacheado.
+        Thread-safe: usa _model_cache_lock para evitar que dos threads carguen
+        el modelo simultaneamente durante cold start (P1 del code review).
+
+        El `import whisper` es lazy (dentro de este metodo) para que CI
+        pueda ejecutar tests sin openai-whisper instalado.
 
         Returns:
-            Instancia de Whisper cargada.
+            Instancia de Whisper cargada (tipo Any por import lazy).
         """
-        if self._model_name not in _model_cache:
-            logger.info(
-                "Cargando modelo Whisper '%s' en %s (primer uso)...",
-                self._model_name,
-                self._device,
-            )
-            start = time.monotonic()
+        with _model_cache_lock:
+            if self._model_name not in _model_cache:
+                # Import lazy: solo disponible si openai-whisper esta instalado
+                import whisper
 
-            # Whisper se carga con fp16=False en CPU/MPS para evitar errores
-            # de precision. CUDA puede usar fp16=True para mayor velocidad.
-            fp16 = self._device == "cuda"
-            model = whisper.load_model(
-                self._model_name,
-                device=self._device,
-                download_root=settings.whisper_model_path or None,
-            )
+                logger.info(
+                    "Cargando modelo Whisper '%s' en %s (primer uso)...",
+                    self._model_name,
+                    self._device,
+                )
+                start = time.monotonic()
 
-            elapsed = time.monotonic() - start
-            logger.info(
-                "Modelo Whisper '%s' cargado en %.1fs — device=%s fp16=%s",
-                self._model_name,
-                elapsed,
-                self._device,
-                fp16,
-            )
-            _model_cache[self._model_name] = model
-        return _model_cache[self._model_name]
+                # Whisper se carga con fp16=False en CPU/MPS para evitar errores
+                # de precision. CUDA puede usar fp16=True para mayor velocidad.
+                fp16 = self._device == "cuda"
+                model = whisper.load_model(
+                    self._model_name,
+                    device=self._device,
+                    download_root=settings.whisper_model_path or None,
+                )
+
+                elapsed = time.monotonic() - start
+                logger.info(
+                    "Modelo Whisper '%s' cargado en %.1fs — device=%s fp16=%s",
+                    self._model_name,
+                    elapsed,
+                    self._device,
+                    fp16,
+                )
+                _model_cache[self._model_name] = model
+            return _model_cache[self._model_name]
 
     def transcribe(self, audio_path: str | Path) -> dict[str, object]:
         """Transcribe un archivo de audio a texto.
@@ -152,7 +164,7 @@ class WhisperService:
                 task="transcribe",
                 verbose=False,
             )
-        except Exception as exc:
+        except (RuntimeError, OSError, ValueError) as exc:
             elapsed = time.monotonic() - start
             logger.exception(
                 "Whisper fallo al transcribir — path=%s elapsed_ms=%d error=%s",
@@ -166,7 +178,7 @@ class WhisperService:
         text = (result.get("text") or "").strip()
 
         logger.info(
-            "Audio transcrito — path=%s text_len=%d chars=%d language=%s elapsed_ms=%d",
+            "Audio transcrito — path=%s text_len=%d words=%d language=%s elapsed_ms=%d",
             path.name,
             len(text),
             len(text.split()),

@@ -26,7 +26,7 @@ import jiwer
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_BACKEND_DIR))
 
-from app.services.whisper_service import WhisperService
+from app.services.whisper_service import WhisperService  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,

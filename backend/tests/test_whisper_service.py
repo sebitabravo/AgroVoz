@@ -280,11 +280,11 @@ class TestDeviceDetection:
         self, mock_mps: Mock, mock_cuda: Mock
     ) -> None:
         """Debe usar CPU si no hay CUDA ni MPS."""
-        from app.services.whisper_service import _get_device
-
         # Necesario incluso en equipos sin MPS: hasattr(torch.backends, "mps")
         # es True en macOS con torch instalado.
         import torch
+
+        from app.services.whisper_service import _get_device
 
         mock_cuda.return_value = False
         mock_mps.return_value = False
