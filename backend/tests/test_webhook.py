@@ -655,8 +655,9 @@ async def test_audio_service_process_audio_happy_path(
     assert send_audio_calls[0][1] == str(hello_ogg)
 
 
-# monkeypatch reemplaza el metodo en la clase: al llamar inst.method(arg),
-# Python no pasa self porque la funcion patcheada no es descriptor.
+# monkeypatch reemplaza el metodo en la clase. Al llamar inst.method(arg),
+# Python pasa self automaticamente (las funciones son descriptores).
+# Por eso fake_transcribe recibe _self como primer parametro.
 def _mock_whisper_transcribe(monkeypatch: pytest.MonkeyPatch) -> None:
     """Mockea WhisperService.transcribe para tests de audio_service.
 
@@ -815,6 +816,102 @@ async def test_audio_service_process_audio_audio_excede_tamano(
     wav_files = list(tmp_path.glob("*.wav"))
     assert len(ogg_files) == 0
     assert len(wav_files) == 0
+
+
+@pytest.mark.asyncio
+async def test_audio_service_process_audio_whisper_runtime_error_continua(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Si Whisper lanza RuntimeError, process_audio loguea pero continua enviando respuesta."""
+    from app.services.audio_service import AudioService
+
+    def fake_convert(input_path: Path, output_path: Path) -> None:
+        output_path.write_bytes(b"FAKE_WAV_DATA")
+
+    monkeypatch.setattr("app.services.audio_service.convert_ogg_to_wav", fake_convert)
+    monkeypatch.setattr("app.services.audio_service.get_audio_duration_ms", lambda wav_path: 3000)
+
+    hello_ogg = tmp_path / "hello.ogg"
+    hello_ogg.write_bytes(b"FAKE_HELLO_OGG")
+    monkeypatch.setattr("app.services.audio_service._HELLO_OGG_PATH", hello_ogg)
+
+    def fake_transcribe_runtime_error(_self: object, audio_path: str) -> dict:
+        raise RuntimeError("Error de transcripcion Whisper: OOM")
+
+    monkeypatch.setattr(
+        "app.services.audio_service.WhisperService.transcribe",
+        fake_transcribe_runtime_error,
+    )
+
+    send_audio_called = False
+
+    async def fake_send_audio(
+        _self: object, target: str, audio_path: str, caption: str | None = None
+    ) -> dict[str, object]:
+        nonlocal send_audio_called
+        send_audio_called = True
+        return {}
+
+    monkeypatch.setattr("app.services.openwa_service.OpenWAService.send_audio", fake_send_audio)
+
+    service = AudioService(audio_temp_dir=tmp_path)
+    await service.process_audio(
+        audio_bytes=b"FAKE_OGG_DATA",
+        chat_id="248069442560050@lid",
+        request_id="req-error-runtime",
+    )
+
+    # Pipeline continua: send_audio se llama aunque Whisper fallo
+    assert send_audio_called
+
+
+@pytest.mark.asyncio
+async def test_audio_service_process_audio_whisper_timeout_continua(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Si Whisper excede el timeout, process_audio loguea pero continua enviando respuesta."""
+    from app.services.audio_service import AudioService
+
+    def fake_convert(input_path: Path, output_path: Path) -> None:
+        output_path.write_bytes(b"FAKE_WAV_DATA")
+
+    monkeypatch.setattr("app.services.audio_service.convert_ogg_to_wav", fake_convert)
+    monkeypatch.setattr("app.services.audio_service.get_audio_duration_ms", lambda wav_path: 3000)
+
+    hello_ogg = tmp_path / "hello.ogg"
+    hello_ogg.write_bytes(b"FAKE_HELLO_OGG")
+    monkeypatch.setattr("app.services.audio_service._HELLO_OGG_PATH", hello_ogg)
+
+    def fake_transcribe_timeout(_self: object, audio_path: str) -> dict:
+        raise TimeoutError("transcripcion excedio timeout de 30s")
+
+    monkeypatch.setattr(
+        "app.services.audio_service.WhisperService.transcribe",
+        fake_transcribe_timeout,
+    )
+
+    send_audio_called = False
+
+    async def fake_send_audio(
+        _self: object, target: str, audio_path: str, caption: str | None = None
+    ) -> dict[str, object]:
+        nonlocal send_audio_called
+        send_audio_called = True
+        return {}
+
+    monkeypatch.setattr("app.services.openwa_service.OpenWAService.send_audio", fake_send_audio)
+
+    service = AudioService(audio_temp_dir=tmp_path)
+    await service.process_audio(
+        audio_bytes=b"FAKE_OGG_DATA",
+        chat_id="248069442560050@lid",
+        request_id="req-error-timeout",
+    )
+
+    # Pipeline continua: send_audio se llama aunque Whisper timeout
+    assert send_audio_called
 
 
 def test_hash_phone_for_log_consistencia() -> None:
