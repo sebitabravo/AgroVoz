@@ -5,6 +5,8 @@ a través del gateway WhatsApp self-hosted.
 """
 
 import logging
+import warnings
+from pathlib import Path
 from urllib.parse import quote
 
 import httpx
@@ -19,15 +21,35 @@ class OpenWAService:
     """Cliente HTTP asíncrono para la API REST de Open-WA.
 
     Encapsula las llamadas a la API de Open-WA: descargar media,
-    enviar texto y enviar audio. Usa httpx con timeout explícito
-    y logging estructurado.
+    enviar texto y enviar audio. Cada método crea su propio httpx.AsyncClient
+    con async with (connection pool se libera al salir del contexto).
+    Para MVP con <10 usuarios concurrentes, el overhead de crear un
+    connection pool por request es negligible. En producción, mover a un
+    cliente compartido manejado por el lifespan de FastAPI.
     """
 
     def __init__(self) -> None:
-        """Inicializa el cliente con la URL base y API key desde settings."""
+        """Inicializa el cliente con la URL base y API key desde settings.
+
+        Valida que la API key esté configurada en desarrollo (solo warning,
+        no bloquea el arranque). En producción, main.py bloquea si está vacía
+        (lifespan validation).
+        """
         self._base_url: str = settings.openwa_api_url.rstrip("/")
         self._api_key: str = settings.openwa_api_key
         self._timeout: float = 30.0
+
+        # P1-3: Advertir si la API key no está configurada en desarrollo.
+        # El warning usa stacklevel=2 para apuntar al caller (AudioService),
+        # no a este __init__.
+        if not self._api_key and settings.app_env == "development":
+            warnings.warn(
+                "OPENWA_API_KEY no está configurada. "
+                "Las llamadas a Open-WA fallarán con 401. "
+                "Configúrela en .env o en el entorno de desarrollo.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
     def _headers(self) -> dict[str, str]:
         """Headers HTTP para requests a la API de Open-WA."""
@@ -113,10 +135,13 @@ class OpenWAService:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.post(url, headers=self._headers(), json=payload)
             response.raise_for_status()
+            # P2-4: Loguear solo el nombre del archivo, no el path completo.
+            # El path completo puede leakear la estructura del sistema de archivos.
+            audio_filename = Path(audio_path).name
             logger.info(
-                "Audio enviado — phone_hash=%s path=%s",
+                "Audio enviado — phone_hash=%s file=%s",
                 _hash_phone_for_log(phone),
-                audio_path,
+                audio_filename,
             )
             return dict(response.json())
 
@@ -127,6 +152,12 @@ def _hash_phone_for_log(phone: str) -> str:
     Delega en hash_phone() de app.core.phone_hash para consistencia
     entre módulos (mismo hash en logs del webhook y del servicio).
     Trunca a 8 caracteres para legibilidad.
+
+    Nunca lanza excepción: si el pepper está vacío o hash_phone falla,
+    retorna 'unknown' en vez de interrumpir la operación que se está logueando.
     """
-    full = hash_phone(phone, settings.phone_hash_pepper)
-    return full[:8]
+    try:
+        full = hash_phone(phone, settings.phone_hash_pepper)
+        return full[:8]
+    except (ValueError, AttributeError):
+        return "unknown"

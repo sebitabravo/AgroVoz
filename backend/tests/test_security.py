@@ -30,7 +30,7 @@ async def test_rate_limit_bloquea_despues_de_n_requests(
         return {"status": "ok"}
 
     async with AsyncClient(
-        transport=ASGITransport(app=app_test), base_url="http://test"
+        transport=ASGITransport(app=app_test), base_url="http://testserver"
     ) as c:
         # Las primeras 3 requests deben pasar (200 OK)
         for _ in range(3):
@@ -138,7 +138,7 @@ async def test_rate_limit_limpieza_ip_inactiva(
     middleware = RateLimitMiddleware(app_inner)
 
     async with AsyncClient(
-        transport=ASGITransport(app=middleware), base_url="http://test"
+        transport=ASGITransport(app=middleware), base_url="http://testserver"
     ) as c:
         client_ip = "127.0.0.1"  # ASGITransport usa 127.0.0.1 como client host
 
@@ -178,7 +178,7 @@ async def test_rate_limit_cero_bloquea_todo(
         return {"status": "ok"}
 
     async with AsyncClient(
-        transport=ASGITransport(app=app_test), base_url="http://test"
+        transport=ASGITransport(app=app_test), base_url="http://testserver"
     ) as c:
         response = await c.get("/api/v1/health")
         assert response.status_code == 429

@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        extra="forbid",  # Rechaza variables de entorno desconocidas (typo-safety)
+        extra="ignore",  # Tolera vars del sistema (PATH, HOME, TZ, vars de Dokploy/Traefik)
     )
 
     # ── Entorno ──────────────────────────
@@ -163,7 +163,34 @@ class Settings(BaseSettings):
             stacklevel=2,
         )
 
+    def validate_api_keys_in_dev(self) -> None:
+        """Advierte si las API keys requeridas están vacías en development.
+
+        En producción, main.py lanza ValueError antes de arrancar (fail-fast).
+        En development, emitir warnings para que el equipo no pierda horas
+        debugueando llamadas silenciosamente sin autenticación.
+        """
+        if self.app_env != "development":
+            return
+
+        if not self.openwa_api_key:
+            warnings.warn(
+                "OPENWA_API_KEY no está configurada. "
+                "Las llamadas a Open-WA no tendrán autenticación (X-API-Key). "
+                "El pipeline de audio no funcionará sin esto.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        if not self.openweathermap_api_key:
+            warnings.warn(
+                "OPENWEATHERMAP_API_KEY no está configurada. "
+                "Las consultas de clima no funcionarán sin esto.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
 
 settings = Settings()
 settings.validate_webhook_secret_not_default()
 settings.validate_pepper_not_default()
+settings.validate_api_keys_in_dev()

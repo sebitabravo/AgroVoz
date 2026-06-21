@@ -15,10 +15,24 @@ from app.core.config import settings
 from app.core.phone_hash import hash_phone
 from app.core.security import verify_openwa_webhook
 from app.schemas.webhook import WebhookPayload
-from app.services.audio_service import AudioService
+from app.services.audio_service import AudioService, sanitize_message_id
 
 router = APIRouter(tags=["webhooks"])
 logger = logging.getLogger(__name__)
+
+
+def get_audio_service() -> AudioService:
+    """Factory para inyección de dependencias de AudioService.
+
+    Permite que FastAPI inyecte AudioService vía Depends,
+    facilitando el mocking en tests (P2-2).
+    """
+    return AudioService()
+
+
+# Dependencias a nivel de módulo para cumplir con B008 (no calls en argument defaults).
+_audio_service_dep = Depends(get_audio_service)
+_verify_openwa_dep = Depends(verify_openwa_webhook)
 
 
 def _is_audio_message(payload: WebhookPayload) -> bool:
@@ -36,7 +50,8 @@ def _is_audio_message(payload: WebhookPayload) -> bool:
 async def webhook_whatsapp(
     request: Request,
     background_tasks: BackgroundTasks,
-    raw_payload: dict[str, object] = Depends(verify_openwa_webhook),  # noqa: B008
+    raw_payload: dict[str, object] = _verify_openwa_dep,
+    audio_service: AudioService = _audio_service_dep,
 ) -> JSONResponse:
     """Endpoint que recibe mensajes de WhatsApp vía webhook de Open-WA.
 
@@ -63,11 +78,16 @@ async def webhook_whatsapp(
         )
 
     phone = payload.message.from_
-    message_id = payload.message.id
+    raw_message_id = payload.message.id
+    # CI/CD P1: Sanitizar message_id en logs — IDs de WhatsApp contienen
+    # el número de teléfono en texto plano (formato: true_<phone>@c.us_<random>).
+    # sanitize_message_id() reemplaza caracteres no seguros preservando
+    # trazabilidad sin leakear PII.
+    message_id_safe = sanitize_message_id(raw_message_id)
 
     logger.info(
         "Webhook recibido — message_id=%s phone_hash=%s has_media=%s media_count=%d request_id=%s",
-        message_id,
+        message_id_safe,
         hash_phone(phone, settings.phone_hash_pepper),
         payload.message.has_media,
         len(payload.message.media),
@@ -77,9 +97,9 @@ async def webhook_whatsapp(
     # Mensaje de texto: log + ignorar (el pipeline de voz solo procesa audio por ahora)
     if not payload.message.has_media or not _is_audio_message(payload):
         logger.info(
-            "Mensaje no-audio ignorado — message_id=%s type=text body_preview=%s request_id=%s",
-            message_id,
-            payload.message.body[:100] if payload.message.body else "(vacío)",
+            "Mensaje no-audio ignorado — message_id=%s type=text has_body=%s request_id=%s",
+            message_id_safe,
+            "si" if payload.message.body else "no",
             request_id,
         )
         return JSONResponse(
@@ -87,11 +107,13 @@ async def webhook_whatsapp(
             content={"status": "ignored", "reason": "mensaje_no_audio"},
         )
 
-    # Mensaje de audio: delegar a AudioService en background
-    audio_service = AudioService()
+    # Mensaje de audio: delegar a AudioService en background.
+    # AudioService internamente usa el message_id original (raw) para
+    # las llamadas a la API de Open-WA, y sanitize_message_id() para logs/paths.
     background_tasks.add_task(audio_service.process_audio, payload, phone, request_id)
 
+    # En la respuesta usamos el message_id sanitizado para no leakear PII.
     return JSONResponse(
         status_code=200,
-        content={"status": "received", "message_id": message_id},
+        content={"status": "received", "message_id": message_id_safe},
     )

@@ -8,6 +8,7 @@ import hashlib
 import hmac as hmac_mod
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
@@ -46,7 +47,7 @@ async def test_webhook_sin_firma_retorna_401(
     payload = _load_fixture("audio_message")
 
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         response = await client.post(
             "/api/v1/webhook/whatsapp",
@@ -71,7 +72,7 @@ async def test_webhook_firma_invalida_retorna_401(
     body = json.dumps(payload).encode("utf-8")
 
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         response = await client.post(
             "/api/v1/webhook/whatsapp",
@@ -101,7 +102,7 @@ async def test_webhook_firma_mayuscula_es_valida(
     signature = _compute_hmac(body, "test-secret").upper()
 
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         response = await client.post(
             "/api/v1/webhook/whatsapp",
@@ -134,7 +135,7 @@ async def test_webhook_firma_valida_retorna_200(
     signature = _compute_hmac(body, "test-secret")
 
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         response = await client.post(
             "/api/v1/webhook/whatsapp",
@@ -168,7 +169,7 @@ async def test_webhook_mensaje_texto_retorna_200_ignorado(
     signature = _compute_hmac(body, "test-secret")
 
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         response = await client.post(
             "/api/v1/webhook/whatsapp",
@@ -199,7 +200,7 @@ async def test_webhook_mensaje_con_media_no_audio_ignorado(
     signature = _compute_hmac(body, "test-secret")
 
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         response = await client.post(
             "/api/v1/webhook/whatsapp",
@@ -229,7 +230,7 @@ async def test_webhook_mensaje_sin_media_ignorado(
     signature = _compute_hmac(body, "test-secret")
 
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         response = await client.post(
             "/api/v1/webhook/whatsapp",
@@ -266,7 +267,7 @@ async def test_webhook_payload_invalido_retorna_200_ignorado(
     signature = _compute_hmac(body, "test-secret")
 
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         response = await client.post(
             "/api/v1/webhook/whatsapp",
@@ -296,7 +297,7 @@ async def test_webhook_body_no_json_retorna_400(
     signature = _compute_hmac(body, "test-secret")
 
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         response = await client.post(
             "/api/v1/webhook/whatsapp",
@@ -326,7 +327,7 @@ async def test_webhook_secret_vacio_acepta_sin_validar(
     payload = _load_fixture("text_message")
 
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         response = await client.post(
             "/api/v1/webhook/whatsapp",
@@ -345,42 +346,35 @@ async def test_webhook_secret_vacio_acepta_sin_validar(
 async def test_openwa_download_media_exitoso(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """download_media debe retornar los bytes del audio cuando Open-WA responde 200."""
+    """download_media debe retornar los bytes del audio cuando Open-WA responde 200.
+
+    Mockea httpx.AsyncClient con __aenter__/__aexit__ para el patrón
+    async with httpx.AsyncClient(...) as client: que usa el servicio."""
     from app.services.openwa_service import OpenWAService
+    import app.services.openwa_service as svc
 
     monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:8000")
     monkeypatch.setattr(settings, "openwa_api_key", "test-api-key")
 
     fake_audio = b"FAKE_OGG_AUDIO_DATA"
 
-    # Mock httpx.AsyncClient.get para que retorne 200 con fake_audio
+    mock_client = AsyncMock()
+    mock_response = AsyncMock()
+    mock_response.raise_for_status = Mock()
+    mock_response.content = fake_audio
+    mock_client.get.return_value = mock_response
 
-    class FakeResponse:
-        content = fake_audio
-        status_code = 200
-
-        def raise_for_status(self) -> None:
-            pass
-
-    class FakeClient:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            pass
-
-        async def __aenter__(self) -> "FakeClient":
-            return self
-
-        async def __aexit__(self, *args: object) -> None:
-            pass
-
-        async def get(self, url: str, headers: dict[str, str]) -> "FakeResponse":
-            return FakeResponse()
-
-    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    # Mock httpx.AsyncClient: el servicio usa async with httpx.AsyncClient(...) as client:
+    mock_ctx = AsyncMock()
+    mock_ctx.__aenter__.return_value = mock_client
+    mock_ctx.__aexit__.return_value = None
+    monkeypatch.setattr(svc.httpx, "AsyncClient", lambda *a, **kw: mock_ctx)
 
     service = OpenWAService()
     result = await service.download_media("msg_test_001")
 
     assert result == fake_audio
+    mock_client.get.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -389,34 +383,26 @@ async def test_openwa_download_media_error_httpx(
 ) -> None:
     """download_media debe propagar httpx.HTTPError cuando Open-WA falla."""
     from app.services.openwa_service import OpenWAService
+    import app.services.openwa_service as svc
 
     monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:8000")
     monkeypatch.setattr(settings, "openwa_api_key", "test-api-key")
 
-    class FakeResponse:
-        status_code = 500
+    mock_client = AsyncMock()
+    mock_response = AsyncMock()
+    mock_response.raise_for_status = Mock(
+        side_effect=httpx.HTTPStatusError(
+            "Server error",
+            request=httpx.Request("GET", "http://openwa:8000"),
+            response=httpx.Response(500),
+        )
+    )
+    mock_client.get.return_value = mock_response
 
-        def raise_for_status(self) -> None:
-            raise httpx.HTTPStatusError(
-                "Server error",
-                request=httpx.Request("GET", "http://openwa:8000"),
-                response=httpx.Response(500),
-            )
-
-    class FakeClient:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            pass
-
-        async def __aenter__(self) -> "FakeClient":
-            return self
-
-        async def __aexit__(self, *args: object) -> None:
-            pass
-
-        async def get(self, url: str, headers: dict[str, str]) -> "FakeResponse":
-            return FakeResponse()
-
-    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    mock_ctx = AsyncMock()
+    mock_ctx.__aenter__.return_value = mock_client
+    mock_ctx.__aexit__.return_value = None
+    monkeypatch.setattr(svc.httpx, "AsyncClient", lambda *a, **kw: mock_ctx)
 
     service = OpenWAService()
     with pytest.raises(httpx.HTTPStatusError):
@@ -483,24 +469,35 @@ def test_sanitize_message_id_preserva_alfanumerico() -> None:
 
 
 def test_sanitize_message_id_reemplaza_arroba() -> None:
-    """sanitize_message_id reemplaza '@' y '.' por '_' (seguro para file paths)."""
+    """sanitize_message_id hashea el teléfono y preserva @c.us (dominio, no PII)."""
     from app.services.audio_service import sanitize_message_id
 
     result = sanitize_message_id("true_56912345678@c.us")
-    assert "@" not in result
-    assert "." not in result
-    assert result == "true_56912345678_c_us"
+    # El teléfono 56912345678 debe estar hasheado (no aparece en claro)
+    assert "56912345678" not in result
+    # @c.us es el dominio de WhatsApp, no es PII — se preserva
+    assert "@c.us" in result
+    # Estructura: true_<hash_12_chars>@c.us
+    assert result.startswith("true_")
+    assert result.endswith("@c.us")
 
 
 def test_sanitize_message_id_whatsapp_id_real() -> None:
-    """sanitize_message_id maneja IDs reales de WhatsApp con múltiples '@' y '.'."""
+    """sanitize_message_id hashea TODOS los teléfonos en IDs con múltiples ocurrencias."""
     from app.services.audio_service import sanitize_message_id
 
     result = sanitize_message_id("true_56912345678@c.us_3EB0A5F6C8D9_56912345678@c.us")
-    assert "@" not in result
-    assert "." not in result
-    # Estructura preservada con '.' y '@' reemplazados por '_'
-    assert result == "true_56912345678_c_us_3EB0A5F6C8D9_56912345678_c_us"
+    # Ningún teléfono aparece en claro
+    assert "56912345678" not in result
+    # @c.us se preserva en ambas ocurrencias
+    assert result.count("@c.us") == 2
+    # Estructura general: true_<hash>@c.us_<random>_<hash>@c.us
+    assert result.startswith("true_")
+    assert result.endswith("@c.us")
+    # Ambas ocurrencias del mismo teléfono producen el mismo hash
+    import hashlib
+    expected_hash = hashlib.sha256(b"56912345678").hexdigest()[:12]
+    assert result == f"true_{expected_hash}@c.us_3EB0A5F6C8D9_{expected_hash}@c.us"
 
 
 def test_sanitize_message_id_vacio_retorna_unknown() -> None:
@@ -560,7 +557,10 @@ async def test_audio_service_process_audio_happy_path(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """AudioService.process_audio descarga, convierte y limpia sin errores."""
+    """AudioService.process_audio descarga, convierte y limpia sin errores.
+
+    Usa inyección de audio_temp_dir en vez de monkeypatch sobre
+    _get_audio_temp_dir (P1-5 DI)."""
     from app.schemas.webhook import WebhookPayload
     from app.services.audio_service import AudioService
 
@@ -590,16 +590,11 @@ async def test_audio_service_process_audio_happy_path(
         lambda wav_path: 5000,
     )
 
-    # Mock _get_audio_temp_dir para usar tmp_path (evita crear archivos en data/)
-    monkeypatch.setattr(
-        "app.services.audio_service._get_audio_temp_dir",
-        lambda: tmp_path,
-    )
-
     raw = _load_fixture("audio_message")
     payload = WebhookPayload.model_validate(raw)
 
-    service = AudioService()
+    # P1-5: Inyectar audio_temp_dir en vez de monkeypatch sobre _get_audio_temp_dir
+    service = AudioService(audio_temp_dir=tmp_path)
     await service.process_audio(payload, "+56912345678", "test-request-id")
 
     # Verificar que se creó .wav y NO quedó .ogg (se limpia después de convertir)
@@ -608,6 +603,71 @@ async def test_audio_service_process_audio_happy_path(
     assert len(wav_files) == 1
     assert len(ogg_files) == 0
     assert wav_files[0].read_bytes() == b"FAKE_WAV_DATA"
+
+
+@pytest.mark.asyncio
+async def test_audio_service_process_audio_error_descarga_limpia_archivos(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Si download_media falla, el finally limpia archivos temporales (P2-5)."""
+    from app.schemas.webhook import WebhookPayload
+    from app.services.audio_service import AudioService
+
+    # Mock download_media que falla
+    async def fake_download_error(_self: object, _msg_id: str) -> bytes:
+        raise httpx.ConnectError("No se pudo conectar a Open-WA")
+
+    monkeypatch.setattr(
+        "app.services.openwa_service.OpenWAService.download_media",
+        fake_download_error,
+    )
+
+    raw = _load_fixture("audio_message")
+    payload = WebhookPayload.model_validate(raw)
+
+    service = AudioService(audio_temp_dir=tmp_path)
+    # No debe lanzar excepción — el except captura y loguea
+    await service.process_audio(payload, "+56912345678", "test-request-id")
+
+    # No deben quedar archivos huérfanos después del error
+    ogg_files = list(tmp_path.glob("*.ogg"))
+    wav_files = list(tmp_path.glob("*.wav"))
+    assert len(ogg_files) == 0
+    assert len(wav_files) == 0
+
+
+@pytest.mark.asyncio
+async def test_audio_service_process_audio_audio_excede_tamano(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Audio que excede _MAX_AUDIO_SIZE_BYTES es rechazado sin crear archivos (P2-5)."""
+    from app.schemas.webhook import WebhookPayload
+    from app.services.audio_service import AudioService, _MAX_AUDIO_SIZE_BYTES
+
+    # Audio que excede el límite
+    fake_ogg_large = b"X" * (_MAX_AUDIO_SIZE_BYTES + 1)
+
+    async def fake_download_large(_self: object, _msg_id: str) -> bytes:
+        return fake_ogg_large
+
+    monkeypatch.setattr(
+        "app.services.openwa_service.OpenWAService.download_media",
+        fake_download_large,
+    )
+
+    raw = _load_fixture("audio_message")
+    payload = WebhookPayload.model_validate(raw)
+
+    service = AudioService(audio_temp_dir=tmp_path)
+    await service.process_audio(payload, "+56912345678", "test-request-id")
+
+    # No deben crearse archivos porque el audio fue rechazado por tamaño
+    ogg_files = list(tmp_path.glob("*.ogg"))
+    wav_files = list(tmp_path.glob("*.wav"))
+    assert len(ogg_files) == 0
+    assert len(wav_files) == 0
 
 
 def test_hash_phone_for_log_consistencia() -> None:

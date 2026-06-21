@@ -141,13 +141,21 @@ app = FastAPI(
 # Starlette usa insert(0, ...) en add_middleware, así que el middleware
 # agregado primero termina siendo el más interno (innermost) y el último
 # el más externo (outermost).
-# RequestIDMiddleware debe ser el MÁS EXTERNO para setear el ContextVar
-# antes de que RateLimitMiddleware, SecurityHeadersMiddleware y
-# TrustedHostMiddleware procesen el request. Así los logs de rate limiting
-# y security headers también tienen request_id.
+#
+# Orden de procesamiento del request (outermost → innermost):
+#   RequestID → SecurityHeaders → TrustedHost → RateLimit → app
+#
+# - RequestIDMiddleware es el MÁS EXTERNO: setea el ContextVar antes que
+#   cualquier otro middleware, así todos los logs tienen request_id.
+# - SecurityHeadersMiddleware envuelve todo: agrega headers de seguridad
+#   incluso en respuestas de error de TrustedHost (P2-3).
+# - TrustedHostMiddleware rechaza hosts no permitidos antes de llegar
+#   al rate limiter y la app.
+# - RateLimitMiddleware es el más interno: solo cuenta requests que pasan
+#   todas las validaciones previas (hosts, firma HMAC).
 app.add_middleware(RateLimitMiddleware)
-app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestIDMiddleware)
 
 # Routers

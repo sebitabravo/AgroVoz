@@ -6,7 +6,9 @@ de webhooks de Open-WA y constantes de hardening.
 
 import hashlib
 import hmac as hmac_mod
+import json
 import logging
+import threading
 import time
 from collections.abc import Awaitable, Callable
 
@@ -20,15 +22,17 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Tamaño máximo de body para webhooks (10 MB). Previene DoS por RAM bombing.
+MAX_WEBHOOK_BODY_SIZE = 10 * 1024 * 1024
+
 # Hosts permitidos para TrustedHostMiddleware.
 # El middleware se registra en main.py con esta lista.
 ALLOWED_HOSTS: tuple[str, ...] = (
     "localhost",
     "127.0.0.1",
-    "test",
-    "testserver",
+    "testserver",  # Requerido por Starlette TestClient en tests
     "agrovoz.cl",
-    "*.agrovoz.cl",
+    ".agrovoz.cl",  # Leading dot: Starlette TrustedHostMiddleware espera ".domain.com", no "*.domain.com"
 )
 
 
@@ -49,8 +53,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        # HSTS solo sobre HTTPS. Browsers ignoran HSTS sobre HTTP plano.
-        if request.url.scheme == "https":
+        # HSTS solo sobre HTTPS. Detrás de Traefik/Dokploy, la conexión al
+        # backend es HTTP plano — usamos X-Forwarded-Proto que Traefik setea
+        # con el protocolo real que usó el cliente (https o http).
+        scheme = request.headers.get("X-Forwarded-Proto", request.url.scheme)
+        if scheme == "https":
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
@@ -60,50 +67,71 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+def _get_client_ip(request: Request) -> str:
+    """Extrae la IP real del cliente, considerando proxy reverso (Traefik/Nginx).
+
+    En Docker detrás de Traefik, request.client es None o 172.x.x.x.
+    Usa el ÚLTIMO valor de X-Forwarded-For (el agregado por el proxy edge),
+    no el primero (que el cliente puede spoofear).
+
+    En local sin proxy, usa request.client.host directamente.
+    """
+    if request.client is None:
+        forwarded = request.headers.get("X-Forwarded-For", "")
+        # El último valor es el que agrega nuestro proxy de confianza (Traefik).
+        # Los valores anteriores pueden ser spoofeados por el cliente.
+        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+        return parts[-1] if parts else "unknown"
+    return request.client.host
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Rate limiting básico en memoria (MVP).
 
     Límite configurable vía settings.rate_limit_per_minute (default: 60/min por IP).
+    Protegido con threading.Lock() para requests concurrentes (sync endpoints usan
+    ThreadPoolExecutor, lo que expone self._requests a múltiples hilos).
     Para producción, delegar a Traefik/Nginx o usar slowapi.
     """
 
     def __init__(self, app: "ASGIApp") -> None:
         super().__init__(app)
         self._requests: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
         self._last_cleanup: float = 0.0  # Timestamp de la última limpieza global
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-        client_ip: str = request.client.host if request.client else "unknown"
+        client_ip: str = _get_client_ip(request)
         now = time.time()
         window = 60  # 1 minuto
 
-        # Barrido global de IPs inactivas cada 60s para evitar memory leak.
-        # Sin esto, IPs que hacen 1 request y no vuelven acumulan entradas
-        # con timestamps expirados que nunca se limpian (scanners, bots).
-        if now - self._last_cleanup >= 60:
-            dead_ips = [
-                ip for ip, timestamps in self._requests.items() if not [t for t in timestamps if now - t < window]
-            ]
-            for ip in dead_ips:
-                del self._requests[ip]
-            self._last_cleanup = now
+        with self._lock:
+            # Barrido global de IPs inactivas cada 60s para evitar memory leak.
+            if now - self._last_cleanup >= 60:
+                dead_ips = [
+                    ip for ip, timestamps in self._requests.items() if not [t for t in timestamps if now - t < window]
+                ]
+                for ip in dead_ips:
+                    del self._requests[ip]
+                self._last_cleanup = now
 
-        # Limpiar timestamps fuera de la ventana de 1 minuto para la IP actual
-        self._requests.setdefault(client_ip, [])
-        self._requests[client_ip] = [t for t in self._requests[client_ip] if now - t < window]
+            # Limpiar timestamps fuera de la ventana de 1 minuto para la IP actual
+            self._requests.setdefault(client_ip, [])
+            self._requests[client_ip] = [t for t in self._requests[client_ip] if now - t < window]
 
-        # Poda la IP actual si quedó vacía después de limpiar
-        if not self._requests[client_ip]:
-            del self._requests[client_ip]
+            # Poda la IP actual si quedó vacía después de limpiar
+            if not self._requests[client_ip]:
+                del self._requests[client_ip]
 
-        # Rate-limit check: límite configurable vía settings.rate_limit_per_minute
-        if len(self._requests.get(client_ip, [])) >= settings.rate_limit_per_minute:
-            return JSONResponse(
-                status_code=429,
-                content={"detail": "Demasiadas solicitudes. Intenta de nuevo en un minuto."},
-            )
+            # Rate-limit check
+            if len(self._requests.get(client_ip, [])) >= settings.rate_limit_per_minute:
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "Demasiadas solicitudes. Intenta de nuevo en un minuto."},
+                )
 
-        self._requests.setdefault(client_ip, []).append(now)
+            self._requests.setdefault(client_ip, []).append(now)
+
         return await call_next(request)
 
 
@@ -160,6 +188,11 @@ async def verify_openwa_webhook(request: Request) -> dict[str, object]:
     """
     body = await request.body()
 
+    # Validar tamaño máximo de payload para prevenir DoS por RAM bombing.
+    if len(body) > MAX_WEBHOOK_BODY_SIZE:
+        logger.warning("Webhook rechazado: body excede tamaño máximo — size_bytes=%d", len(body))
+        raise HTTPException(status_code=413, detail="Payload demasiado grande")
+
     # Dev mode: sin secret configurado, aceptar sin validación HMAC.
     if not settings.openwa_webhook_secret:
         logger.warning("OPENWA_WEBHOOK_SECRET no configurado — webhooks aceptados sin validación HMAC")
@@ -174,8 +207,6 @@ async def verify_openwa_webhook(request: Request) -> dict[str, object]:
             raise HTTPException(status_code=401, detail="Firma HMAC inválida")
 
     # El body ya fue leído. Devolvemos el dict parseado para que el endpoint lo use.
-    import json
-
     try:
         payload: dict[str, object] = json.loads(body)
     except json.JSONDecodeError as err:
