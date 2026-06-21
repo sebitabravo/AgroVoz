@@ -25,7 +25,9 @@ class OdepaPrice(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "producto", "mercado", "fecha",
+            "producto",
+            "mercado",
+            "fecha",
             name="uq_odepa_producto_mercado_fecha",
         ),
     )

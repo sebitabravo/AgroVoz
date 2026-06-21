@@ -1,7 +1,10 @@
 """Servicio de procesamiento de audio para el pipeline de voz.
 
 Convierte audio .ogg de WhatsApp a .wav 16kHz mono usando ffmpeg,
-valida paths, y orquesta la descarga + conversión en background.
+valida paths, y orquesta la decodificacion + conversion en background.
+
+El audio llega como base64 inline en el webhook de Open-WA (type=voice),
+no se descarga via API.
 """
 
 import asyncio
@@ -16,7 +19,6 @@ import httpx
 
 from app.core.config import settings
 from app.core.phone_hash import hash_phone
-from app.schemas.webhook import WebhookPayload
 from app.services.openwa_service import OpenWAService
 
 logger = logging.getLogger(__name__)
@@ -26,42 +28,46 @@ logger = logging.getLogger(__name__)
 # En local: backend/data/audio_temp/.
 _AUDIO_TEMP_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "audio_temp"
 
-# Tamaño máximo de archivo de audio (25 MB). WhatsApp limita audios a ~16 MB,
-# pero este límite es defensivo contra archivos maliciosos o corruptos.
+# Audio de respuesta fijo: se envia mientras el pipeline TTS completo no esta implementado.
+# Pregrabado con macOS TTS (Eddy es_ES) -> libopus@48kHz mono.
+_HELLO_OGG_PATH = Path(__file__).resolve().parent.parent / "static" / "hello.ogg"
+
+# Tamano maximo de archivo de audio (25 MB). WhatsApp limita audios a ~16 MB,
+# pero este limite es defensivo contra archivos maliciosos o corruptos.
 _MAX_AUDIO_SIZE_BYTES = 25 * 1024 * 1024
 
 
 def sanitize_message_id(message_id: str) -> str:
-    """Sanitiza un message_id reemplazando el número de teléfono con un hash.
+    """Sanitiza un message_id reemplazando el numero de telefono con un hash.
 
     Los message_id de WhatsApp tienen formato true_<phone>@c.us_<random>.
-    El número de teléfono es PII según Ley 21.719 — lo hasheamos con SHA-256
+    El numero de telefono es PII segun Ley 21.719 — lo hasheamos con SHA-256
     truncado a 12 chars, preservando trazabilidad sin leakear datos personales.
 
-    Si el message_id no calza con el formato esperado, aplica sanitización
-    básica (solo alfanumérico + guiones + underscore).
+    Si el message_id no calza con el formato esperado, aplica sanitizacion
+    basica (solo alfanumerico + guiones + underscore).
 
     Args:
         message_id: ID de mensaje proveniente del webhook (no confiable).
 
     Returns:
-        Versión sanitizada con el teléfono hasheado. Si queda vacío, retorna 'unknown'.
+        Version sanitizada con el telefono hasheado. Si queda vacio, retorna 'unknown'.
     """
     import hashlib
 
     # Primero, sanitizar caracteres no seguros preservando @ y . (necesarios para el parseo)
-    cleaned = re.sub(r"[^a-zA-Z0-9_\-@.]", "_", message_id)
+    cleaned = re.sub(r"[^a-zA-Z0-9_\-\@.]", "_", message_id)
 
-    # Hashear TODOS los números de teléfono en el message_id.
+    # Hashear TODOS los numeros de telefono en el message_id.
     # Formato WhatsApp: true_<phone>@c.us (primera ocurrencia) o _<phone>@c.us (resto).
-    # \d+ no matchea hashes hex (tienen letras a-f), así que no hay riesgo de doble hasheo.
-    phone_re = re.compile(r"(true_|_)(\d+)(@c\.us)")
+    # Los IDs modernos pueden ser @lid en vez de @c.us — buscamos digitos antes de @.
+    phone_re = re.compile(r"(true_|_)(\d+)(@c\.us|@lid)")
     result = phone_re.sub(
         lambda m: f"{m.group(1)}{hashlib.sha256(m.group(2).encode()).hexdigest()[:12]}{m.group(3)}",
         cleaned,
     )
 
-    # Si no se encontró ningún teléfono, aplicar sanitización básica
+    # Si no se encontro ningun telefono, aplicar sanitizacion basica
     if result == cleaned:
         sanitized = re.sub(r"[^a-zA-Z0-9_\-]", "_", message_id)
         return sanitized if sanitized else "unknown"
@@ -70,10 +76,10 @@ def sanitize_message_id(message_id: str) -> str:
 
 
 def validate_path_in_audio_dir(path: Path, audio_dir: Path) -> Path:
-    """Valida que un path resuelto esté dentro del directorio de audio.
+    """Valida que un path resuelto este dentro del directorio de audio.
 
     Previene path traversal: resuelve el path real y verifica que
-    esté dentro del directorio base.
+    este dentro del directorio base.
 
     Args:
         path: Path a validar.
@@ -83,7 +89,7 @@ def validate_path_in_audio_dir(path: Path, audio_dir: Path) -> Path:
         Path resuelto si es seguro.
 
     Raises:
-        ValueError: Si el path está fuera de audio_dir (path traversal).
+        ValueError: Si el path esta fuera de audio_dir (path traversal).
     """
     resolved = path.resolve()
     audio_resolved = audio_dir.resolve()
@@ -99,7 +105,7 @@ def validate_path_in_audio_dir(path: Path, audio_dir: Path) -> Path:
 
 
 def _get_audio_temp_dir() -> Path:
-    """Devuelve el directorio de audio temporal, creándolo si no existe."""
+    """Devuelve el directorio de audio temporal, creandolo si no existe."""
     _AUDIO_TEMP_DIR.mkdir(parents=True, exist_ok=True)
     return _AUDIO_TEMP_DIR
 
@@ -113,7 +119,7 @@ def convert_ogg_to_wav(input_path: Path, output_path: Path) -> None:
 
     Raises:
         subprocess.CalledProcessError: Si ffmpeg falla.
-        FileNotFoundError: Si ffmpeg no está instalado.
+        FileNotFoundError: Si ffmpeg no esta instalado.
     """
     cmd = [
         "ffmpeg",
@@ -127,7 +133,7 @@ def convert_ogg_to_wav(input_path: Path, output_path: Path) -> None:
         "-ac",
         "1",  # Mono
         "-fs",
-        str(100 * 1024 * 1024),  # Límite 100 MB output — previene decompression bomb
+        str(100 * 1024 * 1024),  # Limite 100 MB output — previene decompression bomb
         str(output_path),
     ]
 
@@ -139,7 +145,7 @@ def convert_ogg_to_wav(input_path: Path, output_path: Path) -> None:
         raise
     except subprocess.CalledProcessError as exc:
         logger.error(
-            "ffmpeg falló — input=%s stderr=%s",
+            "ffmpeg fallo — input=%s stderr=%s",
             input_path.name,
             exc.stderr.decode("utf-8", errors="replace") if exc.stderr else "(sin stderr)",
         )
@@ -152,9 +158,9 @@ def convert_ogg_to_wav(input_path: Path, output_path: Path) -> None:
 
 
 def get_audio_duration_ms(wav_path: Path) -> int:
-    """Obtiene la duración del audio WAV en milisegundos usando ffprobe.
+    """Obtiene la duracion del audio WAV en milisegundos usando ffprobe.
 
-    Si ffprobe no está disponible o falla, retorna 0.
+    Si ffprobe no esta disponible o falla, retorna 0.
     """
     try:
         result = subprocess.run(
@@ -187,11 +193,14 @@ def get_audio_duration_ms(wav_path: Path) -> int:
 class AudioService:
     """Servicio para el pipeline de procesamiento de audio de WhatsApp.
 
-    Orquesta: descarga desde Open-WA → conversión .ogg → .wav →
-    validación de paths y logging estructurado.
+    Orquesta: decodificar base64 inline -> disco -> conversion .ogg -> .wav ->
+    validacion de paths y logging estructurado.
+
+    El audio llega como base64 inline en el webhook de Open-WA (type=voice),
+    no se descarga via API de Open-WA.
 
     El directorio de audio temporal se puede inyectar para testing
-    (sin monkeypatch frágil). Si no se provee, usa _get_audio_temp_dir().
+    (sin monkeypatch fragil). Si no se provee, usa _get_audio_temp_dir().
     """
 
     def __init__(self, audio_temp_dir: Path | None = None) -> None:
@@ -205,39 +214,37 @@ class AudioService:
 
     async def process_audio(
         self,
-        payload: WebhookPayload,
-        phone: str,
+        audio_bytes: bytes,
+        chat_id: str,
         request_id: str,
     ) -> None:
-        """Procesa el audio en background: descarga, convierte, guarda.
+        """Procesa el audio en background: guarda, convierte, responde.
 
-        Se ejecuta después de que el endpoint ya retornó 200.
+        Se ejecuta despues de que el endpoint ya retorno 200.
         No bloquea la respuesta al webhook de Open-WA.
 
+        El audio ya viene decodificado del base64 inline del webhook.
+        No se descarga via API de Open-WA.
+
         Args:
-            payload: Payload del webhook parseado.
-            phone: Número de teléfono del remitente (para logging).
+            audio_bytes: Contenido del archivo .ogg (decodificado de base64).
+            chat_id: Identificador del chat para responder (formato @c.us o @lid).
             request_id: ID del request para trazabilidad en logs.
         """
-        raw_message_id = payload.message.id
-        message_id = sanitize_message_id(raw_message_id)
-        phone_hash = hash_phone(phone, settings.phone_hash_pepper)
+        message_id = f"audio_{uuid.uuid4().hex[:8]}"
+        chat_id_hash = hash_phone(chat_id, settings.phone_hash_pepper) if chat_id else "sin_chat"
         start_time = time.monotonic()
 
         ogg_path: Path | None = None
         wav_path: Path | None = None
 
         try:
-            # Descargar audio .ogg desde Open-WA (usa ID original — IDs WhatsApp contienen @ que Open-WA espera)
-            openwa = OpenWAService()
-            ogg_data = await openwa.download_media(raw_message_id)
-
-            # Validar tamaño máximo defensivo
-            if len(ogg_data) > _MAX_AUDIO_SIZE_BYTES:
+            # Validar tamano maximo defensivo
+            if len(audio_bytes) > _MAX_AUDIO_SIZE_BYTES:
                 logger.warning(
-                    "Audio excede tamaño máximo — message_id=%s size_bytes=%d max_bytes=%d",
+                    "Audio excede tamano maximo — message_id=%s size_bytes=%d max_bytes=%d",
                     message_id,
-                    len(ogg_data),
+                    len(audio_bytes),
                     _MAX_AUDIO_SIZE_BYTES,
                 )
                 return
@@ -252,32 +259,49 @@ class AudioService:
                 self._audio_temp_dir,
             )
 
-            # Guardar .ogg temporal
-            ogg_path.write_bytes(ogg_data)
+            # Guardar .ogg temporal desde los bytes recibidos
+            ogg_path.write_bytes(audio_bytes)
             logger.info(
-                "Audio guardado — message_id=%s phone_hash=%s size_bytes=%d path=%s",
+                "Audio guardado — message_id=%s chat_id_hash=%s size_bytes=%d path=%s request_id=%s",
                 message_id,
-                phone_hash,
-                len(ogg_data),
+                chat_id_hash,
+                len(audio_bytes),
                 ogg_path,
+                request_id,
             )
 
-            # Convertir .ogg → .wav 16kHz mono (en thread aparte para no bloquear event loop)
+            # Convertir .ogg -> .wav 16kHz mono (en thread aparte para no bloquear event loop)
             await asyncio.to_thread(convert_ogg_to_wav, ogg_path, wav_path)
 
-            elapsed_ms = (time.monotonic() - start_time) * 1000
             audio_duration_ms = await asyncio.to_thread(get_audio_duration_ms, wav_path)
             logger.info(
-                "Audio listo para pipeline — message_id=%s phone_hash=%s wav_path=%s "
-                "duration_ms=%d elapsed_ms=%d",
+                "Audio listo para pipeline — message_id=%s chat_id_hash=%s wav_path=%s duration_ms=%d request_id=%s",
                 message_id,
-                phone_hash,
+                chat_id_hash,
                 wav_path,
                 audio_duration_ms,
-                elapsed_ms,
+                request_id,
             )
 
-            # .ogg se limpia en finally — no duplicar cleanup acá
+            # Enviar respuesta de audio fija (hola mundo end-to-end).
+            # Punto de medicion de latencia E2E: desde recepcion del webhook hasta envio.
+            if _HELLO_OGG_PATH.exists():
+                openwa = OpenWAService()
+                await openwa.send_audio(chat_id, str(_HELLO_OGG_PATH))
+                e2e_ms = int((time.monotonic() - start_time) * 1000)
+                logger.info(
+                    "Respuesta enviada — message_id=%s chat_id_hash=%s e2e_ms=%d request_id=%s",
+                    message_id,
+                    chat_id_hash,
+                    e2e_ms,
+                    request_id,
+                )
+            else:
+                logger.warning(
+                    "hello.ogg no encontrado — message_id=%s path=%s",
+                    message_id,
+                    _HELLO_OGG_PATH,
+                )
 
         except (
             httpx.HTTPError,
@@ -290,26 +314,21 @@ class AudioService:
         ):
             elapsed_ms = (time.monotonic() - start_time) * 1000
             logger.exception(
-                "Error procesando audio en background — message_id=%s phone_hash=%s "
-                "elapsed_ms=%d request_id=%s",
+                "Error procesando audio en background — message_id=%s chat_id_hash=%s elapsed_ms=%d request_id=%s",
                 message_id,
-                phone_hash,
+                chat_id_hash,
                 int(elapsed_ms),
                 request_id,
             )
-            # Limpiar archivos temporales en error para no acumular basura en disco
             if ogg_path is not None:
                 ogg_path.unlink(missing_ok=True)
             if wav_path is not None:
                 wav_path.unlink(missing_ok=True)
         except asyncio.CancelledError:
-            # CancelledError DEBE re-lanzarse en Python 3.12+ para que la
-            # cancelación de la tarea se propague correctamente.
-            # Limpiamos archivos temporales antes de re-lanzar.
             logger.warning(
-                "Procesamiento de audio cancelado — message_id=%s phone_hash=%s request_id=%s",
+                "Procesamiento de audio cancelado — message_id=%s chat_id_hash=%s request_id=%s",
                 message_id,
-                phone_hash,
+                chat_id_hash,
                 request_id,
             )
             if ogg_path is not None:
@@ -318,11 +337,8 @@ class AudioService:
                 wav_path.unlink(missing_ok=True)
             raise
         finally:
-            # Limpiar archivos temporales SIEMPRE, incluso si la excepción
-            # no fue capturada por el bloque except. Previene acumulación
-            # de archivos huérfanos en disco (P1-4).
-            # Solo limpia el .ogg temporal — el .wav es la salida del pipeline
-            # y debe persistir para la etapa de transcripción (Whisper).
-            # En error, los bloques except ya limpian ambos.
+            # Limpiar archivos temporales SIEMPRE, incluso si la excepcion
+            # no fue capturada por el bloque except. Previene acumulacion
+            # de archivos huerfanos en disco (P1-4).
             if ogg_path is not None:
                 ogg_path.unlink(missing_ok=True)
