@@ -14,15 +14,15 @@ from app.core import config
 
 @pytest.fixture
 def prod_lifespan(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Configura app_env=production. monkeypatch auto-undo revierte al final.
+    """Configura app_env=production base. monkeypatch auto-undo revierte al final.
 
-    Solo reload(app_main) en teardown — la restauración de attributes la
-    hace monkeypatch automáticamente al terminar cada test.
+    Solo setea el app_env — cada test hace su propio reload(app_main) después
+    de configurar los atributos específicos que necesita. El reload de teardown
+    asegura que app_main arranque limpio para el siguiente test.
     """
     monkeypatch.setattr(config.settings, "app_env", "production")
-    reload(app_main)
     yield
-    reload(app_main)  # Recargar módulo con settings restauradas por monkeypatch
+    reload(app_main)
 
 
 async def test_exception_handler_no_leakea_info_en_production(
