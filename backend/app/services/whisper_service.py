@@ -185,7 +185,6 @@ class WhisperService:
         if path.stat().st_size == 0:
             raise ValueError(f"Archivo de audio vacio: {path}")
 
-        model = self._load_model()
         start = time.monotonic()
 
         logger.info(
@@ -196,6 +195,7 @@ class WhisperService:
         )
 
         try:
+            model = self._load_model()
             result = model.transcribe(
                 str(path),
                 language=self._language,
