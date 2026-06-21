@@ -475,6 +475,97 @@ def test_max_audio_size_constant() -> None:
     assert _MAX_AUDIO_SIZE_BYTES > 0
 
 
+def test_sanitize_message_id_preserva_alfanumerico() -> None:
+    """_sanitize_message_id preserva caracteres seguros (alfanuméricos, guiones, underscores)."""
+    from app.api.webhooks import _sanitize_message_id
+
+    assert _sanitize_message_id("msg_abc-123_test") == "msg_abc-123_test"
+
+
+def test_sanitize_message_id_reemplaza_arroba() -> None:
+    """_sanitize_message_id reemplaza '@' y '.' por '_' (seguro para file paths)."""
+    from app.api.webhooks import _sanitize_message_id
+
+    result = _sanitize_message_id("true_56912345678@c.us")
+    assert "@" not in result
+    assert "." not in result
+    assert result == "true_56912345678_c_us"
+
+
+def test_sanitize_message_id_whatsapp_id_real() -> None:
+    """_sanitize_message_id maneja IDs reales de WhatsApp con múltiples '@' y '.'."""
+    from app.api.webhooks import _sanitize_message_id
+
+    result = _sanitize_message_id("true_56912345678@c.us_3EB0A5F6C8D9_56912345678@c.us")
+    assert "@" not in result
+    assert "." not in result
+    # Estructura preservada con '.' y '@' reemplazados por '_'
+    assert result == "true_56912345678_c_us_3EB0A5F6C8D9_56912345678_c_us"
+
+
+def test_sanitize_message_id_vacio_retorna_unknown() -> None:
+    """_sanitize_message_id retorna 'unknown' si el string está vacío."""
+    from app.api.webhooks import _sanitize_message_id
+
+    assert _sanitize_message_id("") == "unknown"
+
+
+def test_sanitize_message_id_solo_especiales_retorna_unknown() -> None:
+    """_sanitize_message_id retorna 'unknown' si solo hay caracteres reemplazados."""
+    from app.api.webhooks import _sanitize_message_id
+
+    result = _sanitize_message_id("@@@!!!")
+    # '@' → '_', '!' → '_', 6 caracteres especiales → 6 underscores
+    assert result == "______"
+    assert result != "unknown"  # No vacío — el regex reemplaza, no elimina
+
+
+def test_validate_path_in_audio_dir_ruta_valida() -> None:
+    """_validate_path_in_audio_dir acepta un path dentro del directorio de audio."""
+    import tempfile
+    from pathlib import Path
+
+    from app.api.webhooks import _validate_path_in_audio_dir
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_dir = Path(tmpdir).resolve()
+        file_path = audio_dir / "test_audio.wav"
+        result = _validate_path_in_audio_dir(file_path, audio_dir)
+        assert result == file_path.resolve()
+
+
+def test_validate_path_in_audio_dir_path_traversal_detectado() -> None:
+    """_validate_path_in_audio_dir lanza ValueError si el path está fuera del directorio base."""
+    import tempfile
+    from pathlib import Path
+
+    import pytest
+
+    from app.api.webhooks import _validate_path_in_audio_dir
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_dir = Path(tmpdir).resolve()
+        # Construir path que después de resolve() apunte fuera
+        traversal = audio_dir / ".." / "etc" / "passwd"
+
+        with pytest.raises(ValueError, match="Path fuera del directorio de audio"):
+            _validate_path_in_audio_dir(traversal, audio_dir)
+
+
+def test_hash_phone_for_log_consistencia() -> None:
+    """_hash_phone_for_log produce el mismo prefijo que hash_phone completo."""
+    from app.core.config import settings
+    from app.core.phone_hash import hash_phone
+    from app.services.openwa_service import _hash_phone_for_log
+
+    phone = "+56912345678"
+    full = hash_phone(phone, settings.phone_hash_pepper)
+    truncated = _hash_phone_for_log(phone)
+
+    assert len(truncated) == 8
+    assert full.startswith(truncated)
+
+
 def test_compute_hmac_consistente() -> None:
     """El HMAC debe ser determinista para el mismo body y secret."""
     body = b'{"test": true}'

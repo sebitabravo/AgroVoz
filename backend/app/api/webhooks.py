@@ -14,6 +14,7 @@ import time
 import uuid
 from pathlib import Path
 
+import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import JSONResponse
 
@@ -168,9 +169,9 @@ async def _process_audio_background(
     wav_path: Path | None = None
 
     try:
-        # Descargar audio .ogg desde Open-WA
+        # Descargar audio .ogg desde Open-WA (usa ID original — IDs WhatsApp contienen @ que Open-WA espera)
         openwa = OpenWAService()
-        ogg_data = await openwa.download_media(message_id)
+        ogg_data = await openwa.download_media(raw_message_id)
 
         # Validar tamaño máximo defensivo
         if len(ogg_data) > _MAX_AUDIO_SIZE_BYTES:
@@ -218,7 +219,7 @@ async def _process_audio_background(
         # Borrar .ogg temporal (ya tenemos el .wav)
         ogg_path.unlink(missing_ok=True)
 
-    except Exception:
+    except (httpx.HTTPError, subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError, ValueError):
         elapsed_ms = (time.monotonic() - start_time) * 1000
         logger.exception(
             "Error procesando audio en background — message_id=%s phone_hash=%s elapsed_ms=%d request_id=%s",

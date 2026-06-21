@@ -5,11 +5,12 @@ a través del gateway WhatsApp self-hosted.
 """
 
 import logging
-import re
+from urllib.parse import quote
 
 import httpx
 
 from app.core.config import settings
+from app.core.phone_hash import hash_phone
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +40,9 @@ class OpenWAService:
         """Descarga el archivo de audio de un mensaje vía la API de Open-WA.
 
         Args:
-            message_id: ID del mensaje en Open-WA (ej: "msg_abc123").
-                       Se sanitiza para prevenir path traversal.
+            message_id: ID del mensaje en Open-WA (ej: "true_56912345678@c.us_3EB0...").
+                       Se URL-encodea con quote() para preservar caracteres especiales
+                       que Open-WA requiere (como '@' en IDs de WhatsApp).
 
         Returns:
             Contenido binario del archivo de audio (.ogg).
@@ -48,7 +50,7 @@ class OpenWAService:
         Raises:
             httpx.HTTPError: Si la API de Open-WA no responde o retorna error.
         """
-        safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "_", message_id) or "unknown"
+        safe_id = quote(message_id, safe="")
         url = f"{self._base_url}/api/sessions/default/messages/{safe_id}/media"
 
         async with httpx.AsyncClient(timeout=self._timeout) as client:
@@ -122,18 +124,9 @@ class OpenWAService:
 def _hash_phone_for_log(phone: str) -> str:
     """Hash corto del número para logging (sin PII en claro).
 
-    Usa los primeros 8 caracteres del HMAC-SHA256 completo.
-    En desarrollo (sin pepper configurado), usa SHA-256 simple.
+    Delega en hash_phone() de app.core.phone_hash para consistencia
+    entre módulos (mismo hash en logs del webhook y del servicio).
+    Trunca a 8 caracteres para legibilidad.
     """
-    import hashlib
-
-    pepper = settings.phone_hash_pepper
-    if pepper and pepper != "agrovoz-dev-pepper":
-        import hmac
-
-        full = hmac.new(
-            pepper.encode("utf-8"), phone.encode("utf-8"), hashlib.sha256
-        ).hexdigest()
-    else:
-        full = hashlib.sha256(phone.encode("utf-8")).hexdigest()
+    full = hash_phone(phone, settings.phone_hash_pepper)
     return full[:8]
