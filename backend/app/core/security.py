@@ -33,6 +33,7 @@ ALLOWED_HOSTS: tuple[str, ...] = (
     "testserver",  # Requerido por Starlette TestClient en tests
     "agrovoz.cl",
     ".agrovoz.cl",  # Leading dot: Starlette TrustedHostMiddleware espera ".domain.com", no "*.domain.com"
+    "192.168.97.2",  # Permitir webhooks desde OpenWA en Docker (desarrollo local)
 )
 
 
@@ -147,12 +148,13 @@ def validate_openwa_hmac(body: bytes, signature: str, secret: str) -> bool:
 
     Open-WA envía el header X-OpenWA-Signature con el HMAC-SHA256
     del body del request, calculado con WEBHOOK_SECRET como clave.
+    El formato del header es "sha256=<hex_digest>".
 
     Usa hmac.compare_digest() para prevenir timing attacks.
 
     Args:
         body: Cuerpo crudo del request HTTP (bytes).
-        signature: Valor del header X-OpenWA-Signature.
+        signature: Valor del header X-OpenWA-Signature (formato: "sha256=...").
         secret: Clave secreta compartida (WEBHOOK_SECRET).
 
     Returns:
@@ -164,6 +166,12 @@ def validate_openwa_hmac(body: bytes, signature: str, secret: str) -> bool:
             "OPENWA_WEBHOOK_SECRET no configurado — webhooks aceptados sin validación. Esto es inseguro en producción."
         )
         return True
+
+    # OpenWA firma con formato "sha256=<hex>". Extraemos solo el hex.
+    # Case-insensitive: puede llegar como sha256= o SHA256=.
+    signature_lower = signature.lower()
+    if signature_lower.startswith("sha256="):
+        signature = signature_lower[len("sha256="):]
 
     expected = hmac_mod.new(
         secret.encode("utf-8"),

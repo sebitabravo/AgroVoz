@@ -67,3 +67,6 @@ docker-compose.override.yml
 # ── Logs ──────────────────────────────
 *.log
 logs/
+
+# Playwright MCP - screenshots temporales
+.playwright-mcp/

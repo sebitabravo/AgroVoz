@@ -1,10 +1,11 @@
-"""Router para webhooks de WhatsApp vía Open-WA.
+"""Router para webhooks de WhatsApp via Open-WA.
 
 Endpoint POST /api/v1/webhook/whatsapp que Open-WA llama cuando
 llega un mensaje. Valida firma HMAC, detecta tipo de mensaje,
 y delega el procesamiento de audio al AudioService.
 """
 
+import base64
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
@@ -22,28 +23,49 @@ logger = logging.getLogger(__name__)
 
 
 def get_audio_service() -> AudioService:
-    """Factory para inyección de dependencias de AudioService.
+    """Factory para inyeccion de dependencias de AudioService.
 
-    Permite que FastAPI inyecte AudioService vía Depends,
+    Permite que FastAPI inyecte AudioService via Depends,
     facilitando el mocking en tests (P2-2).
     """
     return AudioService()
 
 
-# Dependencias a nivel de módulo para cumplir con B008 (no calls en argument defaults).
+# Dependencias a nivel de modulo para cumplir con B008 (no calls en argument defaults).
 _audio_service_dep = Depends(get_audio_service)
 _verify_openwa_dep = Depends(verify_openwa_webhook)
 
 
-def _is_audio_message(payload: WebhookPayload) -> bool:
-    """Determina si el mensaje contiene audio.
+def _is_voice_message(payload: WebhookPayload) -> bool:
+    """Determina si el mensaje es un audio de voz.
 
-    Un mensaje se considera de audio si has_media es True y al menos
-    un elemento de media tiene mimetype que empieza con 'audio/'.
+    Open-WA real no usa hasMedia/media[].mimetype — el campo
+    `data.type` es "voice" para notas de voz, y el audio viene
+    inline como base64 en `data.media.data`.
+
+    Solo verifica el tipo. La extraccion del media (base64) se
+    valida despues por separado para dar un log/reason especifico
+    cuando el evento es voice pero no trae datos de audio.
     """
-    if not payload.message.has_media:
-        return False
-    return any(media.mimetype.startswith("audio/") for media in payload.message.media)
+    return payload.data.type == "voice"
+
+
+def _extract_audio_bytes(payload: WebhookPayload) -> bytes | None:
+    """Extrae el audio base64 inline del payload del webhook.
+
+    Open-WA incluye el audio como base64 en data.media.data
+    para mensajes type=voice.
+
+    Returns:
+        Bytes del audio decodificado, o None si no hay media.
+    """
+    if payload.data.media is None or not payload.data.media.data:
+        return None
+    try:
+        return base64.b64decode(payload.data.media.data)
+    except (ValueError, base64.binascii.Error):
+        logger.warning("Audio base64 invalido en webhook")
+        return None
 
 
 @router.post("/webhook/whatsapp")
@@ -53,53 +75,54 @@ async def webhook_whatsapp(
     raw_payload: dict[str, object] = _verify_openwa_dep,
     audio_service: AudioService = _audio_service_dep,
 ) -> JSONResponse:
-    """Endpoint que recibe mensajes de WhatsApp vía webhook de Open-WA.
+    """Endpoint que recibe mensajes de WhatsApp via webhook de Open-WA.
 
     Flujo:
     1. Validar firma HMAC (hecho por la dependencia verify_openwa_webhook).
-    2. Parsear payload → WebhookPayload.
-    3. Detectar tipo de mensaje (audio vs texto vs otro).
-    4. Si es audio: delegar procesamiento al AudioService en background.
-    5. Si es texto: log + ignorar por ahora.
-    6. Retornar 200 rápido (ack a Open-WA).
+    2. Parsear payload -> WebhookPayload.
+    3. Detectar tipo de mensaje (voice vs text vs otro).
+    4. Si es voice: delegar procesamiento al AudioService en background.
+    5. Si es otro: log + ignorar por ahora.
+    6. Retornar 200 rapido (ack a Open-WA).
 
-    Open-WA espera una respuesta rápida (<5s). El procesamiento pesado
-    (descarga, ffmpeg) se hace en background tasks para no bloquear.
+    Open-WA espera una respuesta rapida (<5s). El procesamiento pesado
+    (decodificar base64, ffmpeg) se hace en background tasks para no bloquear.
     """
     request_id: str = getattr(request.state, "request_id", "-")
 
     try:
         payload = WebhookPayload.model_validate(raw_payload)
-    except ValidationError:
-        logger.warning("Webhook con payload inválido — request_id=%s", request_id)
+    except ValidationError as exc:
+        logger.warning(
+            "Webhook con payload invalido — request_id=%s errors=%s",
+            request_id,
+            exc.errors(),
+        )
         return JSONResponse(
             status_code=200,
             content={"status": "ignored", "reason": "payload_invalido"},
         )
 
-    phone = payload.message.from_
-    raw_message_id = payload.message.id
-    # CI/CD P1: Sanitizar message_id en logs — IDs de WhatsApp contienen
-    # el número de teléfono en texto plano (formato: true_<phone>@c.us_<random>).
-    # sanitize_message_id() reemplaza caracteres no seguros preservando
-    # trazabilidad sin leakear PII.
+    chat_id = payload.data.chatId or payload.data.from_
+    raw_message_id = payload.data.id
+    message_type = payload.data.type or "unknown"
     message_id_safe = sanitize_message_id(raw_message_id)
 
     logger.info(
-        "Webhook recibido — message_id=%s phone_hash=%s has_media=%s media_count=%d request_id=%s",
+        "Webhook recibido — message_id=%s chat_id_hash=%s type=%s request_id=%s",
         message_id_safe,
-        hash_phone(phone, settings.phone_hash_pepper),
-        payload.message.has_media,
-        len(payload.message.media),
+        hash_phone(chat_id, settings.phone_hash_pepper) if chat_id else "sin_chat",
+        message_type,
         request_id,
     )
 
-    # Mensaje de texto: log + ignorar (el pipeline de voz solo procesa audio por ahora)
-    if not payload.message.has_media or not _is_audio_message(payload):
+    # Solo procesamos notas de voz (type=voice)
+    if not _is_voice_message(payload):
         logger.info(
-            "Mensaje no-audio ignorado — message_id=%s type=text has_body=%s request_id=%s",
+            "Mensaje no-audio ignorado — message_id=%s type=%s has_body=%s request_id=%s",
             message_id_safe,
-            "si" if payload.message.body else "no",
+            message_type,
+            "si" if payload.data.body else "no",
             request_id,
         )
         return JSONResponse(
@@ -107,12 +130,36 @@ async def webhook_whatsapp(
             content={"status": "ignored", "reason": "mensaje_no_audio"},
         )
 
-    # Mensaje de audio: delegar a AudioService en background.
-    # AudioService internamente usa el message_id original (raw) para
-    # las llamadas a la API de Open-WA, y sanitize_message_id() para logs/paths.
-    background_tasks.add_task(audio_service.process_audio, payload, phone, request_id)
+    # Extraer audio base64 inline
+    audio_bytes = _extract_audio_bytes(payload)
+    if audio_bytes is None:
+        logger.warning(
+            "Mensaje voice sin media data — message_id=%s request_id=%s",
+            message_id_safe,
+            request_id,
+        )
+        return JSONResponse(
+            status_code=200,
+            content={"status": "ignored", "reason": "voice_sin_media"},
+        )
 
-    # En la respuesta usamos el message_id sanitizado para no leakear PII.
+    logger.info(
+        "Audio de voz recibido — message_id=%s chat_id_hash=%s size_bytes=%d request_id=%s",
+        message_id_safe,
+        hash_phone(chat_id, settings.phone_hash_pepper) if chat_id else "sin_chat",
+        len(audio_bytes),
+        request_id,
+    )
+
+    # Delegar procesamiento a AudioService en background.
+    # AudioService recibe los bytes ya decodificados y el chatId para responder.
+    background_tasks.add_task(
+        audio_service.process_audio,
+        audio_bytes=audio_bytes,
+        chat_id=chat_id,
+        request_id=request_id,
+    )
+
     return JSONResponse(
         status_code=200,
         content={"status": "received", "message_id": message_id_safe},

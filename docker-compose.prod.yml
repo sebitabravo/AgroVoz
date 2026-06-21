@@ -34,7 +34,7 @@ services:
       # ── Secrets — Dokploy Secrets UI ──
       - OPENWA_API_KEY=${OPENWA_API_KEY:?OPENWA_API_KEY requerida — configurar en Dokploy Secrets UI}
       - OPENWA_WEBHOOK_SECRET=${OPENWA_WEBHOOK_SECRET:?OPENWA_WEBHOOK_SECRET requerido — configurar en Dokploy Secrets UI}
-      - OPENWA_API_URL=http://openwa:8000
+      - OPENWA_API_URL=http://openwa:2785
       - OPENWEATHERMAP_API_KEY=${OPENWEATHERMAP_API_KEY}
       - ADMIN_API_KEY=${ADMIN_API_KEY}
       # ── Modelos IA (paths dentro del contenedor) ──
@@ -121,7 +121,7 @@ services:
     volumes:
       - openwa_data:/app/data         # Sesión WhatsApp persiste entre reinicios
     expose:
-      - "8000"                        # API interna (solo backend accede)
+      - "2785"                        # API interna (solo backend accede)
     networks:
       - dokploy-network
     depends_on:
@@ -130,8 +130,8 @@ services:
     healthcheck:
       # curl no está garantizado en la imagen Open-WA (basada en Node.js).
       # Usamos node -e con http.get para healthcheck sin dependencias externas.
-      # Open-WA escucha en puerto 8000 (POR defecto de la imagen).
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8000/api/health', r => { process.exit(r.statusCode === 200 ? 0 : 1) })"]
+      # La imagen escucha en puerto 2785 internamente (v0.4.0+).
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:2785/api/health', r => { process.exit(r.statusCode === 200 ? 0 : 1) })"]
       interval: 30s
       timeout: 10s
       retries: 3
