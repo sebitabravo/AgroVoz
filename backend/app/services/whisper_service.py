@@ -15,15 +15,34 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from types import ModuleType
+from typing import Protocol
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Cache de modelos cargados: {model_name: Whisper}
-# Usamos Any porque Whisper se importa lazy (no disponible en module scope).
-_model_cache: dict[str, Any] = {}
+
+class WhisperModel(Protocol):
+    """Protocolo para el modelo Whisper.
+
+    Define solo los metodos que usamos, permitiendo type checking
+    sin importar openai-whisper directamente (lazy import).
+    """
+
+    def transcribe(
+        self,
+        audio: str,
+        *,
+        language: str,
+        fp16: bool,
+        task: str,
+        verbose: bool,
+    ) -> dict[str, object]: ...
+
+
+# Cache de modelos cargados: {model_name: WhisperModel}
+_model_cache: dict[str, WhisperModel] = {}
 _model_cache_lock = threading.Lock()
 
 
@@ -83,7 +102,7 @@ class WhisperService:
         self._language = "es"  # Fijo: espanol chileno
 
     @staticmethod
-    def _import_whisper() -> Any:
+    def _import_whisper() -> ModuleType:
         """Importa el modulo whisper bajo demanda.
 
         Separado como metodo estatico para que los tests puedan mockearlo
@@ -91,13 +110,13 @@ class WhisperService:
         openai-whisper instalado.
 
         Returns:
-            El modulo whisper (lazy import).
+            El modulo whisper (lazy import) como ModuleType.
         """
         import whisper
 
-        return whisper
+        return whisper  # type: ignore[no-any-return]
 
-    def _load_model(self) -> Any:
+    def _load_model(self) -> WhisperModel:
         """Carga el modelo Whisper en cache (singleton por nombre de modelo).
 
         Thread-safe: usa _model_cache_lock para evitar que dos threads carguen
@@ -195,7 +214,7 @@ class WhisperService:
             raise RuntimeError(f"Error de transcripcion Whisper: {exc}") from exc
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
-        text = (result.get("text") or "").strip()
+        text = str(result.get("text") or "").strip()
 
         logger.info(
             "Audio transcrito — path=%s text_len=%d words=%d language=%s elapsed_ms=%d",

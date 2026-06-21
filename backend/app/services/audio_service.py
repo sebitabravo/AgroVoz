@@ -286,19 +286,32 @@ class AudioService:
 
             # Transcripcion Whisper (en thread aparte para no bloquear event loop).
             # El modelo se carga lazy en la primera llamada.
-            whisper = WhisperService()
-            transcription: dict[str, object] = await asyncio.to_thread(
-                whisper.transcribe, str(wav_path)
-            )
-            transcribed_text = str(transcription.get("text", ""))
-            logger.info(
-                "Audio transcrito — message_id=%s text=%s chars=%d whisper_ms=%d request_id=%s",
-                message_id,
-                transcribed_text[:200],
-                len(transcribed_text),
-                transcription.get("duration_ms", 0),
-                request_id,
-            )
+            # Si Whisper falla (OOM, cold start, audio corrupto), se loguea
+            # pero el pipeline CONTINUA para que el agricultor reciba respuesta
+            # de voz (P1 del code review).
+            transcribed_text = ""
+            try:
+                whisper = WhisperService()
+                transcription: dict[str, object] = await asyncio.to_thread(
+                    whisper.transcribe, str(wav_path)
+                )
+                transcribed_text = str(transcription.get("text", ""))
+                logger.info(
+                    "Audio transcrito — message_id=%s text=%s chars=%d whisper_ms=%d request_id=%s",
+                    message_id,
+                    transcribed_text[:200],
+                    len(transcribed_text),
+                    transcription.get("duration_ms", 0),
+                    request_id,
+                )
+            except (RuntimeError, FileNotFoundError, ValueError) as exc:
+                logger.warning(
+                    "Whisper fallo — continuando sin transcripcion: message_id=%s "
+                    "error=%s request_id=%s",
+                    message_id,
+                    exc,
+                    request_id,
+                )
 
             # Enviar respuesta de audio fija (hola mundo end-to-end).
             # Punto de medicion de latencia E2E: desde recepcion del webhook hasta envio.
