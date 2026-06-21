@@ -129,7 +129,7 @@ make up                # Requiere escanear QR de nuevo
 
 | Variable | Propósito | Default en docker-compose |
 |---|---|---|
-| `OPENWA_API_KEY` | API_MASTER_KEY: seed de API key inicial (1er arranque) | UUID v4 (ver docker-compose.yml) |
+| `OPENWA_API_KEY` | API_MASTER_KEY: seed de API key inicial (1er arranque) | `dev-admin-key` (ver docker-compose.yml) |
 | `OPENWA_WEBHOOK_SECRET` | HMAC de webhooks entrantes | UUID v4 (ver docker-compose.yml) |
 | `OPENWA_API_URL` | URL base de Open-WA API | `http://openwa:8000` |
 

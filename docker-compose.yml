@@ -80,7 +80,7 @@ services:
       - ALLOW_DEV_API_KEY=true
       - AUTO_START_SESSIONS=true
       - WEBHOOK_URL=http://backend:8000/api/v1/webhook/whatsapp
-      - WEBHOOK_SECRET=${OPENWA_WEBHOOK_SECRET:-a50334f5-1087-48c1-89b1-acf2079a0f15}
+      - WEBHOOK_SECRET=${OPENWA_WEBHOOK_SECRET:-dev-webhook-secret}
     ports:
       - "127.0.0.1:2785:8000"          # API + Dashboard (unificado desde v0.4.0)
     volumes:
