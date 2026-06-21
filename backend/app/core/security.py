@@ -27,14 +27,17 @@ MAX_WEBHOOK_BODY_SIZE = 10 * 1024 * 1024
 
 # Hosts permitidos para TrustedHostMiddleware.
 # El middleware se registra en main.py con esta lista.
-ALLOWED_HOSTS: tuple[str, ...] = (
+# Hosts extra (como la IP de Docker para desarrollo local) se cargan desde
+# settings.extra_allowed_hosts para que no queden hardcodeados en produccion.
+_base_hosts: list[str] = [
     "localhost",
     "127.0.0.1",
     "testserver",  # Requerido por Starlette TestClient en tests
     "agrovoz.cl",
     ".agrovoz.cl",  # Leading dot: Starlette TrustedHostMiddleware espera ".domain.com", no "*.domain.com"
-    "192.168.97.2",  # Permitir webhooks desde OpenWA en Docker (desarrollo local)
-)
+]
+_base_hosts.extend(h.strip() for h in settings.extra_allowed_hosts.split(",") if h.strip())
+ALLOWED_HOSTS: tuple[str, ...] = tuple(_base_hosts)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -171,7 +174,7 @@ def validate_openwa_hmac(body: bytes, signature: str, secret: str) -> bool:
     # Case-insensitive: puede llegar como sha256= o SHA256=.
     signature_lower = signature.lower()
     if signature_lower.startswith("sha256="):
-        signature = signature_lower[len("sha256="):]
+        signature = signature_lower[len("sha256=") :]
 
     expected = hmac_mod.new(
         secret.encode("utf-8"),

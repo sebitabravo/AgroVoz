@@ -69,7 +69,15 @@ class OpenWAService:
     Para MVP con <10 usuarios concurrentes, el overhead de crear un
     connection pool por request es negligible. En producción, mover a un
     cliente compartido manejado por el lifespan de FastAPI.
+
+    La sesion de Open-WA (UUID) se cachea a nivel de clase (_cached_session_id)
+    para evitar un HTTP GET redundante en cada mensaje. El cache persiste
+    mientras el proceso esta vivo (tipicamente toda la vida del contenedor).
+    Si Open-WA se reinicia, habria que reiniciar el backend, pero en MVP
+    esto es aceptable.
     """
+
+    _cached_session_id: str | None = None
 
     def __init__(self) -> None:
         """Inicializa el cliente con la URL base y API key desde settings.
@@ -84,7 +92,6 @@ class OpenWAService:
         self._base_url: str = settings.openwa_api_url.rstrip("/")
         self._api_key: str = settings.openwa_api_key
         self._timeout: float = 30.0
-        self._session_id: str | None = None  # Se resuelve lazy en _resolve_session_id
 
         # P1-3: Advertir si la API key no está configurada en desarrollo.
         # El warning usa stacklevel=2 para apuntar al caller (AudioService),
@@ -109,8 +116,11 @@ class OpenWAService:
         """Descubre el session ID de Open-WA consultando su API.
 
         Lista las sesiones activas y retorna el ID de la primera
-        con status='ready'. Cachea el resultado en self._session_id
-        para no repetir la consulta HTTP en cada llamada.
+        con status='ready'. Cachea el resultado en _cached_session_id
+        (a nivel de clase) para no repetir la consulta HTTP en cada mensaje.
+
+        El cache persiste mientras el proceso esta vivo, lo que evita
+        un HTTP GET redundante (~50-100ms) en cada mensaje de voz.
 
         Returns:
             ID de sesion (UUID) para usar en URLs de la API.
@@ -119,8 +129,8 @@ class OpenWAService:
             RuntimeError: Si no hay sesiones listas/activas.
             httpx.HTTPError: Si la API de Open-WA no responde.
         """
-        if self._session_id:
-            return self._session_id
+        if OpenWAService._cached_session_id is not None:
+            return OpenWAService._cached_session_id
 
         url = f"{self._base_url}/api/sessions"
         async with httpx.AsyncClient(timeout=self._timeout) as client:
@@ -131,14 +141,11 @@ class OpenWAService:
         for session in sessions:
             if session.get("status") in ("ready", "active"):
                 session_id = str(session["id"])
-                self._session_id = session_id
+                OpenWAService._cached_session_id = session_id
                 logger.info("Sesion Open-WA resuelta — id=%s", session_id)
                 return session_id
 
-        raise RuntimeError(
-            "No hay sesiones listas en Open-WA. "
-            "Escanee el QR para iniciar sesion."
-        )
+        raise RuntimeError("No hay sesiones listas en Open-WA. Escanee el QR para iniciar sesion.")
 
     async def download_media(self, message_id: str) -> bytes:
         """Descarga el archivo de audio de un mensaje vía la API de Open-WA.
@@ -195,9 +202,7 @@ class OpenWAService:
             )
             return dict(response.json())
 
-    async def send_audio(
-        self, target: str, audio_path: str, caption: str | None = None
-    ) -> dict[str, object]:
+    async def send_audio(self, target: str, audio_path: str, caption: str | None = None) -> dict[str, object]:
         """Envia un mensaje de audio a un numero de WhatsApp via Open-WA.
 
         Args:

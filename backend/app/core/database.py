@@ -29,6 +29,7 @@ class Base(DeclarativeBase):
     en Base.metadata para que Alembic los detecte con --autogenerate.
     """
 
+
 # Motor SQLite con WAL mode para acceso concurrente.
 # Sin WAL mode, lecturas y escrituras simultáneas causan SQLITE_BUSY.
 # check_same_thread=False necesario porque FastAPI corre en múltiples hilos.

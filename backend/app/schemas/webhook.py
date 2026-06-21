@@ -24,7 +24,7 @@ class WebhookContact(BaseModel):
     """Informacion del contacto remitente."""
 
     name: str = ""
-    pushName: str = ""
+    push_name: str = Field(default="", alias="pushName")
 
     model_config = ConfigDict(extra="allow")
 
@@ -45,14 +45,14 @@ class WebhookMessageData(BaseModel):
         description="Remitente (puede ser @lid o @c.us, no necesariamente E.164)",
     )
     to: str = ""
-    chatId: str = ""
+    chat_id: str = Field(default="", alias="chatId")
     body: str = ""
     type: str = ""  # "voice", "text", "image", etc.
     timestamp: int = 0
-    fromMe: bool = False
-    isGroup: bool = False
-    isStatusBroadcast: bool = False
-    isLidSender: bool = False
+    from_me: bool = Field(default=False, alias="fromMe")
+    is_group: bool = Field(default=False, alias="isGroup")
+    is_status_broadcast: bool = Field(default=False, alias="isStatusBroadcast")
+    is_lid_sender: bool = Field(default=False, alias="isLidSender")
     contact: WebhookContact = Field(default_factory=WebhookContact)
     media: WebhookMedia | None = None
 
@@ -77,8 +77,8 @@ class WebhookPayload(BaseModel):
     event: str = ""
     timestamp: str = ""
     session_id: str = Field(default="default", alias="sessionId")
-    idempotencyKey: str = ""
-    deliveryId: str = ""
+    idempotency_key: str = Field(default="", alias="idempotencyKey")
+    delivery_id: str = Field(default="", alias="deliveryId")
     data: WebhookMessageData = Field(default_factory=WebhookMessageData)
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)

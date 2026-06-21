@@ -32,9 +32,7 @@ logger = logging.getLogger(__name__)
 
 # ContextVar para propagar el request_id a los logs.
 # El middleware lo setea por request; el logging.Filter lo inyecta en cada LogRecord.
-request_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "request_id", default="-"
-)
+request_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
 
 
 class RequestIDFormatter(logging.Formatter):
@@ -58,9 +56,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
     El header se agrega a la respuesta para trazabilidad end-to-end.
     """
 
-    async def dispatch(
-        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         """Procesa request inyectando X-Request-ID."""
         request_id = request.headers.get("X-Request-ID")
         # Sanitizar: solo alfanumérico + guiones, max 64 chars.

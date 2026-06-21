@@ -63,7 +63,7 @@ def _extract_audio_bytes(payload: WebhookPayload) -> bytes | None:
         return None
     try:
         return base64.b64decode(payload.data.media.data)
-    except (ValueError, base64.binascii.Error):
+    except ValueError:
         logger.warning("Audio base64 invalido en webhook")
         return None
 
@@ -103,7 +103,7 @@ async def webhook_whatsapp(
             content={"status": "ignored", "reason": "payload_invalido"},
         )
 
-    chat_id = payload.data.chatId or payload.data.from_
+    chat_id = payload.data.chat_id or payload.data.from_
     raw_message_id = payload.data.id
     message_type = payload.data.type or "unknown"
     message_id_safe = sanitize_message_id(raw_message_id)

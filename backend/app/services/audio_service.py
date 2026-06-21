@@ -274,8 +274,7 @@ class AudioService:
 
             audio_duration_ms = await asyncio.to_thread(get_audio_duration_ms, wav_path)
             logger.info(
-                "Audio listo para pipeline — message_id=%s chat_id_hash=%s wav_path=%s "
-                "duration_ms=%d",
+                "Audio listo para pipeline — message_id=%s chat_id_hash=%s wav_path=%s duration_ms=%d",
                 message_id,
                 chat_id_hash,
                 wav_path,
@@ -312,8 +311,7 @@ class AudioService:
         ):
             elapsed_ms = (time.monotonic() - start_time) * 1000
             logger.exception(
-                "Error procesando audio en background — message_id=%s chat_id_hash=%s "
-                "elapsed_ms=%d request_id=%s",
+                "Error procesando audio en background — message_id=%s chat_id_hash=%s elapsed_ms=%d request_id=%s",
                 message_id,
                 chat_id_hash,
                 int(elapsed_ms),

@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 60
     audio_retention_hours: int = 24
     phone_hash_pepper: str = "agrovoz-dev-pepper"  # Cambiar en producción (PHONE_HASH_PEPPER en .env)
+    extra_allowed_hosts: str = ""  # Hosts/IPs extra separadas por coma para TrustedHostMiddleware
 
     # ── Versión ──────────────────────────
     app_version: str = "0.1.0-dev"
@@ -96,8 +97,7 @@ class Settings(BaseSettings):
                 )
             if self.app_env != "development":
                 warnings.warn(
-                    "OPENWA_WEBHOOK_SECRET está vacío. "
-                    "Cámbielo antes de desplegar a producción.",
+                    "OPENWA_WEBHOOK_SECRET está vacío. Cámbielo antes de desplegar a producción.",
                     RuntimeWarning,
                     stacklevel=2,
                 )
@@ -114,8 +114,7 @@ class Settings(BaseSettings):
             )
         if self.app_env != "development":
             warnings.warn(
-                "OPENWA_WEBHOOK_SECRET es el valor default público. "
-                "Cámbielo antes de desplegar a producción.",
+                "OPENWA_WEBHOOK_SECRET es el valor default público. Cámbielo antes de desplegar a producción.",
                 RuntimeWarning,
                 stacklevel=2,
             )
@@ -140,8 +139,7 @@ class Settings(BaseSettings):
                     "antes de desplegar a producción."
                 )
             warnings.warn(
-                "PHONE_HASH_PEPPER está vacío. "
-                "Cámbielo antes de desplegar a producción.",
+                "PHONE_HASH_PEPPER está vacío. Cámbielo antes de desplegar a producción.",
                 RuntimeWarning,
                 stacklevel=2,
             )
@@ -157,8 +155,7 @@ class Settings(BaseSettings):
                 "antes de desplegar a producción."
             )
         warnings.warn(
-            "PHONE_HASH_PEPPER es el valor default público. "
-            "Cámbielo antes de desplegar a producción.",
+            "PHONE_HASH_PEPPER es el valor default público. Cámbielo antes de desplegar a producción.",
             RuntimeWarning,
             stacklevel=2,
         )
@@ -183,8 +180,7 @@ class Settings(BaseSettings):
             )
         if not self.openweathermap_api_key:
             warnings.warn(
-                "OPENWEATHERMAP_API_KEY no está configurada. "
-                "Las consultas de clima no funcionarán sin esto.",
+                "OPENWEATHERMAP_API_KEY no está configurada. Las consultas de clima no funcionarán sin esto.",
                 RuntimeWarning,
                 stacklevel=2,
             )

@@ -376,9 +376,14 @@ async def test_openwa_send_audio_usa_contrato_documentado(
     audio_file = tmp_path / "hello.ogg"
     audio_file.write_bytes(b"FAKE_HELLO_OGG")
 
-    service = OpenWAService()
-    service._session_id = "test-session-id"
-    result = await service.send_audio("248069442560050@lid", str(audio_file))
+    # Setear cache de clase para evitar HTTP discovery en _resolve_session_id
+    prev_cache = OpenWAService._cached_session_id
+    OpenWAService._cached_session_id = "test-session-id"
+    try:
+        service = OpenWAService()
+        result = await service.send_audio("248069442560050@lid", str(audio_file))
+    finally:
+        OpenWAService._cached_session_id = prev_cache
 
     assert result == {"status": "sent"}
     mock_client.post.assert_called_once_with(
