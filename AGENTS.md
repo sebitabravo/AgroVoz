@@ -277,6 +277,7 @@ cd backend && uv run uvicorn app.main:app --reload --port 8000
 cd backend && uv run pytest tests/ -v --cov=app
 cd backend && uv run ruff check app/
 cd backend && uv run mypy app/
+cd backend && uv run python scripts/eval_wer.py --model small --samples 10
 
 # Frontend
 cd landing && bun run dev
@@ -295,8 +296,10 @@ git log origin/main..HEAD --oneline    # verificar: commits atómicos, sin WIP n
 
 - Explicar qué cambió y por qué
 - Listar archivos creados/modificados
-- Verificar que tests pasan: `cd backend && uv run pytest tests/ -v`
-- Verificar que linter está limpio: `cd backend && uv run ruff check app/`
+- Verificar que tests pasan: `cd backend && uv run pytest tests/ -v --tb=short`
+- Verificar que linter y types están limpios: `cd backend && uv run ruff check app/ && uv run mypy app/`
+- Si el cambio tocó Whisper, verificar precisión: `cd backend && uv run python scripts/eval_wer.py --model small --samples 5`
+- Si el cambio tocó el pipeline E2E, verificar logs: `docker compose logs backend | rg "Audio transcrito"`
 - Listar riesgos o trade-offs
 - Listar próximo paso (siguiente fase)
 

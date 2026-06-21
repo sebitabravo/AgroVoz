@@ -8,3 +8,4 @@ sqlalchemy==2.0.51
 alembic==1.18.4
 pydantic-settings==2.14.2
 httpx==0.28.1
+openai-whisper==20250625

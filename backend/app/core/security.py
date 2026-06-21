@@ -117,7 +117,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             # Barrido global de IPs inactivas cada 60s para evitar memory leak.
             if now - self._last_cleanup >= 60:
                 dead_ips = [
-                    ip for ip, timestamps in self._requests.items() if not [t for t in timestamps if now - t < window]
+                    ip for ip, timestamps in self._requests.items()
+                    if not any(now - t < window for t in timestamps)
                 ]
                 for ip in dead_ips:
                     del self._requests[ip]
@@ -182,7 +183,7 @@ def validate_openwa_hmac(body: bytes, signature: str, secret: str) -> bool:
         hashlib.sha256,
     ).hexdigest()
 
-    return hmac_mod.compare_digest(expected, signature.lower())
+    return hmac_mod.compare_digest(expected, signature)
 
 
 async def verify_openwa_webhook(request: Request) -> dict[str, object]:
