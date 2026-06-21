@@ -71,7 +71,7 @@ async def client(tmp_path: Path) -> AsyncGenerator[AsyncClient, None]:
     _original_health_engine = health_module.engine  # type: ignore[attr-defined]
     health_module.engine = test_engine  # type: ignore[attr-defined]
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as c:
         try:
             yield c
         finally:

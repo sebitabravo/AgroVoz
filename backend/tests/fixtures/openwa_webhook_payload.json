@@ -1,0 +1,56 @@
+{
+  "audio_message": {
+    "sessionId": "default",
+    "message": {
+      "id": "msg_test_audio_001",
+      "from": "+56912345678",
+      "body": "",
+      "hasMedia": true,
+      "media": [
+        {
+          "mimetype": "audio/ogg; codecs=opus",
+          "url": "http://openwa:8000/api/sessions/default/messages/msg_test_audio_001/media"
+        }
+      ],
+      "timestamp": 1718400000
+    }
+  },
+  "text_message": {
+    "sessionId": "default",
+    "message": {
+      "id": "msg_test_text_001",
+      "from": "+56912345678",
+      "body": "¿A cuánto está la papa?",
+      "hasMedia": false,
+      "media": [],
+      "timestamp": 1718400000
+    }
+  },
+  "message_sin_media": {
+    "sessionId": "default",
+    "message": {
+      "id": "msg_test_no_media_001",
+      "from": "+56912345678",
+      "body": "",
+      "hasMedia": true,
+      "media": [],
+      "timestamp": 1718400000
+    }
+  },
+  "message_media_no_audio": {
+    "sessionId": "default",
+    "message": {
+      "id": "msg_test_image_001",
+      "from": "+56912345678",
+      "body": "Mira esta foto",
+      "hasMedia": true,
+      "media": [
+        {
+          "mimetype": "image/jpeg",
+          "url": "http://openwa:8000/api/sessions/default/messages/msg_test_image_001/media"
+        }
+      ],
+      "timestamp": 1718400000
+    }
+  }
+}

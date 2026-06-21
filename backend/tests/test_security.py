@@ -30,7 +30,7 @@ async def test_rate_limit_bloquea_despues_de_n_requests(
         return {"status": "ok"}
 
     async with AsyncClient(
-        transport=ASGITransport(app=app_test), base_url="http://test"
+        transport=ASGITransport(app=app_test), base_url="http://testserver"
     ) as c:
         # Las primeras 3 requests deben pasar (200 OK)
         for _ in range(3):
@@ -138,7 +138,7 @@ async def test_rate_limit_limpieza_ip_inactiva(
     middleware = RateLimitMiddleware(app_inner)
 
     async with AsyncClient(
-        transport=ASGITransport(app=middleware), base_url="http://test"
+        transport=ASGITransport(app=middleware), base_url="http://testserver"
     ) as c:
         client_ip = "127.0.0.1"  # ASGITransport usa 127.0.0.1 como client host
 
@@ -178,19 +178,21 @@ async def test_rate_limit_cero_bloquea_todo(
         return {"status": "ok"}
 
     async with AsyncClient(
-        transport=ASGITransport(app=app_test), base_url="http://test"
+        transport=ASGITransport(app=app_test), base_url="http://testserver"
     ) as c:
         response = await c.get("/api/v1/health")
         assert response.status_code == 429
 
 
-def test_phone_hash_pepper_dev_sin_warning() -> None:
-    """En development, el pepper default no emite warning."""
+def test_phone_hash_pepper_dev_con_warning() -> None:
+    """En development, el pepper default emite RuntimeWarning (avisa que debe cambiarse)."""
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         s = Settings(app_env="development", phone_hash_pepper="agrovoz-dev-pepper")
         s.validate_pepper_not_default()
-        assert len(w) == 0
+        assert len(w) == 1
+        assert issubclass(w[0].category, RuntimeWarning)
+        assert "PHONE_HASH_PEPPER" in str(w[0].message)
 
 
 def test_phone_hash_pepper_vacio_prod_lanza_error() -> None:

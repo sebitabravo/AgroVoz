@@ -103,7 +103,7 @@ async def test_docs_oculto_en_production(monkeypatch: pytest.MonkeyPatch) -> Non
         assert app_main.app.docs_url is None
 
         async with AsyncClient(
-            transport=ASGITransport(app=app_main.app), base_url="http://test"
+            transport=ASGITransport(app=app_main.app), base_url="http://testserver"
         ) as c:
             # Health debe seguir funcionando en cualquier entorno.
             # Usamos probe=liveness para no depender de ffmpeg/DB en CI.
