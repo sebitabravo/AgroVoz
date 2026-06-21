@@ -287,8 +287,10 @@ class AudioService:
             # Transcripcion Whisper (en thread aparte para no bloquear event loop).
             # El modelo se carga lazy en la primera llamada.
             whisper = WhisperService()
-            transcription = await asyncio.to_thread(whisper.transcribe, str(wav_path))
-            transcribed_text = transcription.get("text", "")
+            transcription: dict[str, object] = await asyncio.to_thread(
+                whisper.transcribe, str(wav_path)
+            )
+            transcribed_text = str(transcription.get("text", ""))
             logger.info(
                 "Audio transcrito — message_id=%s text=%s chars=%d whisper_ms=%d request_id=%s",
                 message_id,
