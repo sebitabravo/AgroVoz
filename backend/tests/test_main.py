@@ -68,16 +68,18 @@ async def test_exception_handler_expone_detalle_en_development(
         reload(app_main)
 
 
-async def test_lifespan_falla_sin_api_key_en_production(
+async def test_lifespan_falla_sin_openweathermap_api_key_en_production(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Lifespan debe raise ValueError si app_env=production y no hay API key."""
+    """Lifespan debe raise ValueError si app_env=production y no hay OpenWeatherMap key."""
     original_env = config.settings.app_env
     original_key = config.settings.openweathermap_api_key
+    original_openwa_key = config.settings.openwa_api_key
 
     try:
         monkeypatch.setattr(config.settings, "app_env", "production")
         monkeypatch.setattr(config.settings, "openweathermap_api_key", "")
+        monkeypatch.setattr(config.settings, "openwa_api_key", "set-not-empty")
         reload(app_main)
 
         with pytest.raises(ValueError, match="OPENWEATHERMAP_API_KEY"):
@@ -86,6 +88,55 @@ async def test_lifespan_falla_sin_api_key_en_production(
     finally:
         monkeypatch.setattr(config.settings, "app_env", original_env)
         monkeypatch.setattr(config.settings, "openweathermap_api_key", original_key)
+        monkeypatch.setattr(config.settings, "openwa_api_key", original_openwa_key)
+        reload(app_main)
+
+
+async def test_lifespan_falla_sin_openwa_api_key_en_production(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lifespan debe raise ValueError si app_env=production y no hay OPENWA_API_KEY."""
+    original_env = config.settings.app_env
+    original_key = config.settings.openwa_api_key
+    original_weather_key = config.settings.openweathermap_api_key
+
+    try:
+        monkeypatch.setattr(config.settings, "app_env", "production")
+        monkeypatch.setattr(config.settings, "openwa_api_key", "")
+        monkeypatch.setattr(config.settings, "openweathermap_api_key", "set-not-empty")
+        reload(app_main)
+
+        with pytest.raises(ValueError, match="OPENWA_API_KEY"):
+            async with app_main.lifespan(app_main.app):
+                pass  # No debería llegar acá — lifespan raisea antes del yield
+    finally:
+        monkeypatch.setattr(config.settings, "app_env", original_env)
+        monkeypatch.setattr(config.settings, "openwa_api_key", original_key)
+        monkeypatch.setattr(config.settings, "openweathermap_api_key", original_weather_key)
+        reload(app_main)
+
+
+async def test_lifespan_falla_sin_ambas_api_keys_en_production(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lifespan debe raise ValueError con ambas keys faltantes en producción."""
+    original_env = config.settings.app_env
+    original_key = config.settings.openwa_api_key
+    original_weather_key = config.settings.openweathermap_api_key
+
+    try:
+        monkeypatch.setattr(config.settings, "app_env", "production")
+        monkeypatch.setattr(config.settings, "openwa_api_key", "")
+        monkeypatch.setattr(config.settings, "openweathermap_api_key", "")
+        reload(app_main)
+
+        with pytest.raises(ValueError, match=r"OPENWEATHERMAP_API_KEY.*OPENWA_API_KEY"):
+            async with app_main.lifespan(app_main.app):
+                pass  # No debería llegar acá — lifespan raisea antes del yield
+    finally:
+        monkeypatch.setattr(config.settings, "app_env", original_env)
+        monkeypatch.setattr(config.settings, "openwa_api_key", original_key)
+        monkeypatch.setattr(config.settings, "openweathermap_api_key", original_weather_key)
         reload(app_main)
 
 

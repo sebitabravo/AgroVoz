@@ -57,10 +57,15 @@ services:
         max-file: "3"
 
   # Open-WA: gateway WhatsApp self-hosted (protocolo WhatsApp Web)
-  # Dashboard en puerto 2886 (host) → 8000 (contenedor) para escanear QR.
-  # API interna mapeada a 2785 (host) → 8000 (contenedor).
+  # Desde v0.4.0: API y dashboard comparten el puerto 2785 (single-port).
+  # API + Dashboard: http://localhost:2785 (API) y http://localhost:2785/ (dashboard SPA).
   # Backend se conecta directamente a http://openwa:8000 (red Docker interna).
-  # Ambos puertos bindeados solo a localhost por seguridad.
+  # Puerto bindeado solo a localhost por seguridad.
+  #
+  # API_MASTER_KEY: seed de API key inicial. Solo se usa en el primer arranque (DB vacía).
+  #   Si no se setea y ALLOW_DEV_API_KEY=true, usa dev-admin-key (SOLO desarrollo).
+  #   Si no, auto-genera owa_k1_<random> y la muestra en logs + data/.api-key.
+  # AUTO_START_SESSIONS: reconecta sesiones WhatsApp previas al reiniciar el contenedor.
   openwa:
     image: ghcr.io/rmyndharis/openwa:latest
     restart: unless-stopped
@@ -68,13 +73,14 @@ services:
       - .env
     environment:
       - NODE_ENV=development
-      - DATABASE_PROVIDER=sqlite
-      - API_KEY=${OPENWA_API_KEY:-8d83df90-24ff-4fd7-b2d1-1fa5fcec51d9}
+      - DATABASE_TYPE=sqlite
+      - API_MASTER_KEY=${OPENWA_API_KEY:-8d83df90-24ff-4fd7-b2d1-1fa5fcec51d9}
+      - ALLOW_DEV_API_KEY=true
+      - AUTO_START_SESSIONS=true
       - WEBHOOK_URL=http://backend:8000/api/v1/webhook/whatsapp
       - WEBHOOK_SECRET=${OPENWA_WEBHOOK_SECRET:-a50334f5-1087-48c1-89b1-acf2079a0f15}
     ports:
-      - "127.0.0.1:2886:8000"          # Dashboard (solo localhost, escanear QR)
-      - "127.0.0.1:2785:8000"          # API interna (solo localhost)
+      - "127.0.0.1:2785:8000"          # API + Dashboard (unificado desde v0.4.0)
     volumes:
       - openwa_data:/app/data           # Sesión WhatsApp persiste entre reinicios
     depends_on:

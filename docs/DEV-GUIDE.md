@@ -40,12 +40,12 @@ para vincular el número WhatsApp de prueba. La sesión persiste en el volumen
 
 ### Escanear QR
 
-1. Abrí el dashboard de Open-WA: [http://localhost:2886](http://localhost:2886)
-2. Te pide API key. Usá la del docker-compose.yml:
-   ```
-   8d83df90-24ff-4fd7-b2d1-1fa5fcec51d9
-   ```
-   (Si definiste `OPENWA_API_KEY` en tu `.env`, usá ese valor en vez del default)
+1. Abrí el dashboard de Open-WA: [http://localhost:2785](http://localhost:2785)
+   (Desde v0.4.0, API y dashboard comparten el mismo puerto 2785.)
+2. Te pide API key. Si no configuraste `OPENWA_API_KEY` en tu `.env`, revisá los logs
+   de arranque (`docker compose logs openwa | grep 'API Key'`) donde Open-WA imprime
+   la key auto-generada `owa_k1_...`. También se guarda en `data/.api-key` dentro del
+   volumen `openwa_data`.
 3. Hacé clic en **"New Session"** → nombre `default`
 4. Se genera un código QR. Escanealo con WhatsApp en el teléfono de prueba:
    - WhatsApp → Ajustes → Dispositivos vinculados → Vincular dispositivo
@@ -54,8 +54,9 @@ para vincular el número WhatsApp de prueba. La sesión persiste en el volumen
 ### Verificar conectividad
 
 ```bash
-# Si no definiste OPENWA_API_KEY en .env, usá el default:
-API_KEY="${OPENWA_API_KEY:-8d83df90-24ff-4fd7-b2d1-1fa5fcec51d9}"
+# La API key está en los logs de arranque o en data/.api-key dentro del volumen.
+# Si configuraste OPENWA_API_KEY en .env, usala directamente.
+API_KEY="owa_k1_..."  # Reemplazar con la key real de tus logs o .api-key
 
 # Verificar estado de la sesión
 curl -s http://localhost:2785/api/sessions/default \
@@ -67,7 +68,7 @@ curl -s http://localhost:2785/api/sessions/default \
 ### Enviar mensaje de prueba
 
 ```bash
-API_KEY="${OPENWA_API_KEY:-8d83df90-24ff-4fd7-b2d1-1fa5fcec51d9}"
+API_KEY="owa_k1_..."  # Reemplazar con la key real
 
 # Enviar texto a un número WhatsApp de prueba
 # Formato: +569XXXXXXXX (número chileno con código país, sin espacios)
@@ -96,12 +97,12 @@ docker compose up -d openwa
 | Servicio | Host (dev) | Docker interno | Propósito |
 |---|---|---|---|
 | Backend | `localhost:8000` | `backend:8000` | API FastAPI + health |
-| Open-WA API | `localhost:2785` | `openwa:8000` | REST API WhatsApp |
-| Open-WA Dashboard | `localhost:2886` | `openwa:8000` | Escanear QR, ver logs |
+| Open-WA | `localhost:2785` | `openwa:8000` | API REST + Dashboard SPA (unificado desde v0.4.0) |
 
-> **Nota:** Open-WA expone un solo puerto HTTP (8000) dentro del contenedor. Docker
-> lo mapea a 2785 (API) y 2886 (dashboard) en el host para evitar conflictos.
-> El backend se conecta a `http://openwa:8000` dentro de la red Docker `agrovoz`.
+> **Nota:** Desde Open-WA v0.4.0, API y dashboard comparten el puerto 2785.
+> La raíz `http://localhost:2785/` sirve el dashboard SPA y
+> `http://localhost:2785/api/` sirve la API REST.
+> El backend se conecta a `http://openwa:8000` dentro de la red Docker.
 
 ## Comandos útiles
 
@@ -129,11 +130,23 @@ make up                # Requiere escanear QR de nuevo
 
 ## Variables de entorno críticas
 
-| Variable | Propósito | Default dev |
+| Variable | Propósito | Default en docker-compose |
 |---|---|---|
-| `OPENWA_API_KEY` | Auth del backend → Open-WA | UUID v4 (ver docker-compose.yml) |
+| `OPENWA_API_KEY` | API_MASTER_KEY: seed de API key inicial (1er arranque) | UUID v4 (ver docker-compose.yml) |
 | `OPENWA_WEBHOOK_SECRET` | HMAC de webhooks entrantes | UUID v4 (ver docker-compose.yml) |
 | `OPENWA_API_URL` | URL base de Open-WA API | `http://openwa:8000` |
 
+**Variables solo para desarrollo (docker-compose.yml):**
+
+| Variable | Efecto |
+|---|---|
+| `ALLOW_DEV_API_KEY=true` | Si no hay API_MASTER_KEY, usa `dev-admin-key` como fallback |
+| `AUTO_START_SESSIONS=true` | Reconecta sesiones WhatsApp previas al reiniciar el contenedor |
+
+> **Importante:** `API_MASTER_KEY` solo se usa en el primer arranque (cuando la DB
+> de Open-WA está vacía). Si la DB ya tiene API keys, se ignora en reinicios
+> subsiguientes. Para resetear: `docker volume rm agrovoz_openwa_data`.
+>
 > En producción, las 3 variables se configuran en Dokploy Secrets UI.
+> `ALLOW_DEV_API_KEY=true` y `dev-admin-key` son rechazados en producción (v0.4.2+).
 > Ver `.env.production.example` para la lista completa.
