@@ -130,7 +130,7 @@ async def test_lifespan_falla_sin_ambas_api_keys_en_production(
         monkeypatch.setattr(config.settings, "openweathermap_api_key", "")
         reload(app_main)
 
-        with pytest.raises(ValueError, match=r"OPENWEATHERMAP_API_KEY.*OPENWA_API_KEY"):
+        with pytest.raises(ValueError, match=r"(?=.*OPENWEATHERMAP_API_KEY)(?=.*OPENWA_API_KEY)"):
             async with app_main.lifespan(app_main.app):
                 pass  # No debería llegar acá — lifespan raisea antes del yield
     finally:
