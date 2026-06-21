@@ -35,10 +35,16 @@ def _get_device() -> str:
     2. MPS (Apple Silicon)
     3. CPU (fallback universal)
 
+    Si torch no esta instalado (CI, tests), fallback silencioso a CPU.
+
     Returns:
         Nombre del dispositivo: "cuda", "mps" o "cpu".
     """
-    import torch
+    try:
+        import torch
+    except ImportError:
+        logger.debug("torch no disponible — dispositivo: CPU")
+        return "cpu"
 
     if torch.cuda.is_available():
         logger.info("Dispositivo detectado: CUDA")
@@ -76,13 +82,28 @@ class WhisperService:
         self._device = _get_device()
         self._language = "es"  # Fijo: espanol chileno
 
+    @staticmethod
+    def _import_whisper() -> Any:
+        """Importa el modulo whisper bajo demanda.
+
+        Separado como metodo estatico para que los tests puedan mockearlo
+        via @patch.object(WhisperService, '_import_whisper') sin necesitar
+        openai-whisper instalado.
+
+        Returns:
+            El modulo whisper (lazy import).
+        """
+        import whisper
+
+        return whisper
+
     def _load_model(self) -> Any:
         """Carga el modelo Whisper en cache (singleton por nombre de modelo).
 
         Thread-safe: usa _model_cache_lock para evitar que dos threads carguen
         el modelo simultaneamente durante cold start (P1 del code review).
 
-        El `import whisper` es lazy (dentro de este metodo) para que CI
+        El `import whisper` es lazy (dentro de _import_whisper) para que CI
         pueda ejecutar tests sin openai-whisper instalado.
 
         Returns:
@@ -90,8 +111,7 @@ class WhisperService:
         """
         with _model_cache_lock:
             if self._model_name not in _model_cache:
-                # Import lazy: solo disponible si openai-whisper esta instalado
-                import whisper
+                whisper = self._import_whisper()
 
                 logger.info(
                     "Cargando modelo Whisper '%s' en %s (primer uso)...",
