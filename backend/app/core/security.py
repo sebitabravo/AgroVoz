@@ -44,25 +44,19 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     - Permissions-Policy: deshabilita micrófono, cámara, geolocalización
     """
 
-    async def dispatch(
-        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         # HSTS solo sobre HTTPS. Browsers ignoran HSTS sobre HTTP plano.
         if request.url.scheme == "https":
-            response.headers["Strict-Transport-Security"] = (
-                "max-age=31536000; includeSubDomains"
-            )
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
         )
-        response.headers["Permissions-Policy"] = (
-            "microphone=(), camera=(), geolocation=()"
-        )
+        response.headers["Permissions-Policy"] = "microphone=(), camera=(), geolocation=()"
         return response
 
 
@@ -78,9 +72,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._requests: dict[str, list[float]] = {}
         self._last_cleanup: float = 0.0  # Timestamp de la última limpieza global
 
-    async def dispatch(
-        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         client_ip: str = request.client.host if request.client else "unknown"
         now = time.time()
         window = 60  # 1 minuto
@@ -90,9 +82,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # con timestamps expirados que nunca se limpian (scanners, bots).
         if now - self._last_cleanup >= 60:
             dead_ips = [
-                ip
-                for ip, timestamps in self._requests.items()
-                if not [t for t in timestamps if now - t < window]
+                ip for ip, timestamps in self._requests.items() if not [t for t in timestamps if now - t < window]
             ]
             for ip in dead_ips:
                 del self._requests[ip]
@@ -100,9 +90,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # Limpiar timestamps fuera de la ventana de 1 minuto para la IP actual
         self._requests.setdefault(client_ip, [])
-        self._requests[client_ip] = [
-            t for t in self._requests[client_ip] if now - t < window
-        ]
+        self._requests[client_ip] = [t for t in self._requests[client_ip] if now - t < window]
 
         # Poda la IP actual si quedó vacía después de limpiar
         if not self._requests[client_ip]:
@@ -112,9 +100,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if len(self._requests.get(client_ip, [])) >= settings.rate_limit_per_minute:
             return JSONResponse(
                 status_code=429,
-                content={
-                    "detail": "Demasiadas solicitudes. Intenta de nuevo en un minuto."
-                },
+                content={"detail": "Demasiadas solicitudes. Intenta de nuevo en un minuto."},
             )
 
         self._requests.setdefault(client_ip, []).append(now)
@@ -143,8 +129,7 @@ def validate_openwa_hmac(body: bytes, signature: str, secret: str) -> bool:
     """
     if not secret:
         logger.warning(
-            "OPENWA_WEBHOOK_SECRET no configurado — webhooks aceptados sin validación. "
-            "Esto es inseguro en producción."
+            "OPENWA_WEBHOOK_SECRET no configurado — webhooks aceptados sin validación. Esto es inseguro en producción."
         )
         return True
 
@@ -154,7 +139,7 @@ def validate_openwa_hmac(body: bytes, signature: str, secret: str) -> bool:
         hashlib.sha256,
     ).hexdigest()
 
-    return hmac_mod.compare_digest(expected, signature)
+    return hmac_mod.compare_digest(expected, signature.lower())
 
 
 async def verify_openwa_webhook(request: Request) -> dict[str, object]:
@@ -177,9 +162,7 @@ async def verify_openwa_webhook(request: Request) -> dict[str, object]:
 
     # Dev mode: sin secret configurado, aceptar sin validación HMAC.
     if not settings.openwa_webhook_secret:
-        logger.warning(
-            "OPENWA_WEBHOOK_SECRET no configurado — webhooks aceptados sin validación HMAC"
-        )
+        logger.warning("OPENWA_WEBHOOK_SECRET no configurado — webhooks aceptados sin validación HMAC")
     else:
         signature = request.headers.get("X-OpenWA-Signature", "")
         if not signature:

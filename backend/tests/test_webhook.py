@@ -87,6 +87,35 @@ async def test_webhook_firma_invalida_retorna_401(
 
 
 @pytest.mark.asyncio
+async def test_webhook_firma_mayuscula_es_valida(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Webhook con firma HMAC en mayúsculas debe ser aceptado (case-insensitive)."""
+    from app.main import app
+
+    monkeypatch.setattr(settings, "openwa_webhook_secret", "test-secret")
+    monkeypatch.setattr(settings, "openwa_api_key", "test-api-key")
+
+    payload = _load_fixture("text_message")
+    body = json.dumps(payload).encode("utf-8")
+    signature = _compute_hmac(body, "test-secret").upper()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/v1/webhook/whatsapp",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-OpenWA-Signature": signature,
+            },
+        )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_webhook_firma_valida_retorna_200(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -425,6 +454,25 @@ def test_is_audio_message_rechaza_sin_media() -> None:
     raw = _load_fixture("text_message")
     payload = WebhookPayload.model_validate(raw)
     assert _is_audio_message(payload) is False
+
+
+def test_get_audio_duration_ms_overflow_no_crash() -> None:
+    """_get_audio_duration_ms no debe explotar con OverflowError."""
+    from pathlib import Path
+
+    from app.api.webhooks import _get_audio_duration_ms
+
+    # Path inexistente → ffprobe falla → CalledProcessError → 0
+    result = _get_audio_duration_ms(Path("/tmp/no-existe-xyz.wav"))
+    assert result == 0
+
+
+def test_max_audio_size_constant() -> None:
+    """_MAX_AUDIO_SIZE_BYTES debe ser > 0 y representar 25 MB."""
+    from app.api.webhooks import _MAX_AUDIO_SIZE_BYTES
+
+    assert _MAX_AUDIO_SIZE_BYTES == 25 * 1024 * 1024
+    assert _MAX_AUDIO_SIZE_BYTES > 0
 
 
 def test_compute_hmac_consistente() -> None:

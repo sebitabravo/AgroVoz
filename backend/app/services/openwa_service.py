@@ -5,6 +5,7 @@ a través del gateway WhatsApp self-hosted.
 """
 
 import logging
+import re
 
 import httpx
 
@@ -39,6 +40,7 @@ class OpenWAService:
 
         Args:
             message_id: ID del mensaje en Open-WA (ej: "msg_abc123").
+                       Se sanitiza para prevenir path traversal.
 
         Returns:
             Contenido binario del archivo de audio (.ogg).
@@ -46,14 +48,15 @@ class OpenWAService:
         Raises:
             httpx.HTTPError: Si la API de Open-WA no responde o retorna error.
         """
-        url = f"{self._base_url}/api/sessions/default/messages/{message_id}/media"
+        safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "_", message_id) or "unknown"
+        url = f"{self._base_url}/api/sessions/default/messages/{safe_id}/media"
 
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.get(url, headers=self._headers())
             response.raise_for_status()
             logger.info(
                 "Audio descargado — message_id=%s size_bytes=%d",
-                message_id,
+                safe_id,
                 len(response.content),
             )
             return response.content

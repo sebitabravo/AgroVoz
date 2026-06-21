@@ -43,7 +43,7 @@ class Settings(BaseSettings):
 
     # ── Open-WA (gateway WhatsApp) ───────
     openwa_api_key: str = ""
-    openwa_webhook_secret: str = ""
+    openwa_webhook_secret: str = "dev-webhook-secret"
     openwa_api_url: str = "http://localhost:2785"
 
     # ── OpenWeatherMap ───────────────────
@@ -74,6 +74,51 @@ class Settings(BaseSettings):
 
     # ── Logging ──────────────────────────
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+
+    def validate_webhook_secret_not_default(self) -> None:
+        """Advierte o bloquea si openwa_webhook_secret es el default público o está vacío.
+
+        En development el default es aceptable.
+        En producción lanza ValueError (bloquea el arranque).
+        En test/CI emite RuntimeWarning (no bloquea tests).
+
+        El guard de secret vacío previene que Docker Compose pase ""
+        cuando OPENWA_WEBHOOK_SECRET no está seteado en Dokploy.
+        """
+        _default_secret = "dev-webhook-secret"
+
+        if not self.openwa_webhook_secret:
+            if self.app_env == "production":
+                raise ValueError(
+                    "OPENWA_WEBHOOK_SECRET está vacío. "
+                    "Debe setear OPENWA_WEBHOOK_SECRET con un valor secreto "
+                    "antes de desplegar a producción."
+                )
+            if self.app_env != "development":
+                warnings.warn(
+                    "OPENWA_WEBHOOK_SECRET está vacío. "
+                    "Cámbielo antes de desplegar a producción.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            return
+
+        if self.openwa_webhook_secret != _default_secret:
+            return  # Secret personalizado, todo OK
+
+        if self.app_env == "production":
+            raise ValueError(
+                "OPENWA_WEBHOOK_SECRET es el valor default público. "
+                "Debe setear OPENWA_WEBHOOK_SECRET con un valor secreto "
+                "antes de desplegar a producción."
+            )
+        if self.app_env != "development":
+            warnings.warn(
+                "OPENWA_WEBHOOK_SECRET es el valor default público. "
+                "Cámbielo antes de desplegar a producción.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
     def validate_pepper_not_default(self) -> None:
         """Advierte o bloquea si phone_hash_pepper es el default público o está vacío.
@@ -122,4 +167,5 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+settings.validate_webhook_secret_not_default()
 settings.validate_pepper_not_default()
