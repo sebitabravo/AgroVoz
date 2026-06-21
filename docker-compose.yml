@@ -62,9 +62,11 @@ services:
   # Backend se conecta directamente a http://openwa:8000 (red Docker interna).
   # Puerto bindeado solo a localhost por seguridad.
   #
-  # API_MASTER_KEY: seed de API key inicial. Solo se usa en el primer arranque (DB vacía).
-  #   Si no se setea y ALLOW_DEV_API_KEY=true, usa dev-admin-key (SOLO desarrollo).
-  #   Si no, auto-genera owa_k1_<random> y la muestra en logs + data/.api-key.
+  # API_MASTER_KEY: seed de API key inicial (SOLO primer arranque, DB vacía).
+  #   En desarrollo usamos dev-admin-key hardcodeado. Determinístico, sin depender
+  #   de sintaxis de substitución de Docker Compose que puede variar entre versiones.
+  #   Si querés sobreescribirlo, definí OPENWA_API_KEY en tu .env y cambiá esta línea
+  #   a: API_MASTER_KEY=${OPENWA_API_KEY:-dev-admin-key}
   # AUTO_START_SESSIONS: reconecta sesiones WhatsApp previas al reiniciar el contenedor.
   openwa:
     image: ghcr.io/rmyndharis/openwa:latest
@@ -74,7 +76,7 @@ services:
     environment:
       - NODE_ENV=development
       - DATABASE_TYPE=sqlite
-      - API_MASTER_KEY=${OPENWA_API_KEY:-8d83df90-24ff-4fd7-b2d1-1fa5fcec51d9}
+      - API_MASTER_KEY=dev-admin-key
       - ALLOW_DEV_API_KEY=true
       - AUTO_START_SESSIONS=true
       - WEBHOOK_URL=http://backend:8000/api/v1/webhook/whatsapp
