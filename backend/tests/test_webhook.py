@@ -18,6 +18,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.core.config import settings
+from app.services.tts_service import PiperModelNotFoundError
 
 
 def _load_fixture(name: str) -> dict[str, object]:
@@ -633,6 +634,7 @@ async def test_audio_service_process_audio_happy_path(
     )
 
     _mock_whisper_transcribe(monkeypatch)
+    _mock_tts_fallback(monkeypatch)
 
     # P1-5: Inyectar audio_temp_dir en vez de monkeypatch sobre _get_audio_temp_dir
     service = AudioService(audio_temp_dir=tmp_path)
@@ -657,6 +659,27 @@ async def test_audio_service_process_audio_happy_path(
 # monkeypatch reemplaza el metodo en la clase. Al llamar inst.method(arg),
 # Python pasa self automaticamente (las funciones son descriptores).
 # Por eso fake_transcribe recibe _self como primer parametro.
+def _mock_tts_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mockea TTSService.synthesize para que falle con PiperModelNotFoundError.
+
+    Esto fuerza el fallback a hello.ogg en tests que verifican el
+    comportamiento degradado del pipeline cuando TTS no esta disponible
+    (modelo no descargado, primer deploy, etc).
+    """
+
+    def fake_synthesize_fail(
+        _self: object, text: str, output_dir: str | Path | None = None
+    ) -> str:
+        raise PiperModelNotFoundError(
+            "Modelo Piper no encontrado (mock para test)"
+        )
+
+    monkeypatch.setattr(
+        "app.services.audio_service.TTSService.synthesize",
+        fake_synthesize_fail,
+    )
+
+
 def _mock_whisper_transcribe(monkeypatch: pytest.MonkeyPatch) -> None:
     """Mockea WhisperService.transcribe para tests de audio_service.
 
@@ -692,6 +715,7 @@ async def test_audio_service_hello_ogg_no_existe_no_crashea(
     monkeypatch.setattr("app.services.audio_service.convert_ogg_to_wav", fake_convert)
     monkeypatch.setattr("app.services.audio_service.get_audio_duration_ms", lambda wav_path: 3000)
     _mock_whisper_transcribe(monkeypatch)
+    _mock_tts_fallback(monkeypatch)
 
     # Apuntar a un archivo que NO existe
     monkeypatch.setattr(
@@ -737,6 +761,7 @@ async def test_audio_service_send_audio_falla_logs_pero_no_crashea(
     monkeypatch.setattr("app.services.audio_service.convert_ogg_to_wav", fake_convert)
     monkeypatch.setattr("app.services.audio_service.get_audio_duration_ms", lambda wav_path: 3000)
     _mock_whisper_transcribe(monkeypatch)
+    _mock_tts_fallback(monkeypatch)
 
     hello_ogg = tmp_path / "hello.ogg"
     hello_ogg.write_bytes(b"FAKE_HELLO_OGG")
