@@ -52,9 +52,17 @@ class Settings(BaseSettings):
     # ── ODEPA ────────────────────────────
     odepa_sync_hour: int = 6
     odepa_sync_minute: int = 0
-    # URL del CSV de precios ODEPA datos abiertos.
-    # Endpoint exacto validado por Matías; default apunta al portal.
-    odepa_csv_url: str = "https://datos.odepa.gob.cl/datos-abiertos"
+    # URL del CSV de precios mayoristas ODEPA (frutas y hortalizas).
+    # Dataset CKAN: precios-mayoristas-de-frutas-y-hortalizas
+    # La URL apunta al año actual. ODEPA publica un CSV por año, así que
+    # toca actualizar este valor anualmente (~enero de cada año).
+    # Sobrescribible con ODEPA_CSV_URL en .env
+    odepa_csv_url: str = (
+        "https://datos.odepa.gob.cl/dataset/"
+        "33f10516-acbe-4446-b633-68244b9b6b26/resource/"
+        "580beca0-e87e-4dd4-9e8a-0bd92773f4a6/download/"
+        "precio_mayorista_fruta-hortaliza_2026.csv"
+    )
     # Productos a sincronizar, separados por coma (lowercase).
     # MVP: solo papa. Expandible sin tocar codigo.
     odepa_productos: str = "papa"
