@@ -198,15 +198,35 @@ class TestUpsertPrices:
         insertados, actualizados = upsert_prices(db, [])
         assert (insertados, actualizados) == (0, 0)
 
-    def test_duplicados_en_batch_no_crashea(self, db: Session) -> None:
-        """Dos registros con misma tupla en un batch: ON CONFLICT resuelve sin error."""
+    def test_duplicados_en_batch_db_vacia_cuenta_un_insert(self, db: Session) -> None:
+        """Dos registros con misma tupla en un batch: 1 insert real, no 2.
+
+        El conteo debe reflejar lo que ON CONFLICT colapsa, no el largo
+        del batch. Gana la última aparición (precio 810).
+        """
         registros = [
             OdepaCsvRecord("papa", "Lo Valledor", Decimal("800"), "kg", datetime.date(2026, 6, 20)),
             OdepaCsvRecord("papa", "Lo Valledor", Decimal("810"), "kg", datetime.date(2026, 6, 20)),
         ]
-        upsert_prices(db, registros)
-        # ON CONFLICT deja una sola fila.
+        insertados, actualizados = upsert_prices(db, registros)
+
+        assert (insertados, actualizados) == (1, 0)
         assert db.query(OdepaPrice).count() == 1
+        assert db.query(OdepaPrice).one().precio_kg == Decimal("810")
+
+    def test_duplicados_en_batch_tupla_existente_cuenta_un_update(self, db: Session) -> None:
+        """Batch con dup intra-batch sobre tupla ya en DB: 1 update real."""
+        upsert_prices(db, [OdepaCsvRecord("papa", "Lo Valledor", Decimal("800"), "kg", datetime.date(2026, 6, 20))])
+
+        registros = [
+            OdepaCsvRecord("papa", "Lo Valledor", Decimal("850"), "kg", datetime.date(2026, 6, 20)),
+            OdepaCsvRecord("papa", "Lo Valledor", Decimal("870"), "kg", datetime.date(2026, 6, 20)),
+        ]
+        insertados, actualizados = upsert_prices(db, registros)
+
+        assert (insertados, actualizados) == (0, 1)
+        assert db.query(OdepaPrice).count() == 1
+        assert db.query(OdepaPrice).one().precio_kg == Decimal("870")
 
 
 class TestDownloadCsv:

@@ -214,14 +214,27 @@ def upsert_prices(
     Si la tupla existe, actualiza precio_kg y unidad: ODEPA puede corregir
     precios de una fecha ya publicada. updated_at no lleva onupdate (metadata
     append-only), así que conserva la fecha de inserción original.
+
+    Los duplicados intra-batch (misma tupla producto/mercado/fecha) se
+    deduplican antes del upsert: gana la última aparición, consistente con
+    el valor `excluded` que SQLite aplica en ON CONFLICT DO UPDATE. Sin esto,
+    el conteo de insertados/actualizados se inflaría, reportando operaciones
+    que ON CONFLICT colapsa en una sola.
     """
     if not registros:
         return (0, 0)
 
+    # Deduplica por (producto, mercado, fecha). Orden de dict preserva inserción;
+    # al reasignar la clave, el valor final es la última aparición del batch.
+    unicos: dict[tuple[str, str, datetime.date], OdepaCsvRecord] = {}
+    for r in registros:
+        unicos[(r.producto, r.mercado, r.fecha)] = r
+    registros_unicos = list(unicos.values())
+
     # Detecta tuplas existentes para diferenciar inserts de updates.
     # O(N) queries, pero N es chico para MVP (papa, ~decena de mercados).
     existentes: set[tuple[str, str, datetime.date]] = set()
-    for registro in registros:
+    for registro in registros_unicos:
         clave = (registro.producto, registro.mercado, registro.fecha)
         if clave in existentes:
             continue
@@ -242,7 +255,7 @@ def upsert_prices(
             "fecha": r.fecha,
             "fuente": "ODEPA",
         }
-        for r in registros
+        for r in registros_unicos
     ]
     stmt = sqlite_insert(OdepaPrice).values(valores)
     stmt = stmt.on_conflict_do_update(
@@ -256,9 +269,9 @@ def upsert_prices(
     session.commit()
 
     actualizados = sum(
-        1 for r in registros if (r.producto, r.mercado, r.fecha) in existentes
+        1 for r in registros_unicos if (r.producto, r.mercado, r.fecha) in existentes
     )
-    insertados = len(registros) - actualizados
+    insertados = len(registros_unicos) - actualizados
     return (insertados, actualizados)
 
 
