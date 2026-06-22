@@ -91,6 +91,20 @@ async def download_csv(url: str, timeout: float = _TIMEOUT_SEGUNDOS) -> str:
     texto = response.text
     if not texto.strip():
         raise OdepaSyncError("CSV ODEPA vacío")
+
+    # ODEPA es un portal gubernamental. Si cambia la URL o hay un error
+    # interno, puede devolver HTML en vez de CSV. Detectarlo temprano
+    # evita que el parser intente interpretar HTML como CSV y tire
+    # errores confusos como "sin columnas requeridas".
+    _prefix = texto.lstrip()[:256].lower()
+    if any(
+        marcador in _prefix
+        for marcador in ("<!doctype", "<html", "<head", "<body", "<meta", "<title")
+    ):
+        raise OdepaSyncError(
+            f"ODEPA devolvió HTML en vez de CSV. ¿Cambió la URL? ({url})"
+        )
+
     return texto
 
 

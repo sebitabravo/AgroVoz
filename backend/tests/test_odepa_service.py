@@ -384,6 +384,24 @@ class TestDownloadCsv:
         finally:
             await real_client.aclose()
 
+    async def test_respuesta_html_lanza_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Si ODEPA devuelve HTML (portal caído/URL cambiada), error claro."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200, text="<!DOCTYPE html><html><body>Error 404</body></html>"
+            )
+
+        fake_cls, real_client = _csv_fake_client(handler)
+        monkeypatch.setattr("app.services.odepa_service.httpx.AsyncClient", fake_cls)
+        try:
+            with pytest.raises(OdepaSyncError, match="HTML"):
+                await download_csv("https://fake.odepa.cl/csv")
+        finally:
+            await real_client.aclose()
+
 
 class TestSyncOdepa:
     """Orquestador sync_odepa con download_csv mockeado."""
