@@ -494,6 +494,7 @@ class TTSService:
             # los capture y caiga en fallback a hello.ogg. Si se propagara
             # CalledProcessError directo, saltaria el handler mas especifico
             # de process_audio() y el productor se quedaria sin respuesta.
+            ogg_path.unlink(missing_ok=True)  # Limpiar OGG parcial si ffmpeg creo el archivo antes de fallar
             logger.error(
                 "ffmpeg fallo en síntesis — tag=%s error=%s",
                 file_tag,
