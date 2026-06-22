@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import re
 import subprocess
+import threading
 import time
 import uuid
 import wave
@@ -84,14 +85,21 @@ class TTSService:
         self._model_path = model_path or settings.piper_model_path
         self._voice_name = settings.piper_voice or "es_ES-carlfm-x_low"
         self._model: PiperVoice | None = None
+        self._model_lock = threading.Lock()
 
     # ──────────────────────── Carga del modelo ────────────────────────
 
     def _load_model(self) -> PiperVoice:
-        """Carga el modelo Piper bajo demanda con cache singleton.
+        """Carga el modelo Piper bajo demanda con double-checked locking.
 
-        El `from piper import PiperVoice` es lazy (dentro de este metodo)
-        para que CI pueda ejecutar tests sin piper-tts instalado.
+        El modelo se cachea en self._model. La primera llamada lo carga
+        desde disco, las siguientes retornan la instancia cacheada.
+
+        Proteccion contra race condition: como synthesize() se ejecuta en
+        thread pool (via asyncio.to_thread), dos webhooks simultaneos post-
+        startup podrian ver self._model is None y cargar el modelo dos
+        veces (~100MB RAM extra). Un threading.Lock con double-checked
+        locking evita la doble carga sin serializar lecturas posteriores.
 
         Returns:
             Instancia de PiperVoice cargada.
@@ -103,12 +111,16 @@ class TTSService:
         if self._model is not None:
             return self._model
 
-        model_file = Path(self._model_path)
-        if not model_file.exists():
-            raise PiperModelNotFoundError(
-                f"Modelo Piper no encontrado en {self._model_path}. "
-                "Descarguelo con scripts/download_models.sh"
-            )
+        with self._model_lock:
+            if self._model is not None:
+                return self._model
+
+            model_file = Path(self._model_path)
+            if not model_file.exists():
+                raise PiperModelNotFoundError(
+                    f"Modelo Piper no encontrado en {self._model_path}. "
+                    "Descarguelo con scripts/download_models.sh"
+                )
 
         # Lazy import: evita que CI falle si piper-tts no esta instalado.
         from piper import PiperVoice

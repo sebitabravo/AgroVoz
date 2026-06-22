@@ -44,6 +44,9 @@ audio/
 *.ico
 *.webp
 
+# ── Debug artifacts ─────────────────
+openwa-login
+
 # ── Python ────────────────────────────
 __pycache__/
 *.py[cod]
