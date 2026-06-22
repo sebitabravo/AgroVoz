@@ -68,12 +68,13 @@ descargar_archivo() {
 
     # curl: -L seguir redirecciones, -o output, -# barra de progreso
     #       --retry 3 reintentos, --connect-timeout 60s
-    if curl -L -# -o "$destino" --retry 3 --connect-timeout 60 "$url" 2>&1; then
+    if curl --fail -L -# -o "$destino" --retry 3 --connect-timeout 60 "$url" 2>&1; then
         if [[ -s "$destino" ]]; then
             echo ""
             local tamaño
             tamaño=$(du -h "$destino" | cut -f1)
             info "$descripcion descargado: $(basename "$destino") ($tamaño)"
+            verificar_checksum "$destino" || return 1
             return 0
         else
             echo ""
@@ -87,8 +88,6 @@ descargar_archivo() {
         rm -f "$destino"
         return 1
     fi
-
-    verificar_checksum "$destino"
 }
 
 verificar_checksum() {
