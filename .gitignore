@@ -35,6 +35,18 @@ audio/
 # Archivos de audio estático comprometidos (respuestas pregrabadas)
 !/backend/app/static/*.ogg
 
+# ── Imágenes — Sesión QR WhatsApp, screenshots, assets binarios ──
+# El proyecto usa SVG inline (Lucide). No debe tener PNG en el repo.
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.webp
+
+# ── Debug artifacts ─────────────────
+openwa-login
+
 # ── Python ────────────────────────────
 __pycache__/
 *.py[cod]

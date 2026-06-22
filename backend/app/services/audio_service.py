@@ -20,6 +20,7 @@ import httpx
 from app.core.config import settings
 from app.core.phone_hash import hash_phone
 from app.services.openwa_service import OpenWAService
+from app.services.tts_service import PiperModelNotFoundError, TTSService
 from app.services.whisper_service import WhisperService
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,23 @@ _MAX_AUDIO_SIZE_BYTES = 25 * 1024 * 1024
 # 15s tarda ~30s en transcribir (justo el timeout). Limitamos a 12s para
 # dejar margen y evitar threads zombie que saturen el VPS.
 _MAX_WHISPER_AUDIO_MS = 12_000
+
+# Cache singleton de TTSService: el modelo Piper se carga UNA vez y se
+# reusa entre requests. Cada instancia nueva forzaria PiperVoice.load()
+# en cada webhook, sumando 1-3s de latencia extra (P1).
+_tts_service: TTSService | None = None
+
+
+def _get_tts_service() -> TTSService:
+    """Retorna la instancia singleton de TTSService.
+
+    El modelo Piper se carga lazy (primera llamada a synthesize) y
+    queda cacheado para todas las requests posteriores.
+    """
+    global _tts_service
+    if _tts_service is None:
+        _tts_service = TTSService()
+    return _tts_service
 
 
 def sanitize_message_id(message_id: str) -> str:
@@ -220,6 +238,26 @@ class AudioService:
         """
         self._audio_temp_dir = audio_temp_dir or _get_audio_temp_dir()
 
+    @staticmethod
+    def _build_response_text(transcribed_text: str) -> str:
+        """Construye el texto de respuesta a partir de la transcripcion.
+
+        En MVP, repite la transcripcion al productor para validar que el
+        pipeline completo funciona (bucle cerrado voz->texto->voz).
+        Cuando se integre el LLM, este metodo se reemplazara por la
+        invocacion al modelo con los resultados de precio/clima.
+
+        Args:
+            transcribed_text: Texto transcrito por Whisper.
+
+        Returns:
+            Texto listo para sintetizar con Piper.
+        """
+        return (
+            f"Usted dijo: {transcribed_text.strip()}. "
+            "Estamos procesando su consulta."
+        )
+
     async def process_audio(
         self,
         audio_bytes: bytes,
@@ -340,25 +378,61 @@ class AudioService:
                         request_id,
                     )
 
-            # Enviar respuesta de audio fija (hola mundo end-to-end).
-            # Punto de medicion de latencia E2E: desde recepcion del webhook hasta envio.
-            if _HELLO_OGG_PATH.exists():
+            # Sintetizar respuesta de audio con Piper TTS.
+            # Estrategia de fallback: si el modelo Piper no esta disponible
+            # (no descargado, primer deploy) o falla, se envia hello.ogg.
+            # Esto permite que el pipeline funcione sin modelo TTS durante
+            # desarrollo y CI.
+            response_ogg_path: str | None = None
+            if transcribed_text:
+                try:
+                    tts = _get_tts_service()
+                    if transcribed_text.strip():
+                        response_text = self._build_response_text(transcribed_text)
+                        # Piper TTS es CPU-bound (3-5s). Ejecutar en thread pool
+                        # para no bloquear el event loop. sin esto, 2+ mensajes
+                        # simultaneos encolan requests y degradan la respuesta.
+                        response_ogg_path = await asyncio.to_thread(
+                            tts.synthesize, response_text
+                        )
+                except (PiperModelNotFoundError, RuntimeError, ValueError, OSError) as exc:
+                    logger.warning(
+                        "TTS fallo — message_id=%s error=%s request_id=%s",
+                        message_id,
+                        exc,
+                        request_id,
+                    )
+
+            # Fallback a hello.ogg si TTS no genero audio
+            if response_ogg_path is None:
+                if _HELLO_OGG_PATH.exists():
+                    response_ogg_path = str(_HELLO_OGG_PATH)
+                else:
+                    logger.warning(
+                        "hello.ogg no encontrado — message_id=%s path=%s",
+                        message_id,
+                        _HELLO_OGG_PATH,
+                    )
+
+            # Enviar respuesta de audio
+            if response_ogg_path:
                 openwa = OpenWAService()
-                await openwa.send_audio(chat_id, str(_HELLO_OGG_PATH))
-                e2e_ms = int((time.monotonic() - start_time) * 1000)
-                logger.info(
-                    "Respuesta enviada — message_id=%s chat_id_hash=%s e2e_ms=%d request_id=%s",
-                    message_id,
-                    chat_id_hash,
-                    e2e_ms,
-                    request_id,
-                )
-            else:
-                logger.warning(
-                    "hello.ogg no encontrado — message_id=%s path=%s",
-                    message_id,
-                    _HELLO_OGG_PATH,
-                )
+                try:
+                    await openwa.send_audio(chat_id, response_ogg_path)
+                    e2e_ms = int((time.monotonic() - start_time) * 1000)
+                    logger.info(
+                        "Respuesta enviada — message_id=%s chat_id_hash=%s audio=%s e2e_ms=%d request_id=%s",
+                        message_id,
+                        chat_id_hash,
+                        Path(response_ogg_path).name,
+                        e2e_ms,
+                        request_id,
+                    )
+                finally:
+                    # Limpiar archivo TTS generado incluso si send_audio falla
+                    # (P2: cleanup garantizado, no solo en path exitoso)
+                    if response_ogg_path != str(_HELLO_OGG_PATH):
+                        Path(response_ogg_path).unlink(missing_ok=True)
 
         except (
             httpx.HTTPError,

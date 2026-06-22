@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     admin_api_key: str = ""
 
     # ── Modelos IA (paths) ───────────────
-    piper_model_path: str = "/app/models/es_ES-carlfm-x_low.voice"
+    piper_model_path: str = "models/es_ES-carlfm-x_low.onnx"
 
     # ── Seguridad ────────────────────────
     rate_limit_per_minute: int = 60
