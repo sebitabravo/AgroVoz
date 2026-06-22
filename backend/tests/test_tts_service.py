@@ -267,7 +267,7 @@ class TestTTSServiceSplitText:
         # Verificar que ningun numero quedo partido
         for chunk in chunks:
             assert "1." not in chunk or "1.500" in chunk or "1.200" in chunk
-            assert "1." not in chunk or "1.500" in chunk or "1.200" in chunk
+            assert "22." not in chunk or "22.5" in chunk
 
     def test_split_text_property_no_chunk_excede_limite(self) -> None:
         """Property test: ningun chunk debe exceder _MAX_PIPER_CHARS.
