@@ -203,7 +203,11 @@ def parse_csv(
             f"CSV ODEPA sin columnas requeridas: {faltantes}. Headers: {headers}"
         )
 
-    filtro = {p.lower() for p in productos_filter} if productos_filter else None
+    # None = sin filtro (sincroniza todo). Secuencia vacía = no sincronizar nada.
+    # Distinguir ambos es importante: settings.odepa_productos_list puede ser []
+    # si ODEPA_PRODUCTOS='' o ODEPA_PRODUCTOS=',' en .env.
+    filtro = None if productos_filter is None else {p.lower() for p in productos_filter}
+
     registros: list[OdepaCsvRecord] = []
 
     # num_fila empieza en 2: la línea 1 es el header del CSV.
@@ -211,7 +215,7 @@ def parse_csv(
         producto = (fila.get(col_producto) or "").strip().lower()
         if not producto:
             continue
-        if filtro and producto not in filtro:
+        if filtro is not None and producto not in filtro:
             continue
 
         mercado = (fila.get(col_mercado) or "").strip()

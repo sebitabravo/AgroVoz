@@ -213,6 +213,21 @@ class TestParseCsv:
         registros = parse_csv(contenido)
         assert len(registros) == 5
 
+    def test_filtro_lista_vacia_no_sincroniza_nada(self) -> None:
+        """productos_filter=[] no matchea ningún producto (filtro vacío, no sin filtro)."""
+        registros = parse_csv(_CSV_FIJO, productos_filter=[])
+        assert len(registros) == 0
+
+    def test_filtro_none_sincroniza_todo(self) -> None:
+        """productos_filter=None sincroniza todos los productos (5 filas)."""
+        registros = parse_csv(_CSV_FIJO, productos_filter=None)
+        assert len(registros) == 5
+
+    def test_filtro_con_string_vacio_no_sincroniza(self) -> None:
+        """productos_filter=[''] (ODEPA_PRODUCTOS=',') no matchea productos reales."""
+        registros = parse_csv(_CSV_FIJO, productos_filter=[""])
+        assert len(registros) == 0
+
 
 class TestUpsertPrices:
     """Upsert en odepa_prices: insert, update e idempotencia."""
