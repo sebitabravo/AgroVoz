@@ -31,6 +31,10 @@ MODELS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/models"
 PIPER_URL="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_ES/carlfm/x_low/es_ES-carlfm-x_low.onnx"
 PIPER_JSON_URL="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_ES/carlfm/x_low/es_ES-carlfm-x_low.onnx.json"
 
+# SHA256 de los modelos Piper (verificados al descargar)
+PIPER_ONNX_SHA256="d69677323a907cd4963f42b29c20a98b5d6bfa7f3e64df339915e4650c00d125"
+PIPER_JSON_SHA256="d9bdfa9ff01eb2bc9e62e7d2593939d1e4c4d8eb7cf75f972731539d12399966"
+
 FORCE=false
 PIPER_ONLY=false
 
@@ -50,7 +54,10 @@ header()  { echo -e "${BOLD}══ $* ══${RESET}"; }
 # ─── Funciones auxiliares ────────────────────────────────────────────────────
 
 mostrar_ayuda() {
-    sed -n '/^# =======/,/^# =======/p' "$0" | sed '1d;$d' | sed 's/^# //; s/^#$//'
+    # Extrae el bloque de comentarios entre el título y set -euo pipefail
+    sed -n '3,/^set -euo pipefail$/p' "$0" \
+        | sed '/^set -euo/d; /^# ====*/d' \
+        | sed 's/^# //; s/^#$//'
     exit 0
 }
 
@@ -58,6 +65,7 @@ descargar_archivo() {
     local url="$1"
     local destino="$2"
     local descripcion="$3"
+    local expected_hash="${4:-}"
 
     if [[ -f "$destino" && "$FORCE" != true ]]; then
         skip "$descripcion ya existe: $(basename "$destino")"
@@ -74,7 +82,7 @@ descargar_archivo() {
             local tamaño
             tamaño=$(du -h "$destino" | cut -f1)
             info "$descripcion descargado: $(basename "$destino") ($tamaño)"
-            verificar_checksum "$destino" || return 1
+            verificar_checksum "$destino" "$expected_hash" || return 1
             return 0
         else
             echo ""
@@ -92,20 +100,10 @@ descargar_archivo() {
 
 verificar_checksum() {
     local archivo="$1"
-    local checksums="$MODELS_DIR/checksums.sha256"
-
-    if [[ ! -f "$checksums" ]]; then
-        # Modo tolerante: si no existe el archivo de checksums, se salta
-        return 0
-    fi
-
-    local nombre
-    nombre=$(basename "$archivo")
-    local expected
-    expected=$(grep -E "^[0-9a-f]{64}  ${nombre}$" "$checksums" | cut -d' ' -f1)
+    local expected="$2"
 
     if [[ -z "$expected" ]]; then
-        # Archivo no listado en checksums — skip
+        # Sin hash de referencia, se salta verificacion
         return 0
     fi
 
@@ -140,8 +138,8 @@ descargar_piper() {
 
     mkdir -p "$MODELS_DIR"
 
-    descargar_archivo "$PIPER_URL" "$MODELS_DIR/es_ES-carlfm-x_low.onnx" "Modelo ONNX"
-    descargar_archivo "$PIPER_JSON_URL" "$MODELS_DIR/es_ES-carlfm-x_low.onnx.json" "Config JSON"
+    descargar_archivo "$PIPER_URL" "$MODELS_DIR/es_ES-carlfm-x_low.onnx" "Modelo ONNX" "$PIPER_ONNX_SHA256"
+    descargar_archivo "$PIPER_JSON_URL" "$MODELS_DIR/es_ES-carlfm-x_low.onnx.json" "Config JSON" "$PIPER_JSON_SHA256"
 
     echo ""
 }
