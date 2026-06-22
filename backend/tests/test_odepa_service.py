@@ -9,7 +9,7 @@ import datetime
 from collections.abc import Callable
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -121,6 +121,19 @@ class TestParsearPrecio:
         with pytest.raises(ValueError, match="inválido"):
             _parsear_precio("ABC")
 
+    def test_solo_simbolo_monetario_lanza_error(self) -> None:
+        """'$' o ' $' → normalización deja string vacío → error estructural."""
+        with pytest.raises(ValueError, match="inválido"):
+            _parsear_precio("$")
+        with pytest.raises(ValueError, match="inválido"):
+            _parsear_precio(" $")
+
+    def test_estructura_degenerada_lanza_error(self) -> None:
+        """Strings con estructura no numérica post-normalización."""
+        for invalido in ("1.5.0", "ABC", "1,2,3"):
+            with pytest.raises(ValueError, match="inválido"):
+                _parsear_precio(invalido)
+
 
 class TestParseCsv:
     """Parser CSV -> OdepaCsvRecord."""
@@ -227,6 +240,15 @@ class TestParseCsv:
         """productos_filter=[''] (ODEPA_PRODUCTOS=',') no matchea productos reales."""
         registros = parse_csv(_CSV_FIJO, productos_filter=[""])
         assert len(registros) == 0
+
+    def test_colision_columnas_lanza_error(self) -> None:
+        """Header con keywords de 2 roles (ej. 'precio_mercado') → OdepaSyncError."""
+        csv_colision = (
+            "producto,precio_mercado,precio,unidad,fecha\n"
+            "papa,Lo Valledor,800,kg,2026-06-20\n"
+        )
+        with pytest.raises(OdepaSyncError, match="Colisión"):
+            parse_csv(csv_colision)
 
 
 class TestUpsertPrices:
@@ -389,3 +411,22 @@ class TestSyncOdepa:
             new=AsyncMock(side_effect=OdepaSyncError("red caída")),
         ), pytest.raises(OdepaSyncError, match="red caída"):
             await sync_odepa(session=db)
+
+    async def test_sync_con_session_auto(self) -> None:
+        """sync_odepa(session=None) crea su propia sesión y la cierra."""
+        mock_session = MagicMock(spec=Session)
+        with (
+            patch(
+                "app.services.odepa_service.download_csv",
+                new=AsyncMock(return_value=_CSV_FIJO),
+            ),
+            patch(
+                "app.core.database.SessionLocal",
+                return_value=mock_session,
+            ),
+        ):
+            resultado = await sync_odepa(session=None)
+
+        assert isinstance(resultado, SyncResult)
+        assert resultado.insertados == 4
+        mock_session.close.assert_called_once()

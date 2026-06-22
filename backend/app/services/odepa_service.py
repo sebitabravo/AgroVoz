@@ -19,6 +19,7 @@ from decimal import Decimal, InvalidOperation
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy import tuple_ as sa_tuple
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
@@ -146,11 +147,16 @@ def _parsear_precio(valor: str) -> Decimal:
     """
     if not valor:
         raise ValueError("precio vacío")
-    limpio = _normalizar_precio(valor.strip())
+    original = valor.strip()
+    limpio = _normalizar_precio(original)
+    # Validación estructural: después de normalizar solo debe haber dígitos
+    # y a lo más un punto decimal. Cualquier otra cosa es ruido no parseable.
+    if not limpio.replace(".", "", 1).replace("-", "", 1).isdigit():
+        raise ValueError(f"precio inválido: {original!r}")
     try:
         return Decimal(limpio)
     except InvalidOperation as exc:
-        raise ValueError(f"precio inválido: {valor!r}") from exc
+        raise ValueError(f"precio inválido: {original!r}") from exc
 
 
 def _parsear_fecha(valor: str) -> datetime.date:
@@ -202,6 +208,29 @@ def parse_csv(
         raise OdepaSyncError(
             f"CSV ODEPA sin columnas requeridas: {faltantes}. Headers: {headers}"
         )
+
+    # mypy: tras el guard de faltantes, todas las columnas requeridas son str.
+    assert col_producto is not None
+    assert col_mercado is not None
+    assert col_precio is not None
+    assert col_fecha is not None
+
+    # Detecta colisiones: si dos roles apuntan al mismo header, el substring
+    # match de _resolver_columna produjo un falso positivo (ej. "precio_mercado"
+    # matchea "precio" y "mercado" a la vez). Esto corrompería datos silenciosamente.
+    roles_resueltos: dict[str, str] = {}
+    for rol, col in [
+        ("producto", col_producto),
+        ("mercado", col_mercado),
+        ("precio", col_precio),
+        ("fecha", col_fecha),
+    ]:
+        if col in roles_resueltos:
+            raise OdepaSyncError(
+                f"Colisión de columnas: header '{col}' resuelto como"
+                f" '{roles_resueltos[col]}' y '{rol}'. Headers: {headers}"
+            )
+        roles_resueltos[col] = rol
 
     # None = sin filtro (sincroniza todo). Secuencia vacía = no sincronizar nada.
     # Distinguir ambos es importante: settings.odepa_productos_list puede ser []
@@ -270,20 +299,17 @@ def upsert_prices(
         unicos[(r.producto, r.mercado, r.fecha)] = r
     registros_unicos = list(unicos.values())
 
-    # Detecta tuplas existentes para diferenciar inserts de updates.
-    # O(N) queries, pero N es chico para MVP (papa, ~decena de mercados).
-    existentes: set[tuple[str, str, datetime.date]] = set()
-    for registro in registros_unicos:
-        clave = (registro.producto, registro.mercado, registro.fecha)
-        if clave in existentes:
-            continue
-        q = select(OdepaPrice.id).where(
-            OdepaPrice.producto == registro.producto,
-            OdepaPrice.mercado == registro.mercado,
-            OdepaPrice.fecha == registro.fecha,
-        )
-        if session.scalars(q).first() is not None:
-            existentes.add(clave)
+    # Detecta tuplas existentes en 1 sola query para diferenciar inserts de updates.
+    # tuple_().in_() evita N SELECTs individuales al crecer el catálogo de productos.
+    claves = [(r.producto, r.mercado, r.fecha) for r in registros_unicos]
+    q = select(
+        OdepaPrice.producto, OdepaPrice.mercado, OdepaPrice.fecha
+    ).where(
+        sa_tuple(
+            OdepaPrice.producto, OdepaPrice.mercado, OdepaPrice.fecha
+        ).in_(claves)
+    )
+    existentes = {tuple(row) for row in session.execute(q).all()}
 
     valores = [
         {
@@ -347,6 +373,10 @@ async def sync_odepa(session: Session | None = None) -> SyncResult:
             settings.odepa_productos_list,
         )
         return SyncResult(insertados=insertados, actualizados=actualizados)
+    except Exception:
+        if cerrar:
+            session.rollback()
+        raise
     finally:
         if cerrar:
             session.close()

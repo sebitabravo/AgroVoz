@@ -18,6 +18,8 @@ import asyncio
 import logging
 import sys
 
+import sqlalchemy.exc
+
 from app.services.odepa_service import OdepaSyncError, sync_odepa
 
 logger = logging.getLogger(__name__)
@@ -30,9 +32,10 @@ async def _ejecutar() -> int:
     except OdepaSyncError as exc:
         logger.error("Sync ODEPA falló: %s", exc)
         return 1
-    except Exception:
-        # Excepción inesperada: loguea trace completo y exit 1.
-        logger.exception("Sync ODEPA falló con error inesperado")
+    except (sqlalchemy.exc.SQLAlchemyError, OSError, ValueError) as exc:
+        # Errores de BD/sistema inesperados: trace completo en log y exit 1.
+        # No se usa except Exception por convención del proyecto.
+        logger.exception("Sync ODEPA falló con error inesperado: %s", exc)
         return 1
 
     logger.info(

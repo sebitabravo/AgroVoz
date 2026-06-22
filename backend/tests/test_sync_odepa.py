@@ -33,13 +33,18 @@ class TestEjecutar:
         assert rc == 1
 
     async def test_excepcion_inesperada_devuelve_uno(self) -> None:
-        """Cualquier excepción no-OdepaSyncError también da exit 1 (cron lo reporta)."""
-        with patch(
-            "app.jobs.sync_odepa.sync_odepa",
-            new=AsyncMock(side_effect=RuntimeError("boom")),
+        """Excepción de BD/sistema (OSError) da exit 1 y loguea trace completo."""
+        with (
+            patch(
+                "app.jobs.sync_odepa.sync_odepa",
+                new=AsyncMock(side_effect=OSError("boom")),
+            ),
+            patch("app.jobs.sync_odepa.logger.exception") as mock_log,
         ):
             rc = await _ejecutar()
         assert rc == 1
+        mock_log.assert_called_once()
+        assert "Sync ODEPA falló con error inesperado" in mock_log.call_args[0][0]
 
 
 class TestMain:
