@@ -4,7 +4,9 @@ Usa mocks para evitar descargar el modelo (~500MB) en cada ejecucion de test.
 Usa audio sintetico generado con el modulo `wave` de la stdlib.
 """
 
+from collections.abc import Generator
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -13,7 +15,7 @@ from app.services.whisper_service import WhisperService, clear_model_cache
 
 
 @pytest.fixture(autouse=True)
-def _mock_whisper_import(mock_whisper: Mock) -> None:
+def _mock_whisper_import(mock_whisper: Mock) -> Generator[None, None, None]:
     """Auto-mockea WhisperService._import_whisper para que CI corra sin openai-whisper.
 
     Crea un modulo whisper simulado con load_model() que retorna mock_whisper.
@@ -49,7 +51,7 @@ def _generate_synthetic_wav(path: Path, duration_sec: float = 1.0) -> Path:
 
 
 @pytest.fixture(autouse=True)
-def _clean_cache() -> None:
+def _clean_cache() -> Generator[None, None, None]:
     """Limpia la cache de modelos antes y despues de cada test."""
     clear_model_cache()
     yield
@@ -152,7 +154,7 @@ class TestWhisperServiceTranscribe:
         assert not service.is_loaded
 
         service.transcribe(str(wav_path))
-        WhisperService._import_whisper.assert_called()
+        WhisperService._import_whisper.assert_called()  # type: ignore[attr-defined]
 
     def test_transcribe_reusa_cache(
         self,
@@ -166,7 +168,7 @@ class TestWhisperServiceTranscribe:
         s2.transcribe(str(wav_path))
 
         # WhisperService._import_whisper debe llamarse solo una vez (segunda usa cache)
-        assert WhisperService._import_whisper.call_count == 1
+        assert WhisperService._import_whisper.call_count == 1  # type: ignore[attr-defined]
 
     def test_transcribe_archivo_no_existe(self) -> None:
         """Debe lanzar FileNotFoundError si el archivo no existe."""
@@ -191,7 +193,8 @@ class TestWhisperServiceTranscribe:
         mock_model = MagicMock()
         mock_model.transcribe.side_effect = RuntimeError("Whisper crash")
         # Sobrescribir el return_value de load_model dentro del mock
-        WhisperService._import_whisper.return_value.load_model.return_value = mock_model
+        import_mock = cast(Mock, WhisperService._import_whisper)
+        import_mock.return_value.load_model.return_value = mock_model
 
         service = WhisperService()
         with pytest.raises(RuntimeError, match="Error de transcripcion"):
@@ -208,7 +211,8 @@ class TestWhisperServiceTranscribe:
             "language": "es",
             "segments": [],
         }
-        WhisperService._import_whisper.return_value.load_model.return_value = mock_model
+        import_mock = cast(Mock, WhisperService._import_whisper)
+        import_mock.return_value.load_model.return_value = mock_model
 
         service = WhisperService()
         result = service.transcribe(str(wav_path))
@@ -234,7 +238,7 @@ class TestWhisperServiceCache:
         s_tiny.transcribe(str(wav_path))
 
         # Dos modelos distintos = dos llamadas a WhisperService._import_whisper
-        assert WhisperService._import_whisper.call_count == 2
+        assert WhisperService._import_whisper.call_count == 2  # type: ignore[attr-defined]
 
 
 class TestDeviceDetection:
@@ -275,7 +279,7 @@ class TestWhisperServiceLoadModel:
         model = service._load_model()
 
         assert model is not None
-        WhisperService._import_whisper.assert_called_once()
+        WhisperService._import_whisper.assert_called_once()  # type: ignore[attr-defined]
 
     def test_load_model_reusa_cache(self) -> None:
         """_load_model debe reusar el modelo en cache."""
@@ -286,11 +290,12 @@ class TestWhisperServiceLoadModel:
         s2._load_model()
 
         # Mismo modelo = misma instancia (cache): _import_whisper solo una vez
-        assert WhisperService._import_whisper.call_count == 1
+        assert WhisperService._import_whisper.call_count == 1  # type: ignore[attr-defined]
 
     def test_load_model_distintos_modelos_no_comparten_cache(self) -> None:
         """Distintos nombres de modelo deben tener entradas separadas."""
-        WhisperService._import_whisper.return_value.load_model.side_effect = [
+        import_mock = cast(Mock, WhisperService._import_whisper)
+        import_mock.return_value.load_model.side_effect = [
             MagicMock(),
             MagicMock(),
         ]
@@ -302,5 +307,6 @@ class TestWhisperServiceLoadModel:
         m2 = s_tiny._load_model()
 
         assert m1 is not m2
-        assert WhisperService._import_whisper.call_count == 2
-        assert WhisperService._import_whisper.return_value.load_model.call_count == 2
+        import_mock = cast(Mock, WhisperService._import_whisper)
+        assert import_mock.call_count == 2
+        assert import_mock.return_value.load_model.call_count == 2

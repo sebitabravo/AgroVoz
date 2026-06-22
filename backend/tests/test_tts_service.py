@@ -186,8 +186,8 @@ class TestTTSServiceSplitText:
         assert TTSService._split_text("") == []
         assert TTSService._split_text("   ") == []
 
-    def test_split_text_por_oraciones(self) -> None:
-        """Texto con varias oraciones debe dividirse por oraciones."""
+    def test_split_text_corto_con_varias_oraciones_no_se_divide(self) -> None:
+        """Texto con varias oraciones cortas no debe dividirse si entra en un chunk."""
         text = "El precio de la papa es 500 pesos. El clima en Traiguen esta soleado."
         chunks = TTSService._split_text(text)
         assert len(chunks) == 1  # Ambas oraciones entran en un chunk
@@ -452,6 +452,104 @@ class TestTTSServiceSynthesize:
             result = service.synthesize("Hola mundo", output_dir=str(custom_dir))
 
         assert Path(result).parent == custom_dir
+
+    # ──────────────── Tests con numeros, simbolos y frases reales ────────────────
+
+    def test_synthesize_con_numeros_y_simbolos(
+        self,
+        tmp_audio_dir: Path,
+        mock_piper_voice: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """Sintesis con numeros chilenos y simbolos: $1.500, 25°C."""
+        model_path = _create_fake_model_file(tmp_path)
+
+        with patch(
+            "app.services.tts_service.TTSService._load_model",
+            return_value=mock_piper_voice,
+        ):
+            service = TTSService(model_path=str(model_path))
+            result = service.synthesize(
+                "$1.500 por kg a 25°C",
+                output_dir=tmp_audio_dir,
+            )
+
+        assert isinstance(result, str)
+        assert result.endswith(".ogg")
+        assert Path(result).exists()
+        assert Path(result).stat().st_size > 0
+
+    def test_synthesize_con_varios_simbolos(
+        self,
+        tmp_audio_dir: Path,
+        mock_piper_voice: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """Sintesis con CLP, temperatura, porcentaje juntos."""
+        model_path = _create_fake_model_file(tmp_path)
+
+        with patch(
+            "app.services.tts_service.TTSService._load_model",
+            return_value=mock_piper_voice,
+        ):
+            service = TTSService(model_path=str(model_path))
+            result = service.synthesize(
+                "El CLP $2.500 el kilo. Temperatura 25°C. Humedad 80%.",
+                output_dir=tmp_audio_dir,
+            )
+
+        assert isinstance(result, str)
+        assert result.endswith(".ogg")
+        assert Path(result).exists()
+        assert Path(result).stat().st_size > 0
+
+    def test_synthesize_frase_real_agrovoz(
+        self,
+        tmp_audio_dir: Path,
+        mock_piper_voice: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """Sintesis de la frase real que usa AgroVoz en produccion."""
+        model_path = _create_fake_model_file(tmp_path)
+
+        with patch(
+            "app.services.tts_service.TTSService._load_model",
+            return_value=mock_piper_voice,
+        ):
+            service = TTSService(model_path=str(model_path))
+            result = service.synthesize(
+                "El precio de la papa en Temuco es 500 pesos por kilo",
+                output_dir=tmp_audio_dir,
+            )
+
+        assert isinstance(result, str)
+        assert result.endswith(".ogg")
+        assert Path(result).exists()
+        assert Path(result).stat().st_size > 0
+
+    def test_synthesize_frase_con_medidas(
+        self,
+        tmp_audio_dir: Path,
+        mock_piper_voice: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """Sintesis con pesos por kg, temperatura decimal y humedad."""
+        model_path = _create_fake_model_file(tmp_path)
+
+        with patch(
+            "app.services.tts_service.TTSService._load_model",
+            return_value=mock_piper_voice,
+        ):
+            service = TTSService(model_path=str(model_path))
+            result = service.synthesize(
+                "La papa cuesta $1.500 por kg. Son 25.5°C con 80% de humedad.",
+                output_dir=tmp_audio_dir,
+            )
+
+        assert isinstance(result, str)
+        assert result.endswith(".ogg")
+        assert Path(result).exists()
+        assert Path(result).stat().st_size > 0
 
 
 # ───────────────────────── Tests de ffmpeg ─────────────────────────
