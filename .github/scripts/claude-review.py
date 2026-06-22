@@ -913,9 +913,19 @@ def _read_from_filesystem(file_path: str, line: int, context: int) -> str | None
         return None
 
     try:
-        with open(full_path) as f:
-            content = f.read()
+        with open(full_path, 'rb') as f:
+            raw = f.read()
     except (FileNotFoundError, PermissionError, OSError):
+        return None
+
+    # Detectar binario
+    if b'\x00' in raw:
+        print(f"   ⚠️  {file_path}: archivo binario detectado (null byte). Saltando contexto (filesystem).")
+        return None
+    try:
+        content = raw.decode('utf-8')
+    except UnicodeDecodeError:
+        print(f"   ⚠️  {file_path}: archivo binario detectado (no UTF-8). Saltando contexto (filesystem).")
         return None
 
     all_lines = content.split('\n')
@@ -937,16 +947,21 @@ def _read_from_filesystem(file_path: str, line: int, context: int) -> str | None
 
 
 def get_code_context(file_path: str, line: int, context: int = CODE_CONTEXT_LINES) -> str | None:
-    """Lee el archivo real en HEAD y retorna contexto con números de línea.
+    """Lee el archivo real en HEAD y retorna contexto con numeros de linea.
 
     Archivos <= WHOLE_FILE_MAX_LINES se devuelven COMPLETOS para que el verificador
     vea todo el control-flow (gates, `if:`, early returns). Archivos grandes usan
-    una ventana de ±`context` líneas alrededor de `line`.
+    una ventana de ±`context` lineas alrededor de `line`.
+
+    Maneja archivos binarios: si `git show` devuelve bytes no decodificables como
+    UTF-8, retorna None en vez de crashear con UnicodeDecodeError (como le pasaba
+    con `text=True` + openwa-qr-session.png).
     """
     try:
+        # Usar text=False para recibir bytes y poder detectar binarios
         result = subprocess.run(
             ["git", "show", f"HEAD:{file_path}"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=False, timeout=10,
         )
         if result.returncode != 0:
             # Archivo nuevo (no existe en HEAD) → intentar filesystem
@@ -958,7 +973,7 @@ def get_code_context(file_path: str, line: int, context: int = CODE_CONTEXT_LINE
         try:
             result = subprocess.run(
                 ["git", "show", f"HEAD:{file_path}"],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True, text=False, timeout=15,
             )
             if result.returncode != 0:
                 return _read_from_filesystem(file_path, line, context)
@@ -968,15 +983,26 @@ def get_code_context(file_path: str, line: int, context: int = CODE_CONTEXT_LINE
     except OSError:
         return None
 
-    # Protección OOM: si git show retorna un archivo enorme (ej: LLM alucinó path a modelo ML).
+    stdout = result.stdout
+
+    # Proteccion OOM: si git show retorna un archivo enorme (ej: LLM alucino path a modelo ML).
     # GitHub Actions runners tienen ~7 GB RAM — un archivo de 500 MB ya es peligroso.
-    stdout_size = len(result.stdout)
-    if stdout_size > MAX_FILE_SIZE_BYTES:
-        print(f"   ⚠️  {file_path}: {stdout_size / 1024 / 1024:.1f} MB — "
-              f"excede límite de {MAX_FILE_SIZE_BYTES // 1024 // 1024} MB. Saltando (OOM prevention).")
+    if len(stdout) > MAX_FILE_SIZE_BYTES:
+        print(f"   ⚠️  {file_path}: {len(stdout) / 1024 / 1024:.1f} MB — "
+              f"excede limite de {MAX_FILE_SIZE_BYTES // 1024 // 1024} MB. Saltando (OOM prevention).")
         return None
 
-    all_lines = result.stdout.split('\n')
+    # Detectar archivo binario: si contiene \x00 o no se puede decodificar como UTF-8
+    if b'\x00' in stdout:
+        print(f"   ⚠️  {file_path}: archivo binario detectado (null byte). Saltando contexto.")
+        return None
+    try:
+        text_content = stdout.decode('utf-8')
+    except UnicodeDecodeError:
+        print(f"   ⚠️  {file_path}: archivo binario detectado (no UTF-8). Saltando contexto.")
+        return None
+
+    all_lines = text_content.split('\n')
 
     # Strip trailing empty line (archivos con trailing newline producen N+1 elementos).
     # Sin esto, un archivo de 400 líneas exactas + \n final → 401 elementos y se trata
