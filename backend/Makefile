@@ -9,7 +9,7 @@
 #   make typecheck   — type checking (mypy strict)
 #   make clean       — limpiar artefactos
 
-.PHONY: install run test lint lint-fix typecheck clean db-init db-migrate db-downgrade download-models download-piper
+.PHONY: install run test lint lint-fix typecheck clean db-init db-migrate db-downgrade download-models download-piper sync-odepa
 
 install: ## Instalar dependencias de desarrollo
 	uv sync --extra dev
@@ -44,6 +44,9 @@ download-models: ## Descargar modelos IA (Piper TTS)
 
 download-piper: ## Descargar solo modelo Piper TTS
 	uv run bash scripts/download_models.sh --piper-only
+
+sync-odepa: ## Descargar CSV ODEPA y cargar precios en SQLite
+	uv run python -m app.jobs.sync_odepa
 
 clean: ## Limpiar __pycache__ y archivos .pyc
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

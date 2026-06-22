@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     # ── ODEPA ────────────────────────────
     odepa_sync_hour: int = 6
     odepa_sync_minute: int = 0
+    # URL del CSV de precios ODEPA datos abiertos.
+    # Endpoint exacto validado por Matías; default apunta al portal.
+    odepa_csv_url: str = "https://datos.odepa.gob.cl/datos-abiertos"
+    # Productos a sincronizar, separados por coma (lowercase).
+    # MVP: solo papa. Expandible sin tocar codigo.
+    odepa_productos: str = "papa"
 
     # ── Modelos IA ───────────────────────
     whisper_model: str = "small"
@@ -76,6 +82,11 @@ class Settings(BaseSettings):
 
     # ── Logging ──────────────────────────
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+
+    @property
+    def odepa_productos_list(self) -> list[str]:
+        """Lista de productos ODEPA normalizada (lowercase, sin espacios)."""
+        return [p.strip().lower() for p in self.odepa_productos.split(",") if p.strip()]
 
     def validate_webhook_secret_not_default(self) -> None:
         """Advierte o bloquea si openwa_webhook_secret es el default público o está vacío.

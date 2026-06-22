@@ -65,7 +65,7 @@ tunnel: ## ngrok para exponer webhook Open-WA local (test remoto)
 	ngrok http 8000
 
 sync-odepa: ## Forzar sincronización de precios ODEPA
-	cd backend && uv run python -m app.jobs.sync_odepa --force
+	cd backend && uv run python -m app.jobs.sync_odepa
 
 # ─────────────────────────────────────────────
 # Base de datos
