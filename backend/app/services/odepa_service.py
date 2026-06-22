@@ -106,12 +106,47 @@ def _resolver_columna(headers: Sequence[str], claves: tuple[str, ...]) -> str | 
     return None
 
 
+def _normalizar_precio(valor: str) -> str:
+    """Normaliza un string de precio a formato anglosajón para Decimal.
+
+    ODEPA es una institución chilena y sus CSVs pueden usar formato local:
+    punto como separador de miles y coma como decimal. Decimal de Python usa
+    formato anglosajón (punto = decimal), así que hay que normalizar antes.
+
+    Reglas (aplicadas tras quitar '$' y espacios):
+    - '1500'           -> '1500'      (sin cambio)
+    - '800,50'         -> '800.50'    (coma = decimal)
+    - '1.500'          -> '1500'      (punto = miles)
+    - '1.500.000'      -> '1500000'   (puntos = miles)
+    - '1.500,50'       -> '1500.50'   (punto=miles, coma=decimal)
+    - '800.50'         -> '800.50'    (anglosajón: 2 decimales, no miles)
+    """
+    limpio = valor.replace("$", "").replace(" ", "")
+
+    if "," in limpio:
+        # Coma presente => formato chileno. El punto (si lo hay) es miles.
+        return limpio.replace(".", "").replace(",", ".")
+
+    if "." in limpio:
+        # Solo punto: ambiguous. Si todos los grupos post-entero son de 3
+        # dígitos, es separador de miles ('1.500', '1.500.000'). Si no,
+        # se trata como decimal anglosajón ('800.50', '1.5').
+        partes = limpio.split(".")
+        grupos = partes[1:]
+        if grupos and all(g.isdigit() and len(g) == 3 for g in grupos):
+            return "".join(partes)
+
+    return limpio
+
+
 def _parsear_precio(valor: str) -> Decimal:
-    """Convierte string de precio a Decimal. Lanza ValueError si inválido."""
+    """Convierte string de precio a Decimal. Lanza ValueError si inválido.
+
+    Normaliza formato chileno (coma decimal, punto miles) antes de Decimal.
+    """
     if not valor:
         raise ValueError("precio vacío")
-    # Limpia símbolos de moneda y espacios. Mantiene separadores decimal/miles.
-    limpio = valor.strip().replace("$", "").replace(" ", "")
+    limpio = _normalizar_precio(valor.strip())
     try:
         return Decimal(limpio)
     except InvalidOperation as exc:

@@ -20,6 +20,8 @@ from app.services.odepa_service import (
     OdepaCsvRecord,
     OdepaSyncError,
     SyncResult,
+    _normalizar_precio,
+    _parsear_precio,
     download_csv,
     parse_csv,
     sync_odepa,
@@ -62,6 +64,62 @@ def _csv_fake_client(
             pass
 
     return _CtxAsyncClient, real_client
+
+
+class TestNormalizarPrecio:
+    """Normalización de formato numérico chileno a anglosajón."""
+
+    def test_entero_sin_separadores(self) -> None:
+        assert _normalizar_precio("1500") == "1500"
+
+    def test_coma_decimal(self) -> None:
+        """'800,50' (coma decimal) -> '800.50'."""
+        assert _normalizar_precio("800,50") == "800.50"
+
+    def test_punto_miles_simple(self) -> None:
+        """'1.500' (punto miles) -> '1500'."""
+        assert _normalizar_precio("1.500") == "1500"
+
+    def test_punto_miles_multiple(self) -> None:
+        """'1.500.000' (puntos miles) -> '1500000'."""
+        assert _normalizar_precio("1.500.000") == "1500000"
+
+    def test_punto_miles_y_coma_decimal(self) -> None:
+        """'1.500,50' (formato chileno completo) -> '1500.50'."""
+        assert _normalizar_precio("1.500,50") == "1500.50"
+
+    def test_decimal_anglosajon_intacto(self) -> None:
+        """'800.50' (2 decimales, no miles) se preserva."""
+        assert _normalizar_precio("800.50") == "800.50"
+
+    def test_simbolo_moneda_y_espacios(self) -> None:
+        """'$ 1.500' -> '1500'."""
+        assert _normalizar_precio("$ 1.500") == "1500"
+
+
+class TestParsearPrecio:
+    """_parsear_precio con formato chileno y casos inválidos."""
+
+    def test_punto_miles_a_decimal(self) -> None:
+        """'1.500' se interpreta como 1500, no como 1.5."""
+        assert _parsear_precio("1.500") == Decimal("1500")
+
+    def test_coma_decimal(self) -> None:
+        assert _parsear_precio("800,50") == Decimal("800.50")
+
+    def test_formato_chileno_completo(self) -> None:
+        assert _parsear_precio("1.500,50") == Decimal("1500.50")
+
+    def test_entero_plano(self) -> None:
+        assert _parsear_precio("800") == Decimal("800")
+
+    def test_vacio_lanza_value_error(self) -> None:
+        with pytest.raises(ValueError, match="vacío"):
+            _parsear_precio("")
+
+    def test_no_numerico_lanza_value_error(self) -> None:
+        with pytest.raises(ValueError, match="inválido"):
+            _parsear_precio("ABC")
 
 
 class TestParseCsv:
