@@ -53,6 +53,13 @@ async def client(tmp_path: Path) -> AsyncGenerator[AsyncClient, None]:
         f"sqlite:///{db_path}",
         connect_args={"check_same_thread": False},
     )
+
+    # Crear tablas para que los endpoints que tocan DB funcionen en tests.
+    from app.core.database import Base
+    from app.models import Consultation, OdepaPrice  # noqa: F401
+
+    Base.metadata.create_all(test_engine)
+
     test_session_local = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
     def override_get_db() -> Generator[Session, None, None]:
