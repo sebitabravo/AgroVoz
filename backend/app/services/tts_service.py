@@ -122,20 +122,21 @@ class TTSService:
                     "Descarguelo con scripts/download_models.sh"
                 )
 
-        # Lazy import: evita que CI falle si piper-tts no esta instalado.
-        from piper import PiperVoice
+            # Lazy import: evita que CI falle si piper-tts no esta instalado.
+            from piper import PiperVoice
 
-        logger.info(
-            "Cargando modelo Piper — path=%s voice=%s",
-            self._model_path,
-            self._voice_name,
-        )
-        start = time.monotonic()
+            logger.info(
+                "Cargando modelo Piper — path=%s voice=%s",
+                self._model_path,
+                self._voice_name,
+            )
+            start = time.monotonic()
 
-        self._model = PiperVoice.load(self._model_path, use_cuda=False)
+            self._model = PiperVoice.load(self._model_path, use_cuda=False)
 
-        elapsed = time.monotonic() - start
-        logger.info("Modelo Piper cargado en %.1fs", elapsed)
+            elapsed = time.monotonic() - start
+            logger.info("Modelo Piper cargado en %.1fs", elapsed)
+
         return self._model
 
     # ──────────────────────── Split de texto ────────────────────────
