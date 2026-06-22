@@ -64,16 +64,16 @@ def tmp_audio_dir(tmp_path: Path) -> Path:
 
 
 def _create_fake_model_file(tmp_path: Path) -> Path:
-    """Crea un archivo .voice ficticio para pruebas de carga de modelo.
+    """Crea un archivo .onnx ficticio para pruebas de carga de modelo.
 
-    Piper espera un archivo .voice (que contiene el modelo ONNX +
+    Piper espera un archivo .onnx (que contiene el modelo ONNX +
     config JSON). Para testing, creamos un archivo dummy que existe
     pero no es un modelo valido de Piper.
 
     Returns:
-        Path al archivo .voice ficticio.
+        Path al archivo .onnx ficticio.
     """
-    model_path = tmp_path / "es_ES-carlfm-x_low.voice"
+    model_path = tmp_path / "es_ES-carlfm-x_low.onnx"
     model_path.write_text("fake model content")
     return model_path
 
@@ -115,10 +115,10 @@ def _fake_synthesize_text(
 
 @pytest.fixture
 def fake_model_file(tmp_path: Path) -> Path:
-    """Crea un archivo .voice ficticio y configura settings para usarlo.
+    """Crea un archivo .onnx ficticio y configura settings para usarlo.
 
     Returns:
-        Path al archivo .voice.
+        Path al archivo .onnx.
     """
     return _create_fake_model_file(tmp_path)
 

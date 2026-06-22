@@ -68,7 +68,7 @@ class TTSService:
         ffmpeg -> .ogg opus 16kHz mono
 
     Attributes:
-        model_path: Ruta al archivo .voice del modelo Piper.
+        model_path: Ruta al archivo .onnx del modelo Piper.
         voice_name: Nombre de la voz configurada (ej: "es_ES-carlfm-x_low").
     """
 
@@ -79,7 +79,7 @@ class TTSService:
         en la primera llamada a synthesize().
 
         Args:
-            model_path: Ruta al archivo .voice de Piper.
+            model_path: Ruta al archivo .onnx de Piper.
                        Si es None, usa piper_model_path del settings.
         """
         self._model_path = model_path or settings.piper_model_path
@@ -105,7 +105,7 @@ class TTSService:
             Instancia de PiperVoice cargada.
 
         Raises:
-            PiperModelNotFoundError: Si el archivo .voice no existe en
+            PiperModelNotFoundError: Si el archivo .onnx no existe en
                                      la ruta configurada.
         """
         if self._model is not None:
@@ -523,7 +523,7 @@ class TTSService:
 
     @property
     def model_path(self) -> str:
-        """Ruta al archivo .voice del modelo Piper."""
+        """Ruta al archivo .onnx del modelo Piper."""
         return self._model_path
 
     @property
