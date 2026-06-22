@@ -9,7 +9,7 @@
 #   make typecheck   — type checking (mypy strict)
 #   make clean       — limpiar artefactos
 
-.PHONY: install run test lint lint-fix typecheck clean db-init db-migrate db-downgrade
+.PHONY: install run test lint lint-fix typecheck clean db-init db-migrate db-downgrade download-models download-piper
 
 install: ## Instalar dependencias de desarrollo
 	uv sync --extra dev
@@ -37,6 +37,13 @@ db-migrate: ## Generar migración con --autogenerate (msg requerido: make db-mig
 
 db-downgrade: ## Revertir última migración
 	uv run alembic downgrade -1
+
+download-models: ## Descargar modelos IA (Piper TTS)
+	@echo "=== Descargando modelos IA ==="
+	uv run bash scripts/download_models.sh
+
+download-piper: ## Descargar solo modelo Piper TTS
+	uv run bash scripts/download_models.sh --piper-only
 
 clean: ## Limpiar __pycache__ y archivos .pyc
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

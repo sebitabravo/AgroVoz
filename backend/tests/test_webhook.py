@@ -26,7 +26,9 @@ def _load_fixture(name: str) -> dict[str, object]:
     fixture_path = Path(__file__).parent / "fixtures" / "openwa_webhook_payload.json"
     with open(fixture_path) as f:
         data: dict[str, object] = json.load(f)
-    return dict(data[name])  # type: ignore[arg-type]
+    payload = data[name]
+    assert isinstance(payload, dict), f"Fixture '{name}' no es un dict"
+    return dict(payload)
 
 
 def _compute_hmac(body: bytes, secret: str) -> str:
@@ -357,7 +359,6 @@ async def test_openwa_send_audio_usa_contrato_documentado(
     tmp_path: Path,
 ) -> None:
     """send_audio debe enviar chatId + base64 + mimetype al top level, sin anidar."""
-    import app.services.openwa_service as svc
     from app.services.openwa_service import OpenWAService
 
     monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
@@ -372,7 +373,7 @@ async def test_openwa_send_audio_usa_contrato_documentado(
     mock_ctx = AsyncMock()
     mock_ctx.__aenter__.return_value = mock_client
     mock_ctx.__aexit__.return_value = None
-    monkeypatch.setattr(svc.httpx, "AsyncClient", lambda *a, **kw: mock_ctx)
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: mock_ctx)
 
     audio_file = tmp_path / "hello.ogg"
     audio_file.write_bytes(b"FAKE_HELLO_OGG")
@@ -454,14 +455,12 @@ def test_is_voice_message_acepta_voice_sin_media() -> None:
     assert _is_voice_message(payload) is True
 
 
-def test_get_audio_duration_ms_overflow_no_crash() -> None:
+def test_get_audio_duration_ms_overflow_no_crash(tmp_path: Path) -> None:
     """get_audio_duration_ms no debe explotar con OverflowError."""
-    from pathlib import Path
-
     from app.services.audio_service import get_audio_duration_ms
 
     # Path inexistente -> ffprobe falla -> CalledProcessError -> 0
-    result = get_audio_duration_ms(Path("/tmp/no-existe-xyz.wav"))
+    result = get_audio_duration_ms(tmp_path / "no-existe.wav")
     assert result == 0
 
 
@@ -769,7 +768,7 @@ def _mock_whisper_transcribe(monkeypatch: pytest.MonkeyPatch) -> None:
     audio_service para evitar cargar el modelo real.
     """
 
-    def fake_transcribe(_self: object, audio_path: str) -> dict:
+    def fake_transcribe(_self: object, audio_path: str) -> dict[str, object]:
         return {
             "text": "Hola esta es una prueba",
             "language": "es",
@@ -948,7 +947,7 @@ async def test_audio_service_process_audio_audio_largo_omite_whisper(
 
     whisper_called = False
 
-    def fake_transcribe(_self: object, audio_path: str) -> dict:
+    def fake_transcribe(_self: object, audio_path: str) -> dict[str, object]:
         nonlocal whisper_called
         whisper_called = True
         return {"text": "nunca deberia llamarse", "language": "es", "segments": [], "duration_ms": 0}
@@ -997,7 +996,7 @@ async def test_audio_service_process_audio_whisper_runtime_error_continua(
     hello_ogg.write_bytes(b"FAKE_HELLO_OGG")
     monkeypatch.setattr("app.services.audio_service._HELLO_OGG_PATH", hello_ogg)
 
-    def fake_transcribe_runtime_error(_self: object, audio_path: str) -> dict:
+    def fake_transcribe_runtime_error(_self: object, audio_path: str) -> dict[str, object]:
         raise RuntimeError("Error de transcripcion Whisper: OOM")
 
     monkeypatch.setattr(
@@ -1045,7 +1044,7 @@ async def test_audio_service_process_audio_whisper_timeout_continua(
     hello_ogg.write_bytes(b"FAKE_HELLO_OGG")
     monkeypatch.setattr("app.services.audio_service._HELLO_OGG_PATH", hello_ogg)
 
-    def fake_transcribe_timeout(_self: object, audio_path: str) -> dict:
+    def fake_transcribe_timeout(_self: object, audio_path: str) -> dict[str, object]:
         raise TimeoutError("transcripcion excedio timeout de 30s")
 
     monkeypatch.setattr(
