@@ -515,17 +515,24 @@ class TTSService:
             else:
                 self._concatenate_wavs(wav_paths, final_wav_path)
             self._convert_wav_to_ogg(final_wav_path, ogg_path)
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
             # Convertir errores de ffmpeg a RuntimeError para que audio_service.py
             # los capture y caiga en fallback a hello.ogg. Si se propagara
             # CalledProcessError directo, saltaria el handler mas especifico
             # de process_audio() y el productor se quedaria sin respuesta.
             ogg_path.unlink(missing_ok=True)  # Limpiar OGG parcial si ffmpeg creo el archivo antes de fallar
-            logger.error(
-                "ffmpeg fallo en síntesis — tag=%s error=%s",
-                file_tag,
-                exc,
-            )
+            if isinstance(exc, OSError):
+                logger.error(
+                    "ffmpeg no está instalado — tag=%s error=%s",
+                    file_tag,
+                    exc,
+                )
+            else:
+                logger.error(
+                    "ffmpeg fallo en síntesis — tag=%s error=%s",
+                    file_tag,
+                    exc,
+                )
             raise RuntimeError(f"ffmpeg fallo: {exc}") from exc
         finally:
             # Garantizar cleanup incluso si ffmpeg falla (P2)
