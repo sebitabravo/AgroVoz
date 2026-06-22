@@ -45,6 +45,23 @@ _MAX_AUDIO_SIZE_BYTES = 25 * 1024 * 1024
 # dejar margen y evitar threads zombie que saturen el VPS.
 _MAX_WHISPER_AUDIO_MS = 12_000
 
+# Cache singleton de TTSService: el modelo Piper se carga UNA vez y se
+# reusa entre requests. Cada instancia nueva forzaria PiperVoice.load()
+# en cada webhook, sumando 1-3s de latencia extra (P1).
+_tts_service: TTSService | None = None
+
+
+def _get_tts_service() -> TTSService:
+    """Retorna la instancia singleton de TTSService.
+
+    El modelo Piper se carga lazy (primera llamada a synthesize) y
+    queda cacheado para todas las requests posteriores.
+    """
+    global _tts_service
+    if _tts_service is None:
+        _tts_service = TTSService()
+    return _tts_service
+
 
 def sanitize_message_id(message_id: str) -> str:
     """Sanitiza un message_id reemplazando el numero de telefono con un hash.
@@ -369,7 +386,7 @@ class AudioService:
             response_ogg_path: str | None = None
             if transcribed_text:
                 try:
-                    tts = TTSService()
+                    tts = _get_tts_service()
                     if transcribed_text.strip():
                         response_text = self._build_response_text(transcribed_text)
                         response_ogg_path = tts.synthesize(response_text)

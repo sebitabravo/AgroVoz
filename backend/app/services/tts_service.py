@@ -16,6 +16,8 @@ que CI pueda ejecutar tests sin piper-tts instalado. Los tests mockean
 TTSService a nivel de metodo, no de modulo.
 """
 
+from __future__ import annotations
+
 import logging
 import re
 import subprocess
@@ -23,11 +25,14 @@ import time
 import uuid
 import wave
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from app.core.config import settings
+
+if TYPE_CHECKING:
+    from piper import PiperVoice
 
 logger = logging.getLogger(__name__)
 
@@ -78,11 +83,11 @@ class TTSService:
         """
         self._model_path = model_path or settings.piper_model_path
         self._voice_name = settings.piper_voice or "es_ES-carlfm-x_low"
-        self._model: Any | None = None
+        self._model: PiperVoice | None = None
 
     # ──────────────────────── Carga del modelo ────────────────────────
 
-    def _load_model(self) -> Any:
+    def _load_model(self) -> PiperVoice:
         """Carga el modelo Piper bajo demanda con cache singleton.
 
         El `from piper import PiperVoice` es lazy (dentro de este metodo)
@@ -443,7 +448,7 @@ class TTSService:
                 for p in wav_paths:
                     p.unlink(missing_ok=True)
                 raise
-            except Exception as exc:
+            except (RuntimeError, OSError, ValueError) as exc:
                 logger.exception(
                     "Error sintetizando fragmento %d/%d — text_len=%d",
                     i + 1,
@@ -457,22 +462,21 @@ class TTSService:
                     f"Error al sintetizar fragmento {i + 1}/{len(chunks)}"
                 ) from exc
 
-        # Concatenar fragmentos si hay mas de uno
+        # Concatenar fragmentos y convertir a .ogg
         final_wav_path = output_dir / f"tts_{file_tag}_final.wav"
-        if len(wav_paths) == 1:
-            wav_paths[0].rename(final_wav_path)
-        else:
-            self._concatenate_wavs(wav_paths, final_wav_path)
-            # Limpiar fragmentos individuales
+        ogg_path = output_dir / f"tts_{file_tag}.ogg"
+
+        try:
+            if len(wav_paths) == 1:
+                wav_paths[0].rename(final_wav_path)
+            else:
+                self._concatenate_wavs(wav_paths, final_wav_path)
+            self._convert_wav_to_ogg(final_wav_path, ogg_path)
+        finally:
+            # Garantizar cleanup incluso si ffmpeg falla (P2)
             for p in wav_paths:
                 p.unlink(missing_ok=True)
-
-        # Convertir .wav final a .ogg opus
-        ogg_path = output_dir / f"tts_{file_tag}.ogg"
-        self._convert_wav_to_ogg(final_wav_path, ogg_path)
-
-        # Limpiar .wav final
-        final_wav_path.unlink(missing_ok=True)
+            final_wav_path.unlink(missing_ok=True)
 
         elapsed = time.monotonic() - start
         ogg_size = ogg_path.stat().st_size
