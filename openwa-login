@@ -1,0 +1,35 @@
+- generic [ref=e6]:
+  - generic [ref=e7]:
+    - generic [ref=e8]:
+      - img "OpenWA" [ref=e9]
+      - generic [ref=e10]: v0.4.1 · 6/18/2026
+    - generic [ref=e11]:
+      - img [ref=e12]
+      - combobox "Language" [ref=e16] [cursor=pointer]:
+        - option "English" [selected]
+        - option "Español"
+        - option "עברית"
+        - option "简体中文"
+        - option "繁體中文"
+        - option "العربية"
+        - option "తెలుగు"
+        - option "Français"
+        - option "Italiano"
+    - generic [ref=e17]:
+      - generic [ref=e18]:
+        - generic [ref=e19]: API Key
+        - generic [ref=e20]:
+          - textbox "API Key" [ref=e21]:
+            - /placeholder: Enter your API key
+          - button "Show API key" [ref=e22] [cursor=pointer]:
+            - img [ref=e23]
+      - button "Connect" [ref=e26] [cursor=pointer]
+    - paragraph [ref=e27]:
+      - text: Need help?
+      - link "View Documentation" [ref=e28] [cursor=pointer]:
+        - /url: https://github.com/rmyndharis/OpenWA/blob/main/docs/01-project-overview.md
+  - contentinfo [ref=e29]:
+    - generic [ref=e30]: Made with ❤️ by Yudhi Armyndharis and the OpenWA Community
+    - link "GitHub" [ref=e31] [cursor=pointer]:
+      - /url: https://github.com/rmyndharis/OpenWA
+      - img [ref=e32]
