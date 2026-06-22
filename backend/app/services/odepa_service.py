@@ -354,6 +354,7 @@ async def sync_odepa(session: Session | None = None) -> SyncResult:
     else:
         cerrar = False
 
+    _ok = False
     try:
         contenido = await download_csv(settings.odepa_csv_url)
         registros = parse_csv(contenido, settings.odepa_productos_list)
@@ -363,6 +364,7 @@ async def sync_odepa(session: Session | None = None) -> SyncResult:
                 "Sync ODEPA: 0 registros tras filtro productos=%s",
                 settings.odepa_productos_list,
             )
+            _ok = True  # Sin cambios en DB, sesión limpia.
             return SyncResult()
 
         insertados, actualizados = upsert_prices(session, registros)
@@ -372,11 +374,10 @@ async def sync_odepa(session: Session | None = None) -> SyncResult:
             actualizados,
             settings.odepa_productos_list,
         )
+        _ok = True
         return SyncResult(insertados=insertados, actualizados=actualizados)
-    except Exception:
-        if cerrar:
-            session.rollback()
-        raise
     finally:
         if cerrar:
+            if not _ok:
+                session.rollback()
             session.close()
