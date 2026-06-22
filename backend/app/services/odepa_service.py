@@ -32,10 +32,13 @@ logger = logging.getLogger(__name__)
 _TIMEOUT_SEGUNDOS = 30
 
 # Substrings a buscar en cada header normalizado (strip + lower).
-# Si el header contiene alguno, se mapea a ese campo canónico.
+# COLS: cada tupla es un grupo de substrings a buscar en los headers (case-insensitive).
+# El orden de las claves dentro de cada tupla define prioridad: la primera que
+# matchea gana. Esto permite preferir "promedio" sobre "precio" cuando hay
+# múltiples columnas de precio (min, max, promedio) como en el CSV real de ODEPA.
 _COLUMNA_PRODUCTO = ("producto",)
 _COLUMNA_MERCADO = ("mercado", "lugar", "plaza", "feria")
-_COLUMNA_PRECIO = ("precio",)
+_COLUMNA_PRECIO = ("promedio", "precio")
 _COLUMNA_UNIDAD = ("unidad", "medida")
 _COLUMNA_FECHA = ("fecha", "día", "dia")
 
@@ -92,6 +95,13 @@ async def download_csv(url: str, timeout: float = _TIMEOUT_SEGUNDOS) -> str:
     if not texto.strip():
         raise OdepaSyncError("CSV ODEPA vacío")
 
+    # ODEPA publica CSVs con BOM UTF-8 (﻿). Sin stripping, el BOM se pega
+    # al primer header y csv.DictReader lo interpreta como parte del nombre
+    # de columna (ej. '﻿"Fecha"' en vez de 'Fecha'). El parser lo tolera
+    # porque las claves se buscan con substring, pero es frágil.
+    if texto.startswith("﻿"):
+        texto = texto[1:]
+
     # ODEPA es un portal gubernamental. Si cambia la URL o hay un error
     # interno, puede devolver HTML en vez de CSV. Detectarlo temprano
     # evita que el parser intente interpretar HTML como CSV y tire
@@ -109,15 +119,18 @@ async def download_csv(url: str, timeout: float = _TIMEOUT_SEGUNDOS) -> str:
 
 
 def _resolver_columna(headers: Sequence[str], claves: tuple[str, ...]) -> str | None:
-    """Devuelve el primer header que contiene alguna de las claves.
+    """Devuelve el primer header que contiene alguna de las claves, con prioridad.
+
+    Itera las *claves* en orden (prioridad), y para cada clave busca entre
+    los headers. La primera clave que matchea gana — esto permite preferir
+    "promedio" sobre "precio" cuando hay múltiples columnas de precio.
 
     Búsqueda case-insensitive sobre header normalizado (strip + lower).
-    Permite que ODEPA cambie 'precio' por 'precio_prom_may' sin romper el parser.
     """
-    for header in headers:
-        norm = header.strip().lower()
-        if any(clave in norm for clave in claves):
-            return header
+    for clave in claves:
+        for header in headers:
+            if clave in header.strip().lower():
+                return header
     return None
 
 
