@@ -250,6 +250,22 @@ class TestParseCsv:
         with pytest.raises(OdepaSyncError, match="Colisión"):
             parse_csv(csv_colision)
 
+    def test_prioriza_promedio_sobre_otros_precios(self) -> None:
+        """Con headers 'minimo', 'maximo', 'promedio', elige 'Precio promedio'.
+
+        El CSV real de ODEPA tiene 3 columnas de precio: mínimo, máximo y
+        promedio. 'promedio' matchea antes que 'precio' porque _COLUMNA_PRECIO
+        es ("promedio", "precio") y _resolver_columna itera claves primero.
+        """
+        csv_tres_precios = (
+            "producto,mercado,Precio minimo,Precio maximo,Precio promedio,unidad,fecha\n"
+            "papa,Lo Valledor,500,1200,800,kg,2026-06-20\n"
+        )
+        registros = parse_csv(csv_tres_precios)
+        assert len(registros) == 1
+        # Debe tomar "Precio promedio" (800), no "Precio minimo" (500)
+        assert registros[0].precio_kg == Decimal("800")
+
 
 class TestUpsertPrices:
     """Upsert en odepa_prices: insert, update e idempotencia."""
@@ -401,6 +417,36 @@ class TestDownloadCsv:
                 await download_csv("https://fake.odepa.cl/csv")
         finally:
             await real_client.aclose()
+
+    async def test_respuesta_con_bom_strippea_bom(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """BOM UTF-8 al inicio del CSV se elimina antes de retornar.
+
+        ODEPA publica CSVs con BOM. Si no se elimina, el BOM se pega al
+        primer header y csv.DictReader lo incluye en el nombre de columna.
+        download_csv() lo detecta con startswith('﻿') y lo corta.
+        """
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                text="﻿producto,mercado,precio,unidad,fecha\npapa,X,800,kg,2026-06-20\n",
+            )
+
+        fake_cls, real_client = _csv_fake_client(handler)
+        monkeypatch.setattr("app.services.odepa_service.httpx.AsyncClient", fake_cls)
+        try:
+            contenido = await download_csv("https://fake.odepa.cl/csv")
+        finally:
+            await real_client.aclose()
+
+        # El BOM no debe estar en el contenido retornado
+        assert not contenido.startswith("﻿")
+        # Y parse_csv debe poder leerlo sin problemas
+        registros = parse_csv(contenido)
+        assert len(registros) == 1
+        assert registros[0].producto == "papa"
 
 
 class TestSyncOdepa:
