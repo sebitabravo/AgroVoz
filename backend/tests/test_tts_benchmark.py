@@ -1,15 +1,19 @@
 """Benchmark de latencia para TTSService con modelo Piper real.
 
 Mide el tiempo de sintesis para 3 largos de texto distintos.
+Incluye warm-up para descartar overhead de carga del modelo ONNX.
 Se salta si el modelo no esta descargado.
 
 Uso:
     uv run pytest tests/test_tts_benchmark.py -v
 
-Targets MVP:
+Targets MVP (medidos con warm-up):
     - <20 palabras:  < 4s
     - 30-40 palabras: < 6s
     - 70-80 palabras: < 10s
+
+Nota: las latencias dependen del hardware del runner (CPU, RAM).
+Los targets estan calibrados para Hetzner CX43 (8 vCPU, 16 GB RAM).
 """
 
 import logging
@@ -31,12 +35,29 @@ skip_msg = (
 )
 
 
+# Instancia compartida de TTSService (carga el modelo una sola vez)
+_TTS_SERVICE: TTSService | None = None
+
+
+def _get_tts_service() -> TTSService:
+    global _TTS_SERVICE
+    if _TTS_SERVICE is None:
+        _TTS_SERVICE = TTSService(model_path=str(MODEL_PATH))
+    return _TTS_SERVICE
+
+
+def _warmup(tts_service: TTSService, benchmark_dir: Path) -> None:
+    """Sintetiza un texto corto para descartar cold start."""
+    tts_service.synthesize("Warm up.", output_dir=benchmark_dir)
+
+
 @pytest.mark.skipif(not MODEL_AVAILABLE, reason=skip_msg)
 class TestPiperLatencyBenchmark:
     """Benchmark de latencia de sintesis con modelo Piper real.
 
-    Mide el tiempo real de sintesis para textos de distinta longitud.
-    Se ejecuta solo si el modelo ONNX esta presente en backend/models/.
+    Usa un solo TTSService para toda la clase (warm-up incluido).
+    Las mediciones descartan el overhead de carga del modelo ONNX
+    para reflejar latencia real de sintesis.
     """
 
     # ─── Textos de prueba ────────────────────────────────────────────
@@ -66,9 +87,14 @@ class TestPiperLatencyBenchmark:
     # ─── Tests ────────────────────────────────────────────────────────
 
     def _ejecutar_benchmark(
-        self, texto: str, target_segundos: float, benchmark_dir: Path
+        self,
+        texto: str,
+        target_segundos: float,
+        benchmark_dir: Path,
     ) -> None:
         """Ejecuta una medicion de latencia para un texto dado.
+
+        El servicio se obtiene de _get_tts_service() con warm-up previo.
 
         Args:
             texto: Texto a sintetizar.
@@ -79,8 +105,7 @@ class TestPiperLatencyBenchmark:
             AssertionError: Si la latencia supera el target o el archivo
                           de salida no es valido.
         """
-        # Instanciar servicio con modelo real
-        service = TTSService(model_path=str(MODEL_PATH))
+        service = _get_tts_service()
 
         # Medicion
         inicio = time.monotonic()
@@ -113,12 +138,15 @@ class TestPiperLatencyBenchmark:
 
     def test_latencia_texto_corto(self, benchmark_dir: Path) -> None:
         """Texto corto (<20 palabras) debe sintetizar en <4s."""
+        _warmup(_get_tts_service(), benchmark_dir)
         self._ejecutar_benchmark(self.TEXTO_CORTO, 4.0, benchmark_dir)
 
     def test_latencia_texto_medio(self, benchmark_dir: Path) -> None:
         """Texto medio (30-40 palabras) debe sintetizar en <6s."""
+        _warmup(_get_tts_service(), benchmark_dir)
         self._ejecutar_benchmark(self.TEXTO_MEDIO, 6.0, benchmark_dir)
 
     def test_latencia_texto_largo(self, benchmark_dir: Path) -> None:
         """Texto largo (70-80 palabras) debe sintetizar en <10s."""
+        _warmup(_get_tts_service(), benchmark_dir)
         self._ejecutar_benchmark(self.TEXTO_LARGO, 10.0, benchmark_dir)
