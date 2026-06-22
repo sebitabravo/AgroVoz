@@ -417,20 +417,22 @@ class AudioService:
             # Enviar respuesta de audio
             if response_ogg_path:
                 openwa = OpenWAService()
-                await openwa.send_audio(chat_id, response_ogg_path)
-                e2e_ms = int((time.monotonic() - start_time) * 1000)
-                logger.info(
-                    "Respuesta enviada — message_id=%s chat_id_hash=%s audio=%s e2e_ms=%d request_id=%s",
-                    message_id,
-                    chat_id_hash,
-                    Path(response_ogg_path).name,
-                    e2e_ms,
-                    request_id,
-                )
-
-                # Limpiar archivo TTS generado (no limpiar hello.ogg que es static)
-                if response_ogg_path != str(_HELLO_OGG_PATH):
-                    Path(response_ogg_path).unlink(missing_ok=True)
+                try:
+                    await openwa.send_audio(chat_id, response_ogg_path)
+                    e2e_ms = int((time.monotonic() - start_time) * 1000)
+                    logger.info(
+                        "Respuesta enviada — message_id=%s chat_id_hash=%s audio=%s e2e_ms=%d request_id=%s",
+                        message_id,
+                        chat_id_hash,
+                        Path(response_ogg_path).name,
+                        e2e_ms,
+                        request_id,
+                    )
+                finally:
+                    # Limpiar archivo TTS generado incluso si send_audio falla
+                    # (P2: cleanup garantizado, no solo en path exitoso)
+                    if response_ogg_path != str(_HELLO_OGG_PATH):
+                        Path(response_ogg_path).unlink(missing_ok=True)
 
         except (
             httpx.HTTPError,

@@ -459,6 +459,7 @@ class TTSService:
                 # PiperModelNotFoundError se propaga sin wrapper para que
                 # el caller pueda distinguir "modelo no disponible" de
                 # "error de sintesis" y hacer fallback a hello.ogg.
+                wav_path.unlink(missing_ok=True)
                 for p in wav_paths:
                     p.unlink(missing_ok=True)
                 raise
@@ -469,7 +470,9 @@ class TTSService:
                     len(chunks),
                     len(chunk),
                 )
-                # Cleanup: eliminar WAVs generados hasta ahora
+                # Cleanup: eliminar WAV parcial (si _synthesize_wav creo
+                # el archivo pero fallo en writeframes) + WAVs previos
+                wav_path.unlink(missing_ok=True)
                 for p in wav_paths:
                     p.unlink(missing_ok=True)
                 raise RuntimeError(
@@ -530,12 +533,3 @@ class TTSService:
     def voice_name(self) -> str:
         """Nombre de la voz configurada."""
         return self._voice_name
-
-
-def clear_model_cache() -> None:
-    """Limpia la cache del modelo Piper. Util en tests para forzar recarga.
-
-    Como el modelo se cachea por instancia (no hay cache global como
-    en Whisper), este metodo es principalmente un marcador para tests.
-    """
-    logger.debug("Cache de modelo Piper limpiada")

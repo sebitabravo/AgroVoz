@@ -492,15 +492,3 @@ class TestSentenceSplitRegex:
         result = _SENTENCE_SPLIT_RE.split(text)
         assert result == ["Hola mundo esto es una prueba"]
 
-
-# ───────────────────────── Tests de cleanup de cache ─────────────────────────
-
-
-class TestTTSServiceCleanup:
-    """Tests de limpieza del modelo (compatibilidad con patron Whisper)."""
-
-    def test_clear_model_cache_no_errors(self) -> None:
-        """clear_model_cache no debe lanzar errores (marcador de tests)."""
-        from app.services.tts_service import clear_model_cache
-
-        clear_model_cache()  # No-op, solo verificar que no explota
