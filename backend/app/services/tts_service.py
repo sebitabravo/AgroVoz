@@ -44,7 +44,12 @@ _MAX_PIPER_CHARS = 500
 
 # Regex para dividir texto en oraciones. Preserva el signo de puntuacion
 # como parte de la oracion anterior.
-_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+#
+# NO divide en numeros chilenos (1.500, 2.500 kg, $15.000) gracias al
+# negative lookbehind (?<!\d\.) que evita dividir despues de un punto
+# precedido por digito. Sin esto, "El precio es 1.500 pesos" se dividiria
+# en ["El precio es 1.", "500 pesos"].
+_SENTENCE_SPLIT_RE = re.compile(r"(?:(?<=[!?])|(?:(?<=\.)(?<!\d\.)))\s+")
 
 # Tipo numpy para audio float32 (como lo entrega Piper).
 _NP_FLOAT = np.float32
@@ -437,6 +442,27 @@ class TTSService:
 
         # Dividir texto largo en fragmentos
         chunks = self._split_text(text)
+
+        # Defensa en profundidad: _split_text no deberia devolver chunks
+        # > _MAX_PIPER_CHARS, pero si lo hace (edge case no cubierto),
+        # se subdividen forzadamente para evitar que Piper falle.
+        safe_chunks: list[str] = []
+        for c in chunks:
+            if len(c) <= _MAX_PIPER_CHARS:
+                safe_chunks.append(c)
+            else:
+                logger.warning(
+                    "_split_text devolvio chunk de %d chars > max %d — "
+                    "forzando subdivision (texto=%s...)",
+                    len(c),
+                    _MAX_PIPER_CHARS,
+                    c[:_MAX_PIPER_CHARS],
+                )
+                for j in range(0, len(c), _MAX_PIPER_CHARS):
+                    sub = c[j : j + _MAX_PIPER_CHARS].strip()
+                    if sub:
+                        safe_chunks.append(sub)
+        chunks = safe_chunks
         logger.info(
             "Sintetizando texto — text_len=%d chunks=%d",
             len(text),

@@ -240,6 +240,76 @@ class TestTTSServiceSplitText:
         assert "cebolla" in chunks[0]
         assert "Traiguen" in chunks[-1]
 
+    def test_split_text_numeros_chilenos_no_separan(self) -> None:
+        """Numeros chilenos (1.500, $2.500) no deben partirse por el punto."""
+        text = (
+            "El precio de la papa es $1.500 pesos por kilo. "
+            "La cebolla cuesta 2.500 pesos. "
+            "Hay 15.000 personas en la feria."
+        )
+        chunks = TTSService._split_text(text)
+        # Todo entra en un chunk
+        assert len(chunks) == 1
+        assert "1.500" in chunks[0]
+        assert "2.500" in chunks[0]
+        assert "15.000" in chunks[0]
+
+    def test_split_text_numeros_mixtos_con_oraciones(self) -> None:
+        """Numeros + oraciones largas: no deben romperse los numeros."""
+        text = (
+            "Ayer el precio de la papa en la feria de Santiago fue de 1.500 pesos por kilo. "
+            "Hoy bajo a 1.200 pesos. "
+            "El clima en Traiguen esta nublado con maxima de 22.5 grados."
+        )
+        chunks = TTSService._split_text(text)
+        for chunk in chunks:
+            assert len(chunk) <= _MAX_PIPER_CHARS
+        # Verificar que ningun numero quedo partido
+        for chunk in chunks:
+            assert "1." not in chunk or "1.500" in chunk or "1.200" in chunk
+            assert "1." not in chunk or "1.500" in chunk or "1.200" in chunk
+
+    def test_split_text_property_no_chunk_excede_limite(self) -> None:
+        """Property test: ningun chunk debe exceder _MAX_PIPER_CHARS.
+
+        Cubre edge cases que _split_text podria no manejar:
+        - Sin puntuacion (no hay . ! ? para dividir)
+        - Solo comas (sin oraciones completas)
+        - Palabras ultra-largas (sola palabra > limite)
+        - Puntuacion repetida (!!!, ...)
+        - Texto que empieza con numero (500 pesos -> periodo como separador de miles)
+        """
+        cases = [
+            # Sin puntuacion — solo fallback por caracteres
+            "a" * (_MAX_PIPER_CHARS + 100),
+            # Solo comas, sin punto final
+            "manzana, pera, platano, uva, fresa, sandia, melon, kiwi, mango, papaya, "
+            "cereza, durazno, ciruela, granada, higo, lima, limon, mandarina, naranja, "
+            "pomelo, toronja, maracuya, lulo, carambola, guanabana, tamarindo, zapote, "
+            "chirimoya, pitahaya, coco, acai, arandano, frambuesa, mora, grosella, "
+            "casis, ruibarbo, jengibre, curcuma, anis, cilantro, perejil, albahaca, "
+            "menta, oregano, tomillo, romero, laurel, salvia, estragon, eneldo",
+            # Palabra ultra-larga (supera el limite sola)
+            "g" * (_MAX_PIPER_CHARS + 50),
+            # Puntuacion repetida
+            "Hola!!! Como estas??? Bien... Esto es una prueba enorme " * 20,
+            # Texto con numeros mixtos sin puntuacion
+            "precio 1.500 2.500 3.000 4.500 10.000 15.000 20.000 " * 30,
+            # Oracion sin comas que excede el limite
+            "El precio de la papa en la feria de Santiago centro " * 50,
+            # Mezcla de todo
+            "El precio es 1.500 pesos!!! Como estamos? Bien... " * 30,
+        ]
+
+        for i, text in enumerate(cases):
+            chunks = TTSService._split_text(text)
+            assert len(chunks) >= 1, f"Case {i}: debio producir al menos 1 chunk"
+            for j, chunk in enumerate(chunks):
+                assert len(chunk) <= _MAX_PIPER_CHARS, (
+                    f"Case {i}, chunk {j}: {len(chunk)} chars excede limite "
+                    f"de {_MAX_PIPER_CHARS}. Texto: {chunk[:_MAX_PIPER_CHARS]}..."
+                )
+
 
 # ───────────────────────── Tests de sintesis (con mocks) ─────────────────────────
 
@@ -491,4 +561,18 @@ class TestSentenceSplitRegex:
         text = "Hola mundo esto es una prueba"
         result = _SENTENCE_SPLIT_RE.split(text)
         assert result == ["Hola mundo esto es una prueba"]
+
+    def test_no_split_numeros_chilenos(self) -> None:
+        """Numeros chilenos ($1.500, 2.500 kg) no deben dividirse por el punto.
+
+        El punto como separador de miles (1.500) es indistinguible del
+        punto como fin de oracion para una regex ingenua. El negative
+        lookbehind (?<!\\d\\.) evita dividir en estos casos.
+        """
+        text = "El precio es $1.500 pesos. La papa cuesta 2.500."
+        result = _SENTENCE_SPLIT_RE.split(text)
+        assert result == [
+            "El precio es $1.500 pesos.",
+            "La papa cuesta 2.500.",
+        ]
 
