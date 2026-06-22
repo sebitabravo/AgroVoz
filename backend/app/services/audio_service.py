@@ -389,7 +389,12 @@ class AudioService:
                     tts = _get_tts_service()
                     if transcribed_text.strip():
                         response_text = self._build_response_text(transcribed_text)
-                        response_ogg_path = tts.synthesize(response_text)
+                        # Piper TTS es CPU-bound (3-5s). Ejecutar en thread pool
+                        # para no bloquear el event loop. sin esto, 2+ mensajes
+                        # simultaneos encolan requests y degradan la respuesta.
+                        response_ogg_path = await asyncio.to_thread(
+                            tts.synthesize, response_text
+                        )
                 except (PiperModelNotFoundError, RuntimeError, ValueError, OSError) as exc:
                     logger.warning(
                         "TTS fallo — message_id=%s error=%s request_id=%s",

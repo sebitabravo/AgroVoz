@@ -244,8 +244,9 @@ class TTSService:
             [chunk.audio_float_array for chunk in chunks]
         )
 
-        # Convertir float32 [-1, 1] a int16 PCM
-        audio_int16 = (audio_float * 32767).astype(np.int16)
+        # Convertir float32 [-1, 1] a int16 PCM con clip para evitar
+        # overflow/underflow audible si Piper produce valores fuera de rango
+        audio_int16 = np.clip(audio_float * 32767, -32768, 32767).astype(np.int16)
 
         with wave.open(str(output_path), "wb") as wav_file:
             wav_file.setnchannels(channels)
@@ -472,6 +473,17 @@ class TTSService:
             else:
                 self._concatenate_wavs(wav_paths, final_wav_path)
             self._convert_wav_to_ogg(final_wav_path, ogg_path)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            # Convertir errores de ffmpeg a RuntimeError para que audio_service.py
+            # los capture y caiga en fallback a hello.ogg. Si se propagara
+            # CalledProcessError directo, saltaria el handler mas especifico
+            # de process_audio() y el productor se quedaria sin respuesta.
+            logger.error(
+                "ffmpeg fallo en síntesis — tag=%s error=%s",
+                file_tag,
+                exc,
+            )
+            raise RuntimeError(f"ffmpeg fallo: {exc}") from exc
         finally:
             # Garantizar cleanup incluso si ffmpeg falla (P2)
             for p in wav_paths:
