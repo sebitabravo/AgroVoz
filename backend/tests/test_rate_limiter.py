@@ -16,7 +16,6 @@ from app.core.rate_limiter import WeatherSlidingWindow, _weather_limiter, check_
 from app.main import app
 from app.services.weather_service import WeatherData
 
-
 # ── Fixtures ───────────────────────────────────────────────────────
 
 

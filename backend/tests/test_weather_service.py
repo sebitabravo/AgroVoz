@@ -669,3 +669,42 @@ class TestClearCache:
             assert ws._cache_key(-53.15, -70.90) in ws._cache
         finally:
             await mock_client.aclose()
+
+    async def test_cache_ttl_expira_y_refresca(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Entrada de cache expira tras _CACHE_TTL_SECONDS y se refresca vía API."""
+        monkeypatch.setattr(
+            "app.services.weather_service.settings.openweathermap_api_key", "test-key"
+        )
+
+        # Reloj fake: lista mutable para que el handler y _cache_* compartan
+        # la misma referencia. time.monotonic() retorna t[0].
+        t = [1000.0]
+        monkeypatch.setattr("app.services.weather_service.time.monotonic", lambda: t[0])
+
+        call_count = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal call_count
+            call_count += 1
+            return httpx.Response(200, json=_OWM_RESPUESTA_COMPLETA)
+
+        mock_client = _install_mock_client(monkeypatch, handler)
+        try:
+            # 1ª llamada: cache miss → API
+            await get_weather()
+            assert call_count == 1
+
+            # 2ª llamada inmediata: cache hit → sin API
+            await get_weather()
+            assert call_count == 1
+
+            # Avanzar 31 minutos → TTL expirado (30 min)
+            t[0] = 1000.0 + 31 * 60
+
+            # 3ª llamada: cache expirado → nueva API
+            await get_weather()
+            assert call_count == 2
+        finally:
+            await mock_client.aclose()
