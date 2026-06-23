@@ -1,0 +1,36 @@
+---
+// Waveform: barras de onda de sonido.
+// Alturas generadas server-side con la misma formula del mockup (.dc.html).
+// La animacion (keyframe wf) es CSS puro, sin JS.
+interface Props {
+  variant?: "hero" | "mini";
+  parallax?: string;
+}
+
+const { variant = "hero", parallax } = Astro.props;
+
+const count = variant === "mini" ? 30 : 52;
+const bars = Array.from({ length: count }, (_, i) => {
+  const h =
+    variant === "mini"
+      ? 5 + Math.round(Math.abs(Math.sin(i * 0.7)) * 22 + (i % 3) * 3)
+      : 6 +
+        Math.round(
+          Math.abs(Math.sin(i * 0.55) * Math.cos(i * 0.21)) * 38 + (i % 4) * 3,
+        );
+  return {
+    h,
+    d: ((variant === "mini" ? i * 0.05 : i * 0.04).toFixed(2)) + "s",
+  };
+});
+
+const parallaxAttr = parallax ? { "data-parallax": parallax } : {};
+---
+
+<div class={`waveform waveform--${variant}`} {...parallaxAttr}>
+  {
+    bars.map((b) => (
+      <span class="wave-bar" style={`height:${b.h}px;animation-delay:${b.d}`} />
+    ))
+  }
+</div>

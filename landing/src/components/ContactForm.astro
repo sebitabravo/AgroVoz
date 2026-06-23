@@ -1,0 +1,64 @@
+---
+// Formulario de contacto (#contacto). El submit arma un mailto: con el plan
+// seleccionado. Para MVP no hay backend: mailto es suficiente.
+const chips = [
+  { plan: "institucional", label: "Institucional", i18n: "form.chip.inst" },
+  { plan: "premium", label: "Premium", i18n: "form.chip.premium" },
+  { plan: "convenios", label: "Convenios", i18n: "form.chip.convenios" },
+  { plan: "general", label: "Consulta general", i18n: "form.chip.general" },
+];
+---
+
+<form class="contact-form" id="contact-form" novalidate>
+  <div class="chip-grid">
+    {
+      chips.map((c) => (
+        <button
+          type="button"
+          class="chip"
+          data-plan-chip={c.plan}
+          {...(c.i18n ? { "data-i18n": c.i18n } : {})}
+        >
+          {c.label}
+        </button>
+      ))
+    }
+  </div>
+
+  <div class="field">
+    <label for="cf-name" data-i18n="form.name">Nombre</label>
+    <input
+      id="cf-name"
+      name="name"
+      type="text"
+      autocomplete="name"
+      placeholder="Tu nombre"
+      data-i18n-ph="form.nameph"
+    />
+  </div>
+
+  <div class="field">
+    <label for="cf-email" data-i18n="form.email">Email</label>
+    <input
+      id="cf-email"
+      name="email"
+      type="email"
+      autocomplete="email"
+      placeholder="tu@correo.cl"
+    />
+  </div>
+
+  <div class="field">
+    <label for="cf-msg" data-i18n="form.msg">Mensaje</label>
+    <textarea
+      id="cf-msg"
+      name="message"
+      rows="3"
+      placeholder="¿Cómo podemos colaborar?"
+      data-i18n-ph="form.msgph"></textarea>
+  </div>
+
+  <button type="submit" class="btn btn-primary" style="width:100%" data-i18n="form.submit">
+    Solicitar demo
+  </button>
+</form>

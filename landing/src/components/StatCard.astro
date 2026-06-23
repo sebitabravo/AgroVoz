@@ -1,0 +1,65 @@
+---
+// Statistica numerica con count-up animado (#problema, #impacto).
+// Si `count` viene definido, el JS anima desde 0 hasta ese valor.
+interface Props {
+  // Valor a animar (numero). Si se omite, se usa `text` estatico.
+  count?: number;
+  decimals?: number;
+  prefix?: string;
+  suffix?: string;
+  // Texto fijo (ej. "40–60%", "<15 s") cuando no hay count-up.
+  text?: string;
+  label: string;
+  variant?: "cell" | "impact";
+  accent?: boolean;
+  revealDelay?: number;
+  i18nLabel?: string;
+}
+
+const {
+  count,
+  decimals = 0,
+  prefix = "",
+  suffix = "",
+  text,
+  label,
+  variant = "cell",
+  accent = false,
+  revealDelay = 0,
+  i18nLabel,
+} = Astro.props;
+
+const revealAttr: Record<string, string> = { "data-reveal": "" };
+if (revealDelay) revealAttr["data-reveal-delay"] = `${revealDelay}ms`;
+
+const numberAttrs: Record<string, string> = {};
+if (count !== undefined) {
+  numberAttrs["data-count"] = String(count);
+  if (decimals) numberAttrs["data-decimals"] = String(decimals);
+  if (prefix) numberAttrs["data-prefix"] = prefix;
+  if (suffix) numberAttrs["data-suffix"] = suffix;
+}
+
+const numberClass = variant === "impact" ? "impact-number" : "stat-number";
+
+// Valor final formateado server-side (es-CL). Sin JS se muestra el numero real;
+// con JS, countUp anima desde 0 hasta este valor al entrar en viewport.
+const finalValue =
+  count !== undefined
+    ? `${prefix}${new Intl.NumberFormat("es-CL", {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals,
+      }).format(count)}${suffix}`
+    : (text ?? "");
+---
+
+<div class={variant === "impact" ? "impact-card" : "stat-cell"} {...revealAttr}>
+  <div class={numberClass} {...(accent ? { style: "color:var(--color-accent-deep)" } : {})} {...numberAttrs}>
+    {finalValue}
+  </div>
+  <p class="stat-label"
+    {...(i18nLabel ? { "data-i18n": i18nLabel } : {})}
+  >
+    {label}
+  </p>
+</div>

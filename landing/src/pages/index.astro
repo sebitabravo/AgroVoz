@@ -1,0 +1,859 @@
+---
+import Base from "../layouts/Base.astro";
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
+import Hero from "../components/Hero.astro";
+import FeatureCard from "../components/FeatureCard.astro";
+import StatCard from "../components/StatCard.astro";
+import PlanCard from "../components/PlanCard.astro";
+import TeamCard from "../components/TeamCard.astro";
+import DemoPhone from "../components/DemoPhone.astro";
+import ContactForm from "../components/ContactForm.astro";
+import Waveform from "../components/Waveform.astro";
+
+// --- Datos de las secciones (ES = fuente de verdad en el markup) ---
+
+const problemaStats = [
+  {
+    count: 205000,
+    label: "agricultores usuarios de INDAP en Chile",
+    i18nLabel: "problema.s1",
+    delay: 0,
+  },
+  {
+    text: "40–60%",
+    accent: true,
+    label: "del precio mayorista capturado por intermediarios",
+    i18nLabel: "problema.s2",
+    delay: 90,
+  },
+  {
+    count: 14.5,
+    decimals: 1,
+    suffix: "%",
+    label: "de pérdidas post-cosecha en promedio",
+    i18nLabel: "problema.s3",
+    delay: 180,
+  },
+  {
+    count: 7,
+    suffix: "%",
+    label: "de la adaptación climática es planificada; el resto es intuición",
+    i18nLabel: "problema.s4",
+    delay: 270,
+  },
+];
+
+const pasos = [
+  {
+    step: "01",
+    title: "El productor pregunta",
+    desc: "Envía un audio por WhatsApp en lenguaje natural: «¿A cuánto está la papa en Santiago?».",
+    i18nTitle: "como.1.title",
+    i18nDesc: "como.1.desc",
+    delay: 0,
+  },
+  {
+    step: "02",
+    title: "AgroVoz consulta",
+    desc: "Transcribe la voz, interpreta la pregunta y consulta fuentes oficiales —ODEPA y OpenWeatherMap— en tiempo real.",
+    i18nTitle: "como.2.title",
+    i18nDesc: "como.2.desc",
+    delay: 120,
+  },
+  {
+    step: "03",
+    title: "Responde con voz",
+    desc: "Devuelve un mensaje de audio en español natural con datos verificables, en menos de 15 segundos.",
+    i18nTitle: "como.3.title",
+    i18nDesc: "como.3.desc",
+    delay: 240,
+  },
+];
+
+// Nota: card 1 usa Open-WA (gateway self-hosted). El mockup decia Twilio,
+// pero el constraint del proyecto es 100% open-source, sin APIs pagas.
+const stackItems = [
+  { title: "Open-WA", sub: "Canal de mensajería", i18nSub: "stack.1.sub" },
+  { title: "Whisper", sub: "Transcripción de voz", i18nSub: "stack.2.sub" },
+  {
+    title: "Qwen2.5-3B",
+    sub: "Comprensión + Tool Calling",
+    i18nSub: "stack.3.sub",
+  },
+  { title: "Piper TTS", sub: "Síntesis de voz", i18nSub: "stack.4.sub" },
+  { title: "ODEPA", sub: "Precios oficiales", i18nSub: "stack.5.sub" },
+  {
+    title: "OpenWeatherMap",
+    sub: "Clima localizado",
+    i18nSub: "stack.6.sub",
+  },
+];
+
+const planes = [
+  {
+    plan: "institucional",
+    name: "Institucional · B2G",
+    sub: "Para INDAP, PRODESAL y municipios",
+    price: "CLP 500–1.000",
+    unit: "por agricultor · mes",
+    features: [
+      "Gratis para el agricultor (subsidiado)",
+      "Consultas ilimitadas de precios y clima",
+      "Panel de cobertura y uso",
+      "Onboarding en terreno",
+    ],
+    cta: "Hablar con ventas",
+    featured: true,
+    badge: "Recomendado",
+    i18nName: "plan1.name",
+    i18nSub: "plan1.sub",
+    i18nUnit: "plan1.unit",
+    i18nCta: "plan1.cta",
+    i18nFeatures: [
+      "plan1.f1",
+      "plan1.f2",
+      "plan1.f3",
+      "plan1.f4",
+    ],
+  },
+  {
+    plan: "premium",
+    name: "Premium directo",
+    sub: "Para el agricultor o la cooperativa",
+    price: "CLP 2.000",
+    unit: "por mes · 10 consultas gratis al mes",
+    features: [
+      "Consultas ilimitadas",
+      "Alertas de precio",
+      "Historial de consultas",
+      "Pronóstico extendido",
+    ],
+    cta: "Probar gratis",
+    i18nName: "plan2.name",
+    i18nSub: "plan2.sub",
+    i18nUnit: "plan2.unit",
+    i18nCta: "plan2.cta",
+    i18nFeatures: ["plan2.f1", "plan2.f2", "plan2.f3", "plan2.f4"],
+  },
+  {
+    plan: "convenios",
+    name: "Convenios privados",
+    sub: "Para empresas y gremios",
+    price: "A convenir",
+    unit: "según programa",
+    features: [
+      "Programas de proveedores AFC, RSE y cadena de proveedores",
+      "Integración a medida",
+    ],
+    cta: "Conversemos",
+    i18nName: "plan3.name",
+    i18nSub: "plan3.sub",
+    i18nUnit: "plan3.unit",
+    i18nCta: "plan3.cta",
+    i18nFeatures: ["plan3.f1", "plan3.f2"],
+  },
+];
+
+const impactoStats = [
+  {
+    count: 3500000,
+    prefix: "+$",
+    accent: true,
+    label: "de ingreso adicional anual por productor (hasta), al negociar con datos",
+    i18nLabel: "impacto.i1",
+  },
+  {
+    count: 265000,
+    label: "explotaciones de agricultura familiar — el 85% de los predios del país",
+    i18nLabel: "impacto.i2",
+  },
+  {
+    text: "<15 s",
+    label: "de latencia objetivo entre la pregunta y la respuesta de voz",
+    i18nLabel: "impacto.i3",
+  },
+];
+
+const equipo = [
+  {
+    initials: "SB",
+    name: "Sebastián Bravo",
+    role: "Líder técnico",
+    desc: "Arquitectura, backend, LLM y Tool Calling.",
+    i18nRole: "equipo.sb.role",
+    i18nDesc: "equipo.sb.desc",
+  },
+  {
+    initials: "FF",
+    name: "Francisco Fernández",
+    role: "Product Owner",
+    desc: "Producto, investigación y vínculo territorial en Traiguén.",
+    i18nRole: "equipo.ff.role",
+    i18nDesc: "equipo.ff.desc",
+  },
+  {
+    initials: "MA",
+    name: "Matías Atuán",
+    role: "Desarrollo e investigación",
+    desc: "Backend, validación de fuentes y testing.",
+    i18nRole: "equipo.ma.role",
+    i18nDesc: "equipo.ma.desc",
+  },
+];
+---
+
+<Base>
+  <Header />
+
+  <main id="top">
+    <Hero />
+
+    <!-- #problema -->
+    <section class="section" id="problema">
+      <div class="container" style="max-width:1080px">
+        <div data-reveal>
+          <span class="eyebrow" data-i18n="problema.eyebrow">El problema</span>
+          <h2 class="h2" data-i18n="problema.title">
+            Los precios existen. El acceso, no.
+          </h2>
+          <p class="lede" style="margin-top:20px" data-i18n="problema.body">
+            ODEPA publica los precios mayoristas en un Excel. Pero el productor
+            que negocia con un intermediario a las 6 AM no tiene cómo
+            consultarlos. Esa asimetría de información le cuesta hasta el 60%
+            del precio.
+          </p>
+        </div>
+        <div class="stat-grid" style="margin-top:44px">
+          {
+            problemaStats.map((s) => (
+              <StatCard
+                count={s.count}
+                decimals={s.decimals}
+                prefix={s.prefix}
+                suffix={s.suffix}
+                text={s.text}
+                accent={s.accent}
+                label={s.label}
+                i18nLabel={s.i18nLabel}
+                revealDelay={s.delay}
+              />
+            ))
+          }
+        </div>
+      </div>
+    </section>
+
+    <!-- #como -->
+    <section class="section" id="como" style="background:var(--color-surface)">
+      <div class="container">
+        <div data-reveal style="text-align:center;margin-bottom:44px">
+          <span class="eyebrow" data-i18n="como.eyebrow">Cómo funciona</span>
+          <h2 class="h2" style="margin-inline:auto" data-i18n="como.title">
+            Hablar es toda la interfaz.
+          </h2>
+        </div>
+        <div class="grid-3">
+          {
+            pasos.map((p) => (
+              <FeatureCard
+                step={p.step}
+                title={p.title}
+                description={p.desc}
+                i18nTitle={p.i18nTitle}
+                i18nDescription={p.i18nDesc}
+                revealDelay={p.delay}
+              />
+            ))
+          }
+        </div>
+      </div>
+    </section>
+
+    <!-- #demo -->
+    <section class="section" id="demo">
+      <div class="container">
+        <div class="demo-grid" id="demo-track">
+          <div data-reveal>
+            <span class="eyebrow" data-i18n="demo.eyebrow"
+              >Una conversación real</span
+            >
+            <h2 class="h2" data-i18n="demo.title">
+              Tan simple como un mensaje de voz.
+            </h2>
+            <p
+              class="lede"
+              style="margin-top:20px;max-width:46ch"
+              data-i18n="demo.caption"
+            >
+              100% por voz. Sin apps, sin leer ni escribir — como mandarle un
+              mensaje de voz a un vecino.
+            </p>
+            <div style="margin-top:32px">
+              <Waveform variant="mini" />
+            </div>
+          </div>
+          <DemoPhone />
+        </div>
+      </div>
+    </section>
+
+    <!-- #stack -->
+    <section class="section" id="stack" style="background:var(--color-surface)">
+      <div class="container">
+        <div data-reveal style="max-width:720px">
+          <span class="eyebrow" data-i18n="stack.eyebrow">Tecnología</span>
+          <h2 class="h2" data-i18n="stack.title">
+            Costos bajo control, por diseño.
+          </h2>
+          <p class="lede" style="margin-top:20px" data-i18n="stack.body">
+            Whisper, el LLM y la síntesis de voz corren sobre tecnología
+            open-source en infraestructura propia. No para regalar el servicio,
+            sino para que sea rentable: el costo de operación no crece con cada
+            nuevo agricultor.
+          </p>
+        </div>
+        <div class="grid-stack" style="margin-top:44px">
+          {
+            stackItems.map((s) => (
+              <FeatureCard
+                variant="stack"
+                title={s.title}
+                subtitle={s.sub}
+                i18nSubtitle={s.i18nSub}
+              />
+            ))
+          }
+        </div>
+        <div class="cost-note" data-reveal>
+          <span class="dot" aria-hidden="true"></span>
+          <span data-i18n="stack.cost"
+            >Costo de operación ≈ CLP 150–210 por agricultor/mes · margen bruto
+            del 58–85%</span
+          >
+        </div>
+      </div>
+    </section>
+
+    <!-- #planes -->
+    <section class="section" id="planes">
+      <div class="container">
+        <div data-reveal style="text-align:center;max-width:760px;margin-inline:auto;margin-bottom:48px">
+          <span class="eyebrow" data-i18n="planes.eyebrow">Planes</span>
+          <h2 class="h2" style="margin-inline:auto" data-i18n="planes.title">
+            Un plan para cada forma de llegar al agricultor.
+          </h2>
+          <p class="lede" style="margin:20px auto 0" data-i18n="planes.body">
+            Desde el despliegue institucional hasta el servicio directo: elige
+            cómo AgroVoz se ajusta a tu organización.
+          </p>
+        </div>
+        <div class="grid-plans">
+          {
+            planes.map((p) => (
+              <PlanCard
+                plan={p.plan}
+                name={p.name}
+                sub={p.sub}
+                price={p.price}
+                unit={p.unit}
+                features={p.features}
+                cta={p.cta}
+                featured={p.featured}
+                badge={p.badge}
+                i18nName={p.i18nName}
+                i18nSub={p.i18nSub}
+                i18nUnit={p.i18nUnit}
+                i18nCta={p.i18nCta}
+                i18nFeatures={p.i18nFeatures}
+              />
+            ))
+          }
+        </div>
+        <p
+          style="margin-top:32px;text-align:center;font-size:13.5px;color:var(--color-muted);max-width:60ch;margin-inline:auto"
+          data-reveal data-i18n="planes.note"
+        >
+          El agricultor nunca paga en el plan institucional. Costo de operación
+          ≈ CLP 150–210 por agricultor/mes.
+        </p>
+      </div>
+    </section>
+
+    <!-- #impacto -->
+    <section class="section section--impacto" id="impacto">
+      <div class="container" style="max-width:1080px">
+        <div data-reveal>
+          <span class="eyebrow" data-i18n="impacto.eyebrow">Impacto</span>
+          <h2 class="h2" data-i18n="impacto.title">
+            Cerrar la brecha cambia una economía familiar.
+          </h2>
+        </div>
+        <div class="grid-3" style="margin-top:44px">
+          {
+            impactoStats.map((s) => (
+              <StatCard
+                variant="impact"
+                count={s.count}
+                prefix={s.prefix}
+                text={s.text}
+                accent={s.accent}
+                label={s.label}
+                i18nLabel={s.i18nLabel}
+              />
+            ))
+          }
+        </div>
+        <div class="ods-bar" data-reveal>
+          <span class="ods-numbers" data-i18n="impacto.odsNumbers"
+            >ODS 2 · 8 · 10 · 13</span
+          >
+          <span class="ods-labels" data-i18n="impacto.odsLabels"
+            >Hambre Cero · Trabajo Decente y Crecimiento · Reducción de
+            Desigualdades · Acción por el Clima</span
+          >
+        </div>
+      </div>
+    </section>
+
+    <!-- #equipo -->
+    <section class="section" id="equipo">
+      <div class="container">
+        <div data-reveal style="text-align:center;margin-bottom:44px">
+          <span class="eyebrow" data-i18n="equipo.eyebrow">Equipo</span>
+          <h2 class="h2" style="margin-inline:auto" data-i18n="equipo.title">
+            Estudiantes de Ingeniería en Informática, INACAP Temuco.
+          </h2>
+        </div>
+        <div class="grid-3">
+          {
+            equipo.map((m) => (
+              <TeamCard
+                initials={m.initials}
+                name={m.name}
+                role={m.role}
+                description={m.desc}
+                i18nRole={m.i18nRole}
+                i18nDescription={m.i18nDesc}
+              />
+            ))
+          }
+        </div>
+      </div>
+    </section>
+
+    <!-- #contacto -->
+    <section class="section" id="contacto" style="background:var(--color-surface)">
+      <div class="container">
+        <div class="contact-grid">
+          <div data-reveal>
+            <span class="eyebrow" data-i18n="contacto.eyebrow">Contacto</span>
+            <h2 class="h2" data-i18n="contacto.title">
+              Agenda una demo de AgroVoz.
+            </h2>
+            <p class="lede" style="margin-top:20px" data-i18n="contacto.body">
+              Cuéntanos sobre tu organización y te mostramos AgroVoz funcionando
+              con datos reales de tu zona. Para INDAP, PRODESAL, cooperativas,
+              municipios y empresas del agro.
+            </p>
+            <p style="margin-top:24px;font-size:14.5px">
+              <a
+                href="mailto:hola@agrovoz.cl"
+                style="color:var(--color-accent-deep);font-weight:600"
+                data-i18n="contacto.alt"
+                >O escríbenos a hola@agrovoz.cl</a
+              >
+            </p>
+          </div>
+          <div data-reveal>
+            <ContactForm />
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <Footer />
+</Base>
+
+<script>
+  // --- AgroVoz landing: interactividad del lado cliente ---
+  // Port fiel del JS del mockup (.dc.html): reveals, count-up, demo cascade,
+  // parallax, selector de plan, i18n ES/EN y envio del form por mailto.
+
+  const reduce = window.matchMedia(
+    "(prefers-reduced-motion: reduce)",
+  ).matches;
+
+  // ===== Diccionario EN (ES es la fuente de verdad en el markup) =====
+  const EN: Record<string, string> = {
+    "nav.como": "How it works",
+    "nav.demo": "Demo",
+    "nav.planes": "Plans",
+    "nav.stack": "Technology",
+    "nav.impacto": "Impact",
+    "nav.contacto": "Contact",
+    "hero.eyebrow": "Price and weather intelligence · by voice on WhatsApp",
+    "hero.title": "Your voice gets the right price.",
+    "hero.sub":
+      "AgroVoz turns a WhatsApp voice message into official market and weather data, returned by voice. No apps, no reading or writing.",
+    "hero.cta1": "Request a demo",
+    "hero.cta2": "See how it works",
+    "hero.meta":
+      "Voice via WhatsApp · ODEPA prices + real-time weather · <15s per reply",
+    "problema.eyebrow": "The problem",
+    "problema.title": "The prices exist. Access doesn't.",
+    "problema.body":
+      "ODEPA publishes wholesale prices in a spreadsheet. But the smallholder negotiating with a middleman at 6 AM has no way to check them. That information gap costs up to 60% of the price.",
+    "problema.s1": "INDAP-registered farmers in Chile",
+    "problema.s2": "of the wholesale price captured by middlemen",
+    "problema.s3": "average post-harvest losses",
+    "problema.s4":
+      "of climate adaptation is planned; the rest is guesswork",
+    "como.eyebrow": "How it works",
+    "como.title": "Speaking is the whole interface.",
+    "como.1.title": "The farmer asks",
+    "como.1.desc":
+      "Sends a voice note on WhatsApp in plain language: \"How much is potato in Santiago?\"",
+    "como.2.title": "AgroVoz looks it up",
+    "como.2.desc":
+      "Transcribes the voice, understands the question and queries official sources — ODEPA and OpenWeatherMap — in real time.",
+    "como.3.title": "Replies by voice",
+    "como.3.desc":
+      "Returns an audio message in natural Spanish with verifiable data, in under 15 seconds.",
+    "demo.eyebrow": "A real conversation",
+    "demo.title": "As simple as a voice message.",
+    "demo.caption":
+      "100% by voice. No apps, no reading or writing — like sending a voice note to a neighbor.",
+    "demo.status": "online",
+    "demo.m1": "How much is potato this week?",
+    "demo.m2":
+      "In Lo Valledor, potato is at $480 per kilo this week. Up 6% from last week.",
+    "demo.m3": "And will it rain in Traiguén tomorrow?",
+    "demo.m4":
+      "Traiguén can expect 12 mm of rain tomorrow, with a high of 14°C and a low of 6°C.",
+    "stack.eyebrow": "Technology",
+    "stack.title": "Costs under control, by design.",
+    "stack.body":
+      "Whisper, the LLM and voice synthesis run on open-source technology on our own infrastructure. Not to give the service away, but so it's profitable: operating cost doesn't grow with every new farmer.",
+    "stack.cost":
+      "Operating cost ≈ CLP 150–210 per farmer/month · 58–85% gross margin",
+    "stack.1.sub": "Messaging channel",
+    "stack.2.sub": "Voice transcription",
+    "stack.3.sub": "Understanding + Tool Calling",
+    "stack.4.sub": "Voice synthesis",
+    "stack.5.sub": "Official prices",
+    "stack.6.sub": "Localized weather",
+    "planes.eyebrow": "Plans",
+    "planes.title": "A plan for every way to reach the farmer.",
+    "planes.body":
+      "From institutional deployment to direct service: choose how AgroVoz fits your organization.",
+    "planes.badge": "Recommended",
+    "planes.note":
+      "The farmer never pays in the institutional plan. Operating cost ≈ CLP 150–210 per farmer/month.",
+    "plan1.name": "Institutional · B2G",
+    "plan1.sub": "For INDAP, PRODESAL and municipalities",
+    "plan1.unit": "per farmer · month",
+    "plan1.cta": "Talk to sales",
+    "plan1.f1": "Free for the farmer (subsidized)",
+    "plan1.f2": "Unlimited price and weather queries",
+    "plan1.f3": "Coverage and usage dashboard",
+    "plan1.f4": "Field onboarding",
+    "plan2.name": "Direct Premium",
+    "plan2.sub": "For the farmer or the cooperative",
+    "plan2.unit": "per month · 10 free queries a month",
+    "plan2.cta": "Try free",
+    "plan2.f1": "Unlimited queries",
+    "plan2.f2": "Price alerts",
+    "plan2.f3": "Query history",
+    "plan2.f4": "Extended forecast",
+    "plan3.name": "Private partnerships",
+    "plan3.sub": "For companies and trade associations",
+    "plan3.unit": "by arrangement",
+    "plan3.cta": "Let's talk",
+    "plan3.f1": "AFC supplier, CSR and supply-chain programs",
+    "plan3.f2": "Custom integration",
+    "impacto.eyebrow": "Impact",
+    "impacto.title": "Closing the gap changes a family's economy.",
+    "impacto.i1":
+      "extra annual income per producer (up to), by negotiating with data",
+    "impacto.i2": "family-farming holdings — 85% of the country's farms",
+    "impacto.i3":
+      "target latency between the question and the voice answer",
+    "impacto.odsNumbers": "SDG 2 · 8 · 10 · 13",
+    "impacto.odsLabels":
+      "Zero Hunger · Decent Work and Growth · Reduced Inequalities · Climate Action",
+    "equipo.eyebrow": "Team",
+    "equipo.title": "Computer Engineering students, INACAP Temuco.",
+    "equipo.sb.role": "Technical Lead",
+    "equipo.sb.desc": "Architecture, backend, LLM and Tool Calling.",
+    "equipo.ff.role": "Product Owner",
+    "equipo.ff.desc": "Product, research and territorial link in Traiguén.",
+    "equipo.ma.role": "Development & Research",
+    "equipo.ma.desc": "Backend, source validation and testing.",
+    "contacto.eyebrow": "Contact",
+    "contacto.title": "Book an AgroVoz demo.",
+    "contacto.body":
+      "Tell us about your organization and we'll show AgroVoz working with real data from your area. For INDAP, PRODESAL, cooperatives, municipalities and agribusiness.",
+    "contacto.alt": "Or write us at hola@agrovoz.cl",
+    "form.name": "Name",
+    "form.email": "Email",
+    "form.msg": "Message",
+    "form.submit": "Request demo",
+    "form.nameph": "Your name",
+    "form.msgph": "How can we collaborate?",
+    "form.chip.inst": "Institutional",
+    "form.chip.premium": "Premium",
+    "form.chip.convenios": "Partnerships",
+    "form.chip.general": "General inquiry",
+    "footer.credit": "Born at INACAP Temuco · Desafío Crea INACAP 2026",
+  };
+
+  const ENPH: Record<string, string> = {
+    "form.nameph": "Your name",
+    "form.msgph": "How can we collaborate?",
+  };
+
+  // Captura el texto ES original de cada nodo i18n (fuente de verdad).
+  document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
+    el.dataset.es = el.textContent ?? "";
+  });
+  document.querySelectorAll<HTMLElement>("[data-i18n-ph]").forEach((el) => {
+    const input = el as HTMLInputElement | HTMLTextAreaElement;
+    el.dataset.esph = input.placeholder;
+  });
+
+  function setLang(lang: "es" | "en") {
+    document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
+      const key = el.dataset.i18n!;
+      if (lang === "en" && EN[key]) el.textContent = EN[key];
+      else el.textContent = el.dataset.es ?? "";
+    });
+    document.querySelectorAll<HTMLElement>("[data-i18n-ph]").forEach((el) => {
+      const key = el.dataset.i18nPh!;
+      const input = el as HTMLInputElement | HTMLTextAreaElement;
+      if (lang === "en" && ENPH[key]) input.placeholder = ENPH[key];
+      else input.placeholder = el.dataset.esph ?? "";
+    });
+    document.documentElement.lang = lang;
+    document.querySelectorAll<HTMLButtonElement>("#lang-es,#lang-en").forEach(
+      (b) => {
+        b.classList.toggle("is-active", b.dataset.lang === lang);
+      },
+    );
+    try {
+      localStorage.setItem("agrovoz_lang", lang);
+    } catch {
+      /* localStorage puede estar bloqueado */
+    }
+  }
+
+  document.querySelectorAll<HTMLButtonElement>("#lang-es,#lang-en").forEach(
+    (b) => b.addEventListener("click", () => setLang(b.dataset.lang as "es" | "en")),
+  );
+
+  let initLang: "es" | "en" = "es";
+  try {
+    const stored = localStorage.getItem("agrovoz_lang");
+    if (stored === "en" || stored === "es") initLang = stored;
+  } catch {
+    /* ignore */
+  }
+  setLang(initLang);
+
+  // ===== Count-up =====
+  function countUp(el: HTMLElement) {
+    if (el.dataset.counted) return;
+    el.dataset.counted = "1";
+    const target = parseFloat(el.dataset.count ?? "");
+    if (Number.isNaN(target)) return;
+    const dec = parseInt(el.dataset.decimals ?? "0", 10);
+    const pre = el.dataset.prefix ?? "";
+    const suf = el.dataset.suffix ?? "";
+    const fmt = (v: number) =>
+      pre +
+      new Intl.NumberFormat("es-CL", {
+        minimumFractionDigits: dec,
+        maximumFractionDigits: dec,
+      }).format(v) +
+      suf;
+    if (reduce) {
+      el.textContent = fmt(target);
+      return;
+    }
+    const dur = 1500;
+    const start = performance.now();
+    const tick = (now: number) => {
+      const p = Math.min(1, (now - start) / dur);
+      const e = 1 - Math.pow(1 - p, 3);
+      el.textContent = fmt(target * e);
+      if (p < 1) requestAnimationFrame(tick);
+      else el.textContent = fmt(target);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  // ===== Reveals on scroll =====
+  const reveals = Array.from(
+    document.querySelectorAll<HTMLElement>("[data-reveal]"),
+  );
+
+  function showNow(el: HTMLElement) {
+    el.classList.add("is-visible");
+    el.querySelectorAll<HTMLElement>("[data-count]").forEach(countUp);
+  }
+  function hideEl(el: HTMLElement) {
+    el.classList.remove("is-visible");
+    el.querySelectorAll<HTMLElement>("[data-count]").forEach((n) => {
+      // permite re-animar al volver a entrar
+      delete n.dataset.counted;
+    });
+  }
+
+  if (!reduce) {
+    reveals.forEach((el) => {
+      if (el.dataset.revealDelay)
+        el.style.transitionDelay = el.dataset.revealDelay;
+    });
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((e) => {
+          if (e.isIntersecting) showNow(e.target as HTMLElement);
+          else hideEl(e.target as HTMLElement);
+        });
+      },
+      { threshold: 0, rootMargin: "0px 0px -8% 0px" },
+    );
+    reveals.forEach((el) => io.observe(el));
+    // failsafe: revela lo que quedo en viewport sin disparar
+    setTimeout(() => {
+      reveals.forEach((el) => {
+        const r = el.getBoundingClientRect();
+        if (!el.classList.contains("is-visible") && r.top < window.innerHeight && r.bottom > 0)
+          showNow(el);
+      });
+    }, 3500);
+  } else {
+    reveals.forEach(showNow);
+  }
+
+  // ===== Demo chat: cascada al entrar en viewport =====
+  const track = document.getElementById("demo-track");
+  const msgs = track
+    ? Array.from(track.querySelectorAll<HTMLElement>("[data-msg]"))
+    : [];
+  let played = false;
+
+  function playChat() {
+    if (played) return;
+    played = true;
+    msgs.forEach((m, i) => {
+      setTimeout(() => {
+        if (played) m.classList.add("is-visible");
+      }, 300 + i * 700);
+    });
+  }
+  function resetChat() {
+    played = false;
+    msgs.forEach((m) => m.classList.remove("is-visible"));
+  }
+
+  if (reduce) {
+    msgs.forEach((m) => m.classList.add("is-visible"));
+  } else if (msgs.length && track) {
+    const phone = document.getElementById("demo-phone") ?? track;
+    const dio = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((e) => {
+          if (e.isIntersecting) playChat();
+          else resetChat();
+        });
+      },
+      { threshold: 0, rootMargin: "0px 0px -15% 0px" },
+    );
+    dio.observe(phone);
+    setTimeout(() => {
+      if (phone.getBoundingClientRect().top < window.innerHeight) playChat();
+    }, 2500);
+  }
+
+  // ===== Parallax sutil =====
+  const parallax = Array.from(
+    document.querySelectorAll<HTMLElement>("[data-parallax]"),
+  );
+  function applyParallax() {
+    if (reduce) return;
+    parallax.forEach((el) => {
+      const r = el.getBoundingClientRect();
+      const center = r.top + r.height / 2 - window.innerHeight / 2;
+      el.style.transform = `translateY(${
+        center * parseFloat(el.dataset.parallax ?? "0") * 0.35
+      }px)`;
+    });
+  }
+  let ticking = false;
+  const onScroll = () => {
+    if (!ticking) {
+      requestAnimationFrame(() => {
+        applyParallax();
+        ticking = false;
+      });
+      ticking = true;
+    }
+  };
+  window.addEventListener("scroll", onScroll, { passive: true });
+  window.addEventListener("resize", onScroll, { passive: true });
+  applyParallax();
+
+  // ===== Selector de plan + envio del form por mailto =====
+  let selectedPlan = "general";
+  const chips = Array.from(
+    document.querySelectorAll<HTMLElement>("[data-plan-chip]"),
+  );
+
+  function setPlan(p: string) {
+    selectedPlan = p;
+    chips.forEach((c) => {
+      const on = c.dataset.planChip === p;
+      c.style.background = on ? "var(--accent-soft)" : "var(--surface)";
+      c.style.borderColor = on ? "var(--accent)" : "var(--line)";
+      c.style.color = on ? "var(--accent-deep)" : "var(--muted)";
+    });
+  }
+  chips.forEach((c) =>
+    c.addEventListener("click", () => setPlan(c.dataset.planChip ?? "general")),
+  );
+  if (chips.length) setPlan("general");
+
+  // un CTA de plan preselecciona ese plan antes de scroll al form
+  document.querySelectorAll<HTMLElement>("[data-plan]").forEach((a) =>
+    a.addEventListener("click", () =>
+      setPlan(a.dataset.plan ?? "general"),
+    ),
+  );
+
+  const form = document.getElementById("contact-form") as HTMLFormElement | null;
+  if (form) {
+    form.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const fields = form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+        "input, textarea",
+      );
+      const name = fields[0]?.value ?? "";
+      const email = fields[1]?.value ?? "";
+      const msg = fields[2]?.value ?? "";
+      const activeChip = document.querySelector<HTMLElement>(
+        `[data-plan-chip="${selectedPlan}"]`,
+      );
+      const planText = activeChip?.textContent ?? selectedPlan;
+      const body = encodeURIComponent(
+        `Plan de interés: ${planText}\n\n${msg}\n\n— ${name} (${email})`,
+      );
+      window.location.href =
+        "mailto:hola@agrovoz.cl?subject=" +
+        encodeURIComponent(`AgroVoz — ${planText} — ${name || "Contacto"}`) +
+        "&body=" +
+        body;
+    });
+  }
+</script>
