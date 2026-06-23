@@ -102,8 +102,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # arrancar silenciosamente y fallar en runtime con errores oscuros.
     if settings.app_env == "production":
         missing = []
-        if not settings.openweathermap_api_key.strip():
-            missing.append("OPENWEATHERMAP_API_KEY")
+        # OpenWeatherMap ya no es necesario — migrado a OpenMeteo (issue #51).
         if not settings.openwa_api_key.strip():
             missing.append("OPENWA_API_KEY")
         if not settings.openwa_webhook_secret.strip():

@@ -1,8 +1,9 @@
-"""Servicio OpenWeatherMap: consulta de clima actual.
+"""Servicio OpenMeteo: consulta de clima actual sin API key.
 
-Issue #17: get_weather(lat, lon) para Tool Calling del LLM.
+Issue #50: get_weather(lat, lon) para Tool Calling del LLM.
+OpenMeteo es gratuita, sin API key, 10.000 requests/día.
 MVP usa coordenadas fijas de Traiguén (-38.23, -72.68).
-Plan gratuito: 60 calls/min. Cache en memoria con TTL 30 min.
+Cache en memoria con TTL 30 min.
 """
 
 import asyncio
@@ -11,9 +12,6 @@ import time
 from dataclasses import dataclass
 
 import httpx
-
-from app.core.config import settings
-from app.schemas.openweathermap import OWMResponse
 
 logger = logging.getLogger(__name__)
 
@@ -25,34 +23,70 @@ __all__ = [
     "get_weather_full",
 ]
 
-# TTL del cache en segundos (30 min). Plan gratuito permite 60 calls/min,
-# así que 30 min es conservador para un solo usuario.
+# TTL del cache en segundos (30 min).
 _CACHE_TTL_SECONDS = 30 * 60
 
-# Tamaño máximo del cache. Evita crecimiento no acotado si el LLM consulta
-# muchas coordenadas distintas. Con 50 entradas sobra para MVP (1-2 ubicaciones).
+# Tamaño máximo del cache. Evita crecimiento no acotado.
 _CACHE_MAX_SIZE = 50
 
-# Timeout HTTP. La API de OpenWeatherMap responde en <1s típicamente.
+# Timeout HTTP. OpenMeteo responde típicamente en <100ms.
 _TIMEOUT_SECONDS = 10
 
-# URL base de OpenWeatherMap Current Weather Data API (plan gratuito).
-_OWM_API_URL = "https://api.openweathermap.org/data/2.5/weather"
+# URL base de OpenMeteo Forecast API (sin API key, 10.000 req/día).
+_OPENMETEO_URL = "https://api.open-meteo.com/v1/forecast"
 
 # Coordenadas default para MVP: Traiguén, Región de La Araucanía, Chile.
 DEFAULT_LAT = -38.23
 DEFAULT_LON = -72.68
 
-# Cliente HTTP compartido con connection pooling hacia OpenWeatherMap.
-# Se inicializa lazy en _get_http_client(). Evita instanciar un
-# AsyncClient nuevo por cada request.
+# Umbral para detectar coordenadas cercanas a Traiguén.
+# Si lat y lon están a menos de esta distancia, usamos "Traiguén"
+# como nombre de ubicación.
+_TRAIGUEN_THRESHOLD = 0.05
+
+# Mapa de códigos WMO (World Meteorological Organization) a descripciones
+# en español chileno. OpenMeteo devuelve weather_code según estándar WMO.
+# Códigos: 0-3 = cielo, 45-48 = niebla, 51-57 = llovizna,
+# 61-67 = lluvia, 71-77 = nieve, 80-86 = chubascos, 95-99 = tormenta.
+_WMO_CODES: dict[int, str] = {
+    0: "cielo despejado",
+    1: "mayormente despejado",
+    2: "parcialmente nublado",
+    3: "nublado",
+    45: "neblina",
+    48: "niebla con escarcha",
+    51: "llovizna ligera",
+    53: "llovizna moderada",
+    55: "llovizna densa",
+    56: "llovizna helada ligera",
+    57: "llovizna helada densa",
+    61: "lluvia ligera",
+    63: "lluvia moderada",
+    65: "lluvia fuerte",
+    66: "lluvia helada ligera",
+    67: "lluvia helada fuerte",
+    71: "nevada ligera",
+    73: "nevada moderada",
+    75: "nevada fuerte",
+    77: "granos de nieve",
+    80: "chubascos ligeros",
+    81: "chubascos moderados",
+    82: "chubascos violentos",
+    85: "chubascos de nieve ligeros",
+    86: "chubascos de nieve fuertes",
+    95: "tormenta eléctrica",
+    96: "tormenta con granizo ligero",
+    99: "tormenta con granizo fuerte",
+}
+
+# Cliente HTTP compartido con connection pooling.
 _http_client: httpx.AsyncClient | None = None
 _http_client_lock = asyncio.Lock()
 
 
 @dataclass
 class WeatherData:
-    """Datos estructurados de clima extraídos de OpenWeatherMap.
+    """Datos estructurados de clima extraídos de OpenMeteo.
 
     Punto único de extracción: aquí se aplican defaults, casts
     y decisiones de negocio (ej: lluvia = 0 se reporta como None).
@@ -81,8 +115,6 @@ def _cache_key(lat: float, lon: float) -> str:
 
     Trunca a 2 decimales (~1.1 km de resolución) para agrupar requests
     con variaciones mínimas de coordenadas bajo la misma entrada del cache.
-    Esto previene que un atacante evada el cache variando el 3er decimal
-    (ej: -38.231 vs -38.239) y agote la cuota gratuita de OWM (60 req/min).
 
     Para clima, 1.1 km de resolución es más que suficiente — la temperatura
     y condiciones no varían significativamente a esa escala.
@@ -128,7 +160,7 @@ async def _get_http_client() -> httpx.AsyncClient:
 
     Se inicializa lazy en la primera llamada y se reusa en requests
     subsiguientes. Evita el overhead de crear/destruir un cliente
-    HTTP por cada consulta a OpenWeatherMap.
+    HTTP por cada consulta a OpenMeteo.
 
     Usa double-checked locking con asyncio.Lock para evitar race
     condition cuando dos corutinas concurrentes crean el cliente.
@@ -149,43 +181,76 @@ async def _close_http_client() -> None:
     _http_client = None
 
 
-def _extract_weather_data(data: OWMResponse, lat: float, lon: float) -> WeatherData:
-    """Extrae datos tipados de un OWMResponse ya validado por Pydantic.
+def _location_name(lat: float, lon: float) -> str:
+    """Determina el nombre de ubicación según las coordenadas.
 
-    Punto ÚNICO de extracción para todo el módulo. Acceso tipado directo
-    a atributos del modelo Pydantic — sin cast(), dict.get(), ni riesgo
-    de null-propagación silenciosa.
-
-    La validación Pydantic en _fetch_weather_data garantiza que:
-    - main, weather, wind, rain, coord son del tipo correcto o None.
-    - Valores null dentro de dicts (ej: rain["1h"] = null) son rechazados
-      por Pydantic, no propagados como None al downstream.
+    OpenMeteo no devuelve nombre de ciudad, así que usamos un
+    nombre genérico. Si las coordenadas están cerca de Traiguén
+    (default MVP), lo llamamos por su nombre.
     """
-    main = data.main
-    weather_list = data.weather
-    weather = weather_list[0] if weather_list else None
+    if (
+        abs(lat - DEFAULT_LAT) < _TRAIGUEN_THRESHOLD
+        and abs(lon - DEFAULT_LON) < _TRAIGUEN_THRESHOLD
+    ):
+        return "Traiguén"
+    return "la zona consultada"
 
-    temp_val = main.temp if main else None
-    feels_val = main.feels_like if main else None
-    hum_val = main.humidity if main else None
-    desc_val = weather.description if weather and weather.description else "sin datos"
 
-    coord_lat = data.coord.lat if data.coord and data.coord.lat is not None else lat
-    coord_lon = data.coord.lon if data.coord and data.coord.lon is not None else lon
+def _wmo_description(code: int | None) -> str:
+    """Traduce un código WMO a descripción textual en español.
 
-    loc_name = data.name or "Desconocido"
+    Si el código no está en el mapa, devuelve "sin datos".
+    """
+    if code is None:
+        return "sin datos"
+    return _WMO_CODES.get(code, "sin datos")
 
-    wind_val: float | None = None
-    if data.wind and data.wind.speed is not None:
-        wind_val = data.wind.speed
 
+def _parse_openmeteo_response(
+    data: dict[str, object], lat: float, lon: float
+) -> WeatherData:
+    """Parsea la respuesta JSON de OpenMeteo a WeatherData.
+
+    La respuesta de OpenMeteo tiene esta estructura:
+    {
+        "current": {
+            "temperature_2m": 4.1,
+            "relative_humidity_2m": 98,
+            "apparent_temperature": 1.2,
+            "weather_code": 3,
+            "wind_speed_10m": 9.4,
+            "rain": 0.0
+        }
+    }
+
+    Args:
+        data: JSON parseado de la respuesta de OpenMeteo.
+        lat: Latitud consultada (fallback si no viene en respuesta).
+        lon: Longitud consultada (fallback si no viene en respuesta).
+
+    Returns:
+        WeatherData con todos los campos tipados.
+    """
+    current: dict[str, object] = {}
+    if isinstance(data.get("current"), dict):
+        current = data["current"]  # type: ignore[assignment]
+
+    temp_val: float | None = _safe_float(current.get("temperature_2m"))
+    feels_val: float | None = _safe_float(current.get("apparent_temperature"))
+    hum_val: int | None = _safe_int(current.get("relative_humidity_2m"))
+    wind_val: float | None = _safe_float(current.get("wind_speed_10m"))
+    rain_val_raw: float | None = _safe_float(current.get("rain"))
+
+    # weather_code es int, puede venir como None
+    wmo_code: int | None = _safe_int(current.get("weather_code"))
+    desc_val: str = _wmo_description(wmo_code)
+
+    # Lluvia: solo reportar si > 0
     rain_val: float | None = None
-    if data.rain:
-        # dict[str, float] validado por Pydantic: valores siempre float, nunca None.
-        # .get("1h", .get("3h", 0.0)) solo usa el default si la key no existe.
-        rain_1h = data.rain.get("1h", data.rain.get("3h", 0.0))
-        if rain_1h > 0:
-            rain_val = rain_1h
+    if rain_val_raw is not None and rain_val_raw > 0:
+        rain_val = rain_val_raw
+
+    loc_name: str = _location_name(lat, lon)
 
     texto = _format_weather(
         temp=temp_val,
@@ -197,8 +262,8 @@ def _extract_weather_data(data: OWMResponse, lat: float, lon: float) -> WeatherD
     )
 
     return WeatherData(
-        lat=coord_lat,
-        lon=coord_lon,
+        lat=lat,
+        lon=lon,
         location=loc_name,
         temperature_c=temp_val,
         feels_like_c=feels_val,
@@ -210,6 +275,42 @@ def _extract_weather_data(data: OWMResponse, lat: float, lon: float) -> WeatherD
     )
 
 
+def _safe_float(value: object) -> float | None:
+    """Convierte un valor a float de forma segura.
+
+    Retorna None si el valor es None o no se puede convertir.
+    Solo acepta valores numéricos (int, float) o strings convertibles.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
+def _safe_int(value: object) -> int | None:
+    """Convierte un valor a int de forma segura.
+
+    Retorna None si el valor es None o no se puede convertir.
+    Solo acepta valores numéricos (int, float) o strings convertibles.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
 async def get_weather_full(
     lat: float = DEFAULT_LAT,
     lon: float = DEFAULT_LON,
@@ -218,7 +319,9 @@ async def get_weather_full(
 
     Función pública para el endpoint REST. Usa cache en memoria
     con TTL de 30 minutos. La extracción de campos, defaults y
-    decisiones de negocio están centralizadas en _extract_weather_data().
+    decisiones de negocio están centralizadas en _parse_openmeteo_response().
+
+    No requiere API key — OpenMeteo es gratuito (10.000 req/día).
 
     Args:
         lat: Latitud. Default: Traiguén (-38.23).
@@ -228,80 +331,74 @@ async def get_weather_full(
         WeatherData con todos los campos tipados.
 
     Raises:
-        ValueError: API key no configurada.
         ConnectionError: Error de red.
-        RuntimeError: Error de API (key inválida, rate limit, etc.).
+        RuntimeError: Error de API o respuesta malformada.
     """
     cached = _cache_get(lat, lon)
     if cached is not None:
         return cached
 
     data = await _fetch_weather_data(lat, lon)
-    wd = _extract_weather_data(data, lat, lon)
+    wd = _parse_openmeteo_response(data, lat, lon)
     _cache_set(lat, lon, wd)
     logger.info("Clima obtenido para (%.4f, %.4f): %s", lat, lon, wd.location)
+    logger.debug(
+        "OpenMeteo raw — temp=%s hum=%s code=%s wind=%s rain=%s",
+        wd.temperature_c, wd.humidity, wd.description,
+        wd.wind_speed_ms, wd.rain_1h_mm,
+    )
     return wd
 
 
-async def _fetch_weather_data(lat: float, lon: float) -> OWMResponse:
-    """Obtiene datos de OpenWeatherMap Current Weather API y los valida.
+async def _fetch_weather_data(lat: float, lon: float) -> dict[str, object]:
+    """Obtiene datos de OpenMeteo Forecast API.
 
-    La respuesta JSON se valida contra OWMResponse (Pydantic v2). Si OWM
-    devuelve campos malformados (ej: valores null donde se espera float),
-    Pydantic lanza ValidationError → se captura como RuntimeError.
+    OpenMeteo no requiere API key. Usamos current weather variables:
+    temperature_2m, relative_humidity_2m, apparent_temperature,
+    weather_code (WMO), wind_speed_10m, rain.
 
     Args:
         lat: Latitud.
         lon: Longitud.
 
     Returns:
-        OWMResponse validado con acceso tipado a todos los campos.
+        Dict con la respuesta JSON de OpenMeteo.
 
     Raises:
-        ValueError: API key no configurada.
         ConnectionError: Error de red (DNS, timeout, conexión rechazada).
-        RuntimeError: Error de API (key inválida, rate limit, respuesta
-            malformada, etc.).
+        RuntimeError: Error de API o respuesta malformada.
     """
-    api_key = (settings.openweathermap_api_key or "").strip()
-    if not api_key:
-        raise ValueError("OPENWEATHERMAP_API_KEY no está configurada")
-
     params: dict[str, str | float] = {
-        "lat": lat,
-        "lon": lon,
-        "appid": api_key,
-        "units": "metric",
-        "lang": "es",
+        "latitude": lat,
+        "longitude": lon,
+        "current": "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,rain",
+        "timezone": "auto",
+        "forecast_days": 1,
+        "windspeed_unit": "ms",
     }
 
     try:
         client = await _get_http_client()
-        response = await client.get(_OWM_API_URL, params=params)
+        response = await client.get(_OPENMETEO_URL, params=params)
         response.raise_for_status()
-        data = OWMResponse.model_validate(response.json())
+        data: dict[str, object] = response.json()
         return data
     except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 401:
-            raise RuntimeError("API key de OpenWeatherMap inválida") from exc
-        if exc.response.status_code == 429:
-            raise RuntimeError(
-                "Rate limit de OpenWeatherMap excedido (60/min)"
-            ) from exc
+        logger.warning(
+            "OpenMeteo respondió HTTP %s", exc.response.status_code
+        )
         raise RuntimeError(
-            f"OpenWeatherMap respondió HTTP {exc.response.status_code}"
+            f"OpenMeteo respondió HTTP {exc.response.status_code}"
         ) from exc
     except httpx.RequestError as exc:
-        # No incluimos str(exc) en el mensaje porque httpx puede incluir la URL
-        # completa con appid=<api_key> en el texto de la excepción.
-        logger.warning("Error de red al consultar OpenWeatherMap: %s", exc)
+        logger.warning("Error de red al consultar OpenMeteo: %s", exc)
         raise ConnectionError(
-            "Error de red al consultar OpenWeatherMap"
+            "Error de red al consultar OpenMeteo"
         ) from exc
     except ValueError as exc:
-        # Captura json.JSONDecodeError y pydantic.ValidationError (ambos ValueError).
+        # Captura json.JSONDecodeError
         raise RuntimeError(
-            f"Respuesta de OpenWeatherMap malformada: {exc}"
+            f"Respuesta de OpenMeteo malformada: {exc}"
         ) from exc
 
 
@@ -315,9 +412,9 @@ def _format_weather(
 ) -> str:
     """Formatea datos de clima a texto natural en español chileno.
 
-    Recibe valores ya extraídos y tipados desde _extract_weather_data().
+    Recibe valores ya extraídos y tipados desde _parse_openmeteo_response().
     Ningún campo se lee del dict crudo — la extracción ocurre UNA sola vez
-    en _extract_weather_data(), punto único de verdad para todo el módulo.
+    en _parse_openmeteo_response(), punto único de verdad para todo el módulo.
 
     Args:
         temp: Temperatura en °C. None → "temperatura no disponible".
@@ -325,7 +422,7 @@ def _format_weather(
         description: Descripción del clima. "sin datos" → se omite.
         wind_speed: Velocidad del viento en m/s. None → se omite.
         rain_mm: Lluvia última hora en mm. None o 0 → se omite.
-        location: Nombre de la ubicación según OpenWeatherMap.
+        location: Nombre de la ubicación.
 
     Returns:
         Texto natural listo para Piper TTS.
@@ -347,7 +444,7 @@ def _format_weather(
         if humidity is not None:
             partes.append(f", humedad {humidity}%")
 
-    if wind_speed is not None:
+    if wind_speed is not None and wind_speed > 0:
         partes.append(f", viento {wind_speed:.1f} m/s")
 
     if rain_mm is not None and rain_mm > 0:
@@ -365,6 +462,8 @@ async def get_weather(
     Tool function para el LLM vía Tool Calling. Delega en get_weather_full()
     la consulta y extracción, y retorna solo el texto.
 
+    OpenMeteo no requiere API key.
+
     Args:
         lat: Latitud. Default: Traiguén (-38.23).
         lon: Longitud. Default: Traiguén (-72.68).
@@ -377,8 +476,6 @@ async def get_weather(
         excepción, para que el LLM pueda comunicarlo al agricultor.
     """
     # Validación de rango: misma defensa que el endpoint REST (Query ge/le).
-    # get_weather() retorna mensajes informativos, no excepciones, para que
-    # el LLM pueda comunicar el error al agricultor sin romper el diálogo.
     if not (-90.0 <= lat <= 90.0):
         return "La latitud debe estar entre -90° y 90°. ¿Me das otra coordenada?"
     if not (-180.0 <= lon <= 180.0):
@@ -387,9 +484,6 @@ async def get_weather(
     try:
         wd = await get_weather_full(lat, lon)
         return wd.texto
-    except ValueError as exc:
-        logger.warning("Configuración de clima incompleta: %s", exc)
-        return "El servicio de clima no está configurado todavía."
     except ConnectionError as exc:
         logger.warning("Error de red al consultar clima: %s", exc)
         return "No pude consultar el clima ahora. ¿Probamos más tarde?"

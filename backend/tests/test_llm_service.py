@@ -12,6 +12,7 @@ Sin modelo real: todos los tests corren en CI sin llama-cpp-python ni GGUF.
 import pytest
 
 from app.services.llm_service import (
+    _TOOLS_SECTION,
     FALLBACK_TEXT,
     MAX_TOOL_ITERATIONS,
     NO_RESPONSE_TEXT,
@@ -22,7 +23,9 @@ from app.services.llm_service import (
     _execute_tool,
     _mock_answer,
     _parse_content,
+    _parse_text_tool_calls,
     _parse_tool_calls,
+    _strip_tool_tags,
     answer,
     get_model_error,
     is_model_available,
@@ -222,6 +225,133 @@ class TestParseContent:
         assert _parse_content(response) == "Hola mundo"
 
 
+# ── Parseo de <tool_call> desde texto (formato nativo Qwen2.5) ──
+
+
+class TestParseTextToolCalls:
+    """_parse_text_tool_calls extrae tool calls del texto de Qwen2.5."""
+
+    def test_tool_call_simple(self) -> None:
+        """Extrae un tool_call basico del texto."""
+        content = (
+            '<tool_call>\n'
+            '{"name": "get_price", "arguments": {"producto": "papa", "mercado": "Lo Valledor"}}\n'
+            '</tool_call>'
+        )
+        result = _parse_text_tool_calls(content)
+        assert len(result) == 1
+        assert result[0]["function"]["name"] == "get_price"
+        assert "papa" in result[0]["function"]["arguments"]
+
+    def test_tool_call_con_texto_adyacente(self) -> None:
+        """Ignora texto alrededor del tool_call."""
+        content = (
+            'Voy a consultar el precio para ti.\n'
+            '<tool_call>\n'
+            '{"name": "get_price", "arguments": {"producto": "tomate", "mercado": "La Vega"}}\n'
+            '</tool_call>\n'
+            'Un momento por favor.'
+        )
+        result = _parse_text_tool_calls(content)
+        assert len(result) == 1
+        assert result[0]["function"]["name"] == "get_price"
+
+    def test_sin_tool_call(self) -> None:
+        """Retorna lista vacia si no hay <tool_call>."""
+        assert _parse_text_tool_calls("Hola, cómo estás?") == []
+
+    def test_content_vacio(self) -> None:
+        """Retorna lista vacia con contenido vacio."""
+        assert _parse_text_tool_calls("") == []
+        assert _parse_text_tool_calls(None) == []  # type: ignore[arg-type]
+
+    def test_json_invalido_dentro_de_tool_call(self) -> None:
+        """JSON invalido dentro del tag no rompe el parseo."""
+        content = (
+            '<tool_call>\n'
+            'esto no es json\n'
+            '</tool_call>'
+        )
+        result = _parse_text_tool_calls(content)
+        assert result == []
+
+    def test_multiple_tool_calls(self) -> None:
+        """Soporta multiples tool calls en un mismo texto."""
+        content = (
+            '<tool_call>\n'
+            '{"name": "get_price", "arguments": {"producto": "papa", "mercado": "Lo Valledor"}}\n'
+            '</tool_call>\n'
+            '<tool_call>\n'
+            '{"name": "get_weather", "arguments": {"lat": -38.23, "lon": -72.68}}\n'
+            '</tool_call>'
+        )
+        result = _parse_text_tool_calls(content)
+        assert len(result) == 2
+        assert result[0]["function"]["name"] == "get_price"
+        assert result[1]["function"]["name"] == "get_weather"
+
+
+class TestStripToolTags:
+    """_strip_tool_tags elimina tags XML residuales del texto."""
+
+    def test_strip_tool_call_tag(self) -> None:
+        """Elimina bloque <tool_call> completo."""
+        text = 'Hola <tool_call>{"name": "test"}</tool_call> mundo'
+        result = _strip_tool_tags(text)
+        assert "<tool_call>" not in result
+        assert "Hola" in result
+        assert "mundo" in result
+
+    def test_strip_tool_response_tag(self) -> None:
+        """Elimina bloque <tool_response> completo."""
+        text = '<tool_response>42</tool_response> La respuesta es 42'
+        result = _strip_tool_tags(text)
+        assert "<tool_response>" not in result
+        assert "respuesta" in result
+
+    def test_strip_tools_tag(self) -> None:
+        """Elimina bloque <tools> completo."""
+        text = 'Info <tools>{"fn": "x"}</tools> resto'
+        result = _strip_tool_tags(text)
+        assert "<tools>" not in result
+
+    def test_strip_im_start_end(self) -> None:
+        """Elimina tokens <|im_start|> y <|im_end|>."""
+        text = '<|im_start|>assistant\nHola<|im_end|>'
+        result = _strip_tool_tags(text)
+        assert "<|im_start|>" not in result
+        assert "<|im_end|>" not in result
+        assert "Hola" in result
+
+    def test_sin_tags(self) -> None:
+        """Texto sin tags se mantiene igual."""
+        text = "La papa está a $1.200 el kilo."
+        assert _strip_tool_tags(text) == text
+
+    def test_texto_vacio(self) -> None:
+        """Texto vacio se mantiene vacio."""
+        assert _strip_tool_tags("") == ""
+
+
+# ── TOOLS section contien tools en formato nativo Qwen2.5 ───────
+
+
+class TestToolsSection:
+    """_TOOLS_SECTION incluye definiciones de tools en formato nativo."""
+
+    def test_tools_section_contiene_xml_tools(self) -> None:
+        """La seccion de tools usa formato <tools> XML."""
+        assert "<tools>" in _TOOLS_SECTION
+        assert "</tools>" in _TOOLS_SECTION
+        assert "get_price" in _TOOLS_SECTION
+        assert "get_weather" in _TOOLS_SECTION
+
+    def test_tools_section_tiene_tool_call_example(self) -> None:
+        """Incluye ejemplo de como hacer tool_call."""
+        assert "<tool_call>" in _TOOLS_SECTION
+        assert "<tool_response>" in _TOOLS_SECTION
+
+
 # ── Construccion de mensajes ────────────────────────────────────
 
 
@@ -229,11 +359,12 @@ class TestBuildMessages:
     """_build_messages construye la lista de mensajes para el LLM."""
 
     def test_mensaje_base_sin_historial(self) -> None:
-        """Primer mensaje es system prompt, ultimo es el usuario."""
+        """Primer mensaje es system prompt + tools, ultimo es el usuario."""
         messages = _build_messages("¿Cuál es el precio de la papa?", [])
         assert len(messages) == 2
         assert messages[0]["role"] == "system"
-        assert messages[0]["content"] == SYSTEM_PROMPT
+        assert SYSTEM_PROMPT in str(messages[0]["content"])
+        assert "<tools>" in str(messages[0]["content"])
         assert messages[1]["role"] == "user"
         assert messages[1]["content"] == "¿Cuál es el precio de la papa?"
 

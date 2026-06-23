@@ -215,28 +215,32 @@ class TestFormatPriceText:
         registro = _insertar_precio(db, producto="papa", precio_kg=Decimal("1200"))
         texto = format_price_text(registro)
         assert "Papa" in texto
-        assert "$1.200" in texto
+        assert "1.200 pesos" in texto
         assert "Lo Valledor" in texto
         assert "20/06/2026" in texto
+        assert "$" not in texto
 
     def test_precio_con_decimales(self, db: Session) -> None:
         registro = _insertar_precio(db, precio_kg=Decimal("1150.50"))
         texto = format_price_text(registro)
-        assert "$1.150,50" in texto
+        assert "1.150 coma 50 pesos" in texto
+        assert "$" not in texto
 
     def test_precio_entero_sin_decimales(self, db: Session) -> None:
         registro = _insertar_precio(db, precio_kg=Decimal("800"))
         texto = format_price_text(registro)
-        assert "$800" in texto
-        assert "$800.00" not in texto
-        assert "$800,00" not in texto
+        assert "800 pesos" in texto
+        assert "$" not in texto
+        assert "800.00" not in texto
+        assert "800,00" not in texto
 
     def test_precio_miles_chileno_con_punto(self, db: Session) -> None:
-        """Formato chileno usa punto para miles: $1.200, no $1,200."""
+        """Formato chileno usa punto para miles."""
         registro = _insertar_precio(db, precio_kg=Decimal("1500"))
         texto = format_price_text(registro)
-        assert "$1.500" in texto
-        assert "$1,500" not in texto
+        assert "1.500 pesos" in texto
+        assert "1,500" not in texto
+        assert "$" not in texto
 
     def test_texto_contiene_frase_completa(self, db: Session) -> None:
         registro = _insertar_precio(
@@ -248,7 +252,7 @@ class TestFormatPriceText:
         )
         texto = format_price_text(registro)
         assert texto == (
-            "Tomate está a $850 el kilo en Vega Central, precio del 19/06/2026."
+            "Tomate está a 850 pesos el kilo en Vega Central, precio del 19/06/2026."
         )
 
 
@@ -262,7 +266,8 @@ class TestGetPriceForLlm:
         _insertar_precio(db)
         texto = get_price_for_llm(db, "papa", "Lo Valledor")
         assert "Papa" in texto
-        assert "$1.200" in texto
+        assert "1.200 pesos" in texto
+        assert "$" not in texto
 
     def test_devuelve_mensaje_sin_datos_producto_no_existe(self, db: Session) -> None:
         texto = get_price_for_llm(db, "zanahoria", "Lo Valledor")
@@ -358,7 +363,8 @@ class TestPricesApiEndpoint:
         assert data["precio_kg"] == 1200.0
         assert data["unidad"] == "kg"
         assert "Papa" in data["texto"]
-        assert "$1.200" in data["texto"]
+        assert "1.200 pesos" in data["texto"]
+        assert "$" not in data["texto"]
 
     async def test_get_producto_sin_mercado_devuelve_todos(
         self, client: AsyncClient, tmp_path: Path

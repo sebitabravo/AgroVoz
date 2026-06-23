@@ -582,10 +582,10 @@ class TestSaveConsultation:
 class TestTimeout:
     """Timeout del pipeline."""
 
-    def test_timeout_default_es_60_segundos(self) -> None:
+    def test_timeout_default(self) -> None:
         pipeline = AgroVozPipeline()
         assert pipeline._timeout == _PIPELINE_TIMEOUT
-        assert pipeline._timeout == 60.0
+        assert pipeline._timeout == 120.0
 
     def test_timeout_customizable(self) -> None:
         pipeline = AgroVozPipeline(pipeline_timeout=5.0)

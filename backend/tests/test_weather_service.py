@@ -1,10 +1,10 @@
-"""Tests para app.services.weather_service: consulta clima OpenWeatherMap.
+"""Tests para app.services.weather_service: consulta clima OpenMeteo.
 
 Cobertura: _format_weather (respuesta completa, parcial, lluvia, sin viento),
-_extract_weather_data con OWMResponse (null main, rain 3h, coord fallback,
-weather vacío), get_weather con mock httpx (happy path, cache, errores),
-validación lat/lon, cache eviction, Pydantic validation rejection,
-y _clear_cache. Sin red real: MockTransport simula respuestas de OpenWeatherMap.
+_parse_openmeteo_response con datos realistas (completo, mínimo, nulos),
+get_weather con mock httpx (happy path, cache, errores),
+validación lat/lon, cache eviction, y _clear_cache.
+Sin red real: MockTransport simula respuestas de OpenMeteo.
 """
 
 from collections.abc import Callable
@@ -12,61 +12,58 @@ from collections.abc import Callable
 import httpx
 import pytest
 
-from app.schemas.openweathermap import (
-    OWMCoord,
-    OWMMain,
-    OWMResponse,
-    OWMWeatherItem,
-    OWMWind,
-)
 from app.services.weather_service import (
     _clear_cache,
-    _extract_weather_data,
     _format_weather,
+    _parse_openmeteo_response,
+    _wmo_description,
     get_weather,
     get_weather_full,
 )
 
-# ── Fixtures de datos OpenWeatherMap ──────────────────────────
+# ── Fixtures de datos OpenMeteo ──────────────────────────
 
-# Respuesta completa de OpenWeatherMap para Traiguén.
-# Incluye temp, humedad, viento, lluvia, descripción en español.
-_OWM_RESPUESTA_COMPLETA = {
-    "coord": {"lon": -72.68, "lat": -38.23},
-    "weather": [{"id": 804, "main": "Clouds", "description": "nublado"}],
-    "main": {
-        "temp": 18.5,
-        "feels_like": 17.2,
-        "temp_min": 15.0,
-        "temp_max": 22.0,
-        "humidity": 65,
+# Respuesta completa de OpenMeteo para Traiguén.
+# Incluye temp, humedad, sensación térmica, viento, lluvia, código WMO.
+_OPENMETEO_RESPUESTA_COMPLETA: dict[str, object] = {
+    "latitude": -38.23,
+    "longitude": -72.68,
+    "current": {
+        "temperature_2m": 18.5,
+        "relative_humidity_2m": 65,
+        "apparent_temperature": 17.2,
+        "weather_code": 3,
+        "wind_speed_10m": 3.6,
+        "rain": 0.5,
     },
-    "wind": {"speed": 3.6, "deg": 180},
-    "rain": {"1h": 0.5},
-    "clouds": {"all": 90},
-    "dt": 1719000000,
-    "name": "Traiguén",
 }
 
-# Respuesta sin lluvia y sin viento (campos ausentes).
-_OWM_SIN_LLUVIA_NI_VIENTO = {
-    "coord": {"lon": -72.68, "lat": -38.23},
-    "weather": [{"id": 800, "main": "Clear", "description": "cielo claro"}],
-    "main": {
-        "temp": 22.0,
-        "feels_like": 21.0,
-        "temp_min": 20.0,
-        "temp_max": 25.0,
-        "humidity": 40,
+# Respuesta sin lluvia ni viento (campos en 0 o ausentes).
+_OPENMETEO_SIN_LLUVIA_NI_VIENTO: dict[str, object] = {
+    "latitude": -38.23,
+    "longitude": -72.68,
+    "current": {
+        "temperature_2m": 22.0,
+        "relative_humidity_2m": 40,
+        "apparent_temperature": 21.0,
+        "weather_code": 0,
+        "wind_speed_10m": 0.0,
+        "rain": 0.0,
     },
-    "name": "Traiguén",
 }
 
-# Respuesta con datos mínimos (temp y humidity faltantes).
-_OWM_DATOS_MINIMOS = {
-    "weather": [{"description": "niebla"}],
-    "main": {},
-    "name": "Lonquimay",
+# Respuesta con datos mínimos (temperatura y humedad presentes, sin extras).
+_OPENMETEO_DATOS_MINIMOS: dict[str, object] = {
+    "latitude": -38.5,
+    "longitude": -72.0,
+    "current": {
+        "temperature_2m": 12.0,
+        "relative_humidity_2m": 80,
+        "apparent_temperature": 11.0,
+        "weather_code": 45,
+        "wind_speed_10m": None,
+        "rain": None,
+    },
 }
 
 
@@ -79,7 +76,7 @@ def _install_mock_client(
 ) -> httpx.AsyncClient:
     """Instala un cliente HTTP mockeado en _http_client.
 
-    Usa MockTransport para simular respuestas de OpenWeatherMap sin red.
+    Usa MockTransport para simular respuestas de OpenMeteo sin red.
     El caller debe cerrar el cliente devuelto al terminar el test.
     """
     transport = httpx.MockTransport(handler)
@@ -94,7 +91,7 @@ def _install_mock_client(
 
 
 class TestFormatWeather:
-    """Formateo de respuesta JSON OpenWeatherMap a texto natural."""
+    """Formateo de datos de clima a texto natural."""
 
     def test_respuesta_completa(self) -> None:
         """Con todos los campos: temp, humedad, viento, lluvia."""
@@ -110,7 +107,7 @@ class TestFormatWeather:
         assert "0.5 mm" in texto
 
     def test_sin_lluvia_ni_viento(self) -> None:
-        """Respuesta sin campos rain ni wind."""
+        """Respuesta sin rain ni wind."""
         texto = _format_weather(
             temp=22.0, humidity=40, description="cielo claro",
             location="Traiguén",
@@ -141,12 +138,12 @@ class TestFormatWeather:
         assert "niebla" in texto
 
     def test_lista_weather_vacia(self) -> None:
-        """weather: [] — texto no incluye descripción de clima."""
+        """description='sin datos' — texto no incluye descripción."""
         texto = _format_weather(
             temp=12.0, humidity=55, description="sin datos",
             location="Vacio",
         )
-        # Solo temp y humedad, sin descripción de clima (weather vacío → description="sin datos" → se omite).
+        # Solo temp y humedad, sin descripción de clima.
         assert "Vacio" in texto
         assert "12°C" in texto
         assert "55%" in texto
@@ -154,182 +151,122 @@ class TestFormatWeather:
         assert "soleado" not in texto
 
 
-# ── Tests: _extract_weather_data con OWMResponse ───────────────
+# ── Tests: _wmo_description ──────────────────────────────────
 
 
-class TestExtractWeatherData:
-    """Extracción desde OWMResponse validado por Pydantic a WeatherData."""
+class TestWMODescription:
+    """Traducción de códigos WMO a español."""
 
-    def test_extraccion_respuesta_completa(self) -> None:
-        """OWMResponse con todos los campos produce WeatherData completo."""
-        owm = OWMResponse(
-            coord=OWMCoord(lat=-38.23, lon=-72.68),
-            weather=[OWMWeatherItem(id=804, main="Clouds", description="nublado")],
-            main=OWMMain(temp=18.5, feels_like=17.2, humidity=65),
-            wind=OWMWind(speed=3.6, deg=180),
-            rain={"1h": 0.5},
-            name="Traiguén",
+    def test_codigo_conocido(self) -> None:
+        """Código WMO conocido devuelve descripción."""
+        assert _wmo_description(0) == "cielo despejado"
+        assert _wmo_description(3) == "nublado"
+        assert _wmo_description(61) == "lluvia ligera"
+        assert _wmo_description(95) == "tormenta eléctrica"
+
+    def test_codigo_desconocido(self) -> None:
+        """Código WMO no mapeado devuelve 'sin datos'."""
+        assert _wmo_description(999) == "sin datos"
+
+    def test_codigo_none(self) -> None:
+        """None devuelve 'sin datos'."""
+        assert _wmo_description(None) == "sin datos"
+
+
+# ── Tests: _parse_openmeteo_response ─────────────────────────
+
+
+class TestParseOpenMeteoResponse:
+    """Parseo de respuesta JSON de OpenMeteo a WeatherData."""
+
+    def test_respuesta_completa(self) -> None:
+        """OpenMeteo con todos los campos produce WeatherData completo."""
+        wd = _parse_openmeteo_response(
+            _OPENMETEO_RESPUESTA_COMPLETA, -38.23, -72.68
         )
-
-        wd = _extract_weather_data(owm, -38.23, -72.68)
 
         assert wd.lat == -38.23
         assert wd.lon == -72.68
-        assert wd.location == "Traiguén"
+        assert wd.location == "Traiguén"  # cerca de default
         assert wd.temperature_c == 18.5
         assert wd.feels_like_c == 17.2
         assert wd.humidity == 65
-        assert wd.description == "nublado"
+        assert wd.description == "nublado"  # code 3
         assert wd.wind_speed_ms == 3.6
         assert wd.rain_1h_mm == 0.5
         assert "18°C" in wd.texto
         assert "nublado" in wd.texto
 
-    def test_main_none_produce_nulls(self) -> None:
-        """OWMResponse con main=None → temp, feels_like, humidity son None."""
-        owm = OWMResponse(
-            weather=[OWMWeatherItem(description="niebla")],
-            main=None,
-            name="Lonquimay",
+    def test_campos_ausentes_produce_nones(self) -> None:
+        """Campos None en current → temp, feels, humidity son None."""
+        wd = _parse_openmeteo_response(
+            {"current": {}}, -38.5, -72.0
         )
-
-        wd = _extract_weather_data(owm, -38.5, -72.0)
 
         assert wd.temperature_c is None
         assert wd.feels_like_c is None
         assert wd.humidity is None
+        assert wd.description == "sin datos"
         assert "temperatura no disponible" in wd.texto
 
-    def test_weather_list_vacia_produce_sin_datos(self) -> None:
-        """weather=[] → description="sin datos"."""
-        owm = OWMResponse(
-            weather=[],
-            main=OWMMain(temp=15.0, humidity=50),
-            name="Vacío",
-        )
+    def test_sin_current_produce_nones(self) -> None:
+        """Sin bloque current → todos los campos son None."""
+        wd = _parse_openmeteo_response({}, -33.0, -70.0)
 
-        wd = _extract_weather_data(owm, -33.0, -70.0)
-
+        assert wd.temperature_c is None
+        assert wd.humidity is None
         assert wd.description == "sin datos"
 
-    def test_weather_description_none_produce_sin_datos(self) -> None:
-        """weather[0].description=None → fallback a "sin datos"."""
-        owm = OWMResponse(
-            weather=[OWMWeatherItem(id=800, description=None)],
-            main=OWMMain(temp=15.0, humidity=50),
-            name="Nublado",
+    def test_coordenadas_lejos_de_traiguen(self) -> None:
+        """Coordenadas lejos de Traiguén → location='la zona consultada'."""
+        wd = _parse_openmeteo_response(
+            {
+                "current": {
+                    "temperature_2m": 25.0,
+                    "relative_humidity_2m": 30,
+                    "weather_code": 0,
+                }
+            },
+            -33.45, -70.65,  # Santiago
         )
 
-        wd = _extract_weather_data(owm, -33.0, -70.0)
-
-        assert wd.description == "sin datos"
-
-    def test_coord_null_usa_fallback(self) -> None:
-        """coord=None → usa lat/lon del argumento (fallback)."""
-        owm = OWMResponse(
-            coord=None,
-            weather=[OWMWeatherItem(description="soleado")],
-            main=OWMMain(temp=20.0, humidity=40),
-            name="SinCoord",
-        )
-
-        wd = _extract_weather_data(owm, -40.0, -73.0)
-
-        assert wd.lat == -40.0
-        assert wd.lon == -73.0
-
-    def test_coord_lat_none_usa_fallback(self) -> None:
-        """coord.lat=None → usa lat del argumento."""
-        owm = OWMResponse(
-            coord=OWMCoord(lat=None, lon=-72.68),
-            weather=[OWMWeatherItem(description="nublado")],
-            main=OWMMain(temp=18.0, humidity=60),
-            name="SinLat",
-        )
-
-        wd = _extract_weather_data(owm, -38.23, -72.68)
-
-        assert wd.lat == -38.23
-        assert wd.lon == -72.68
-
-    def test_wind_none_produce_null(self) -> None:
-        """wind=None → wind_speed_ms=None."""
-        owm = OWMResponse(
-            weather=[OWMWeatherItem(description="calma")],
-            main=OWMMain(temp=22.0, humidity=30),
-            wind=None,
-            name="SinViento",
-        )
-
-        wd = _extract_weather_data(owm, -33.0, -70.0)
-
-        assert wd.wind_speed_ms is None
-
-    def test_wind_speed_none_produce_null(self) -> None:
-        """wind.speed=None → wind_speed_ms=None."""
-        owm = OWMResponse(
-            weather=[OWMWeatherItem(description="ventoso")],
-            main=OWMMain(temp=15.0, humidity=55),
-            wind=OWMWind(speed=None, deg=180),
-            name="VientoNull",
-        )
-
-        wd = _extract_weather_data(owm, -33.0, -70.0)
-
-        assert wd.wind_speed_ms is None
-
-    def test_rain_none_produce_null(self) -> None:
-        """rain=None → rain_1h_mm=None."""
-        owm = OWMResponse(
-            weather=[OWMWeatherItem(description="seco")],
-            main=OWMMain(temp=28.0, humidity=20),
-            rain=None,
-            name="SinLluvia",
-        )
-
-        wd = _extract_weather_data(owm, -33.0, -70.0)
-
-        assert wd.rain_1h_mm is None
-
-    def test_rain_con_3h_en_vez_de_1h(self) -> None:
-        """rain solo tiene key '3h' → extrae de '3h'."""
-        owm = OWMResponse(
-            weather=[OWMWeatherItem(description="lluvioso")],
-            main=OWMMain(temp=14.0, humidity=80),
-            rain={"3h": 2.5},
-            name="Lluvia3h",
-        )
-
-        wd = _extract_weather_data(owm, -38.0, -72.0)
-
-        assert wd.rain_1h_mm == 2.5
-        assert "2.5 mm" in wd.texto
+        assert wd.location == "la zona consultada"
+        assert wd.temperature_c == 25.0
+        assert wd.description == "cielo despejado"
 
     def test_rain_cero_no_se_reporta(self) -> None:
-        """rain={'1h': 0.0} → rain_1h_mm=None (umbral > 0)."""
-        owm = OWMResponse(
-            weather=[OWMWeatherItem(description="nublado")],
-            main=OWMMain(temp=16.0, humidity=60),
-            rain={"1h": 0.0},
-            name="Traiguén",
+        """rain=0.0 → rain_1h_mm=None (umbral > 0)."""
+        wd = _parse_openmeteo_response(
+            {
+                "current": {
+                    "temperature_2m": 16.0,
+                    "relative_humidity_2m": 60,
+                    "weather_code": 3,
+                    "rain": 0.0,
+                }
+            },
+            -38.23, -72.68,
         )
-
-        wd = _extract_weather_data(owm, -38.23, -72.68)
 
         assert wd.rain_1h_mm is None
         assert "mm" not in wd.texto  # sin mención de lluvia
 
-    def test_name_none_produce_desconocido(self) -> None:
-        """name=None → location='Desconocido'."""
-        owm = OWMResponse(
-            weather=[OWMWeatherItem(description="soleado")],
-            main=OWMMain(temp=20.0, humidity=50),
-            name=None,
+    def test_wind_zero_si_incluye(self) -> None:
+        """wind_speed_10m=0.0 → wind_speed_ms=0.0 (no None)."""
+        wd = _parse_openmeteo_response(
+            {
+                "current": {
+                    "temperature_2m": 20.0,
+                    "relative_humidity_2m": 50,
+                    "weather_code": 1,
+                    "wind_speed_10m": 0.0,
+                }
+            },
+            -38.23, -72.68,
         )
 
-        wd = _extract_weather_data(owm, -35.0, -71.0)
-
-        assert wd.location == "Desconocido"
+        assert wd.wind_speed_ms == 0.0
+        assert "viento" not in wd.texto  # no se menciona si es 0
 
 
 # ── Tests: get_weather ────────────────────────────────────────
@@ -346,10 +283,6 @@ class TestGetWeather:
 
     def _mock_client(self, monkeypatch: pytest.MonkeyPatch, json_body: dict[str, object]) -> httpx.AsyncClient:
         """Helper: instala mock de cliente HTTP que responde con json_body."""
-        monkeypatch.setattr(
-            "app.services.weather_service.settings.openweathermap_api_key", "test-key"
-        )
-
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json=json_body)
 
@@ -357,7 +290,7 @@ class TestGetWeather:
 
     async def test_get_weather_traiguen_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Consulta con coordenadas default devuelve texto natural."""
-        mock_client = self._mock_client(monkeypatch, _OWM_RESPUESTA_COMPLETA)
+        mock_client = self._mock_client(monkeypatch, _OPENMETEO_RESPUESTA_COMPLETA)
         try:
             texto = await get_weather()
             assert "Traiguén" in texto
@@ -370,14 +303,17 @@ class TestGetWeather:
     ) -> None:
         """Consulta con coordenadas de Santiago."""
         mock_client = self._mock_client(monkeypatch, {
-            "coord": {"lon": -70.65, "lat": -33.45},
-            "weather": [{"description": "soleado"}],
-            "main": {"temp": 25.0, "humidity": 30},
-            "name": "Santiago",
+            "latitude": -33.45,
+            "longitude": -70.65,
+            "current": {
+                "temperature_2m": 25.0,
+                "relative_humidity_2m": 30,
+                "weather_code": 0,
+            },
         })
         try:
             texto = await get_weather(-33.45, -70.65)
-            assert "Santiago" in texto
+            assert "la zona consultada" in texto
             assert "25°C" in texto
         finally:
             await mock_client.aclose()
@@ -386,15 +322,12 @@ class TestGetWeather:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Segunda llamada con mismas coordenadas usa cache, no llama API."""
-        monkeypatch.setattr(
-            "app.services.weather_service.settings.openweathermap_api_key", "test-key"
-        )
         call_count = 0
 
         def handler(request: httpx.Request) -> httpx.Response:
             nonlocal call_count
             call_count += 1
-            return httpx.Response(200, json=_OWM_RESPUESTA_COMPLETA)
+            return httpx.Response(200, json=_OPENMETEO_RESPUESTA_COMPLETA)
 
         mock_client = _install_mock_client(monkeypatch, handler)
         try:
@@ -405,38 +338,6 @@ class TestGetWeather:
             assert texto1 == texto2
             # Solo 1 llamada a la API.
             assert call_count == 1
-        finally:
-            await mock_client.aclose()
-
-    async def test_cache_por_coordenadas_distintas(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Coordenadas distintas = llamadas distintas, sin compartir cache."""
-        monkeypatch.setattr(
-            "app.services.weather_service.settings.openweathermap_api_key", "test-key"
-        )
-        call_count = 0
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            nonlocal call_count
-            call_count += 1
-            lat = float(request.url.params["lat"])
-            if abs(lat - (-38.23)) < 0.01:
-                return httpx.Response(200, json=_OWM_RESPUESTA_COMPLETA)
-            return httpx.Response(200, json={
-                "coord": {"lon": -70.65, "lat": -33.45},
-                "weather": [{"description": "soleado"}],
-                "main": {"temp": 25.0, "humidity": 30},
-                "name": "Santiago",
-            })
-
-        mock_client = _install_mock_client(monkeypatch, handler)
-        try:
-            texto_tgn = await get_weather(-38.23, -72.68)
-            texto_stgo = await get_weather(-33.45, -70.65)
-            assert "Traiguén" in texto_tgn
-            assert "Santiago" in texto_stgo
-            assert call_count == 2
         finally:
             await mock_client.aclose()
 
@@ -452,15 +353,11 @@ class TestGetWeatherErrores:
     def _install_mock(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        status: int,
+        status: int = 200,
         json_body: dict[str, object] | None = None,
         exc: type[Exception] | None = None,
     ) -> httpx.AsyncClient:
         """Instala mock que responde con status o lanza excepción."""
-        monkeypatch.setattr(
-            "app.services.weather_service.settings.openweathermap_api_key", "test-key"
-        )
-
         def handler(request: httpx.Request) -> httpx.Response:
             if exc:
                 raise exc("error simulado")
@@ -468,22 +365,11 @@ class TestGetWeatherErrores:
 
         return _install_mock_client(monkeypatch, handler)
 
-    async def test_api_key_invalida_devuelve_mensaje(
+    async def test_error_http_devuelve_mensaje(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """HTTP 401 → mensaje informativo, no excepción."""
-        mock_client = self._install_mock(monkeypatch, 401, {"cod": 401, "message": "Invalid API key"})
-        try:
-            texto = await get_weather()
-            assert "no está disponible" in texto
-        finally:
-            await mock_client.aclose()
-
-    async def test_rate_limit_devuelve_mensaje(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """HTTP 429 → mensaje informativo."""
-        mock_client = self._install_mock(monkeypatch, 429)
+        """HTTP 500 → mensaje informativo."""
+        mock_client = self._install_mock(monkeypatch, 500, {})
         try:
             texto = await get_weather()
             assert "no está disponible" in texto
@@ -507,10 +393,6 @@ class TestGetWeatherErrores:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """HTTP 200 con body no-JSON (ej: HTML de proxy/CDN) → mensaje informativo."""
-        monkeypatch.setattr(
-            "app.services.weather_service.settings.openweathermap_api_key", "test-key"
-        )
-
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, content=b"<html>502 Proxy Error</html>")
 
@@ -521,27 +403,12 @@ class TestGetWeatherErrores:
         finally:
             await mock_client.aclose()
 
-    async def test_api_key_no_configurada_devuelve_mensaje(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """API key vacía → ValueError → mensaje informativo."""
-        monkeypatch.setattr(
-            "app.services.weather_service.settings.openweathermap_api_key", ""
-        )
-        # Limpiar cache por si otro test guardó algo.
-        _clear_cache()
-        texto = await get_weather()
-        assert "no está configurado" in texto
-
     # ── Validación de rango lat/lon (defensa en profundidad) ────
 
     async def test_latitud_invalida_devuelve_mensaje(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Latitud > 90° retorna mensaje sin llamar a la API."""
-        monkeypatch.setattr(
-            "app.services.weather_service.settings.openweathermap_api_key", "test-key"
-        )
         texto = await get_weather(lat=91.0, lon=-70.0)
         assert "latitud" in texto.lower()
 
@@ -549,51 +416,8 @@ class TestGetWeatherErrores:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Longitud > 180° retorna mensaje sin llamar a la API."""
-        monkeypatch.setattr(
-            "app.services.weather_service.settings.openweathermap_api_key", "test-key"
-        )
         texto = await get_weather(lat=-33.0, lon=181.0)
         assert "longitud" in texto.lower()
-
-    async def test_respuesta_null_en_rain_es_rechazada(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """OWM responde rain={"1h": null} → Pydantic ValidationError → RuntimeError."""
-        monkeypatch.setattr(
-            "app.services.weather_service.settings.openweathermap_api_key", "test-key"
-        )
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, json={"rain": {"1h": None}})
-
-        mock_client = _install_mock_client(monkeypatch, handler)
-        try:
-            texto = await get_weather()
-            assert "no está disponible" in texto
-        finally:
-            await mock_client.aclose()
-
-    async def test_respuesta_rain_malformado_es_rechazado(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """OWM responde rain={"1h": "mucho"} → str no es float → Pydantic ValidationError."""
-        monkeypatch.setattr(
-            "app.services.weather_service.settings.openweathermap_api_key", "test-key"
-        )
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, json={
-                "main": {"temp": 18.0, "humidity": 50},
-                "weather": [{"description": "nublado"}],
-                "rain": {"1h": "mucho"},  # string donde se espera float
-            })
-
-        mock_client = _install_mock_client(monkeypatch, handler)
-        try:
-            texto = await get_weather()
-            assert "no está disponible" in texto
-        finally:
-            await mock_client.aclose()
 
 
 class TestClearCache:
@@ -606,15 +430,12 @@ class TestClearCache:
 
     async def test_clear_cache_funciona(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Después de clear_cache, la siguiente llamada va a API."""
-        monkeypatch.setattr(
-            "app.services.weather_service.settings.openweathermap_api_key", "test-key"
-        )
         call_count = 0
 
         def handler(request: httpx.Request) -> httpx.Response:
             nonlocal call_count
             call_count += 1
-            return httpx.Response(200, json=_OWM_RESPUESTA_COMPLETA)
+            return httpx.Response(200, json=_OPENMETEO_RESPUESTA_COMPLETA)
 
         mock_client = _install_mock_client(monkeypatch, handler)
         try:
@@ -630,20 +451,18 @@ class TestClearCache:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Cache con > _CACHE_MAX_SIZE entradas evicta la más antigua."""
-        monkeypatch.setattr(
-            "app.services.weather_service.settings.openweathermap_api_key", "test-key"
-        )
         # Forzar _CACHE_MAX_SIZE a 3 para el test.
         monkeypatch.setattr("app.services.weather_service._CACHE_MAX_SIZE", 3)
 
         def handler(request: httpx.Request) -> httpx.Response:
-            lat = float(request.url.params["lat"])
-            lon = float(request.url.params["lon"])
+            _ = float(request.url.params["latitude"])  # solo para validar que llega
+            _ = float(request.url.params["longitude"])
             return httpx.Response(200, json={
-                "coord": {"lon": lon, "lat": lat},
-                "weather": [{"description": "nublado"}],
-                "main": {"temp": 18.0, "humidity": 60},
-                "name": f"Lugar {lat}",
+                "current": {
+                    "temperature_2m": 18.0,
+                    "relative_humidity_2m": 60,
+                    "weather_code": 3,
+                },
             })
 
         mock_client = _install_mock_client(monkeypatch, handler)
@@ -651,8 +470,7 @@ class TestClearCache:
             import app.services.weather_service as ws
 
             # Insertar 4 entradas con coordenadas distintas.
-            # Cada _cache_key usa 6 decimales de precisión.
-            await get_weather_full(-38.23, -72.68)  # Traiguén (1ª entrada → será evictada)
+            await get_weather_full(-38.23, -72.68)  # Traiguén (1ª → será evictada)
             await get_weather_full(-33.45, -70.65)  # Santiago (2ª)
             await get_weather_full(-36.82, -73.05)  # Concepción (3ª)
             await get_weather_full(-53.15, -70.90)  # Punta Arenas (4ª → evicta 1ª)
@@ -674,10 +492,6 @@ class TestClearCache:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Entrada de cache expira tras _CACHE_TTL_SECONDS y se refresca vía API."""
-        monkeypatch.setattr(
-            "app.services.weather_service.settings.openweathermap_api_key", "test-key"
-        )
-
         # Reloj fake: lista mutable para que el handler y _cache_* compartan
         # la misma referencia. time.monotonic() retorna t[0].
         t = [1000.0]
@@ -688,7 +502,7 @@ class TestClearCache:
         def handler(request: httpx.Request) -> httpx.Response:
             nonlocal call_count
             call_count += 1
-            return httpx.Response(200, json=_OWM_RESPUESTA_COMPLETA)
+            return httpx.Response(200, json=_OPENMETEO_RESPUESTA_COMPLETA)
 
         mock_client = _install_mock_client(monkeypatch, handler)
         try:

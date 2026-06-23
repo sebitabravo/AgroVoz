@@ -25,10 +25,11 @@ logger = logging.getLogger(__name__)
 
 # Timeout interno del pipeline. Si el pipeline completo excede este limite,
 # se aborta y se retorna AudioResponse con texto de error. Distinto del
-# target de producto <15s: los 60s son la red de seguridad.
-# En desarrollo (Docker en ARM64), se necesita mas tiempo porque los modelos
-# cargan en CPU emulada. En produccion (x86_64 bare metal), 60s es suficiente.
-_PIPELINE_TIMEOUT = 60.0
+# target de producto <15s.
+# Aumentado a 120s para desarrollo: el LLM en CPU emulada (ARM64 Docker)
+# necesita ~5-9s cold start + 20-40s por generacion, y el tool calling loop
+# requiere 2 generaciones. En produccion (x86_64), cold start solo 1 vez.
+_PIPELINE_TIMEOUT = 120.0
 
 # Duracion maxima de audio para transcripcion Whisper (ms).
 # asyncio.wait_for cancela la coroutine pero NO el thread subyacente.

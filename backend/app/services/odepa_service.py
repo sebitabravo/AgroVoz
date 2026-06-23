@@ -475,20 +475,22 @@ def query_latest_by_product(
 def format_price_text(record: OdepaPrice) -> str:
     """Formatea un registro OdepaPrice como texto natural en español chileno.
 
-    Formato: "Papa está a $1.200 el kilo en Lo Valledor, precio del 20/06/2026."
+    Formato: "Papa está a 1.200 pesos el kilo en Lo Valledor, precio del 20/06/2026."
     Sin artículo para evitar errores de género (el tomate, la papa).
     Usa punto como separador de miles (convención chilena).
     Muestra decimales solo si el precio tiene fracción significativa.
+    Usa "pesos" en vez de "$" para que el LLM no hable de "dólares" al leer el
+    resultado de la tool antes de pasarlo a TTS.
     """
     precio = record.precio_kg
     if precio == precio.to_integral_value():
         parte_entera = f"{int(precio):,}".replace(",", ".")
-        precio_str = f"${parte_entera}"
+        precio_str = f"{parte_entera} pesos"
     else:
         entero, dec = str(precio).split(".")
         parte_entera = f"{int(entero):,}".replace(",", ".")
         dec = dec.ljust(2, "0")[:2]
-        precio_str = f"${parte_entera},{dec}"
+        precio_str = f"{parte_entera} coma {dec} pesos"
 
     fecha_str = record.fecha.strftime("%d/%m/%Y")
     return (

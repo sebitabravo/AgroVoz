@@ -46,7 +46,9 @@ class Settings(BaseSettings):
     openwa_webhook_secret: str = "dev-webhook-secret"
     openwa_api_url: str = "http://localhost:2785"
 
-    # ── OpenWeatherMap ───────────────────
+    # ── OpenWeatherMap (DEPRECATED) ───────
+    # Ya no se usa. Migrado a OpenMeteo (sin API key) en issue #51.
+    # Se mantiene por compatibilidad, pero no afecta el funcionamiento.
     openweathermap_api_key: str = ""
 
     # ── ODEPA ────────────────────────────
@@ -199,12 +201,8 @@ class Settings(BaseSettings):
                 RuntimeWarning,
                 stacklevel=2,
             )
-        if not self.openweathermap_api_key:
-            warnings.warn(
-                "OPENWEATHERMAP_API_KEY no está configurada. Las consultas de clima no funcionarán sin esto.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
+        # OpenMeteo no requiere API key (issue #51).
+        # Mantenemos openweathermap_api_key como deprecated por compatibilidad.
 
 
 settings = Settings()
