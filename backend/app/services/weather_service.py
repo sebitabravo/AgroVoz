@@ -8,7 +8,7 @@ Plan gratuito: 60 calls/min. Cache en memoria con TTL 30 min.
 import logging
 import time
 from collections.abc import Mapping
-from typing import Any
+from typing import cast
 
 import httpx
 
@@ -64,7 +64,7 @@ def _clear_cache() -> None:
     _cache.clear()
 
 
-async def _fetch_weather_data(lat: float, lon: float) -> dict[str, Any]:
+async def _fetch_weather_data(lat: float, lon: float) -> dict[str, object]:
     """Obtiene datos crudos de OpenWeatherMap Current Weather API.
 
     Args:
@@ -110,11 +110,11 @@ async def _fetch_weather_data(lat: float, lon: float) -> dict[str, Any]:
             f"Error de red al consultar OpenWeatherMap: {exc}"
         ) from exc
 
-    data: dict[str, Any] = response.json()
+    data: dict[str, object] = response.json()
     return data
 
 
-def _format_weather(data: dict[str, Any]) -> str:
+def _format_weather(data: Mapping[str, object]) -> str:
     """Formatea la respuesta JSON en texto natural español chileno.
 
     Formato: "En Traiguén ahora: 18°C, cielo nublado, humedad 65%,
@@ -126,17 +126,17 @@ def _format_weather(data: dict[str, Any]) -> str:
     Returns:
         Texto natural listo para Piper TTS.
     """
-    main = data.get("main", {})
-    weather_list = data.get("weather", [])
+    main = cast(dict[str, object], data.get("main", {}))
+    weather_list = cast(list[dict[str, object]], data.get("weather", []))
     weather = weather_list[0] if weather_list else {}
-    wind = data.get("wind", {})
-    rain = data.get("rain", {})
+    wind = cast(dict[str, object], data.get("wind", {}))
+    rain = cast(dict[str, object], data.get("rain", {}))
 
     temp = main.get("temp")
     humidity = main.get("humidity")
     description = weather.get("description", "sin datos")
     wind_speed = wind.get("speed")
-    location = data.get("name", "la zona consultada")
+    location = cast(str, data.get("name")) or "la zona consultada"
 
     # Temperatura: redondear a entero para texto natural.
     temp_str = f"{temp:.0f}°C" if temp is not None else "temperatura no disponible"
@@ -161,8 +161,8 @@ def _format_weather(data: dict[str, Any]) -> str:
 
     # Lluvia: OpenWeatherMap devuelve rain.1h (mm última hora) o rain.3h.
     if rain:
-        rain_mm = rain.get("1h", rain.get("3h", 0))
-        if rain_mm and rain_mm > 0:
+        rain_mm = cast(float, rain.get("1h", rain.get("3h", 0.0)))
+        if rain_mm > 0:
             partes.append(f", lluvia {rain_mm:.1f} mm")
 
     return "".join(partes) + "."
