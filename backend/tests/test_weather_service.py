@@ -333,6 +333,27 @@ class TestGetWeatherErrores:
         finally:
             await real_client.aclose()
 
+    async def test_respuesta_no_json_devuelve_mensaje(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """HTTP 200 con body no-JSON (ej: HTML de proxy/CDN) → mensaje informativo."""
+        monkeypatch.setattr(
+            "app.services.weather_service.settings.openweathermap_api_key", "test-key"
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=b"<html>502 Proxy Error</html>")
+
+        fake_cls, real_client = _weather_fake_client(handler)
+        monkeypatch.setattr(
+            "app.services.weather_service.httpx.AsyncClient", fake_cls
+        )
+        try:
+            texto = await get_weather()
+            assert "no está disponible" in texto
+        finally:
+            await real_client.aclose()
+
     async def test_api_key_no_configurada_devuelve_mensaje(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

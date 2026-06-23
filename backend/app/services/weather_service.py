@@ -214,6 +214,8 @@ async def _fetch_weather_data(lat: float, lon: float) -> dict[str, object]:
         async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
             response = await client.get(_OWM_API_URL, params=params)
             response.raise_for_status()
+            data: dict[str, object] = response.json()
+            return data
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 401:
             raise RuntimeError("API key de OpenWeatherMap inválida") from exc
@@ -228,9 +230,10 @@ async def _fetch_weather_data(lat: float, lon: float) -> dict[str, object]:
         raise ConnectionError(
             f"Error de red al consultar OpenWeatherMap: {exc}"
         ) from exc
-
-    data: dict[str, object] = response.json()
-    return data
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Respuesta no-JSON de OpenWeatherMap: {exc}"
+        ) from exc
 
 
 def _format_weather(
