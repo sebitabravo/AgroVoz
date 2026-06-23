@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.schemas.pipeline import AudioResponse
 from app.services.pipeline_service import (
@@ -544,22 +545,25 @@ class TestSaveConsultation:
 
     def test_save_exitoso(self) -> None:
         """_save_consultation guarda en DB sin lanzar excepcion."""
-        start = time.monotonic()
-        # Esto requiere DB real. Si falla (sin DB), el metodo captura y loguea.
-        AgroVozPipeline._save_consultation(
-            phone_hash="test_hash_123",
-            intent="precio",
-            query_text="precio de la papa",
-            response_text="450 pesos",
-            audio_duration_ms=3500,
-            start_time=start,
-        )
-        # Si llega aqui sin excepcion, el fire-and-forget funciona.
+        with patch("app.core.database.SessionLocal") as mock_factory:
+            mock_session = mock_factory.return_value
+            start = time.monotonic()
+            AgroVozPipeline._save_consultation(
+                phone_hash="test_hash_123",
+                intent="precio",
+                query_text="precio de la papa",
+                response_text="450 pesos",
+                audio_duration_ms=3500,
+                start_time=start,
+            )
+            # Verifica que la consulta se persistio en DB.
+            mock_session.add.assert_called_once()
+            mock_session.commit.assert_called_once()
 
     def test_save_error_no_propaga(self) -> None:
         """Si la DB falla, _save_consultation no lanza excepcion."""
         with patch("app.core.database.SessionLocal") as mock_session:
-            mock_session.side_effect = RuntimeError("DB caida")
+            mock_session.side_effect = SQLAlchemyError("DB caida")
             start = time.monotonic()
             # No debe lanzar excepcion
             AgroVozPipeline._save_consultation(

@@ -202,7 +202,7 @@ class OpenWAService:
                     state,
                     _hash_phone_for_log(target),
                 )
-        except httpx.HTTPError:
+        except Exception:
             logger.warning(
                 "Typing indicator fallo (no critico) — target_hash=%s state=%s",
                 _hash_phone_for_log(target),

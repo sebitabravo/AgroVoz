@@ -15,6 +15,8 @@ import logging
 import time
 from pathlib import Path
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.schemas.pipeline import AudioResponse
 from app.services.tts_service import PiperModelNotFoundError, TTSService
 from app.services.whisper_service import WhisperService
@@ -184,7 +186,7 @@ class AgroVozPipeline:
                 raise
             finally:
                 session.close()
-        except Exception:
+        except SQLAlchemyError:
             logger.exception(
                 "Error guardando consulta en DB — phone_hash=%s intent=%s",
                 phone_hash[:8],
