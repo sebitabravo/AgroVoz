@@ -1,6 +1,6 @@
 """Schemas Pydantic para el endpoint de clima OpenWeatherMap.
 
-Issue #17: GET /api/v1/weather/{lat}/{lon}
+Issue #17: GET /api/v1/weather?lat=X&lon=Y
 """
 
 from pydantic import BaseModel, Field
