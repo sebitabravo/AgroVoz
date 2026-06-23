@@ -106,6 +106,10 @@ async def _odepa_scheduler() -> None:
                 resultado.actualizados,
             )
         except Exception:
+            # Cron de fondo en loop infinito: cualquier excepcion NO capturada
+            # mata el scheduler para siempre. except Exception es intencional aca
+            # (boundary de resiliencia). CancelledError hereda de BaseException,
+            # no se captura -> shutdown limpio via odepa_task.cancel() en lifespan.
             logger.exception("ODEPA scheduler: error en sync automatica")
 
 

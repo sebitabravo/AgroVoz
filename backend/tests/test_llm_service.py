@@ -21,6 +21,7 @@ from app.services.llm_service import (
     WHITELIST_TOOLS,
     _build_messages,
     _execute_tool,
+    _filter_handler_args,
     _force_keyword_tool,
     _mock_answer,
     _parse_content,
@@ -536,6 +537,40 @@ class TestExecuteToolWhitelist:
         # No debe ser FALLBACK_TEXT: get_price SI esta en el whitelist.
         assert result != FALLBACK_TEXT
 
+    async def test_filter_descarta_args_alucinados(self) -> None:
+        """Args no presentes en la firma del handler se descartan (regresión P1).
+
+        El LLM alucina params extra (ej: 'unidad') que el handler no acepta.
+        Sin _filter_handler_args, handler(**arguments) lanzaria TypeError porque
+        get_price_for_llm tiene firma estricta sin **kwargs.
+        """
+
+        def _handler(producto: str, mercado: str = "") -> str:
+            return f"{producto}@{mercado}"
+
+        filtered = _filter_handler_args(_handler, {"producto": "papa", "unidad": "kilo"})
+        assert filtered == {"producto": "papa"}
+
+    async def test_filter_con_kwargs_acepta_todo(self) -> None:
+        """Si el handler acepta **kwargs, no se filtra nada."""
+
+        def _handler(**kwargs: object) -> str:
+            return "ok"
+
+        filtered = _filter_handler_args(_handler, {"producto": "papa", "unidad": "kilo"})
+        assert filtered == {"producto": "papa", "unidad": "kilo"}
+
+    async def test_execute_tool_no_lanza_typeerror_con_arg_extra(self) -> None:
+        """get_price con arg alucinado 'unidad' no propaga TypeError (regresión P1).
+
+        Sin fix, handler(session=..., producto=..., unidad=...) lanzaba TypeError
+        porque get_price_for_llm no acepta 'unidad'. Con _filter_handler_args el
+        arg se descarta antes de la llamada.
+        """
+        result = await _execute_tool("get_price", {"producto": "papa", "unidad": "kilo"})
+        # No lanzo TypeError, y get_price SI esta en whitelist -> no es FALLBACK_TEXT.
+        assert result != FALLBACK_TEXT
+
 
 # ── Fallback keyword detection (_force_keyword_tool) ────────────
 
@@ -561,7 +596,7 @@ class TestForceKeywordToolDbError:
 
         monkeypatch.setattr(db_module, "SessionLocal", lambda: _FakeSession())
 
-        def _raise_db_error(session, producto):  # noqa: ANN001
+        def _raise_db_error(session, producto):
             raise SQLAlchemyError("database is locked")
 
         monkeypatch.setattr(odepa_service, "get_price_for_llm", _raise_db_error)

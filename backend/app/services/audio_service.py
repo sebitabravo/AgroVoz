@@ -357,6 +357,13 @@ class AudioService:
             RuntimeError,
             TypeError,
         ):
+            # Limpiar indicador 'recording' si el pipeline fallo antes del cleanup
+            # del path exitoso (linea 345). WhatsApp lo agota solo, pero limpiar
+            # mejora UX. No critico: cualquier fallo aca se ignora.
+            try:
+                await OpenWAService().send_typing_indicator(chat_id, "paused")
+            except (httpx.HTTPError, OSError, RuntimeError):
+                logger.debug("No se pudo limpiar indicador recording en error path")
             elapsed_ms = (time.monotonic() - start_time) * 1000
             logger.exception(
                 "Error procesando audio en background — message_id=%s chat_id_hash=%s elapsed_ms=%d request_id=%s",

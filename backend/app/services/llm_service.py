@@ -17,6 +17,7 @@ System prompt ESENCIAL definido en SYSTEM_PROMPT (literal del issue #18).
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -347,6 +348,25 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
     }
 
 
+def _filter_handler_args(
+    handler: Callable[..., object],
+    arguments: dict[str, object],
+) -> dict[str, object]:
+    """Filtra argumentos contra la firma real del handler.
+
+    El LLM puede alucinar params extra (ej: 'unidad': 'kilo') que el handler
+    no acepta, porque los handlers tienen firma estricta sin **kwargs. Sin este
+    filtro, cualquier arg inventado lanza TypeError en runtime. Descartamos los
+    desconocidos en vez de propagar el error: el handler solo recibe lo que sabe
+    manejar.
+    """
+    params = inspect.signature(handler).parameters
+    # Si el handler acepta **kwargs, todo es valido.
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return dict(arguments)
+    return {k: v for k, v in arguments.items() if k in params}
+
+
 async def _execute_tool(name: str, arguments: dict[str, object]) -> str:
     """Ejecuta una tool del whitelist y retorna el resultado como texto.
 
@@ -364,6 +384,10 @@ async def _execute_tool(name: str, arguments: dict[str, object]) -> str:
         logger.warning("Tool no whitelisteada: %s", name)
         return FALLBACK_TEXT
 
+    # Filtrar argumentos alucinados por el LLM contra la firma real del handler.
+    # Evita TypeError cuando el LLM inventa params que el handler no acepta.
+    valid_args = _filter_handler_args(handler, arguments)
+
     try:
         # get_price necesita session de DB. Se la pasamos como kwarg.
         if name == "get_price":
@@ -371,7 +395,7 @@ async def _execute_tool(name: str, arguments: dict[str, object]) -> str:
 
             # Completar defaults para argumentos vacios que el LLM no especifico.
             # Si el producto esta vacio, no podemos consultar nada -> fallback.
-            if not arguments.get("producto") or not str(arguments.get("producto", "")).strip():
+            if not valid_args.get("producto") or not str(valid_args.get("producto", "")).strip():
                 return (
                     "No entendi que producto queres consultar. "
                     "¿Podrias repetir el nombre del producto?"
@@ -385,18 +409,18 @@ async def _execute_tool(name: str, arguments: dict[str, object]) -> str:
                 result = await asyncio.to_thread(
                     handler,
                     session=session,
-                    **arguments,
+                    **valid_args,
                 )
             finally:
                 session.close()
         else:
             # get_weather es async
             if asyncio.iscoroutinefunction(handler):
-                result = await handler(**arguments)
+                result = await handler(**valid_args)
             else:
-                result = await asyncio.to_thread(handler, **arguments)
+                result = await asyncio.to_thread(handler, **valid_args)
 
-        logger.info("Tool %s ejecutada — args=%s", name, arguments)
+        logger.info("Tool %s ejecutada — args=%s", name, valid_args)
         return str(result)
     except (RuntimeError, ValueError, OSError, SQLAlchemyError) as exc:
         logger.exception("Error ejecutando tool %s: %s", name, exc)
