@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.models.odepa_price import OdepaPrice
 from app.schemas.prices import PriceListResponse, PriceResponse
 from app.services.odepa_service import (
     format_price_text,
@@ -22,6 +23,18 @@ from app.services.odepa_service import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["prices"])
+
+
+def _record_to_response(record: OdepaPrice) -> PriceResponse:
+    """Convierte un registro OdepaPrice en un schema PriceResponse para la API."""
+    return PriceResponse(
+        producto=record.producto,
+        mercado=record.mercado,
+        precio_kg=float(record.precio_kg),
+        unidad=record.unidad,
+        fecha=record.fecha.isoformat(),
+        texto=format_price_text(record),
+    )
 
 
 @router.get("/prices/{producto}", response_model=PriceListResponse | PriceResponse)
@@ -68,14 +81,7 @@ def get_prices(
                 ),
             )
 
-        return PriceResponse(
-            producto=record.producto,
-            mercado=record.mercado,
-            precio_kg=float(record.precio_kg),
-            unidad=record.unidad,
-            fecha=record.fecha.isoformat(),
-            texto=format_price_text(record),
-        )
+        return _record_to_response(record)
 
     # Caso: todos los mercados para este producto
     # Una sola query obtiene el precio más reciente por mercado (evita N+1)
@@ -88,16 +94,7 @@ def get_prices(
 
     precios: list[PriceResponse] = []
     for record in precios_por_mercado.values():
-        precios.append(
-            PriceResponse(
-                producto=record.producto,
-                mercado=record.mercado,
-                precio_kg=float(record.precio_kg),
-                unidad=record.unidad,
-                fecha=record.fecha.isoformat(),
-                texto=format_price_text(record),
-            )
-        )
+        precios.append(_record_to_response(record))
 
     return PriceListResponse(
         producto=producto_norm,
