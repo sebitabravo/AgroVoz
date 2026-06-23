@@ -68,7 +68,9 @@ def _session_test_db(tmp_path: Path) -> Generator[Session, None, None]:
         yield session
     finally:
         session.close()
-        engine.dispose()
+        # engine.dispose() omitido intencionalmente: el engine del
+        # fixture client es dueño del ciclo de vida del archivo SQLite.
+        # Un dispose() acá compite con el engine del client fixture.
 
 
 # ── query_latest_price ──────────────────────────────────────────────
@@ -102,10 +104,17 @@ class TestQueryLatestPrice:
         assert result is not None
         assert result.producto == "papa"
 
-    def test_ilike_mercado_parcial(self, db: Session) -> None:
+    def test_case_insensitive_mercado(self, db: Session) -> None:
+        _insertar_precio(db, mercado="Lo Valledor")
+        result = query_latest_price(db, "papa", "lo valledor")
+        assert result is not None
+        assert result.mercado == "Lo Valledor"
+
+    def test_mercado_match_exacto_no_parcial(self, db: Session) -> None:
+        """Match exacto: buscar 'Lo Valledor' NO matchea 'Lo Valledor Sector Mayorista'."""
         _insertar_precio(db, mercado="Lo Valledor Sector Mayorista")
         result = query_latest_price(db, "papa", "Lo Valledor")
-        assert result is not None
+        assert result is None
 
     def test_lanza_value_error_si_producto_vacio(self, db: Session) -> None:
         with pytest.raises(ValueError, match="producto no puede estar vacío"):
@@ -134,6 +143,25 @@ class TestQueryLatestPrice:
         result = query_latest_price(db, "melón", "Lo Valledor")
         assert result is not None
         assert result.producto == "melón"
+
+    def test_mercado_con_porcentaje_no_expande_wildcard(self, db: Session) -> None:
+        """El carácter % en el input no debe actuar como comodín LIKE."""
+        _insertar_precio(db, mercado="Lo Valledor")
+        result = query_latest_price(db, "papa", "%")
+        assert result is None
+
+    def test_mercado_con_guion_bajo_no_expande_wildcard(self, db: Session) -> None:
+        """El carácter _ en el input no debe actuar como comodín LIKE."""
+        _insertar_precio(db, mercado="Lo Valledor")
+        result = query_latest_price(db, "papa", "_")
+        assert result is None
+
+    def test_mercado_con_backslash_real(self, db: Session) -> None:
+        """Un backslash literal en el input debe buscarse como carácter normal."""
+        _insertar_precio(db, mercado="Mercado\\Sur")
+        result = query_latest_price(db, "papa", "Mercado\\Sur")
+        assert result is not None
+        assert result.mercado == "Mercado\\Sur"
 
 
 # ── query_latest_by_product ───────────────────────────────────────────

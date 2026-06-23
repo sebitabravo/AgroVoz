@@ -418,7 +418,9 @@ def query_latest_price(
 ) -> OdepaPrice | None:
     """Busca el precio más reciente para un producto en un mercado.
 
-    Normaliza producto (lower, strip) y mercado (strip + ilike).
+    Normaliza producto (lower, strip) y mercado (lower, strip).
+    Usa match exacto case-insensitive para evitar ambigüedad:
+    "Lo Valledor" no debe devolver datos de "Lo Valledor Sur".
     Lanza ValueError si producto o mercado están vacíos.
     Retorna None si no hay datos en la DB.
     """
@@ -428,13 +430,13 @@ def query_latest_price(
         raise ValueError("mercado no puede estar vacío")
 
     producto_norm = producto.strip().lower()
-    mercado_norm = mercado.strip()
+    mercado_norm = mercado.strip().lower()
 
     q = (
         select(OdepaPrice)
         .where(
             func.lower(OdepaPrice.producto) == producto_norm,
-            OdepaPrice.mercado.ilike(f"%{mercado_norm}%"),
+            func.lower(OdepaPrice.mercado) == mercado_norm,
         )
         .order_by(OdepaPrice.fecha.desc())
         .limit(1)
@@ -490,7 +492,7 @@ def format_price_text(record: OdepaPrice) -> str:
 
     fecha_str = record.fecha.strftime("%d/%m/%Y")
     return (
-        f"{record.producto.capitalize()} está a {precio_str} "
+        f"{record.producto[0].upper()}{record.producto[1:]} está a {precio_str} "
         f"el kilo en {record.mercado}, precio del {fecha_str}."
     )
 
