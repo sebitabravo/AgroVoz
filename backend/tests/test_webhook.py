@@ -633,6 +633,7 @@ async def test_audio_service_process_audio_happy_path(
     )
 
     _mock_whisper_transcribe(monkeypatch)
+    _mock_llm_answer(monkeypatch)
     _mock_tts_fallback(monkeypatch)
 
     # P1-5: Inyectar audio_temp_dir en vez de monkeypatch sobre _get_audio_temp_dir
@@ -678,6 +679,7 @@ async def test_audio_service_process_audio_tts_success(
     monkeypatch.setattr("app.services.audio_service.get_audio_duration_ms", lambda wav_path: 5000)
 
     _mock_whisper_transcribe(monkeypatch)
+    _mock_llm_answer(monkeypatch)
 
     # Mock TTS EXITOSO — retorna un OGG falso
     tts_ogg_path = _mock_tts_success(monkeypatch, tmp_path)
@@ -735,7 +737,7 @@ def _mock_tts_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     monkeypatch.setattr(
-        "app.services.audio_service.TTSService.synthesize",
+        "app.services.pipeline_service.TTSService.synthesize",
         fake_synthesize_fail,
     )
 
@@ -755,17 +757,34 @@ def _mock_tts_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
         return str(fake_ogg_path)
 
     monkeypatch.setattr(
-        "app.services.audio_service.TTSService.synthesize",
+        "app.services.pipeline_service.TTSService.synthesize",
         fake_synthesize_success,
     )
     return str(fake_ogg_path)
+
+
+def _mock_llm_answer(monkeypatch: pytest.MonkeyPatch, text: str = "Respuesta mock del LLM") -> None:
+    """Mockea llm_service.answer para evitar cargar el modelo Qwen2.5-3B real.
+
+    El modelo real pesa 2GB y su carga toma ~10-15s en CPU. Los tests
+    de audio_service solo verifican que el pipeline orquesta las etapas
+    sin importar el contenido de la respuesta del LLM.
+    """
+
+    async def fake_answer(query: str) -> str:
+        return text
+
+    monkeypatch.setattr(
+        "app.services.llm_service.answer",
+        fake_answer,
+    )
 
 
 def _mock_whisper_transcribe(monkeypatch: pytest.MonkeyPatch) -> None:
     """Mockea WhisperService.transcribe para tests de audio_service.
 
     Agrega monkeypatch.setattr sobre el metodo transcribe en el modulo
-    audio_service para evitar cargar el modelo real.
+    pipeline_service para evitar cargar el modelo real.
     """
 
     def fake_transcribe(_self: object, audio_path: str) -> dict[str, object]:
@@ -777,7 +796,7 @@ def _mock_whisper_transcribe(monkeypatch: pytest.MonkeyPatch) -> None:
         }
 
     monkeypatch.setattr(
-        "app.services.audio_service.WhisperService.transcribe",
+        "app.services.pipeline_service.WhisperService.transcribe",
         fake_transcribe,
     )
 
@@ -796,6 +815,7 @@ async def test_audio_service_hello_ogg_no_existe_no_crashea(
     monkeypatch.setattr("app.services.audio_service.convert_ogg_to_wav", fake_convert)
     monkeypatch.setattr("app.services.audio_service.get_audio_duration_ms", lambda wav_path: 3000)
     _mock_whisper_transcribe(monkeypatch)
+    _mock_llm_answer(monkeypatch)
     _mock_tts_fallback(monkeypatch)
 
     # Apuntar a un archivo que NO existe
@@ -842,6 +862,7 @@ async def test_audio_service_send_audio_falla_logs_pero_no_crashea(
     monkeypatch.setattr("app.services.audio_service.convert_ogg_to_wav", fake_convert)
     monkeypatch.setattr("app.services.audio_service.get_audio_duration_ms", lambda wav_path: 3000)
     _mock_whisper_transcribe(monkeypatch)
+    _mock_llm_answer(monkeypatch)
     _mock_tts_fallback(monkeypatch)
 
     hello_ogg = tmp_path / "hello.ogg"
@@ -929,7 +950,8 @@ async def test_audio_service_process_audio_audio_largo_omite_whisper(
     tmp_path: Path,
 ) -> None:
     """Audio > _MAX_WHISPER_AUDIO_MS omite transcripcion Whisper y envia respuesta igual."""
-    from app.services.audio_service import _MAX_WHISPER_AUDIO_MS, AudioService
+    from app.services.audio_service import AudioService
+    from app.services.pipeline_service import _MAX_WHISPER_AUDIO_MS
 
     def fake_convert(input_path: Path, output_path: Path) -> None:
         output_path.write_bytes(b"FAKE_WAV_DATA")
@@ -952,7 +974,7 @@ async def test_audio_service_process_audio_audio_largo_omite_whisper(
         whisper_called = True
         return {"text": "nunca deberia llamarse", "language": "es", "segments": [], "duration_ms": 0}
 
-    monkeypatch.setattr("app.services.audio_service.WhisperService.transcribe", fake_transcribe)
+    monkeypatch.setattr("app.services.pipeline_service.WhisperService.transcribe", fake_transcribe)
 
     send_audio_called = False
 
@@ -1000,7 +1022,7 @@ async def test_audio_service_process_audio_whisper_runtime_error_continua(
         raise RuntimeError("Error de transcripcion Whisper: OOM")
 
     monkeypatch.setattr(
-        "app.services.audio_service.WhisperService.transcribe",
+        "app.services.pipeline_service.WhisperService.transcribe",
         fake_transcribe_runtime_error,
     )
 
@@ -1048,7 +1070,7 @@ async def test_audio_service_process_audio_whisper_timeout_continua(
         raise TimeoutError("transcripcion excedio timeout de 30s")
 
     monkeypatch.setattr(
-        "app.services.audio_service.WhisperService.transcribe",
+        "app.services.pipeline_service.WhisperService.transcribe",
         fake_transcribe_timeout,
     )
 

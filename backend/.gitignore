@@ -1,1 +1,4 @@
 .coverage
+models/
+*.gguf
+data/

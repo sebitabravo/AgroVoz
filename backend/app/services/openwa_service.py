@@ -175,6 +175,40 @@ class OpenWAService:
             )
             return response.content
 
+    async def send_typing_indicator(self, target: str, state: str = "recording") -> None:
+        """Muestra o limpia el indicador de escritura/grabando en WhatsApp.
+
+        Mientras el bot procesa el audio, muestra el indicador "grabando..."
+        para que el agricultor sepa que está funcionando. Se limpia con
+        state="paused" al terminar.
+
+        Args:
+            target: Numero E.164 o chatId.
+            state: "typing", "recording" (muestra indicador) o "paused" (lo limpia).
+
+        Raises:
+            httpx.HTTPError: Si la API de Open-WA falla (loggeado, no bloquea).
+        """
+        try:
+            session_id = await self._resolve_session_id()
+            url = f"{self._base_url}/api/sessions/{session_id}/chats/typing"
+            payload = {"chatId": phone_to_chat_id(target), "state": state}
+
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(url, headers=self._headers(), json=payload)
+                response.raise_for_status()
+                logger.debug(
+                    "Typing indicator %s — target_hash=%s",
+                    state,
+                    _hash_phone_for_log(target),
+                )
+        except httpx.HTTPError:
+            logger.warning(
+                "Typing indicator fallo (no critico) — target_hash=%s state=%s",
+                _hash_phone_for_log(target),
+                state,
+            )
+
     async def send_text(self, target: str, message: str) -> dict[str, object]:
         """Envia un mensaje de texto a un numero de WhatsApp via Open-WA.
 

@@ -20,8 +20,6 @@ import httpx
 from app.core.config import settings
 from app.core.phone_hash import hash_phone
 from app.services.openwa_service import OpenWAService
-from app.services.tts_service import PiperModelNotFoundError, TTSService
-from app.services.whisper_service import WhisperService
 
 logger = logging.getLogger(__name__)
 
@@ -37,30 +35,6 @@ _HELLO_OGG_PATH = Path(__file__).resolve().parent.parent / "static" / "hello.ogg
 # Tamano maximo de archivo de audio (25 MB). WhatsApp limita audios a ~16 MB,
 # pero este limite es defensivo contra archivos maliciosos o corruptos.
 _MAX_AUDIO_SIZE_BYTES = 25 * 1024 * 1024
-
-# Duracion maxima de audio para transcripcion Whisper.
-# asyncio.wait_for cancela la coroutine pero NO el thread subyacente; Python
-# no soporta terminacion forzada de threads. Con RTF CPU ~2x, un audio de
-# 15s tarda ~30s en transcribir (justo el timeout). Limitamos a 12s para
-# dejar margen y evitar threads zombie que saturen el VPS.
-_MAX_WHISPER_AUDIO_MS = 12_000
-
-# Cache singleton de TTSService: el modelo Piper se carga UNA vez y se
-# reusa entre requests. Cada instancia nueva forzaria PiperVoice.load()
-# en cada webhook, sumando 1-3s de latencia extra (P1).
-_tts_service: TTSService | None = None
-
-
-def _get_tts_service() -> TTSService:
-    """Retorna la instancia singleton de TTSService.
-
-    El modelo Piper se carga lazy (primera llamada a synthesize) y
-    queda cacheado para todas las requests posteriores.
-    """
-    global _tts_service
-    if _tts_service is None:
-        _tts_service = TTSService()
-    return _tts_service
 
 
 def sanitize_message_id(message_id: str) -> str:
@@ -238,25 +212,6 @@ class AudioService:
         """
         self._audio_temp_dir = audio_temp_dir or _get_audio_temp_dir()
 
-    @staticmethod
-    def _build_response_text(transcribed_text: str) -> str:
-        """Construye el texto de respuesta a partir de la transcripcion.
-
-        En MVP, repite la transcripcion al productor para validar que el
-        pipeline completo funciona (bucle cerrado voz->texto->voz).
-        Cuando se integre el LLM, este metodo se reemplazara por la
-        invocacion al modelo con los resultados de precio/clima.
-
-        Args:
-            transcribed_text: Texto transcrito por Whisper.
-
-        Returns:
-            Texto listo para sintetizar con Piper.
-        """
-        return (
-            f"Usted dijo: {transcribed_text.strip()}. "
-            "Estamos procesando su consulta."
-        )
 
     async def process_audio(
         self,
@@ -338,70 +293,27 @@ class AudioService:
                 request_id,
             )
 
-            # Transcripcion Whisper (en thread aparte para no bloquear event loop).
-            # El modelo se carga lazy en la primera llamada.
-            # Si Whisper falla (OOM, cold start, audio corrupto), se loguea
-            # pero el pipeline CONTINUA para que el agricultor reciba respuesta
-            # de voz (P1 del code review).
-            transcribed_text = ""
-            if audio_duration_ms > _MAX_WHISPER_AUDIO_MS:
-                logger.warning(
-                    "Audio demasiado largo para transcripcion Whisper — "
-                    "message_id=%s duration_ms=%d limite_ms=%d request_id=%s",
-                    message_id,
-                    audio_duration_ms,
-                    _MAX_WHISPER_AUDIO_MS,
-                    request_id,
-                )
-            else:
-                try:
-                    whisper = WhisperService()
-                    transcription: dict[str, object] = await asyncio.wait_for(
-                        asyncio.to_thread(whisper.transcribe, str(wav_path)),
-                        timeout=30.0,
-                    )
-                    transcribed_text = str(transcription.get("text", ""))
-                    logger.info(
-                        "Audio transcrito — message_id=%s text=%s chars=%d whisper_ms=%d request_id=%s",
-                        message_id,
-                        transcribed_text[:200],
-                        len(transcribed_text),
-                        transcription.get("duration_ms", 0),
-                        request_id,
-                    )
-                except (RuntimeError, FileNotFoundError, ValueError, TimeoutError) as exc:
-                    logger.warning(
-                        "Whisper fallo — continuando sin transcripcion: message_id=%s "
-                        "error=%s request_id=%s",
-                        message_id,
-                        exc,
-                        request_id,
-                    )
+            # Mostrar indicador "grabando..." en WhatsApp para feedback visual.
+            # Si falla, no es critico — solo se loggea warning.
+            await OpenWAService().send_typing_indicator(chat_id, "recording")
 
-            # Sintetizar respuesta de audio con Piper TTS.
-            # Estrategia de fallback: si el modelo Piper no esta disponible
-            # (no descargado, primer deploy) o falla, se envia hello.ogg.
-            # Esto permite que el pipeline funcione sin modelo TTS durante
-            # desarrollo y CI.
-            response_ogg_path: str | None = None
-            if transcribed_text:
-                try:
-                    tts = _get_tts_service()
-                    if transcribed_text.strip():
-                        response_text = self._build_response_text(transcribed_text)
-                        # Piper TTS es CPU-bound (3-5s). Ejecutar en thread pool
-                        # para no bloquear el event loop. sin esto, 2+ mensajes
-                        # simultaneos encolan requests y degradan la respuesta.
-                        response_ogg_path = await asyncio.to_thread(
-                            tts.synthesize, response_text
-                        )
-                except (PiperModelNotFoundError, RuntimeError, ValueError, OSError) as exc:
-                    logger.warning(
-                        "TTS fallo — message_id=%s error=%s request_id=%s",
-                        message_id,
-                        exc,
-                        request_id,
-                    )
+            # Pipeline de voz: Whisper → LLM → TTS (Checkpoint C, Issue #18).
+            # AgroVozPipeline orquesta las etapas con timeout de 20s y
+            # benchmark de latencia por etapa. Guarda consulta en DB.
+            from app.services.pipeline_service import AgroVozPipeline
+
+            pipeline = AgroVozPipeline()
+            pipeline_result = await pipeline.process(
+                wav_path=wav_path,
+                audio_duration_ms=audio_duration_ms,
+                message_id=message_id,
+                chat_id_hash=chat_id_hash,
+                request_id=request_id,
+            )
+
+            response_ogg_path: str | None = (
+                pipeline_result.audio_path if pipeline_result.audio_path else None
+            )
 
             # Fallback a hello.ogg si TTS no genero audio
             if response_ogg_path is None:
@@ -429,6 +341,8 @@ class AudioService:
                         request_id,
                     )
                 finally:
+                    # Limpiar indicador "grabando..." de WhatsApp (no critico si falla)
+                    await OpenWAService().send_typing_indicator(chat_id, "paused")
                     # Limpiar archivo TTS generado incluso si send_audio falla
                     # (P2: cleanup garantizado, no solo en path exitoso)
                     if response_ogg_path != str(_HELLO_OGG_PATH):
