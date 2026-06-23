@@ -330,6 +330,18 @@ class TestPricesApiEndpoint:
         data = response.json()
         assert "producto" in data["detail"].lower()
 
+    async def test_get_mercado_solo_espacios_devuelve_400(
+        self, client: AsyncClient, tmp_path: Path
+    ) -> None:
+        """Mercado con solo espacios debe devolver 400, no 500."""
+        with next(_session_test_db(tmp_path)) as db:
+            _insertar_precio(db, producto="papa", mercado="Lo Valledor")
+
+        response = await client.get("/api/v1/prices/papa?mercado=%20%20%20")
+        assert response.status_code == 400
+        data = response.json()
+        assert "mercado" in data["detail"].lower()
+
     async def test_get_mercado_inexistente_devuelve_404(
         self, client: AsyncClient, tmp_path: Path
     ) -> None:

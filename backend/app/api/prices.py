@@ -51,9 +51,13 @@ def get_prices(
             detail=f"No hay datos de precio para '{producto_norm}'.",
         )
 
-    if mercado:
+    if mercado is not None:
         # Caso: mercado específico
         mercado_norm = mercado.strip()
+        if not mercado_norm:
+            raise HTTPException(
+                status_code=400, detail="El mercado no puede estar vacío."
+            )
         record = query_latest_price(db, producto_norm, mercado_norm)
 
         if record is None:
