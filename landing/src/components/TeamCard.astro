@@ -1,0 +1,28 @@
+---
+// Tarjeta de miembro del equipo (#equipo).
+interface Props {
+  initials: string;
+  name: string;
+  role: string;
+  description: string;
+  i18nRole?: string;
+  i18nDescription?: string;
+}
+
+const { initials, name, role, description, i18nRole, i18nDescription } =
+  Astro.props;
+---
+
+<div class="team-card" data-reveal>
+  <div class="team-avatar" aria-hidden="true">{initials}</div>
+  <div class="team-name">{name}</div>
+  <div class="team-role" {...(i18nRole ? { "data-i18n": i18nRole } : {})}>
+    {role}
+  </div>
+  <p
+    class="team-desc"
+    {...(i18nDescription ? { "data-i18n": i18nDescription } : {})}
+  >
+    {description}
+  </p>
+</div>

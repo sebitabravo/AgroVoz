@@ -43,6 +43,9 @@ audio/
 *.gif
 *.ico
 *.webp
+# Excepción: og-image.png es requerido por Open Graph/Twitter (los
+# scrapers de redes sociales no soportan SVG). Fuente: landing/src/assets/og-image.svg.
+!landing/public/og-image.png
 
 # ── Debug artifacts ─────────────────
 openwa-login

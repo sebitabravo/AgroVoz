@@ -1,0 +1,54 @@
+---
+import "../styles/global.css";
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = "AgroVoz — Asistente de Voz para la Agricultura Familiar Campesina",
+  description = "AgroVoz responde por voz en WhatsApp con precios oficiales ODEPA y clima en tiempo real. Para pequeños agricultores chilenos, INDAP, PRODESAL y cooperativas.",
+} = Astro.props;
+
+const site = "https://agrovoz.cl";
+const canonical = new URL(Astro.url.pathname, site).toString();
+---
+
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="generator" content={Astro.generator} />
+
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <meta name="theme-color" content="#4f7d5a" />
+
+    <!-- Progressive enhancement: sin JS, todo el contenido se muestra (sin animaciones). -->
+    <script is:inline>
+      document.documentElement.classList.add("js");
+    </script>
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AgroVoz" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:locale" content="es_CL" />
+    <meta property="og:image" content={`${site}/og-image.png`} />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={`${site}/og-image.png`} />
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>

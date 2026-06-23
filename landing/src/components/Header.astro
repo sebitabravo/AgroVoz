@@ -1,0 +1,45 @@
+---
+// Header sticky con backdrop-blur, navegacion ancla, toggle de idioma ES/EN.
+// En mobile (<920px) la nav se vuelve un drawer abierto por el boton hamburguesa.
+---
+
+<header class="site-header" id="site-header">
+  <div class="site-header__inner">
+    <a href="#top" class="logo" aria-label="AgroVoz inicio">
+      <span class="logo__bars" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </span>
+      AgroVoz
+    </a>
+
+    <button
+      type="button"
+      class="nav-toggle"
+      id="nav-toggle"
+      aria-label="Abrir menú de navegación"
+      aria-expanded="false"
+      aria-controls="nav"
+    >
+      <span class="nav-toggle__bar"></span>
+      <span class="nav-toggle__bar"></span>
+      <span class="nav-toggle__bar"></span>
+    </button>
+
+    <nav class="nav" id="nav" aria-label="Principal">
+      <a href="#como" data-i18n="nav.como">Cómo funciona</a>
+      <a href="#demo" data-i18n="nav.demo">Demo</a>
+      <a href="#planes" data-i18n="nav.planes">Planes</a>
+      <a href="#stack" data-i18n="nav.stack">Tecnología</a>
+      <a href="#impacto" data-i18n="nav.impacto">Impacto</a>
+    </nav>
+
+    <div class="header-actions">
+      <div class="lang-toggle" role="group" aria-label="Idioma">
+        <button type="button" id="lang-es" data-lang="es">ES</button>
+        <button type="button" id="lang-en" data-lang="en">EN</button>
+      </div>
+      <a href="#contacto" class="pill" data-i18n="nav.contacto">Contacto</a>
+    </div>
+  </div>
+  <div class="nav-backdrop" id="nav-backdrop" aria-hidden="true"></div>
+</header>

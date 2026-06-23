@@ -1,0 +1,53 @@
+---
+// Mockup de telefono con conversacion de WhatsApp (#demo).
+// Los mensajes aparecen en cascada via JS cuando entra en viewport.
+const messages = [
+  {
+    side: "sent",
+    time: "0:05",
+    text: "¿A cuánto está la papa esta semana?",
+    i18n: "demo.m1",
+  },
+  {
+    side: "received",
+    time: "0:08",
+    text: "En Lo Valledor la papa está a $480 el kilo esta semana. Subió un 6% respecto a la semana pasada.",
+    i18n: "demo.m2",
+  },
+  {
+    side: "sent",
+    time: "0:04",
+    text: "¿Y va a llover en Traiguén mañana?",
+    i18n: "demo.m3",
+  },
+  {
+    side: "received",
+    time: "0:07",
+    text: "En Traiguén se esperan 12 mm de lluvia mañana, con máxima de 14°C y mínima de 6°C.",
+    i18n: "demo.m4",
+  },
+];
+---
+
+<div class="demo-phone" id="demo-phone">
+  <div class="demo-phone__notch" aria-hidden="true"></div>
+  <div class="demo-phone__screen">
+    <div class="demo-phone__header">
+      <div class="demo-phone__avatar" aria-hidden="true">A</div>
+      <div>
+        <div class="demo-phone__name">AgroVoz</div>
+        <div class="demo-phone__status" data-i18n="demo.status">en línea</div>
+      </div>
+    </div>
+    <div class="demo-phone__chat">
+      {
+        messages.map((m) => (
+          <div class={`bubble bubble--${m.side}`} data-msg>
+            <span {...(m.i18n ? { "data-i18n": m.i18n } : {})}>{m.text}</span>
+            <span class="bubble__time">{m.time}</span>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</div>

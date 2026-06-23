@@ -1,0 +1,77 @@
+---
+// Tarjeta de plan de precios (#planes).
+interface Props {
+  name: string;
+  sub: string;
+  price: string;
+  unit: string;
+  features: string[];
+  cta: string;
+  plan: string; // valor del atributo data-plan
+  featured?: boolean;
+  badge?: string;
+  i18nName?: string;
+  i18nSub?: string;
+  i18nUnit?: string;
+  i18nCta?: string;
+  i18nFeatures?: string[];
+}
+
+const {
+  name,
+  sub,
+  price,
+  unit,
+  features,
+  cta,
+  plan,
+  featured = false,
+  badge,
+  i18nName,
+  i18nSub,
+  i18nUnit,
+  i18nCta,
+  i18nFeatures,
+} = Astro.props;
+
+const checkIcon =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+---
+
+<div class={`plan-card${featured ? " plan-card--featured" : ""}`} data-reveal>
+  {featured && badge && <span class="plan-badge">{badge}</span>}
+  <div class="plan-name" {...(i18nName ? { "data-i18n": i18nName } : {})}>
+    {name}
+  </div>
+  <div class="plan-sub" {...(i18nSub ? { "data-i18n": i18nSub } : {})}>{sub}</div>
+  <div class="plan-price">{price}</div>
+  <div class="plan-unit" {...(i18nUnit ? { "data-i18n": i18nUnit } : {})}>
+    {unit}
+  </div>
+
+  <ul class="plan-features">
+    {
+      features.map((f, i) => (
+        <li>
+          <Fragment set:html={checkIcon} />
+          <span
+            {...(i18nFeatures && i18nFeatures[i]
+              ? { "data-i18n": i18nFeatures[i] }
+              : {})}
+          >
+            {f}
+          </span>
+        </li>
+      ))
+    }
+  </ul>
+
+  <a
+    href="#contacto"
+    class={`btn plan-cta ${featured ? "btn-primary" : "btn-secondary"}`}
+    data-plan={plan}
+    {...(i18nCta ? { "data-i18n": i18nCta } : {})}
+  >
+    {cta}
+  </a>
+</div>
