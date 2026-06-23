@@ -15,6 +15,7 @@ from app.services.odepa_service import (
     format_price_text,
     list_mercados,
     list_products,
+    query_latest_by_product,
     query_latest_price,
 )
 
@@ -43,14 +44,6 @@ def get_prices(
 
     producto_norm = producto.strip().lower()
 
-    # Verificar que el producto existe en la DB
-    productos = list_products(db)
-    if producto_norm not in productos:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No hay datos de precio para '{producto_norm}'.",
-        )
-
     if mercado is not None:
         # Caso: mercado específico
         mercado_norm = mercado.strip()
@@ -61,6 +54,12 @@ def get_prices(
         record = query_latest_price(db, producto_norm, mercado_norm)
 
         if record is None:
+            # Distinguir si no existe el producto o solo el mercado
+            if not list_mercados(db, producto_norm):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No hay datos de precio para '{producto_norm}'.",
+                )
             raise HTTPException(
                 status_code=404,
                 detail=(
@@ -79,21 +78,26 @@ def get_prices(
         )
 
     # Caso: todos los mercados para este producto
-    mercados = list_mercados(db, producto_norm)
+    # Una sola query obtiene el precio más reciente por mercado (evita N+1)
+    precios_por_mercado = query_latest_by_product(db, producto_norm)
+    if not precios_por_mercado:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No hay datos de precio para '{producto_norm}'.",
+        )
+
     precios: list[PriceResponse] = []
-    for m in mercados:
-        record = query_latest_price(db, producto_norm, m)
-        if record is not None:
-            precios.append(
-                PriceResponse(
-                    producto=record.producto,
-                    mercado=record.mercado,
-                    precio_kg=float(record.precio_kg),
-                    unidad=record.unidad,
-                    fecha=record.fecha.isoformat(),
-                    texto=format_price_text(record),
-                )
+    for record in precios_por_mercado.values():
+        precios.append(
+            PriceResponse(
+                producto=record.producto,
+                mercado=record.mercado,
+                precio_kg=float(record.precio_kg),
+                unidad=record.unidad,
+                fecha=record.fecha.isoformat(),
+                texto=format_price_text(record),
             )
+        )
 
     return PriceListResponse(
         producto=producto_norm,

@@ -24,6 +24,7 @@ from app.services.odepa_service import (
     get_price_for_llm,
     list_mercados,
     list_products,
+    query_latest_by_product,
     query_latest_price,
 )
 
@@ -135,6 +136,47 @@ class TestQueryLatestPrice:
         assert result.producto == "melón"
 
 
+# ── query_latest_by_product ───────────────────────────────────────────
+
+
+class TestQueryLatestByProduct:
+    """Precio más reciente por mercado para un producto — una sola query."""
+
+    def test_retorna_un_registro_por_mercado(self, db: Session) -> None:
+        _insertar_precio(db, producto="papa", mercado="Lo Valledor", fecha=datetime.date(2026, 6, 20))
+        _insertar_precio(db, producto="papa", mercado="Vega Central", fecha=datetime.date(2026, 6, 21))
+        result = query_latest_by_product(db, "papa")
+        assert len(result) == 2
+        assert "Lo Valledor" in result
+        assert "Vega Central" in result
+
+    def test_retorna_precio_mas_reciente_por_mercado(self, db: Session) -> None:
+        _insertar_precio(db, producto="papa", mercado="Lo Valledor",
+                         precio_kg=Decimal("1000"), fecha=datetime.date(2026, 6, 18))
+        _insertar_precio(db, producto="papa", mercado="Lo Valledor",
+                         precio_kg=Decimal("1200"), fecha=datetime.date(2026, 6, 21))
+        result = query_latest_by_product(db, "papa")
+        assert result["Lo Valledor"].precio_kg == Decimal("1200")
+        assert result["Lo Valledor"].fecha == datetime.date(2026, 6, 21)
+
+    def test_retorna_dict_vacio_si_no_hay_datos(self, db: Session) -> None:
+        result = query_latest_by_product(db, "zanahoria")
+        assert result == {}
+
+    def test_case_insensitive(self, db: Session) -> None:
+        _insertar_precio(db, producto="papa", mercado="Lo Valledor")
+        result = query_latest_by_product(db, "PAPA")
+        assert len(result) == 1
+
+    def test_lanza_value_error_si_producto_vacio(self, db: Session) -> None:
+        with pytest.raises(ValueError, match="producto no puede estar vacío"):
+            query_latest_by_product(db, "")
+
+    def test_lanza_value_error_si_producto_solo_espacios(self, db: Session) -> None:
+        with pytest.raises(ValueError, match="producto no puede estar vacío"):
+            query_latest_by_product(db, "   ")
+
+
 # ── format_price_text ──────────────────────────────────────────────
 
 
@@ -144,7 +186,7 @@ class TestFormatPriceText:
     def test_formato_basico(self, db: Session) -> None:
         registro = _insertar_precio(db, producto="papa", precio_kg=Decimal("1200"))
         texto = format_price_text(registro)
-        assert "papa" in texto
+        assert "Papa" in texto
         assert "$1.200" in texto
         assert "Lo Valledor" in texto
         assert "20/06/2026" in texto
@@ -178,7 +220,7 @@ class TestFormatPriceText:
         )
         texto = format_price_text(registro)
         assert texto == (
-            "La tomate está a $850 el kilo en Vega Central, precio del 19/06/2026."
+            "Tomate está a $850 el kilo en Vega Central, precio del 19/06/2026."
         )
 
 
@@ -191,7 +233,7 @@ class TestGetPriceForLlm:
     def test_devuelve_texto_con_precio_cuando_existen_datos(self, db: Session) -> None:
         _insertar_precio(db)
         texto = get_price_for_llm(db, "papa", "Lo Valledor")
-        assert "papa" in texto
+        assert "Papa" in texto
         assert "$1.200" in texto
 
     def test_devuelve_mensaje_sin_datos_producto_no_existe(self, db: Session) -> None:
@@ -287,7 +329,7 @@ class TestPricesApiEndpoint:
         assert data["mercado"] == "Lo Valledor"
         assert data["precio_kg"] == 1200.0
         assert data["unidad"] == "kg"
-        assert "papa" in data["texto"]
+        assert "Papa" in data["texto"]
         assert "$1.200" in data["texto"]
 
     async def test_get_producto_sin_mercado_devuelve_todos(
