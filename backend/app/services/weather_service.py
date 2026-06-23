@@ -120,7 +120,21 @@ def _extract_weather_data(data: Mapping[str, object], lat: float, lon: float) ->
         if rain_1h > 0:
             rain_val = rain_1h
 
-    texto = _format_weather(data)
+    # Valores para _format_weather: None cuando el campo está realmente
+    # ausente del JSON, para que el texto refleje "no disponible" en vez
+    # de un valor por defecto (ej: 0.0°C). Consistente con el viejo
+    # comportamiento de _format_weather cuando parseaba el dict directo.
+    temp_for_text: float | None = cast(float, main.get("temp"))
+    hum_for_text: int | None = cast(int, main.get("humidity"))
+
+    texto = _format_weather(
+        temp=temp_for_text,
+        humidity=hum_for_text,
+        description=desc_val,
+        wind_speed=wind_val,
+        rain_mm=rain_val,
+        location=loc_name,
+    )
 
     return WeatherData(
         lat=coord_lat,
@@ -219,31 +233,31 @@ async def _fetch_weather_data(lat: float, lon: float) -> dict[str, object]:
     return data
 
 
-def _format_weather(data: Mapping[str, object]) -> str:
-    """Formatea la respuesta JSON en texto natural español chileno.
+def _format_weather(
+    temp: float | None = None,
+    humidity: int | None = None,
+    description: str = "sin datos",
+    wind_speed: float | None = None,
+    rain_mm: float | None = None,
+    location: str = "la zona consultada",
+) -> str:
+    """Formatea datos de clima a texto natural en español chileno.
 
-    Formato: "En Traiguén ahora: 18°C, cielo nublado, humedad 65%,
-    viento 3.6 m/s."
+    Recibe valores ya extraídos y tipados desde _extract_weather_data().
+    Ningún campo se lee del dict crudo — la extracción ocurre UNA sola vez
+    en _extract_weather_data(), punto único de verdad para todo el módulo.
 
     Args:
-        data: Respuesta JSON de OpenWeatherMap Current Weather API.
+        temp: Temperatura en °C. None → "temperatura no disponible".
+        humidity: Humedad relativa en %. None → se omite.
+        description: Descripción del clima. "sin datos" → se omite.
+        wind_speed: Velocidad del viento en m/s. None → se omite.
+        rain_mm: Lluvia última hora en mm. None o 0 → se omite.
+        location: Nombre de la ubicación según OpenWeatherMap.
 
     Returns:
         Texto natural listo para Piper TTS.
     """
-    main = cast(dict[str, object], data.get("main", {}))
-    weather_list = cast(list[dict[str, object]], data.get("weather", []))
-    weather = weather_list[0] if weather_list else {}
-    wind = cast(dict[str, object], data.get("wind", {}))
-    rain = cast(dict[str, object], data.get("rain", {}))
-
-    temp = main.get("temp")
-    humidity = main.get("humidity")
-    description = weather.get("description", "sin datos")
-    wind_speed = wind.get("speed")
-    location = cast(str, data.get("name")) or "la zona consultada"
-
-    # Temperatura: redondear a entero para texto natural.
     temp_str = f"{temp:.0f}°C" if temp is not None else "temperatura no disponible"
 
     partes: list[str] = []
@@ -264,11 +278,8 @@ def _format_weather(data: Mapping[str, object]) -> str:
     if wind_speed is not None:
         partes.append(f", viento {wind_speed:.1f} m/s")
 
-    # Lluvia: OpenWeatherMap devuelve rain.1h (mm última hora) o rain.3h.
-    if rain:
-        rain_mm = cast(float, rain.get("1h", rain.get("3h", 0.0)))
-        if rain_mm > 0:
-            partes.append(f", lluvia {rain_mm:.1f} mm")
+    if rain_mm is not None and rain_mm > 0:
+        partes.append(f", lluvia {rain_mm:.1f} mm")
 
     return "".join(partes) + "."
 

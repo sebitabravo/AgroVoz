@@ -96,7 +96,10 @@ class TestFormatWeather:
 
     def test_respuesta_completa(self) -> None:
         """Con todos los campos: temp, humedad, viento, lluvia."""
-        texto = _format_weather(_OWM_RESPUESTA_COMPLETA)
+        texto = _format_weather(
+            temp=18.5, humidity=65, description="nublado",
+            wind_speed=3.6, rain_mm=0.5, location="Traiguén",
+        )
         assert "Traiguén" in texto
         assert "18°C" in texto
         assert "nublado" in texto
@@ -106,7 +109,10 @@ class TestFormatWeather:
 
     def test_sin_lluvia_ni_viento(self) -> None:
         """Respuesta sin campos rain ni wind."""
-        texto = _format_weather(_OWM_SIN_LLUVIA_NI_VIENTO)
+        texto = _format_weather(
+            temp=22.0, humidity=40, description="cielo claro",
+            location="Traiguén",
+        )
         assert "Traiguén" in texto
         assert "22°C" in texto
         assert "cielo claro" in texto
@@ -116,24 +122,28 @@ class TestFormatWeather:
 
     def test_temperatura_redondeada(self) -> None:
         """18.5°C -> '18°C' en el texto."""
-        texto = _format_weather(_OWM_RESPUESTA_COMPLETA)
+        texto = _format_weather(
+            temp=18.5, humidity=65, description="nublado",
+            location="Traiguén",
+        )
         assert "18°C" in texto
         assert "18.5°C" not in texto
 
     def test_datos_minimos(self) -> None:
         """Respuesta degradada: sin temp ni humidity."""
-        texto = _format_weather(_OWM_DATOS_MINIMOS)
+        texto = _format_weather(
+            temp=None, humidity=None, description="niebla",
+            location="Lonquimay",
+        )
         assert "Lonquimay" in texto
         assert "niebla" in texto
 
     def test_lista_weather_vacia(self) -> None:
         """weather: [] — texto no incluye descripción de clima."""
-        data = {
-            "main": {"temp": 12.0, "humidity": 55},
-            "weather": [],
-            "name": "Vacio",
-        }
-        texto = _format_weather(data)
+        texto = _format_weather(
+            temp=12.0, humidity=55, description="sin datos",
+            location="Vacio",
+        )
         # Solo temp y humedad, sin descripción de clima (weather vacío → description="sin datos" → se omite).
         assert "Vacio" in texto
         assert "12°C" in texto
@@ -152,7 +162,7 @@ class TestGetWeather:
         """Limpia el cache antes de cada test."""
         _clear_cache()
 
-    def _mock_client(self, monkeypatch: pytest.MonkeyPatch, json_body: dict) -> httpx.AsyncClient:
+    def _mock_client(self, monkeypatch: pytest.MonkeyPatch, json_body: dict[str, object]) -> httpx.AsyncClient:
         """Helper: instala mock de httpx.AsyncClient que responde con json_body."""
         monkeypatch.setattr(
             "app.services.weather_service.settings.openweathermap_api_key", "test-key"
@@ -269,7 +279,7 @@ class TestGetWeatherErrores:
         self,
         monkeypatch: pytest.MonkeyPatch,
         status: int,
-        json_body: dict | None = None,
+        json_body: dict[str, object] | None = None,
         exc: type[Exception] | None = None,
     ) -> httpx.AsyncClient:
         """Instala mock que responde con status o lanza excepción."""
