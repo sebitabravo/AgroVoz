@@ -1,8 +1,8 @@
 """Tests para app.services.weather_service: consulta clima OpenWeatherMap.
 
 Cobertura: _format_weather (respuesta completa, parcial, lluvia, sin viento),
-get_weather con mock httpx (happy path, cache, errores), y _clear_cache.
-Sin red real: MockTransport simula respuestas de OpenWeatherMap.
+get_weather con mock httpx (happy path, cache, errores), validación lat/lon,
+y _clear_cache. Sin red real: MockTransport simula respuestas de OpenWeatherMap.
 """
 
 from collections.abc import Callable
@@ -62,30 +62,21 @@ _OWM_DATOS_MINIMOS = {
 # ── Helpers para mock httpx ───────────────────────────────────
 
 
-def _weather_fake_client(
+def _install_mock_client(
+    monkeypatch: pytest.MonkeyPatch,
     handler: Callable[[httpx.Request], httpx.Response],
-) -> tuple[type, httpx.AsyncClient]:
-    """Construye un reemplazo de httpx.AsyncClient para tests de weather.
+) -> httpx.AsyncClient:
+    """Instala un cliente HTTP mockeado en _http_client.
 
-    Mismo patrón que _csv_fake_client en test_odepa_service.py.
-    El caller debe cerrar el cliente al terminar el test.
+    Usa MockTransport para simular respuestas de OpenWeatherMap sin red.
+    El caller debe cerrar el cliente devuelto al terminar el test.
     """
     transport = httpx.MockTransport(handler)
-    real_client = httpx.AsyncClient(transport=transport)
-
-    class _CtxAsyncClient:
-        """Stub de AsyncClient: __aenter__ devuelve el cliente mockeado."""
-
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            pass
-
-        async def __aenter__(self) -> httpx.AsyncClient:
-            return real_client
-
-        async def __aexit__(self, *args: object) -> None:
-            pass
-
-    return _CtxAsyncClient, real_client
+    mock_client = httpx.AsyncClient(transport=transport)
+    monkeypatch.setattr(
+        "app.services.weather_service._http_client", mock_client
+    )
+    return mock_client
 
 
 # ── Tests: _format_weather ────────────────────────────────────
@@ -159,11 +150,13 @@ class TestGetWeather:
     """get_weather con httpx mockeado y cache."""
 
     def setup_method(self) -> None:
-        """Limpia el cache antes de cada test."""
+        """Limpia cache y cliente HTTP entre tests."""
         _clear_cache()
+        import app.services.weather_service as ws
+        ws._http_client = None
 
     def _mock_client(self, monkeypatch: pytest.MonkeyPatch, json_body: dict[str, object]) -> httpx.AsyncClient:
-        """Helper: instala mock de httpx.AsyncClient que responde con json_body."""
+        """Helper: instala mock de cliente HTTP que responde con json_body."""
         monkeypatch.setattr(
             "app.services.weather_service.settings.openweathermap_api_key", "test-key"
         )
@@ -171,27 +164,23 @@ class TestGetWeather:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json=json_body)
 
-        fake_cls, real_client = _weather_fake_client(handler)
-        monkeypatch.setattr(
-            "app.services.weather_service.httpx.AsyncClient", fake_cls
-        )
-        return real_client
+        return _install_mock_client(monkeypatch, handler)
 
     async def test_get_weather_traiguen_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Consulta con coordenadas default devuelve texto natural."""
-        real_client = self._mock_client(monkeypatch, _OWM_RESPUESTA_COMPLETA)
+        mock_client = self._mock_client(monkeypatch, _OWM_RESPUESTA_COMPLETA)
         try:
             texto = await get_weather()
             assert "Traiguén" in texto
             assert "18°C" in texto
         finally:
-            await real_client.aclose()
+            await mock_client.aclose()
 
     async def test_get_weather_coordenadas_personalizadas(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Consulta con coordenadas de Santiago."""
-        real_client = self._mock_client(monkeypatch, {
+        mock_client = self._mock_client(monkeypatch, {
             "coord": {"lon": -70.65, "lat": -33.45},
             "weather": [{"description": "soleado"}],
             "main": {"temp": 25.0, "humidity": 30},
@@ -202,7 +191,7 @@ class TestGetWeather:
             assert "Santiago" in texto
             assert "25°C" in texto
         finally:
-            await real_client.aclose()
+            await mock_client.aclose()
 
     async def test_cache_evita_llamada_repetida(
         self, monkeypatch: pytest.MonkeyPatch
@@ -218,10 +207,7 @@ class TestGetWeather:
             call_count += 1
             return httpx.Response(200, json=_OWM_RESPUESTA_COMPLETA)
 
-        fake_cls, real_client = _weather_fake_client(handler)
-        monkeypatch.setattr(
-            "app.services.weather_service.httpx.AsyncClient", fake_cls
-        )
+        mock_client = _install_mock_client(monkeypatch, handler)
         try:
             texto1 = await get_weather()
             texto2 = await get_weather()
@@ -231,7 +217,7 @@ class TestGetWeather:
             # Solo 1 llamada a la API.
             assert call_count == 1
         finally:
-            await real_client.aclose()
+            await mock_client.aclose()
 
     async def test_cache_por_coordenadas_distintas(
         self, monkeypatch: pytest.MonkeyPatch
@@ -255,10 +241,7 @@ class TestGetWeather:
                 "name": "Santiago",
             })
 
-        fake_cls, real_client = _weather_fake_client(handler)
-        monkeypatch.setattr(
-            "app.services.weather_service.httpx.AsyncClient", fake_cls
-        )
+        mock_client = _install_mock_client(monkeypatch, handler)
         try:
             texto_tgn = await get_weather(-38.23, -72.68)
             texto_stgo = await get_weather(-33.45, -70.65)
@@ -266,7 +249,7 @@ class TestGetWeather:
             assert "Santiago" in texto_stgo
             assert call_count == 2
         finally:
-            await real_client.aclose()
+            await mock_client.aclose()
 
 
 class TestGetWeatherErrores:
@@ -274,6 +257,8 @@ class TestGetWeatherErrores:
 
     def setup_method(self) -> None:
         _clear_cache()
+        import app.services.weather_service as ws
+        ws._http_client = None
 
     def _install_mock(
         self,
@@ -292,46 +277,42 @@ class TestGetWeatherErrores:
                 raise exc("error simulado")
             return httpx.Response(status, json=json_body or {})
 
-        fake_cls, real_client = _weather_fake_client(handler)
-        monkeypatch.setattr(
-            "app.services.weather_service.httpx.AsyncClient", fake_cls
-        )
-        return real_client
+        return _install_mock_client(monkeypatch, handler)
 
     async def test_api_key_invalida_devuelve_mensaje(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """HTTP 401 → mensaje informativo, no excepción."""
-        real_client = self._install_mock(monkeypatch, 401, {"cod": 401, "message": "Invalid API key"})
+        mock_client = self._install_mock(monkeypatch, 401, {"cod": 401, "message": "Invalid API key"})
         try:
             texto = await get_weather()
             assert "no está disponible" in texto
         finally:
-            await real_client.aclose()
+            await mock_client.aclose()
 
     async def test_rate_limit_devuelve_mensaje(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """HTTP 429 → mensaje informativo."""
-        real_client = self._install_mock(monkeypatch, 429)
+        mock_client = self._install_mock(monkeypatch, 429)
         try:
             texto = await get_weather()
             assert "no está disponible" in texto
         finally:
-            await real_client.aclose()
+            await mock_client.aclose()
 
     async def test_error_red_devuelve_mensaje(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Error de conexión (RequestError) → mensaje amigable."""
-        real_client = self._install_mock(
+        mock_client = self._install_mock(
             monkeypatch, 200, exc=httpx.ConnectError
         )
         try:
             texto = await get_weather()
             assert "No pude consultar el clima" in texto
         finally:
-            await real_client.aclose()
+            await mock_client.aclose()
 
     async def test_respuesta_no_json_devuelve_mensaje(
         self, monkeypatch: pytest.MonkeyPatch
@@ -344,15 +325,12 @@ class TestGetWeatherErrores:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, content=b"<html>502 Proxy Error</html>")
 
-        fake_cls, real_client = _weather_fake_client(handler)
-        monkeypatch.setattr(
-            "app.services.weather_service.httpx.AsyncClient", fake_cls
-        )
+        mock_client = _install_mock_client(monkeypatch, handler)
         try:
             texto = await get_weather()
             assert "no está disponible" in texto
         finally:
-            await real_client.aclose()
+            await mock_client.aclose()
 
     async def test_api_key_no_configurada_devuelve_mensaje(
         self, monkeypatch: pytest.MonkeyPatch
@@ -366,12 +344,36 @@ class TestGetWeatherErrores:
         texto = await get_weather()
         assert "no está configurado" in texto
 
+    # ── Validación de rango lat/lon (defensa en profundidad) ────
+
+    async def test_latitud_invalida_devuelve_mensaje(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Latitud > 90° retorna mensaje sin llamar a la API."""
+        monkeypatch.setattr(
+            "app.services.weather_service.settings.openweathermap_api_key", "test-key"
+        )
+        texto = await get_weather(lat=91.0, lon=-70.0)
+        assert "latitud" in texto.lower()
+
+    async def test_longitud_invalida_devuelve_mensaje(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Longitud > 180° retorna mensaje sin llamar a la API."""
+        monkeypatch.setattr(
+            "app.services.weather_service.settings.openweathermap_api_key", "test-key"
+        )
+        texto = await get_weather(lat=-33.0, lon=181.0)
+        assert "longitud" in texto.lower()
+
 
 class TestClearCache:
     """_clear_cache para aislamiento de tests."""
 
     def setup_method(self) -> None:
         _clear_cache()
+        import app.services.weather_service as ws
+        ws._http_client = None
 
     async def test_clear_cache_funciona(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Después de clear_cache, la siguiente llamada va a API."""
@@ -385,10 +387,7 @@ class TestClearCache:
             call_count += 1
             return httpx.Response(200, json=_OWM_RESPUESTA_COMPLETA)
 
-        fake_cls, real_client = _weather_fake_client(handler)
-        monkeypatch.setattr(
-            "app.services.weather_service.httpx.AsyncClient", fake_cls
-        )
+        mock_client = _install_mock_client(monkeypatch, handler)
         try:
             await get_weather()
             assert call_count == 1
@@ -396,4 +395,4 @@ class TestClearCache:
             await get_weather()
             assert call_count == 2  # cache limpio → nueva llamada
         finally:
-            await real_client.aclose()
+            await mock_client.aclose()

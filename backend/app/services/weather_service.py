@@ -21,6 +21,10 @@ logger = logging.getLogger(__name__)
 # así que 30 min es conservador para un solo usuario.
 _CACHE_TTL_SECONDS = 30 * 60
 
+# Tamaño máximo del cache. Evita crecimiento no acotado si el LLM consulta
+# muchas coordenadas distintas. Con 50 entradas sobra para MVP (1-2 ubicaciones).
+_CACHE_MAX_SIZE = 50
+
 # Timeout HTTP. La API de OpenWeatherMap responde en <1s típicamente.
 _TIMEOUT_SECONDS = 10
 
@@ -30,6 +34,11 @@ _OWM_API_URL = "https://api.openweathermap.org/data/2.5/weather"
 # Coordenadas default para MVP: Traiguén, Región de La Araucanía, Chile.
 DEFAULT_LAT = -38.23
 DEFAULT_LON = -72.68
+
+# Cliente HTTP compartido con connection pooling hacia OpenWeatherMap.
+# Se inicializa lazy en _get_http_client(). Evita instanciar un
+# AsyncClient nuevo por cada request.
+_http_client: httpx.AsyncClient | None = None
 
 
 @dataclass
@@ -78,14 +87,43 @@ def _cache_get(lat: float, lon: float) -> WeatherData | None:
 
 
 def _cache_set(lat: float, lon: float, wd: WeatherData) -> None:
-    """Guarda WeatherData en el cache con timestamp actual."""
+    """Guarda WeatherData en el cache con timestamp actual.
+
+    Si el cache excede _CACHE_MAX_SIZE, evicta la entrada más antigua
+    para evitar crecimiento no acotado.
+    """
     key = _cache_key(lat, lon)
     _cache[key] = (time.monotonic(), wd)
+    if len(_cache) > _CACHE_MAX_SIZE:
+        oldest_key = min(_cache, key=lambda k: _cache[k][0])
+        del _cache[oldest_key]
+        logger.debug("Cache evictado (oldest): %s", oldest_key)
 
 
 def _clear_cache() -> None:
     """Limpia el cache completo. Útil para tests."""
     _cache.clear()
+
+
+async def _get_http_client() -> httpx.AsyncClient:
+    """Devuelve un AsyncClient compartido con connection pooling.
+
+    Se inicializa lazy en la primera llamada y se reusa en requests
+    subsiguientes. Evita el overhead de crear/destruir un cliente
+    HTTP por cada consulta a OpenWeatherMap.
+    """
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(timeout=_TIMEOUT_SECONDS)
+    return _http_client
+
+
+async def _close_http_client() -> None:
+    """Cierra el cliente HTTP compartido. Para tests y shutdown."""
+    global _http_client
+    if _http_client is not None and not _http_client.is_closed:
+        await _http_client.aclose()
+    _http_client = None
 
 
 def _extract_weather_data(data: Mapping[str, object], lat: float, lon: float) -> WeatherData:
@@ -211,11 +249,11 @@ async def _fetch_weather_data(lat: float, lon: float) -> dict[str, object]:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
-            response = await client.get(_OWM_API_URL, params=params)
-            response.raise_for_status()
-            data: dict[str, object] = response.json()
-            return data
+        client = await _get_http_client()
+        response = await client.get(_OWM_API_URL, params=params)
+        response.raise_for_status()
+        data: dict[str, object] = response.json()
+        return data
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 401:
             raise RuntimeError("API key de OpenWeatherMap inválida") from exc
@@ -307,6 +345,14 @@ async def get_weather(
         Si hay error, retorna un mensaje informativo en vez de lanzar
         excepción, para que el LLM pueda comunicarlo al agricultor.
     """
+    # Validación de rango: misma defensa que el endpoint REST (Query ge/le).
+    # get_weather() retorna mensajes informativos, no excepciones, para que
+    # el LLM pueda comunicar el error al agricultor sin romper el diálogo.
+    if not (-90.0 <= lat <= 90.0):
+        return "La latitud debe estar entre -90° y 90°. ¿Me das otra coordenada?"
+    if not (-180.0 <= lon <= 180.0):
+        return "La longitud debe estar entre -180° y 180°. ¿Me das otra coordenada?"
+
     try:
         wd = await get_weather_full(lat, lon)
         return wd.texto
