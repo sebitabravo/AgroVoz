@@ -1,7 +1,7 @@
 """Tests para el endpoint GET /api/v1/weather.
 
 Cobertura: 200 con coordenadas default, 200 con coordenadas personalizadas,
-502 por error de red/API, 503 por API key faltante.
+502 por error de red/API, 503 por API key faltante, headers Retry-After.
 Mockea get_weather_full del servicio (testeado aparte).
 """
 
@@ -11,8 +11,15 @@ from unittest.mock import AsyncMock, patch
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from app.core.rate_limiter import check_weather_rate_limit, _weather_limiter
 from app.main import app
 from app.services.weather_service import WeatherData
+
+# Deshabilitar rate limiting para TODOS los tests de este modulo.
+# La logica de rate limiting se testea en tests/test_rate_limiter.py
+app.dependency_overrides[check_weather_rate_limit] = lambda: None
+# Limpiar estado residual del rate limiter global (otro modulo pudo haberlo ensuciado)
+_weather_limiter.reset()
 
 # ── Fixture de datos estructurados que devuelve get_weather_full ─
 

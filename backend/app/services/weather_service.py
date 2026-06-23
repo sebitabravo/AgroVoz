@@ -77,8 +77,17 @@ _cache: dict[str, tuple[float, WeatherData]] = {}
 
 
 def _cache_key(lat: float, lon: float) -> str:
-    """Clave de cache para un par de coordenadas."""
-    return f"{lat:.6f}:{lon:.6f}"
+    """Clave de cache para un par de coordenadas.
+
+    Trunca a 2 decimales (~1.1 km de resolución) para agrupar requests
+    con variaciones mínimas de coordenadas bajo la misma entrada del cache.
+    Esto previene que un atacante evada el cache variando el 3er decimal
+    (ej: -38.231 vs -38.239) y agote la cuota gratuita de OWM (60 req/min).
+
+    Para clima, 1.1 km de resolución es más que suficiente — la temperatura
+    y condiciones no varían significativamente a esa escala.
+    """
+    return f"{lat:.2f}:{lon:.2f}"
 
 
 def _cache_get(lat: float, lon: float) -> WeatherData | None:
@@ -283,8 +292,11 @@ async def _fetch_weather_data(lat: float, lon: float) -> OWMResponse:
             f"OpenWeatherMap respondió HTTP {exc.response.status_code}"
         ) from exc
     except httpx.RequestError as exc:
+        # No incluimos str(exc) en el mensaje porque httpx puede incluir la URL
+        # completa con appid=<api_key> en el texto de la excepción.
+        logger.warning("Error de red al consultar OpenWeatherMap: %s", exc)
         raise ConnectionError(
-            f"Error de red al consultar OpenWeatherMap: {exc}"
+            "Error de red al consultar OpenWeatherMap"
         ) from exc
     except ValueError as exc:
         # Captura json.JSONDecodeError y pydantic.ValidationError (ambos ValueError).

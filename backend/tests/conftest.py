@@ -88,4 +88,7 @@ async def client(tmp_path: Path) -> AsyncGenerator[AsyncClient, None]:
             # contaminando los tests siguientes.
             health_module.engine = _original_health_engine  # type: ignore[attr-defined]
             test_engine.dispose()
-            app.dependency_overrides.clear()
+            # Pop solo el override que creamos, sin limpiar otros que
+            # otros test files hayan seteado (ej: test_weather_api.py
+            # sobreescribe check_weather_rate_limit a nivel de modulo).
+            app.dependency_overrides.pop(original_get_db, None)
