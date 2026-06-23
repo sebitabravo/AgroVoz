@@ -1,52 +1,115 @@
 ---
 import Waveform from "./Waveform.astro";
+
+// Banner full-width del hero. Prop-driven (#55): textos vienen del caller
+// (index.astro) para que el componente sea reutilizable y testeable.
+interface Props {
+  title: string;
+  subtitle?: string;
+  eyebrow?: string;
+  ctaText?: string;
+  ctaLink?: string;
+  ctaSecondaryText?: string;
+  ctaSecondaryLink?: string;
+  meta?: string;
+  // Claves i18n (EN dict en index.astro). El JS captura el ES del markup.
+  i18nEyebrow?: string;
+  i18nTitle?: string;
+  i18nSubtitle?: string;
+  i18nCtaText?: string;
+  i18nCtaSecondary?: string;
+  i18nMeta?: string;
+}
+
+const {
+  title,
+  subtitle,
+  eyebrow,
+  ctaText = "Solicitar una demo",
+  ctaLink = "#contacto",
+  ctaSecondaryText = "Ver cómo funciona",
+  ctaSecondaryLink = "#demo",
+  meta,
+  i18nEyebrow,
+  i18nTitle,
+  i18nSubtitle,
+  i18nCtaText,
+  i18nCtaSecondary,
+  i18nMeta,
+} = Astro.props;
 ---
 
 <section class="section" id="top" style="text-align:center">
   <div class="container" style="max-width:1080px">
-    <span class="eyebrow-pill" data-parallax="0.12">
-      <span class="dot" aria-hidden="true"></span>
-      <span data-i18n="hero.eyebrow"
-        >Inteligencia de precios y clima · por voz en WhatsApp</span
-      >
-    </span>
+    {
+      eyebrow && (
+        <span class="eyebrow-pill" data-parallax="0.12">
+          <span class="dot" aria-hidden="true" />
+          <span {...(i18nEyebrow ? { "data-i18n": i18nEyebrow } : {})}>
+            {eyebrow}
+          </span>
+        </span>
+      )
+    }
 
-    <h1 class="h1" style="margin-inline:auto" data-i18n="hero.title">
-      Tu voz tiene el precio justo.
+    <h1
+      class="h1"
+      style="margin-inline:auto"
+      {...(i18nTitle ? { "data-i18n": i18nTitle } : {})}
+    >
+      {title}
     </h1>
 
-    <p
-      class="lede"
-      style="margin:28px auto 0"
-      data-parallax="-0.06"
-      data-i18n="hero.sub"
-    >
-      AgroVoz convierte un mensaje de voz en WhatsApp en datos oficiales de
-      mercado y clima, devueltos también por voz. Sin apps, sin leer ni escribir.
-    </p>
+    {
+      subtitle && (
+        <p
+          class="lede"
+          style="margin:28px auto 0"
+          data-parallax="-0.06"
+          {...(i18nSubtitle ? { "data-i18n": i18nSubtitle } : {})}
+        >
+          {subtitle}
+        </p>
+      )
+    }
 
     <div
       class="flex flex-wrap items-center justify-center gap-3"
       style="margin-top:36px"
     >
-      <a href="#contacto" class="btn btn-primary" data-i18n="hero.cta1"
-        >Solicitar una demo</a
+      <a
+        href={ctaLink}
+        class="btn btn-primary"
+        {...(i18nCtaText ? { "data-i18n": i18nCtaText } : {})}
       >
-      <a href="#demo" class="btn btn-secondary" data-i18n="hero.cta2"
-        >Ver cómo funciona</a
-      >
+        {ctaText}
+      </a>
+      {
+        ctaSecondaryText && (
+          <a
+            href={ctaSecondaryLink}
+            class="btn btn-secondary"
+            {...(i18nCtaSecondary ? { "data-i18n": i18nCtaSecondary } : {})}
+          >
+            {ctaSecondaryText}
+          </a>
+        )
+      }
     </div>
 
     <div style="margin-top:48px">
       <Waveform variant="hero" parallax="0.18" />
     </div>
 
-    <p
-      style="margin-top:28px;font-size:13.5px;color:var(--color-muted)"
-      data-i18n="hero.meta"
-    >
-      Voz vía WhatsApp · Precios ODEPA + clima en tiempo real · &lt;15 s por
-      respuesta
-    </p>
+    {
+      meta && (
+        <p
+          style="margin-top:28px;font-size:13.5px;color:var(--color-muted)"
+          {...(i18nMeta ? { "data-i18n": i18nMeta } : {})}
+        >
+          {meta}
+        </p>
+      )
+    }
   </div>
 </section>

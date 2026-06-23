@@ -1,6 +1,17 @@
 ---
 // Formulario de contacto (#contacto). El submit arma un mailto: con el plan
 // seleccionado. Para MVP no hay backend: mailto es suficiente.
+//
+// Accesibilidad sin JS: el form usa action + method POST nativo, asi si el
+// JS no carga, el navegador igual abre el cliente de correo con los campos.
+// El JS (index.astro) hace preventDefault y arma un mailto mas rico (subject
+// + plan). Para usar Formspree/Netlify/endpoint propio, pasar la URL en formAction.
+interface Props {
+  formAction?: string;
+}
+
+const { formAction = "mailto:hola@agrovoz.cl" } = Astro.props;
+
 const chips = [
   { plan: "institucional", label: "Institucional", i18n: "form.chip.inst" },
   { plan: "premium", label: "Premium", i18n: "form.chip.premium" },
@@ -9,7 +20,14 @@ const chips = [
 ];
 ---
 
-<form class="contact-form" id="contact-form" novalidate>
+<form
+  class="contact-form"
+  id="contact-form"
+  action={formAction}
+  method="post"
+  enctype="text/plain"
+  novalidate
+>
   <div class="chip-grid">
     {
       chips.map((c) => (
