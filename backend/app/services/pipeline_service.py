@@ -387,7 +387,7 @@ class AgroVozPipeline:
                     audio_duration_ms=audio_duration_ms,
                     start_time=pipeline_start,
                 )
-            except (RuntimeError, OSError, SQLAlchemyError):
+            except (RuntimeError, OSError, SQLAlchemyError, TypeError, AttributeError, KeyError):
                 logger.exception(
                     "Error guardando consulta — continuando pipeline: "
                     "phone_hash=%s intent=%s",

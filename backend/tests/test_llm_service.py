@@ -21,6 +21,7 @@ from app.services.llm_service import (
     WHITELIST_TOOLS,
     _build_messages,
     _execute_tool,
+    _force_keyword_tool,
     _mock_answer,
     _parse_content,
     _parse_text_tool_calls,
@@ -534,3 +535,38 @@ class TestExecuteToolWhitelist:
         result = await _execute_tool("get_price", {"producto": "papa", "mercado": "Lo Valledor"})
         # No debe ser FALLBACK_TEXT: get_price SI esta en el whitelist.
         assert result != FALLBACK_TEXT
+
+
+# ── Fallback keyword detection (_force_keyword_tool) ────────────
+
+
+class TestForceKeywordToolDbError:
+    """_force_keyword_tool no propaga errores de DB al pipeline.
+
+    Regresión para P1 del CI review (commit 5adfd60): el bloque de precio
+    llamaba get_price_for_llm sin asyncio.to_thread ni except SQLAlchemyError,
+    crasheando el pipeline si SQLite lanzaba 'database is locked'.
+    """
+
+    async def test_precio_db_error_no_propaga(self, monkeypatch) -> None:
+        """SQLAlchemyError en get_price_for_llm se captura y retorna None."""
+        from sqlalchemy.exc import SQLAlchemyError
+
+        from app.core import database as db_module
+        from app.services import odepa_service
+
+        class _FakeSession:
+            def close(self) -> None:
+                pass
+
+        monkeypatch.setattr(db_module, "SessionLocal", lambda: _FakeSession())
+
+        def _raise_db_error(session, producto):  # noqa: ANN001
+            raise SQLAlchemyError("database is locked")
+
+        monkeypatch.setattr(odepa_service, "get_price_for_llm", _raise_db_error)
+
+        # La query menciona "papa" (producto) pero ningun keyword de clima,
+        # asi que cae al None final sin tocar el bloque de clima.
+        result = await _force_keyword_tool("a cuanto esta la papa")
+        assert result is None

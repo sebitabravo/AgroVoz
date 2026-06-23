@@ -260,7 +260,6 @@ def preload_model() -> None:
     No bloquea: dispara la carga en un thread daemon. Si falla, el error
     queda en _model_error y answer() usara mock en desarrollo.
     """
-    import threading
     threading.Thread(target=_get_model, daemon=True, name="llm-preload").start()
 
 
@@ -620,7 +619,11 @@ async def _force_keyword_tool(query_text: str) -> str | None:
     if product:
         session = SessionLocal()
         try:
-            result = get_price_for_llm(session, producto=product)
+            # Llamada en thread pool: get_price_for_llm es sincrono (query SQLite)
+            # y no debe bloquear el event loop mientras otros requests se procesan.
+            result = await asyncio.to_thread(
+                get_price_for_llm, session, producto=product
+            )
             # Solo retornar si encontro datos reales (no "No tengo datos...").
             if not result.startswith("No tengo datos"):
                 logger.info(
@@ -628,6 +631,10 @@ async def _force_keyword_tool(query_text: str) -> str | None:
                     product, query_text,
                 )
                 return result
+        except SQLAlchemyError as exc:
+            # Fire-and-forget: un error de DB (database is locked, disk I/O)
+            # no debe romper el pipeline. Se loguea y se cae al bloque de clima.
+            logger.warning("Error DB en fallback precio: %s", exc)
         finally:
             session.close()
 
