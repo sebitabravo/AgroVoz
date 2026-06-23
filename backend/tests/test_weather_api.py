@@ -5,9 +5,10 @@ Cobertura: 200 con coordenadas default, 200 con coordenadas personalizadas,
 Mockea get_weather_full del servicio (testeado aparte).
 """
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from unittest.mock import AsyncMock, patch
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
@@ -15,11 +16,19 @@ from app.core.rate_limiter import _weather_limiter, check_weather_rate_limit
 from app.main import app
 from app.services.weather_service import WeatherData
 
-# Deshabilitar rate limiting para TODOS los tests de este modulo.
-# La logica de rate limiting se testea en tests/test_rate_limiter.py
-app.dependency_overrides[check_weather_rate_limit] = lambda: None
-# Limpiar estado residual del rate limiter global (otro modulo pudo haberlo ensuciado)
-_weather_limiter.reset()
+
+@pytest.fixture(scope="module", autouse=True)
+def _deshabilitar_rate_limit() -> Iterator[None]:
+    """Deshabilita rate limiting para todos los tests de este modulo.
+
+    La logica de rate limiting se testea en tests/test_rate_limiter.py.
+    Fixture module-scoped con autouse: se activa antes del primer test
+    y se limpia despues del ultimo, sin contaminar otros modulos.
+    """
+    app.dependency_overrides[check_weather_rate_limit] = lambda: None
+    _weather_limiter.reset()
+    yield
+    app.dependency_overrides.pop(check_weather_rate_limit, None)
 
 # ── Fixture de datos estructurados que devuelve get_weather_full ─
 

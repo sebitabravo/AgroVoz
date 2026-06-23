@@ -6,13 +6,11 @@ Cobertura:
   - Integracion: 31 requests al endpoint -> ultimo retorna 429 con Retry-After.
 """
 
-from collections.abc import Iterator
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.core.rate_limiter import WeatherSlidingWindow, _weather_limiter, check_weather_rate_limit
+from app.core.rate_limiter import WeatherSlidingWindow
 from app.main import app
 from app.services.weather_service import WeatherData
 
@@ -33,21 +31,6 @@ def _weather_data_mock() -> WeatherData:
         rain_1h_mm=0.5,
         texto="En Traiguen ahora: 18C, nublado, humedad 65%, viento 3.6 m/s, lluvia 0.5 mm.",
     )
-
-
-@pytest.fixture
-def _desactivar_override() -> Iterator[None]:
-    """Elimina dependency_overrides para que el rate limiter funcione.
-
-    test_weather_api.py sobreescribe check_weather_rate_limit con lambda: None
-    a nivel de modulo. Esta fixture restaura el rate limiter real y resetea
-    los contadores entre tests.
-    """
-    saved = app.dependency_overrides.pop(check_weather_rate_limit, None)
-    _weather_limiter.reset()
-    yield
-    if saved is not None:
-        app.dependency_overrides[check_weather_rate_limit] = saved
 
 
 # ── Unit tests: WeatherSlidingWindow ───────────────────────────────
@@ -161,9 +144,7 @@ class TestWeatherSlidingWindow:
 class TestWeatherRateLimitIntegration:
     """Tests de integracion: rate limiter en el endpoint real."""
 
-    async def test_30_requests_permitidos_31_bloqueado(
-        self, _desactivar_override: None
-    ) -> None:
+    async def test_30_requests_permitidos_31_bloqueado(self) -> None:
         """30 requests -> 200 OK. El 31 -> 429 con Retry-After."""
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://testserver"
