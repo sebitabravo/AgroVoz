@@ -14,6 +14,9 @@ interface Props {
   accent?: boolean;
   revealDelay?: number;
   i18nLabel?: string;
+  // Cita de la fuente de la cifra. Suma credibilidad institucional.
+  source?: string;
+  i18nSource?: string;
 }
 
 const {
@@ -27,6 +30,8 @@ const {
   accent = false,
   revealDelay = 0,
   i18nLabel,
+  source,
+  i18nSource,
 } = Astro.props;
 
 const revealAttr: Record<string, string> = { "data-reveal": "" };
@@ -62,4 +67,11 @@ const finalValue =
   >
     {label}
   </p>
+  {source && (
+    <p class="stat-source"
+      {...(i18nSource ? { "data-i18n": i18nSource } : {})}
+    >
+      {source}
+    </p>
+  )}
 </div>

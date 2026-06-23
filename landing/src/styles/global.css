@@ -326,6 +326,15 @@ textarea {
   max-width: 26ch;
 }
 
+.stat-source {
+  margin-top: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--color-accent-deep);
+  opacity: 0.75;
+}
+
 /* ---- Auto-fit grids ---- */
 .grid-3 {
   display: grid;
@@ -360,6 +369,23 @@ textarea {
   border: 1px solid var(--color-line);
   border-radius: 16px;
   padding: 24px;
+}
+
+.stack-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: var(--color-accent-soft);
+  color: var(--color-accent-deep);
+  margin-bottom: 16px;
+}
+
+.stack-icon svg {
+  width: 22px;
+  height: 22px;
 }
 
 /* ---- Cost note ---- */
@@ -819,6 +845,34 @@ textarea {
   font-weight: 700;
 }
 
+/* ---- Boton hamburguesa (oculto en desktop, drawer en mobile) ---- */
+.nav-toggle {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  width: 42px;
+  height: 42px;
+  margin-left: auto;
+  padding: 0;
+  border-radius: 10px;
+  transition: background 0.18s ease;
+}
+
+.nav-toggle:hover {
+  background: var(--color-accent-soft);
+}
+
+.nav-toggle__bar {
+  display: block;
+  width: 22px;
+  height: 2px;
+  margin: 0 auto;
+  border-radius: 2px;
+  background: var(--color-ink);
+  transition: transform 0.25s ease, opacity 0.2s ease;
+}
+
 /* ---- Footer ---- */
 .site-footer {
   border-top: 1px solid var(--color-line);
@@ -908,8 +962,60 @@ textarea {
     grid-template-columns: 1fr;
     gap: 36px;
   }
+  /* La nav pasa a ser drawer lateral; el boton hamburguesa la abre. */
+  .nav-toggle {
+    display: flex;
+  }
   .nav {
-    display: none;
+    position: fixed;
+    top: 68px;
+    right: 0;
+    z-index: 49;
+    width: min(300px, 82vw);
+    height: calc(100vh - 68px);
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 0;
+    padding: 12px 16px 32px;
+    background: var(--color-surface);
+    border-left: 1px solid var(--color-line);
+    box-shadow: -24px 0 60px -32px rgba(28, 30, 26, 0.35);
+    transform: translateX(105%);
+    transition: transform 0.28s cubic-bezier(0.16, 0.8, 0.3, 1);
+    overflow-y: auto;
+  }
+  .site-header.nav-open .nav {
+    transform: translateX(0);
+  }
+  .nav a {
+    padding: 14px 12px;
+    font-size: 16px;
+    border-bottom: 1px solid var(--color-line);
+  }
+  /* Overlay detras del drawer, bloquea clicks al fondo. */
+  .nav-backdrop {
+    position: fixed;
+    inset: 68px 0 0 0;
+    z-index: 48;
+    background: rgba(28, 30, 26, 0.32);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.28s ease, visibility 0.28s ease;
+  }
+  .site-header.nav-open .nav-backdrop {
+    opacity: 1;
+    visibility: visible;
+  }
+  /* Animacion de las barras a una X cuando el drawer esta abierto. */
+  .site-header.nav-open .nav-toggle__bar:nth-child(1) {
+    transform: translateY(7px) rotate(45deg);
+  }
+  .site-header.nav-open .nav-toggle__bar:nth-child(2) {
+    opacity: 0;
+  }
+  .site-header.nav-open .nav-toggle__bar:nth-child(3) {
+    transform: translateY(-7px) rotate(-45deg);
   }
 }
 

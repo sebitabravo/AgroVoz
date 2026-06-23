@@ -17,14 +17,18 @@ const problemaStats = [
   {
     count: 205000,
     label: "agricultores usuarios de INDAP en Chile",
+    source: "Fuente: INDAP, 2024",
     i18nLabel: "problema.s1",
+    i18nSource: "problema.s1.src",
     delay: 0,
   },
   {
     text: "40–60%",
     accent: true,
     label: "del precio mayorista capturado por intermediarios",
+    source: "Fuente: ODEPA / FAO",
     i18nLabel: "problema.s2",
+    i18nSource: "problema.s2.src",
     delay: 90,
   },
   {
@@ -32,14 +36,18 @@ const problemaStats = [
     decimals: 1,
     suffix: "%",
     label: "de pérdidas post-cosecha en promedio",
+    source: "Fuente: FAO",
     i18nLabel: "problema.s3",
+    i18nSource: "problema.s3.src",
     delay: 180,
   },
   {
     count: 7,
     suffix: "%",
     label: "de la adaptación climática es planificada; el resto es intuición",
+    source: "Fuente: FAO",
     i18nLabel: "problema.s4",
+    i18nSource: "problema.s4.src",
     delay: 270,
   },
 ];
@@ -73,20 +81,57 @@ const pasos = [
 
 // Nota: card 1 usa Open-WA (gateway self-hosted). El mockup decia Twilio,
 // pero el constraint del proyecto es 100% open-source, sin APIs pagas.
+const SVG = (p: string) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+
 const stackItems = [
-  { title: "Open-WA", sub: "Canal de mensajería", i18nSub: "stack.1.sub" },
-  { title: "Whisper", sub: "Transcripción de voz", i18nSub: "stack.2.sub" },
+  {
+    title: "Open-WA",
+    sub: "Canal de mensajería",
+    i18nSub: "stack.1.sub",
+    icon: SVG(
+      '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>',
+    ),
+  },
+  {
+    title: "Whisper",
+    sub: "Transcripción de voz",
+    i18nSub: "stack.2.sub",
+    icon: SVG(
+      '<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="23"/><line x1="8" x2="16" y1="23" y2="23"/>',
+    ),
+  },
   {
     title: "Qwen2.5-3B",
     sub: "Comprensión + Tool Calling",
     i18nSub: "stack.3.sub",
+    icon: SVG(
+      '<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" x2="9" y1="1" y2="4"/><line x1="15" x2="15" y1="1" y2="4"/><line x1="9" x2="9" y1="20" y2="23"/><line x1="15" x2="15" y1="20" y2="23"/><line x1="20" x2="23" y1="9" y2="9"/><line x1="20" x2="23" y1="14" y2="14"/><line x1="1" x2="4" y1="9" y2="9"/><line x1="1" x2="4" y1="14" y2="14"/>',
+    ),
   },
-  { title: "Piper TTS", sub: "Síntesis de voz", i18nSub: "stack.4.sub" },
-  { title: "ODEPA", sub: "Precios oficiales", i18nSub: "stack.5.sub" },
+  {
+    title: "Piper TTS",
+    sub: "Síntesis de voz",
+    i18nSub: "stack.4.sub",
+    icon: SVG(
+      '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>',
+    ),
+  },
+  {
+    title: "ODEPA",
+    sub: "Precios oficiales",
+    i18nSub: "stack.5.sub",
+    icon: SVG(
+      '<path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>',
+    ),
+  },
   {
     title: "OpenWeatherMap",
     sub: "Clima localizado",
     i18nSub: "stack.6.sub",
+    icon: SVG(
+      '<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>',
+    ),
   },
 ];
 
@@ -161,17 +206,23 @@ const impactoStats = [
     prefix: "+$",
     accent: true,
     label: "de ingreso adicional anual por productor (hasta), al negociar con datos",
+    source: "Proyección AgroVoz",
     i18nLabel: "impacto.i1",
+    i18nSource: "impacto.i1.src",
   },
   {
     count: 265000,
     label: "explotaciones de agricultura familiar — el 85% de los predios del país",
+    source: "Fuente: INE / Censo Agropecuario",
     i18nLabel: "impacto.i2",
+    i18nSource: "impacto.i2.src",
   },
   {
     text: "<15 s",
     label: "de latencia objetivo entre la pregunta y la respuesta de voz",
+    source: "Objetivo AgroVoz",
     i18nLabel: "impacto.i3",
+    i18nSource: "impacto.i3.src",
   },
 ];
 
@@ -235,7 +286,9 @@ const equipo = [
                 text={s.text}
                 accent={s.accent}
                 label={s.label}
+                source={s.source}
                 i18nLabel={s.i18nLabel}
+                i18nSource={s.i18nSource}
                 revealDelay={s.delay}
               />
             ))
@@ -320,6 +373,7 @@ const equipo = [
                 variant="stack"
                 title={s.title}
                 subtitle={s.sub}
+                icon={s.icon}
                 i18nSubtitle={s.i18nSub}
               />
             ))
@@ -399,7 +453,9 @@ const equipo = [
                 text={s.text}
                 accent={s.accent}
                 label={s.label}
+                source={s.source}
                 i18nLabel={s.i18nLabel}
+                i18nSource={s.i18nSource}
               />
             ))
           }
@@ -485,6 +541,38 @@ const equipo = [
     "(prefers-reduced-motion: reduce)",
   ).matches;
 
+  // ===== Drawer de navegacion mobile (boton hamburguesa) =====
+  const header = document.getElementById("site-header");
+  const navToggle = document.getElementById("nav-toggle");
+  const navBackdrop = document.getElementById("nav-backdrop");
+
+  function setNav(open: boolean) {
+    if (!header || !navToggle) return;
+    header.classList.toggle("nav-open", open);
+    navToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    navToggle.setAttribute(
+      "aria-label",
+      open ? "Cerrar menú de navegación" : "Abrir menú de navegación",
+    );
+    document.body.style.overflow = open && window.innerWidth <= 920 ? "hidden" : "";
+  }
+
+  navToggle?.addEventListener("click", () =>
+    setNav(!header?.classList.contains("nav-open")),
+  );
+  // Click en un enlace del menu cierra el drawer.
+  document.querySelectorAll<HTMLElement>("#nav a").forEach((a) =>
+    a.addEventListener("click", () => setNav(false)),
+  );
+  navBackdrop?.addEventListener("click", () => setNav(false));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") setNav(false);
+  });
+  // Al volver a desktop, cierra y libera el scroll del fondo.
+  window.matchMedia("(min-width: 921px)").addEventListener("change", (e) => {
+    if (e.matches) setNav(false);
+  });
+
   // ===== Diccionario EN (ES es la fuente de verdad en el markup) =====
   const EN: Record<string, string> = {
     "nav.como": "How it works",
@@ -510,6 +598,10 @@ const equipo = [
     "problema.s3": "average post-harvest losses",
     "problema.s4":
       "of climate adaptation is planned; the rest is guesswork",
+    "problema.s1.src": "Source: INDAP, 2024",
+    "problema.s2.src": "Source: ODEPA / FAO",
+    "problema.s3.src": "Source: FAO",
+    "problema.s4.src": "Source: FAO",
     "como.eyebrow": "How it works",
     "como.title": "Speaking is the whole interface.",
     "como.1.title": "The farmer asks",
@@ -580,6 +672,9 @@ const equipo = [
     "impacto.i2": "family-farming holdings — 85% of the country's farms",
     "impacto.i3":
       "target latency between the question and the voice answer",
+    "impacto.i1.src": "AgroVoz projection",
+    "impacto.i2.src": "Source: INE / Agricultural Census",
+    "impacto.i3.src": "AgroVoz target",
     "impacto.odsNumbers": "SDG 2 · 8 · 10 · 13",
     "impacto.odsLabels":
       "Zero Hunger · Decent Work and Growth · Reduced Inequalities · Climate Action",

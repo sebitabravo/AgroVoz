@@ -10,6 +10,8 @@ interface Props {
   i18nTitle?: string;
   i18nDescription?: string;
   i18nSubtitle?: string;
+  // SVG inline (string HTML) para fichas de tecnologia (#stack).
+  icon?: string;
 }
 
 const {
@@ -22,6 +24,7 @@ const {
   i18nTitle,
   i18nDescription,
   i18nSubtitle,
+  icon,
 } = Astro.props;
 
 const revealAttr: Record<string, string> = { "data-reveal": "" };
@@ -37,6 +40,11 @@ if (revealDelay) revealAttr["data-reveal-delay"] = `${revealDelay}ms`;
       <div class="step-num" aria-hidden="true">
         {step}
       </div>
+    )
+  }
+  {
+    icon && (
+      <span class="stack-icon" set:html={icon} aria-hidden="true" />
     )
   }
   <h3 class="card-title" {...(i18nTitle ? { "data-i18n": i18nTitle } : {})}>
