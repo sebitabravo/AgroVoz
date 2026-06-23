@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy import tuple_ as sa_tuple
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -408,3 +408,136 @@ async def sync_odepa(session: Session | None = None) -> SyncResult:
             if not _ok:
                 session.rollback()
             session.close()
+
+
+# ── Funciones de consulta para Tool Calling (Issue #16) ──────────
+
+
+def query_latest_price(
+    session: Session, producto: str, mercado: str
+) -> OdepaPrice | None:
+    """Busca el precio más reciente para un producto en un mercado.
+
+    Normaliza producto (lower, strip) y mercado (lower, strip).
+    Usa match exacto case-insensitive para evitar ambigüedad:
+    "Lo Valledor" no debe devolver datos de "Lo Valledor Sur".
+    Lanza ValueError si producto o mercado están vacíos.
+    Retorna None si no hay datos en la DB.
+    """
+    if not producto or not producto.strip():
+        raise ValueError("producto no puede estar vacío")
+    if not mercado or not mercado.strip():
+        raise ValueError("mercado no puede estar vacío")
+
+    producto_norm = producto.strip().lower()
+    mercado_norm = mercado.strip().lower()
+
+    q = (
+        select(OdepaPrice)
+        .where(
+            func.lower(OdepaPrice.producto) == producto_norm,
+            func.lower(OdepaPrice.mercado) == mercado_norm,
+        )
+        .order_by(OdepaPrice.fecha.desc())
+        .limit(1)
+    )
+    return session.scalars(q).first()
+
+
+def query_latest_by_product(
+    session: Session, producto: str
+) -> dict[str, OdepaPrice]:
+    """Precio más reciente por mercado para un producto. Una sola query.
+
+    Alternativa a llamar query_latest_price por cada mercado (N+1).
+    SQLite maneja <100 filas en una query; el diccionario se arma en Python.
+    """
+    if not producto or not producto.strip():
+        raise ValueError("producto no puede estar vacío")
+
+    producto_norm = producto.strip().lower()
+    q = (
+        select(OdepaPrice)
+        .where(func.lower(OdepaPrice.producto) == producto_norm)
+        .order_by(OdepaPrice.mercado, OdepaPrice.fecha.desc())
+    )
+    rows = session.scalars(q).all()
+    # Primera fila por mercado = la más reciente (orden desc por fecha)
+    seen: set[str] = set()
+    result: dict[str, OdepaPrice] = {}
+    for row in rows:
+        if row.mercado not in seen:
+            seen.add(row.mercado)
+            result[row.mercado] = row
+    return result
+
+
+def format_price_text(record: OdepaPrice) -> str:
+    """Formatea un registro OdepaPrice como texto natural en español chileno.
+
+    Formato: "Papa está a $1.200 el kilo en Lo Valledor, precio del 20/06/2026."
+    Sin artículo para evitar errores de género (el tomate, la papa).
+    Usa punto como separador de miles (convención chilena).
+    Muestra decimales solo si el precio tiene fracción significativa.
+    """
+    precio = record.precio_kg
+    if precio == precio.to_integral_value():
+        parte_entera = f"{int(precio):,}".replace(",", ".")
+        precio_str = f"${parte_entera}"
+    else:
+        entero, dec = str(precio).split(".")
+        parte_entera = f"{int(entero):,}".replace(",", ".")
+        dec = dec.ljust(2, "0")[:2]
+        precio_str = f"${parte_entera},{dec}"
+
+    fecha_str = record.fecha.strftime("%d/%m/%Y")
+    return (
+        f"{record.producto[0].upper()}{record.producto[1:]} está a {precio_str} "
+        f"el kilo en {record.mercado}, precio del {fecha_str}."
+    )
+
+
+def get_price_for_llm(session: Session, producto: str, mercado: str) -> str:
+    """Tool function para el LLM: consulta el precio más reciente.
+
+    Retorna texto natural en español chileno listo para TTS.
+    Si no hay datos, retorna un mensaje informativo en vez de fallar.
+    El LLM usará esta función vía Tool Calling (Issue #18).
+    """
+    try:
+        record = query_latest_price(session, producto, mercado)
+    except ValueError:
+        return "No entendí el producto o mercado. ¿Podrías repetirlo?"
+
+    if record is None:
+        return (
+            f"No tengo datos de precio para {producto.strip()} "
+            f"en {mercado.strip()}."
+        )
+    return format_price_text(record)
+
+
+def list_products(session: Session) -> list[str]:
+    """Lista todos los productos disponibles en ODEPA, ordenados A-Z.
+
+    Útil para que el LLM sepa qué productos puede consultar y para
+    autocompletar en el dashboard admin.
+    """
+    q = (
+        select(func.lower(OdepaPrice.producto).label("producto"))
+        .distinct()
+        .order_by(func.lower(OdepaPrice.producto))
+    )
+    return list(session.scalars(q).all())
+
+
+def list_mercados(session: Session, producto: str | None = None) -> list[str]:
+    """Lista mercados disponibles, opcionalmente filtrados por producto.
+
+    Sin filtro: todos los mercados. Con producto: solo mercados donde
+    ese producto tiene datos.
+    """
+    q = select(OdepaPrice.mercado).distinct().order_by(OdepaPrice.mercado)
+    if producto:
+        q = q.where(func.lower(OdepaPrice.producto) == producto.strip().lower())
+    return list(session.scalars(q).all())

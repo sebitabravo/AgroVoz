@@ -19,6 +19,7 @@ from starlette.responses import Response
 
 from app import __version__
 from app.api.health import router as health_router
+from app.api.prices import router as prices_router
 from app.api.webhooks import router as webhooks_router
 from app.core.config import settings
 from app.core.database import engine
@@ -156,6 +157,7 @@ app.add_middleware(RequestIDMiddleware)
 
 # Routers
 app.include_router(health_router, prefix="/api/v1")
+app.include_router(prices_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 
 
