@@ -16,9 +16,15 @@ class WeatherResponse(BaseModel):
     lat: float = Field(description="Latitud consultada")
     lon: float = Field(description="Longitud consultada")
     location: str = Field(description="Nombre de la ubicación según OpenWeatherMap")
-    temperature_c: float = Field(description="Temperatura actual en grados Celsius")
-    feels_like_c: float = Field(description="Sensación térmica en grados Celsius")
-    humidity: int = Field(description="Humedad relativa en porcentaje (0-100)")
+    temperature_c: float | None = Field(
+        default=None, description="Temperatura actual en grados Celsius"
+    )
+    feels_like_c: float | None = Field(
+        default=None, description="Sensación térmica en grados Celsius"
+    )
+    humidity: int | None = Field(
+        default=None, description="Humedad relativa en porcentaje (0-100)"
+    )
     description: str = Field(description="Descripción del clima en español")
     wind_speed_ms: float | None = Field(
         default=None, description="Velocidad del viento en m/s"

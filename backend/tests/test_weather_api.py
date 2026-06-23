@@ -5,9 +5,10 @@ Cobertura: 200 con coordenadas default, 200 con coordenadas personalizadas,
 Mockea get_weather_full del servicio (testeado aparte).
 """
 
+from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, patch
 
-import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
@@ -15,31 +16,28 @@ from app.services.weather_service import WeatherData
 
 # ── Fixture de datos estructurados que devuelve get_weather_full ─
 
+_TEXTO_ESPERADO = (
+    "En Traiguén ahora: 18°C, nublado, humedad 65%, viento 3.6 m/s, lluvia 0.5 mm."
+)
+
 
 def _weather_data_para(
     lat: float = -38.23,
     lon: float = -72.68,
     location: str = "Traiguén",
-    temperature_c: float = 18.5,
-    feels_like_c: float = 17.2,
-    humidity: int = 65,
+    temperature_c: float | None = 18.5,
+    feels_like_c: float | None = 17.2,
+    humidity: int | None = 65,
     description: str = "nublado",
     wind_speed_ms: float | None = 3.6,
     rain_1h_mm: float | None = 0.5,
-    texto: str | None = None,
+    texto: str = _TEXTO_ESPERADO,
 ) -> WeatherData:
-    """Helper: construye un WeatherData con defaults de test."""
-    if texto is None:
-        partes = [
-            f"En {location} ahora: {temperature_c:.0f}°C, {description}, "
-            f"humedad {humidity}%",
-        ]
-        if wind_speed_ms is not None:
-            partes.append(f", viento {wind_speed_ms:.1f} m/s")
-        if rain_1h_mm is not None:
-            partes.append(f", lluvia {rain_1h_mm:.1f} mm")
-        texto = "".join(partes) + "."
+    """Helper: construye un WeatherData con defaults de test.
 
+    Usa texto precomputado como default — NO reimplementa _format_weather().
+    Tests que necesiten un texto distinto lo pasan explícitamente.
+    """
     return WeatherData(
         lat=lat,
         lon=lon,
@@ -54,19 +52,15 @@ def _weather_data_para(
     )
 
 
-_TEXTO_ESPERADO = (
-    "En Traiguén ahora: 18°C, nublado, humedad 65%, viento 3.6 m/s, lluvia 0.5 mm."
-)
-
-
 # ── AsyncClient helper ─────────────────────────────────────────
 
 
-@pytest.fixture
-def weather_client() -> AsyncClient:
+@pytest_asyncio.fixture
+async def weather_client() -> AsyncIterator[AsyncClient]:
     """Cliente HTTP asíncrono para testear la app FastAPI. Nombrado distinto
     del fixture client en conftest.py para evitar colisión."""
-    return AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as c:
+        yield c
 
 
 # ── Tests: GET /api/v1/weather ─────────────────────────────────
@@ -145,7 +139,7 @@ class TestWeatherEndpoint:
             response = await weather_client.get("/api/v1/weather")
 
         assert response.status_code == 503
-        assert "API key" in response.json()["detail"]
+        assert "no disponible" in response.json()["detail"]
 
     async def test_connection_error_returns_502(
         self, weather_client: AsyncClient

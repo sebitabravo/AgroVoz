@@ -5,6 +5,7 @@ MVP usa coordenadas fijas de Traiguén (-38.23, -72.68).
 Plan gratuito: 60 calls/min. Cache en memoria con TTL 30 min.
 """
 
+import asyncio
 import logging
 import time
 from collections.abc import Mapping
@@ -39,6 +40,7 @@ DEFAULT_LON = -72.68
 # Se inicializa lazy en _get_http_client(). Evita instanciar un
 # AsyncClient nuevo por cada request.
 _http_client: httpx.AsyncClient | None = None
+_http_client_lock = asyncio.Lock()
 
 
 @dataclass
@@ -54,9 +56,9 @@ class WeatherData:
     lat: float
     lon: float
     location: str
-    temperature_c: float
-    feels_like_c: float
-    humidity: int
+    temperature_c: float | None
+    feels_like_c: float | None
+    humidity: int | None
     description: str
     wind_speed_ms: float | None
     rain_1h_mm: float | None
@@ -69,7 +71,7 @@ _cache: dict[str, tuple[float, WeatherData]] = {}
 
 def _cache_key(lat: float, lon: float) -> str:
     """Clave de cache para un par de coordenadas."""
-    return f"{lat:.4f}:{lon:.4f}"
+    return f"{lat:.6f}:{lon:.6f}"
 
 
 def _cache_get(lat: float, lon: float) -> WeatherData | None:
@@ -111,10 +113,15 @@ async def _get_http_client() -> httpx.AsyncClient:
     Se inicializa lazy en la primera llamada y se reusa en requests
     subsiguientes. Evita el overhead de crear/destruir un cliente
     HTTP por cada consulta a OpenWeatherMap.
+
+    Usa double-checked locking con asyncio.Lock para evitar race
+    condition cuando dos corutinas concurrentes crean el cliente.
     """
     global _http_client
     if _http_client is None or _http_client.is_closed:
-        _http_client = httpx.AsyncClient(timeout=_TIMEOUT_SECONDS)
+        async with _http_client_lock:
+            if _http_client is None or _http_client.is_closed:
+                _http_client = httpx.AsyncClient(timeout=_TIMEOUT_SECONDS)
     return _http_client
 
 
@@ -133,19 +140,27 @@ def _extract_weather_data(data: Mapping[str, object], lat: float, lon: float) ->
     cast() y decisiones de negocio (umbral de lluvia, valores None).
     Tanto get_weather_full() como _format_weather() pasan por aquí.
     """
-    main = cast(dict[str, object], data.get("main", {}))
-    weather_list = cast(list[dict[str, object]], data.get("weather", []))
+    # or {} maneja tanto key ausente como valor null en el JSON.
+    # Si OWM devuelve "main": null, data.get("main", {}) retorna None
+    # y el .get() siguiente crashea con AttributeError.
+    main = cast(dict[str, object], data.get("main") or {})
+    weather_list = cast(list[dict[str, object]], data.get("weather") or [])
     weather = weather_list[0] if weather_list else {}
-    wind = cast(dict[str, object], data.get("wind", {}))
-    rain = cast(dict[str, object], data.get("rain", {}))
-    coord = cast(dict[str, object], data.get("coord", {}))
+    wind = cast(dict[str, object], data.get("wind") or {})
+    rain = cast(dict[str, object], data.get("rain") or {})
+    coord = cast(dict[str, object], data.get("coord") or {})
 
-    temp_val = cast(float, main.get("temp", 0.0))
-    feels_val = cast(float, main.get("feels_like", 0.0))
-    hum_val = cast(int, main.get("humidity", 0))
+    # Sin defaults: None cuando el campo está realmente ausente del JSON.
+    # cast() con | None es honesto con mypy: si la key no existe,
+    # .get() retorna None y el runtime ya lo maneja correctamente.
+    temp_val: float | None = cast("float | None", main.get("temp"))
+    feels_val: float | None = cast("float | None", main.get("feels_like"))
+    hum_val: int | None = cast("int | None", main.get("humidity"))
     desc_val = cast(str, weather.get("description", "sin datos"))
-    coord_lat = cast(float, coord.get("lat", lat))
-    coord_lon = cast(float, coord.get("lon", lon))
+    coord_lat_raw = cast("float | None", coord.get("lat"))
+    coord_lon_raw = cast("float | None", coord.get("lon"))
+    coord_lat = coord_lat_raw if coord_lat_raw is not None else lat
+    coord_lon = coord_lon_raw if coord_lon_raw is not None else lon
     loc_name = cast(str, data.get("name")) or "Desconocido"
 
     wind_val: float | None = None
@@ -158,16 +173,9 @@ def _extract_weather_data(data: Mapping[str, object], lat: float, lon: float) ->
         if rain_1h > 0:
             rain_val = rain_1h
 
-    # Valores para _format_weather: None cuando el campo está realmente
-    # ausente del JSON, para que el texto refleje "no disponible" en vez
-    # de un valor por defecto (ej: 0.0°C). Consistente con el viejo
-    # comportamiento de _format_weather cuando parseaba el dict directo.
-    temp_for_text: float | None = cast(float, main.get("temp"))
-    hum_for_text: int | None = cast(int, main.get("humidity"))
-
     texto = _format_weather(
-        temp=temp_for_text,
-        humidity=hum_for_text,
+        temp=temp_val,
+        humidity=hum_val,
         description=desc_val,
         wind_speed=wind_val,
         rain_mm=rain_val,

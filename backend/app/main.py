@@ -124,6 +124,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     logger.info("AgroVoz deteniendo — liberando conexiones")
     engine.dispose()
+    from app.services.weather_service import _close_http_client
+    await _close_http_client()
 
 
 app = FastAPI(

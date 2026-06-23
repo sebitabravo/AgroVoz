@@ -32,22 +32,14 @@ async def get_weather_endpoint(
     try:
         wd = await get_weather_full(lat, lon)
     except ValueError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        logger.warning("Configuración de clima incompleta: %s", exc)
+        raise HTTPException(
+            status_code=503, detail="Servicio de clima no disponible"
+        ) from exc
     except (ConnectionError, RuntimeError) as exc:
         logger.warning("Error al obtener clima para (%.4f, %.4f): %s", lat, lon, exc)
         raise HTTPException(
             status_code=502, detail="Servicio de clima no disponible"
         ) from exc
 
-    return WeatherResponse(
-        lat=wd.lat,
-        lon=wd.lon,
-        location=wd.location,
-        temperature_c=wd.temperature_c,
-        feels_like_c=wd.feels_like_c,
-        humidity=wd.humidity,
-        description=wd.description,
-        wind_speed_ms=wd.wind_speed_ms,
-        rain_1h_mm=wd.rain_1h_mm,
-        texto=wd.texto,
-    )
+    return WeatherResponse.model_validate(wd)
