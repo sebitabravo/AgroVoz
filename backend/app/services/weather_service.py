@@ -8,15 +8,22 @@ Plan gratuito: 60 calls/min. Cache en memoria con TTL 30 min.
 import asyncio
 import logging
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import cast
 
 import httpx
 
 from app.core.config import settings
+from app.schemas.openweathermap import OWMResponse
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "DEFAULT_LAT",
+    "DEFAULT_LON",
+    "WeatherData",
+    "get_weather",
+    "get_weather_full",
+]
 
 # TTL del cache en segundos (30 min). Plan gratuito permite 60 calls/min,
 # así que 30 min es conservador para un solo usuario.
@@ -133,43 +140,41 @@ async def _close_http_client() -> None:
     _http_client = None
 
 
-def _extract_weather_data(data: Mapping[str, object], lat: float, lon: float) -> WeatherData:
-    """Extrae datos tipados de la respuesta JSON de OpenWeatherMap.
+def _extract_weather_data(data: OWMResponse, lat: float, lon: float) -> WeatherData:
+    """Extrae datos tipados de un OWMResponse ya validado por Pydantic.
 
-    Punto ÚNICO de extracción para todo el módulo. Aplica defaults,
-    cast() y decisiones de negocio (umbral de lluvia, valores None).
-    Tanto get_weather_full() como _format_weather() pasan por aquí.
+    Punto ÚNICO de extracción para todo el módulo. Acceso tipado directo
+    a atributos del modelo Pydantic — sin cast(), dict.get(), ni riesgo
+    de null-propagación silenciosa.
+
+    La validación Pydantic en _fetch_weather_data garantiza que:
+    - main, weather, wind, rain, coord son del tipo correcto o None.
+    - Valores null dentro de dicts (ej: rain["1h"] = null) son rechazados
+      por Pydantic, no propagados como None al downstream.
     """
-    # or {} maneja tanto key ausente como valor null en el JSON.
-    # Si OWM devuelve "main": null, data.get("main", {}) retorna None
-    # y el .get() siguiente crashea con AttributeError.
-    main = cast(dict[str, object], data.get("main") or {})
-    weather_list = cast(list[dict[str, object]], data.get("weather") or [])
-    weather = weather_list[0] if weather_list else {}
-    wind = cast(dict[str, object], data.get("wind") or {})
-    rain = cast(dict[str, object], data.get("rain") or {})
-    coord = cast(dict[str, object], data.get("coord") or {})
+    main = data.main
+    weather_list = data.weather
+    weather = weather_list[0] if weather_list else None
 
-    # Sin defaults: None cuando el campo está realmente ausente del JSON.
-    # cast() con | None es honesto con mypy: si la key no existe,
-    # .get() retorna None y el runtime ya lo maneja correctamente.
-    temp_val: float | None = cast("float | None", main.get("temp"))
-    feels_val: float | None = cast("float | None", main.get("feels_like"))
-    hum_val: int | None = cast("int | None", main.get("humidity"))
-    desc_val = cast(str, weather.get("description", "sin datos"))
-    coord_lat_raw = cast("float | None", coord.get("lat"))
-    coord_lon_raw = cast("float | None", coord.get("lon"))
-    coord_lat = coord_lat_raw if coord_lat_raw is not None else lat
-    coord_lon = coord_lon_raw if coord_lon_raw is not None else lon
-    loc_name = cast(str, data.get("name")) or "Desconocido"
+    temp_val = main.temp if main else None
+    feels_val = main.feels_like if main else None
+    hum_val = main.humidity if main else None
+    desc_val = weather.description if weather and weather.description else "sin datos"
+
+    coord_lat = data.coord.lat if data.coord and data.coord.lat is not None else lat
+    coord_lon = data.coord.lon if data.coord and data.coord.lon is not None else lon
+
+    loc_name = data.name or "Desconocido"
 
     wind_val: float | None = None
-    if "speed" in wind:
-        wind_val = cast(float, wind["speed"])
+    if data.wind and data.wind.speed is not None:
+        wind_val = data.wind.speed
 
     rain_val: float | None = None
-    if rain:
-        rain_1h = cast(float, rain.get("1h", rain.get("3h", 0.0)))
+    if data.rain:
+        # dict[str, float] validado por Pydantic: valores siempre float, nunca None.
+        # .get("1h", .get("3h", 0.0)) solo usa el default si la key no existe.
+        rain_1h = data.rain.get("1h", data.rain.get("3h", 0.0))
         if rain_1h > 0:
             rain_val = rain_1h
 
@@ -229,26 +234,31 @@ async def get_weather_full(
     return wd
 
 
-async def _fetch_weather_data(lat: float, lon: float) -> dict[str, object]:
-    """Obtiene datos crudos de OpenWeatherMap Current Weather API.
+async def _fetch_weather_data(lat: float, lon: float) -> OWMResponse:
+    """Obtiene datos de OpenWeatherMap Current Weather API y los valida.
+
+    La respuesta JSON se valida contra OWMResponse (Pydantic v2). Si OWM
+    devuelve campos malformados (ej: valores null donde se espera float),
+    Pydantic lanza ValidationError → se captura como RuntimeError.
 
     Args:
         lat: Latitud.
         lon: Longitud.
 
     Returns:
-        Diccionario con la respuesta JSON de la API.
+        OWMResponse validado con acceso tipado a todos los campos.
 
     Raises:
         ValueError: API key no configurada.
         ConnectionError: Error de red (DNS, timeout, conexión rechazada).
-        RuntimeError: Error de API (key inválida, rate limit, etc.).
+        RuntimeError: Error de API (key inválida, rate limit, respuesta
+            malformada, etc.).
     """
     api_key = (settings.openweathermap_api_key or "").strip()
     if not api_key:
         raise ValueError("OPENWEATHERMAP_API_KEY no está configurada")
 
-    params: Mapping[str, str | float] = {
+    params: dict[str, str | float] = {
         "lat": lat,
         "lon": lon,
         "appid": api_key,
@@ -260,7 +270,7 @@ async def _fetch_weather_data(lat: float, lon: float) -> dict[str, object]:
         client = await _get_http_client()
         response = await client.get(_OWM_API_URL, params=params)
         response.raise_for_status()
-        data: dict[str, object] = response.json()
+        data = OWMResponse.model_validate(response.json())
         return data
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 401:
@@ -277,8 +287,9 @@ async def _fetch_weather_data(lat: float, lon: float) -> dict[str, object]:
             f"Error de red al consultar OpenWeatherMap: {exc}"
         ) from exc
     except ValueError as exc:
+        # Captura json.JSONDecodeError y pydantic.ValidationError (ambos ValueError).
         raise RuntimeError(
-            f"Respuesta no-JSON de OpenWeatherMap: {exc}"
+            f"Respuesta de OpenWeatherMap malformada: {exc}"
         ) from exc
 
 

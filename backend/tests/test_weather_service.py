@@ -1,7 +1,9 @@
 """Tests para app.services.weather_service: consulta clima OpenWeatherMap.
 
 Cobertura: _format_weather (respuesta completa, parcial, lluvia, sin viento),
-get_weather con mock httpx (happy path, cache, errores), validación lat/lon,
+_extract_weather_data con OWMResponse (null main, rain 3h, coord fallback,
+weather vacío), get_weather con mock httpx (happy path, cache, errores),
+validación lat/lon, cache eviction, Pydantic validation rejection,
 y _clear_cache. Sin red real: MockTransport simula respuestas de OpenWeatherMap.
 """
 
@@ -10,10 +12,19 @@ from collections.abc import Callable
 import httpx
 import pytest
 
+from app.schemas.openweathermap import (
+    OWMCoord,
+    OWMMain,
+    OWMResponse,
+    OWMWeatherItem,
+    OWMWind,
+)
 from app.services.weather_service import (
     _clear_cache,
+    _extract_weather_data,
     _format_weather,
     get_weather,
+    get_weather_full,
 )
 
 # ── Fixtures de datos OpenWeatherMap ──────────────────────────
@@ -141,6 +152,184 @@ class TestFormatWeather:
         assert "55%" in texto
         assert "nublado" not in texto
         assert "soleado" not in texto
+
+
+# ── Tests: _extract_weather_data con OWMResponse ───────────────
+
+
+class TestExtractWeatherData:
+    """Extracción desde OWMResponse validado por Pydantic a WeatherData."""
+
+    def test_extraccion_respuesta_completa(self) -> None:
+        """OWMResponse con todos los campos produce WeatherData completo."""
+        owm = OWMResponse(
+            coord=OWMCoord(lat=-38.23, lon=-72.68),
+            weather=[OWMWeatherItem(id=804, main="Clouds", description="nublado")],
+            main=OWMMain(temp=18.5, feels_like=17.2, humidity=65),
+            wind=OWMWind(speed=3.6, deg=180),
+            rain={"1h": 0.5},
+            name="Traiguén",
+        )
+
+        wd = _extract_weather_data(owm, -38.23, -72.68)
+
+        assert wd.lat == -38.23
+        assert wd.lon == -72.68
+        assert wd.location == "Traiguén"
+        assert wd.temperature_c == 18.5
+        assert wd.feels_like_c == 17.2
+        assert wd.humidity == 65
+        assert wd.description == "nublado"
+        assert wd.wind_speed_ms == 3.6
+        assert wd.rain_1h_mm == 0.5
+        assert "18°C" in wd.texto
+        assert "nublado" in wd.texto
+
+    def test_main_none_produce_nulls(self) -> None:
+        """OWMResponse con main=None → temp, feels_like, humidity son None."""
+        owm = OWMResponse(
+            weather=[OWMWeatherItem(description="niebla")],
+            main=None,
+            name="Lonquimay",
+        )
+
+        wd = _extract_weather_data(owm, -38.5, -72.0)
+
+        assert wd.temperature_c is None
+        assert wd.feels_like_c is None
+        assert wd.humidity is None
+        assert "temperatura no disponible" in wd.texto
+
+    def test_weather_list_vacia_produce_sin_datos(self) -> None:
+        """weather=[] → description="sin datos"."""
+        owm = OWMResponse(
+            weather=[],
+            main=OWMMain(temp=15.0, humidity=50),
+            name="Vacío",
+        )
+
+        wd = _extract_weather_data(owm, -33.0, -70.0)
+
+        assert wd.description == "sin datos"
+
+    def test_weather_description_none_produce_sin_datos(self) -> None:
+        """weather[0].description=None → fallback a "sin datos"."""
+        owm = OWMResponse(
+            weather=[OWMWeatherItem(id=800, description=None)],
+            main=OWMMain(temp=15.0, humidity=50),
+            name="Nublado",
+        )
+
+        wd = _extract_weather_data(owm, -33.0, -70.0)
+
+        assert wd.description == "sin datos"
+
+    def test_coord_null_usa_fallback(self) -> None:
+        """coord=None → usa lat/lon del argumento (fallback)."""
+        owm = OWMResponse(
+            coord=None,
+            weather=[OWMWeatherItem(description="soleado")],
+            main=OWMMain(temp=20.0, humidity=40),
+            name="SinCoord",
+        )
+
+        wd = _extract_weather_data(owm, -40.0, -73.0)
+
+        assert wd.lat == -40.0
+        assert wd.lon == -73.0
+
+    def test_coord_lat_none_usa_fallback(self) -> None:
+        """coord.lat=None → usa lat del argumento."""
+        owm = OWMResponse(
+            coord=OWMCoord(lat=None, lon=-72.68),
+            weather=[OWMWeatherItem(description="nublado")],
+            main=OWMMain(temp=18.0, humidity=60),
+            name="SinLat",
+        )
+
+        wd = _extract_weather_data(owm, -38.23, -72.68)
+
+        assert wd.lat == -38.23
+        assert wd.lon == -72.68
+
+    def test_wind_none_produce_null(self) -> None:
+        """wind=None → wind_speed_ms=None."""
+        owm = OWMResponse(
+            weather=[OWMWeatherItem(description="calma")],
+            main=OWMMain(temp=22.0, humidity=30),
+            wind=None,
+            name="SinViento",
+        )
+
+        wd = _extract_weather_data(owm, -33.0, -70.0)
+
+        assert wd.wind_speed_ms is None
+
+    def test_wind_speed_none_produce_null(self) -> None:
+        """wind.speed=None → wind_speed_ms=None."""
+        owm = OWMResponse(
+            weather=[OWMWeatherItem(description="ventoso")],
+            main=OWMMain(temp=15.0, humidity=55),
+            wind=OWMWind(speed=None, deg=180),
+            name="VientoNull",
+        )
+
+        wd = _extract_weather_data(owm, -33.0, -70.0)
+
+        assert wd.wind_speed_ms is None
+
+    def test_rain_none_produce_null(self) -> None:
+        """rain=None → rain_1h_mm=None."""
+        owm = OWMResponse(
+            weather=[OWMWeatherItem(description="seco")],
+            main=OWMMain(temp=28.0, humidity=20),
+            rain=None,
+            name="SinLluvia",
+        )
+
+        wd = _extract_weather_data(owm, -33.0, -70.0)
+
+        assert wd.rain_1h_mm is None
+
+    def test_rain_con_3h_en_vez_de_1h(self) -> None:
+        """rain solo tiene key '3h' → extrae de '3h'."""
+        owm = OWMResponse(
+            weather=[OWMWeatherItem(description="lluvioso")],
+            main=OWMMain(temp=14.0, humidity=80),
+            rain={"3h": 2.5},
+            name="Lluvia3h",
+        )
+
+        wd = _extract_weather_data(owm, -38.0, -72.0)
+
+        assert wd.rain_1h_mm == 2.5
+        assert "2.5 mm" in wd.texto
+
+    def test_rain_cero_no_se_reporta(self) -> None:
+        """rain={'1h': 0.0} → rain_1h_mm=None (umbral > 0)."""
+        owm = OWMResponse(
+            weather=[OWMWeatherItem(description="nublado")],
+            main=OWMMain(temp=16.0, humidity=60),
+            rain={"1h": 0.0},
+            name="Traiguén",
+        )
+
+        wd = _extract_weather_data(owm, -38.23, -72.68)
+
+        assert wd.rain_1h_mm is None
+        assert "mm" not in wd.texto  # sin mención de lluvia
+
+    def test_name_none_produce_desconocido(self) -> None:
+        """name=None → location='Desconocido'."""
+        owm = OWMResponse(
+            weather=[OWMWeatherItem(description="soleado")],
+            main=OWMMain(temp=20.0, humidity=50),
+            name=None,
+        )
+
+        wd = _extract_weather_data(owm, -35.0, -71.0)
+
+        assert wd.location == "Desconocido"
 
 
 # ── Tests: get_weather ────────────────────────────────────────
@@ -366,6 +555,46 @@ class TestGetWeatherErrores:
         texto = await get_weather(lat=-33.0, lon=181.0)
         assert "longitud" in texto.lower()
 
+    async def test_respuesta_null_en_rain_es_rechazada(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OWM responde rain={"1h": null} → Pydantic ValidationError → RuntimeError."""
+        monkeypatch.setattr(
+            "app.services.weather_service.settings.openweathermap_api_key", "test-key"
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"rain": {"1h": None}})
+
+        mock_client = _install_mock_client(monkeypatch, handler)
+        try:
+            texto = await get_weather()
+            assert "no está disponible" in texto
+        finally:
+            await mock_client.aclose()
+
+    async def test_respuesta_rain_malformado_es_rechazado(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OWM responde rain={"1h": "mucho"} → str no es float → Pydantic ValidationError."""
+        monkeypatch.setattr(
+            "app.services.weather_service.settings.openweathermap_api_key", "test-key"
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={
+                "main": {"temp": 18.0, "humidity": 50},
+                "weather": [{"description": "nublado"}],
+                "rain": {"1h": "mucho"},  # string donde se espera float
+            })
+
+        mock_client = _install_mock_client(monkeypatch, handler)
+        try:
+            texto = await get_weather()
+            assert "no está disponible" in texto
+        finally:
+            await mock_client.aclose()
+
 
 class TestClearCache:
     """_clear_cache para aislamiento de tests."""
@@ -394,5 +623,49 @@ class TestClearCache:
             _clear_cache()
             await get_weather()
             assert call_count == 2  # cache limpio → nueva llamada
+        finally:
+            await mock_client.aclose()
+
+    async def test_cache_eviction_excede_max_size(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Cache con > _CACHE_MAX_SIZE entradas evicta la más antigua."""
+        monkeypatch.setattr(
+            "app.services.weather_service.settings.openweathermap_api_key", "test-key"
+        )
+        # Forzar _CACHE_MAX_SIZE a 3 para el test.
+        monkeypatch.setattr("app.services.weather_service._CACHE_MAX_SIZE", 3)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            lat = float(request.url.params["lat"])
+            lon = float(request.url.params["lon"])
+            return httpx.Response(200, json={
+                "coord": {"lon": lon, "lat": lat},
+                "weather": [{"description": "nublado"}],
+                "main": {"temp": 18.0, "humidity": 60},
+                "name": f"Lugar {lat}",
+            })
+
+        mock_client = _install_mock_client(monkeypatch, handler)
+        try:
+            import app.services.weather_service as ws
+
+            # Insertar 4 entradas con coordenadas distintas.
+            # Cada _cache_key usa 6 decimales de precisión.
+            await get_weather_full(-38.23, -72.68)  # Traiguén (1ª entrada → será evictada)
+            await get_weather_full(-33.45, -70.65)  # Santiago (2ª)
+            await get_weather_full(-36.82, -73.05)  # Concepción (3ª)
+            await get_weather_full(-53.15, -70.90)  # Punta Arenas (4ª → evicta 1ª)
+
+            assert len(ws._cache) == 3
+
+            # La clave de Traiguén fue evictada por ser la más antigua.
+            traiguen_key = ws._cache_key(-38.23, -72.68)
+            assert traiguen_key not in ws._cache
+
+            # Las otras 3 permanecen.
+            assert ws._cache_key(-33.45, -70.65) in ws._cache
+            assert ws._cache_key(-36.82, -73.05) in ws._cache
+            assert ws._cache_key(-53.15, -70.90) in ws._cache
         finally:
             await mock_client.aclose()
