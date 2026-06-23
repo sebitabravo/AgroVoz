@@ -66,8 +66,8 @@ class Settings(BaseSettings):
         "precio_mayorista_fruta-hortaliza_2026.csv"
     )
     # Productos a sincronizar, separados por coma (lowercase).
-    # MVP: solo papa. Expandible sin tocar codigo.
-    odepa_productos: str = "papa"
+    # "*" = sincronizar TODOS los productos del CSV (60+ productos ODEPA).
+    odepa_productos: str = "*"
 
     # ── Modelos IA ───────────────────────
     whisper_model: str = "small"
@@ -95,9 +95,16 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
     @property
-    def odepa_productos_list(self) -> list[str]:
-        """Lista de productos ODEPA normalizada (lowercase, sin espacios)."""
-        return [p.strip().lower() for p in self.odepa_productos.split(",") if p.strip()]
+    def odepa_productos_list(self) -> list[str] | None:
+        """Lista de productos ODEPA normalizada (lowercase, sin espacios).
+
+        Retorna None cuando el valor es '*' (sincronizar todos los productos).
+        Retorna lista vacía cuando el valor es '' o ',' (no sincronizar nada).
+        """
+        raw = self.odepa_productos.strip()
+        if raw == "*":
+            return None
+        return [p.strip().lower() for p in raw.split(",") if p.strip()]
 
     def validate_webhook_secret_not_default(self) -> None:
         """Advierte o bloquea si openwa_webhook_secret es el default público o está vacío.

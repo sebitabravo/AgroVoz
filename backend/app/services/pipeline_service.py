@@ -1,7 +1,7 @@
 """Orquestador del pipeline de voz: audio → Whisper → LLM → TTS.
 
 Issue #18 — Checkpoint C. AgroVozPipeline coordina las etapas del pipeline
-con timeout interno de 60s y benchmark de latencia por etapa.
+con timeout interno de 120s y benchmark de latencia por etapa.
 
 El pipeline recibe el path al archivo .wav (ya convertido por audio_service)
 y ejecuta: transcripcion Whisper → generacion LLM con Tool Calling →
@@ -51,7 +51,7 @@ def _get_tts_service() -> TTSService:
 class AgroVozPipeline:
     """Orquestador del pipeline de voz completo.
 
-    Coordina las etapas: Whisper → LLM → TTS con timeout de 60s
+    Coordina las etapas: Whisper → LLM → TTS con timeout de 120s
     y benchmark de latencia por etapa para monitoreo.
 
     Uso:
@@ -70,7 +70,7 @@ class AgroVozPipeline:
 
         Args:
             pipeline_timeout: Timeout total del pipeline en segundos.
-                              Default 60s (red de seguridad, no target).
+                              Default 120s (red de seguridad, no target).
         """
         self._timeout = pipeline_timeout
 
@@ -78,8 +78,9 @@ class AgroVozPipeline:
     def _detect_intent(query_text: str, llm_response: str) -> str:
         """Detecta la intencion de la consulta para metrica.
 
-        Usa keyword matching simple. En post-MVP, el LLM podria devolver
-        el intent directamente como parte de la respuesta estructurada.
+        Derivada principalmente de la respuesta del LLM (que contiene
+        datos reales de tools ejecutadas), no de keywords en la consulta.
+        Esto evita falsos positivos como "mercado" o "vale" en saludos.
 
         Args:
             query_text: Texto original transcrito.
@@ -88,21 +89,45 @@ class AgroVozPipeline:
         Returns:
             "precio", "clima", o "desconocido".
         """
-        text = (query_text + " " + llm_response).lower()
-        clima_kw = [
-            "clima", "tiempo", "temperatura", "lluvia", "lloviendo",
-            "frio", "calor", "humedad", "viento", "pronóstico", "pronostico",
+        # Priorizar respuesta del LLM: si ejecuto tools, la respuesta
+        # contiene datos concretos (precios, grados, etc).
+        text = (llm_response + " " + query_text).lower()
+
+        # Indicadores fuertes de precio (datos reales, no keywords ambiguos).
+        precio_patterns = [
+            "pesos el kilo", "pesos kilo", "precio del", "precio de la",
+            "precio de el", "precios en", "está a", "cuesta $",
+            "el kilo de", "la malla de", "el saco de", "la caja de",
+            "pesos la", "pesos el",
         ]
+        if any(p in text for p in precio_patterns):
+            return "precio"
+
+        # Indicadores de precio mas debiles (solo si no matcheo clima).
         precio_kw = [
-            "precio", "kilo", "saco", "malla", "caja", "unidad",
-            "pesos", "luca", "feria", "mayorista", "lo valledor",
-            "la vega", "mercado", "vale", "cuesta",
+            "precio", "kilo", "saco", "malla", "caja",
+            "pesos", "luca", "feria", "mayorista",
+            "lo valledor", "la vega",
         ]
 
-        if any(kw in text for kw in precio_kw):
-            return "precio"
+        # Indicadores de clima (datos reales).
+        clima_patterns = [
+            "grados", "nublado", "despejado", "lluvia", "viento",
+            "humedad", "temperatura", "pronóstico", "pronostico",
+            "clima en", "tiempo en",
+        ]
+        if any(p in text for p in clima_patterns):
+            return "clima"
+
+        # Fallback: keywords en la consulta original (menos preciso).
+        clima_kw = [
+            "clima", "tiempo", "lloviendo", "frio", "calor",
+        ]
         if any(kw in text for kw in clima_kw):
             return "clima"
+        if any(kw in text for kw in precio_kw):
+            return "precio"
+
         return "desconocido"
 
     @staticmethod
@@ -125,7 +150,7 @@ class AgroVozPipeline:
 
         try:
             response_text = await answer(transcribed_text.strip())
-        except Exception:
+        except (TimeoutError, RuntimeError, OSError, ValueError):
             logger.exception("Error en generacion LLM — usando fallback")
             response_text = (
                 "Tuve un problema al procesar tu consulta. "
@@ -182,7 +207,7 @@ class AgroVozPipeline:
                     intent,
                     latency_ms,
                 )
-            except Exception:
+            except SQLAlchemyError:
                 session.rollback()
                 raise
             finally:
@@ -204,7 +229,7 @@ class AgroVozPipeline:
     ) -> AudioResponse:
         """Ejecuta el pipeline completo: Whisper → LLM → TTS.
 
-        El pipeline tiene timeout de 60s. Si se excede, retorna
+        El pipeline tiene timeout de 120s. Si se excede, retorna
         AudioResponse con texto de error predefinido.
 
         Args:
@@ -336,7 +361,7 @@ class AgroVozPipeline:
                     llm_ms_ref[0],
                     request_id,
                 )
-            except Exception:
+            except (TimeoutError, RuntimeError, OSError, ValueError):
                 logger.exception(
                     "Error generando respuesta LLM — message_id=%s request_id=%s",
                     message_id,

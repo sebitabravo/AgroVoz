@@ -24,6 +24,8 @@ import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.core.config import settings
 
 if TYPE_CHECKING:
@@ -122,7 +124,7 @@ _TOOLS_LINES = "\n".join([
                             "description": "Nombre del mercado mayorista (ej: Lo Valledor, La Vega, Talca)",
                         },
                     },
-                    "required": ["producto", "mercado"],
+                    "required": ["producto"],
                 },
             },
         },
@@ -248,6 +250,20 @@ _model_loaded = False
 _model_error: str | None = None
 
 
+def preload_model() -> None:
+    """Pre-carga el modelo LLM en background para evitar cold start en el primer request.
+
+    Llamar desde el ciclo de vida de FastAPI (startup) para que el modelo
+    esté listo antes de que llegue la primera consulta. En VPS CX43 tarda
+    ~6s cargar el GGUF de 3GB en RAM.
+
+    No bloquea: dispara la carga en un thread daemon. Si falla, el error
+    queda en _model_error y answer() usara mock en desarrollo.
+    """
+    import threading
+    threading.Thread(target=_get_model, daemon=True, name="llm-preload").start()
+
+
 def _get_model() -> Llama | None:
     """Carga el modelo Qwen2.5-3B Q4 en modo lazy y thread-safe.
 
@@ -355,11 +371,14 @@ async def _execute_tool(name: str, arguments: dict[str, object]) -> str:
             from app.core.database import SessionLocal
 
             # Completar defaults para argumentos vacios que el LLM no especifico.
-            # Si el usuario no dijo mercado, usar Lo Valledor como default.
-            if not arguments.get("mercado") or not str(arguments.get("mercado", "")).strip():
-                arguments["mercado"] = "Lo Valledor"
+            # Si el producto esta vacio, no podemos consultar nada -> fallback.
             if not arguments.get("producto") or not str(arguments.get("producto", "")).strip():
-                arguments["producto"] = "papa"
+                return (
+                    "No entendi que producto queres consultar. "
+                    "¿Podrias repetir el nombre del producto?"
+                )
+            # Mercado es opcional: si no se especifica, get_price_for_llm
+            # consulta todos los mercados disponibles y devuelve el mas relevante.
 
             session = SessionLocal()
             try:
@@ -380,7 +399,7 @@ async def _execute_tool(name: str, arguments: dict[str, object]) -> str:
 
         logger.info("Tool %s ejecutada — args=%s", name, arguments)
         return str(result)
-    except (RuntimeError, ValueError, OSError) as exc:
+    except (RuntimeError, ValueError, OSError, SQLAlchemyError) as exc:
         logger.exception("Error ejecutando tool %s: %s", name, exc)
         return "Hubo un error al consultar ese dato. ¿Probamos con otro?"
 
@@ -529,6 +548,115 @@ def _strip_tool_tags(text: str) -> str:
     return cleaned
 
 
+# ── Fallback keyword detection (Fix #4) ──────────────────────────────
+# Cuando el LLM no genera <tool_call>, detectamos keywords en la consulta
+# para forzar la tool correcta. Esto cubre el ~30% de consultas donde el
+# modelo Qwen2.5-3B Q4 no obedece la instruccion de "SIEMPRE usa una tool".
+
+# Patrones que indican que el LLM respondio sin usar herramientas.
+_GENERIC_RESPONSE_PATTERNS = [
+    "no tengo", "no entiendo", "no conozco", "no sé", "no se",
+    "reformul", "podrías repetir", "no dispongo", "sin información",
+    "sin datos", "no cuento con", "no puedo responder",
+    "lo siento", "disculpa", "no estoy seguro",
+]
+
+# Productos agricolas chilenos mas comunes (ODEPA). Para fallback de
+# keyword detection cuando el LLM no llama get_price.
+_COMMON_PRODUCTS = [
+    "papa", "tomate", "cebolla", "lechuga", "zanahoria", "ajo",
+    "palta", "naranja", "limón", "limon", "manzana", "pera",
+    "kiwi", "uva", "durazno", "ciruela", "frutilla", "sandía",
+    "sandia", "melón", "melon", "repollo", "acelga", "espinaca",
+    "brocoli", "brócoli", "coliflor", "zapallo", "camote",
+    "betarraga", "rabanito", "rúcula", "rucula", "cilantro",
+    "perejil", "apio", "puerro", "choclo", "poroto", "arveja",
+    "haba", "pepino", "pimentón", "pimenton", "ají", "aji",
+    "maíz", "maiz", "trigo", "arroz",
+]
+
+
+def _is_generic_response(text: str) -> bool:
+    """Detecta si la respuesta del LLM es generica (no uso herramientas).
+
+    Si el LLM responde con "no tengo informacion", "no entiendo",
+    "reformula", etc., es señal de que no intento usar tools.
+    """
+    lower = text.lower()
+    return any(p in lower for p in _GENERIC_RESPONSE_PATTERNS)
+
+
+def _extract_product_from_query(query: str) -> str | None:
+    """Extrae el nombre de un producto agricola de la consulta por keyword.
+
+    Busca nombres de productos en el texto. Si el agricultor dice
+    "a cuanto esta el kilo de tomate", detecta "tomate".
+    """
+    query_lower = query.lower()
+    # Ordenar por largo descendente para que "pimentón" matchee antes que "pimenton"
+    # y "sandía" antes que "sandia".
+    for product in sorted(_COMMON_PRODUCTS, key=len, reverse=True):
+        if product in query_lower:
+            return product
+    return None
+
+
+async def _force_keyword_tool(query_text: str) -> str | None:
+    """Forza tool call por keyword detection cuando el LLM no llama tools.
+
+    Detecta si la consulta menciona un producto agricola o el clima,
+    y ejecuta la tool correspondiente directamente sin pasar por el LLM.
+
+    Returns:
+        Resultado textual de la tool, o None si no se detecta keyword.
+    """
+    from app.core.database import SessionLocal
+    from app.services.odepa_service import get_price_for_llm
+
+    q = query_text.strip().lower()
+
+    # 1. Detectar productos agricolas en la consulta.
+    product = _extract_product_from_query(q)
+    if product:
+        session = SessionLocal()
+        try:
+            result = get_price_for_llm(session, producto=product)
+            # Solo retornar si encontro datos reales (no "No tengo datos...").
+            if not result.startswith("No tengo datos"):
+                logger.info(
+                    "Fallback tool forzado: get_price(producto=%s) — query=%.100s",
+                    product, query_text,
+                )
+                return result
+        finally:
+            session.close()
+
+    # 2. Detectar keywords de clima.
+    clima_kw = [
+        "clima", "tiempo", "temperatura", "lluvia", "lloviendo",
+        "frio", "calor", "humedad", "viento", "pronóstico", "pronostico",
+        "nublado", "despejado",
+    ]
+    if any(kw in q for kw in clima_kw):
+        from app.services.weather_service import get_weather
+        try:
+            # Traiguen como default si no hay coordenadas en la consulta.
+            result = await get_weather(lat=-38.23, lon=-72.68)
+            if result:
+                logger.info(
+                    "Fallback tool forzado: get_weather(lat=-38.23, lon=-72.68) — query=%.100s",
+                    query_text,
+                )
+                return str(result)
+        except (RuntimeError, ValueError, OSError) as exc:
+            logger.warning("Error en fallback clima: %s", exc)
+
+    return None
+
+
+# ── Construccion de mensajes ─────────────────────────────────────────
+
+
 def _build_messages(user_query: str, history: list[dict[str, object]]) -> list[dict[str, object]]:
     """Construye la lista de mensajes para el LLM.
 
@@ -605,10 +733,30 @@ async def answer(
             # Intentar extraer tool calls del texto (formato nativo Qwen2.5).
             tool_calls = _parse_text_tool_calls(content)
             if not tool_calls:
-                # Sin tool calls -> respuesta final del LLM.
-                # Limpiar posibles tags XML residuales del contenido.
+                # Sin tool calls -> posible respuesta final del LLM.
                 cleaned = _strip_tool_tags(content)
                 if cleaned:
+                    # Fix #4: si el LLM respondio con texto generico
+                    # ("no tengo datos", "reformula") sin llamar tools,
+                    # forzar tool call por keyword detection.
+                    if _iteration == 0 and _is_generic_response(cleaned):
+                        forced = await _force_keyword_tool(query_text)
+                        if forced:
+                            # Inyectar el tool call + respuesta para que
+                            # el LLM lo formatee en la siguiente iteracion.
+                            messages.append({
+                                "role": "assistant",
+                                "content": content,
+                            })
+                            messages.append({
+                                "role": "user",
+                                "content": (
+                                    "<tool_response>\n"
+                                    f"{forced}\n"
+                                    "</tool_response>"
+                                ),
+                            })
+                            continue
                     return cleaned
                 continue
 

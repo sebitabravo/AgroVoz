@@ -284,8 +284,14 @@ class TestGetPriceForLlm:
         assert "No entendí" in texto
 
     def test_devuelve_fallback_si_mercado_vacio(self, db: Session) -> None:
+        """Cuando mercado esta vacio, busca en todos los mercados.
+
+        Si no hay datos para el producto en ningun mercado, informa.
+        """
         texto = get_price_for_llm(db, "papa", "")
-        assert "No entendí" in texto
+        # Sin datos insertados, query_latest_by_product no encuentra nada.
+        assert "No tengo datos de precio" in texto
+        assert "papa" in texto
 
 
 # ── list_products ──────────────────────────────────────────────────

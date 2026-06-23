@@ -460,14 +460,14 @@ class TestSyncOdepa:
             resultado = await sync_odepa(session=db)
 
         assert isinstance(resultado, SyncResult)
-        # sync_odepa filtra por settings.odepa_productos_list (default ['papa']).
-        # El CSV_FIJO tiene 4 papas + 1 tomate; el tomate queda fuera del filtro.
-        assert resultado.insertados == 4
+        # odepa_productos_list = None (sin filtro, '*' en config).
+        # El CSV_FIJO tiene 4 papas + 1 tomate; ambos se sincronizan.
+        assert resultado.insertados == 5
         assert resultado.actualizados == 0
         papas = db.query(OdepaPrice).filter_by(producto="papa").count()
         assert papas == 4
         tomates = db.query(OdepaPrice).filter_by(producto="tomate").count()
-        assert tomates == 0
+        assert tomates == 1
 
     async def test_sync_error_de_red_propaga(self, db: Session) -> None:
         with patch(
@@ -492,5 +492,6 @@ class TestSyncOdepa:
             resultado = await sync_odepa(session=None)
 
         assert isinstance(resultado, SyncResult)
-        assert resultado.insertados == 4
+        # odepa_productos_list = None ('*'), sin filtro: 5 registros.
+        assert resultado.insertados == 5
         mock_session.close.assert_called_once()
