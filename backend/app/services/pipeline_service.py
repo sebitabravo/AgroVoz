@@ -1,7 +1,7 @@
 """Orquestador del pipeline de voz: audio → Whisper → LLM → TTS.
 
 Issue #18 — Checkpoint C. AgroVozPipeline coordina las etapas del pipeline
-con timeout interno de 20s y benchmark de latencia por etapa.
+con timeout interno de 60s y benchmark de latencia por etapa.
 
 El pipeline recibe el path al archivo .wav (ya convertido por audio_service)
 y ejecuta: transcripcion Whisper → generacion LLM con Tool Calling →
@@ -14,10 +14,6 @@ import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    pass
 
 from app.schemas.pipeline import AudioResponse
 from app.services.tts_service import PiperModelNotFoundError, TTSService
@@ -27,9 +23,9 @@ logger = logging.getLogger(__name__)
 
 # Timeout interno del pipeline. Si el pipeline completo excede este limite,
 # se aborta y se retorna AudioResponse con texto de error. Distinto del
-# target de producto <15s: los 20s son la red de seguridad.
+# target de producto <15s: los 60s son la red de seguridad.
 # En desarrollo (Docker en ARM64), se necesita mas tiempo porque los modelos
-# cargan en CPU emulada. En produccion (x86_64 bare metal), 20s es suficiente.
+# cargan en CPU emulada. En produccion (x86_64 bare metal), 60s es suficiente.
 _PIPELINE_TIMEOUT = 60.0
 
 # Duracion maxima de audio para transcripcion Whisper (ms).
@@ -52,7 +48,7 @@ def _get_tts_service() -> TTSService:
 class AgroVozPipeline:
     """Orquestador del pipeline de voz completo.
 
-    Coordina las etapas: Whisper → LLM → TTS con timeout de 20s
+    Coordina las etapas: Whisper → LLM → TTS con timeout de 60s
     y benchmark de latencia por etapa para monitoreo.
 
     Uso:
@@ -71,7 +67,7 @@ class AgroVozPipeline:
 
         Args:
             pipeline_timeout: Timeout total del pipeline en segundos.
-                              Default 20s (red de seguridad, no target).
+                              Default 60s (red de seguridad, no target).
         """
         self._timeout = pipeline_timeout
 
@@ -205,7 +201,7 @@ class AgroVozPipeline:
     ) -> AudioResponse:
         """Ejecuta el pipeline completo: Whisper → LLM → TTS.
 
-        El pipeline tiene timeout de 20s. Si se excede, retorna
+        El pipeline tiene timeout de 60s. Si se excede, retorna
         AudioResponse con texto de error predefinido.
 
         Args:
@@ -219,9 +215,9 @@ class AgroVozPipeline:
             AudioResponse con ruta del audio TTS, texto, latencia e intent.
         """
         pipeline_start = time.monotonic()
-        whisper_ms = 0
-        llm_ms = 0
-        tts_ms = 0
+        whisper_ms_ref = [0]
+        llm_ms_ref = [0]
+        tts_ms_ref = [0]
 
         try:
             # Ejecutar pipeline con timeout.
@@ -233,9 +229,9 @@ class AgroVozPipeline:
                     chat_id_hash=chat_id_hash,
                     request_id=request_id,
                     pipeline_start=pipeline_start,
-                    whisper_ms_ref=[whisper_ms],
-                    llm_ms_ref=[llm_ms],
-                    tts_ms_ref=[tts_ms],
+                    whisper_ms_ref=whisper_ms_ref,
+                    llm_ms_ref=llm_ms_ref,
+                    tts_ms_ref=tts_ms_ref,
                 ),
                 timeout=self._timeout,
             )
@@ -256,9 +252,9 @@ class AgroVozPipeline:
                 ),
                 latency_ms=total_ms,
                 intent="desconocido",
-                whisper_ms=whisper_ms,
-                llm_ms=llm_ms,
-                tts_ms=tts_ms,
+                whisper_ms=whisper_ms_ref[0],
+                llm_ms=llm_ms_ref[0],
+                tts_ms=tts_ms_ref[0],
             )
 
     async def _process_stages(
