@@ -152,7 +152,7 @@ class TestFormatPriceText:
     def test_precio_con_decimales(self, db: Session) -> None:
         registro = _insertar_precio(db, precio_kg=Decimal("1150.50"))
         texto = format_price_text(registro)
-        assert "$1.150,50" in texto or "$1.150.50" in texto
+        assert "$1.150,50" in texto
 
     def test_precio_entero_sin_decimales(self, db: Session) -> None:
         registro = _insertar_precio(db, precio_kg=Decimal("800"))

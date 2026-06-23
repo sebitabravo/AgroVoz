@@ -450,13 +450,14 @@ def format_price_text(record: OdepaPrice) -> str:
     Muestra decimales solo si el precio tiene fracción significativa.
     """
     precio = record.precio_kg
-    precio_str = (
-        f"${precio:,.0f}"
-        if precio == precio.to_integral_value()
-        else f"${precio:,.2f}"
-    )
-    # Convertir coma de miles (formato inglés) a punto (formato chileno)
-    precio_str = precio_str.replace(",", ".")
+    if precio == precio.to_integral_value():
+        parte_entera = f"{int(precio):,}".replace(",", ".")
+        precio_str = f"${parte_entera}"
+    else:
+        entero, dec = str(precio).split(".")
+        parte_entera = f"{int(entero):,}".replace(",", ".")
+        dec = dec.ljust(2, "0")[:2]
+        precio_str = f"${parte_entera},{dec}"
 
     fecha_str = record.fecha.strftime("%d/%m/%Y")
     return (

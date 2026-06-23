@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.schemas.prices import PriceListResponse, PriceResponse
 from app.services.odepa_service import (
-    get_price_for_llm,
+    format_price_text,
     list_mercados,
     list_products,
     query_latest_price,
@@ -71,7 +71,7 @@ def get_prices(
             precio_kg=float(record.precio_kg),
             unidad=record.unidad,
             fecha=record.fecha.isoformat(),
-            texto=get_price_for_llm(db, producto_norm, mercado_norm),
+            texto=format_price_text(record),
         )
 
     # Caso: todos los mercados para este producto
@@ -87,7 +87,7 @@ def get_prices(
                     precio_kg=float(record.precio_kg),
                     unidad=record.unidad,
                     fecha=record.fecha.isoformat(),
-                    texto=get_price_for_llm(db, producto_norm, m),
+                    texto=format_price_text(record),
                 )
             )
 
