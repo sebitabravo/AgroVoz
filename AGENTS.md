@@ -56,7 +56,7 @@ Proyecto estudiantil para Desafío Crea INACAP 2026. Etapa actual: IDEA con arqu
 - Pydantic v2, pydantic-settings, httpx 0.28+
 - Whisper open-source (modelo `small` o `tiny`)
 - LLM cuantizado ≤3B params, 4-bit (Qwen2.5-3B-Instruct Q4_K_M) vía llama-cpp-python
-- Piper TTS (voz español `es_ES-carlfm-x_low`)
+- Piper TTS (voz español `es_MX-claude-high`)
 - ffmpeg (conversión de audio .ogg ↔ .wav)
 - pytest + pytest-asyncio + pytest-cov
 - ruff (linter/formatter), mypy (strict mode)

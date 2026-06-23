@@ -38,7 +38,7 @@ class TestConstantes:
     def test_system_prompt_contiene_reglas_estrictas(self) -> None:
         """El system prompt debe contener las 6 reglas del issue #18."""
         assert "REGLAS ESTRICTAS" in SYSTEM_PROMPT
-        assert "SOLO entregas datos de precios" in SYSTEM_PROMPT
+        assert "Tienes DOS herramientas" in SYSTEM_PROMPT
         assert "NUNCA das recomendaciones" in SYSTEM_PROMPT
         assert "NUNCA inventas precios" in SYSTEM_PROMPT
         assert "español chileno" in SYSTEM_PROMPT

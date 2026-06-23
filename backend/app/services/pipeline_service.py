@@ -348,8 +348,10 @@ class AgroVozPipeline:
                     "¿Podrias intentar de nuevo?"
                 )
 
-            # Guardar consulta en DB para metricas (fire-and-forget).
-            self._save_consultation(
+            # Guardar consulta en DB para metricas (en thread aparte
+            # para no bloquear el event loop con session.commit() sincrono).
+            await asyncio.to_thread(
+                self._save_consultation,
                 phone_hash=chat_id_hash,
                 intent=intent,
                 query_text=transcribed_text,

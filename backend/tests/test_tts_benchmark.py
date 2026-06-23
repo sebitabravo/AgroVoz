@@ -26,7 +26,7 @@ from app.services.tts_service import TTSService
 
 logger = logging.getLogger(__name__)
 
-MODEL_PATH = Path("models/es_ES-carlfm-x_low.onnx")
+MODEL_PATH = Path("models/es_MX-claude-high.onnx")
 MODEL_AVAILABLE = MODEL_PATH.exists()
 
 skip_msg = (

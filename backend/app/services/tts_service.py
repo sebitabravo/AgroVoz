@@ -74,7 +74,7 @@ class TTSService:
 
     Attributes:
         model_path: Ruta al archivo .onnx del modelo Piper.
-        voice_name: Nombre de la voz configurada (ej: "es_ES-carlfm-x_low").
+        voice_name: Nombre de la voz configurada (ej: "es_MX-claude-high").
     """
 
     def __init__(self, model_path: str | None = None) -> None:
@@ -88,7 +88,7 @@ class TTSService:
                        Si es None, usa piper_model_path del settings.
         """
         self._model_path = model_path or settings.piper_model_path
-        self._voice_name = settings.piper_voice or "es_ES-carlfm-x_low"
+        self._voice_name = settings.piper_voice or "es_MX-claude-high"
         self._model: PiperVoice | None = None
         self._model_lock = threading.Lock()
 

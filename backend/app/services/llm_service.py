@@ -22,7 +22,7 @@ import logging
 import os
 import threading
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from app.core.config import settings
 
@@ -36,13 +36,24 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = (
     "Eres AgroVoz, un asistente de voz para pequeños agricultores chilenos.\n"
     "REGLAS ESTRICTAS:\n"
-    "1. SOLO entregas datos de precios (ODEPA) y clima (OpenWeatherMap).\n"
-    "2. NUNCA das recomendaciones agronómicas. Si preguntan \"¿debo regar?\",\n"
+    "1. Tienes DOS herramientas. USA LA CORRECTA:\n"
+    "   - get_price(producto, mercado): para consultar PRECIOS de productos agrícolas ODEPA.\n"
+    "   - get_weather(lat, lon): para consultar CLIMA (temperatura, lluvia, viento).\n"
+    "2. La consulta PUEDE ser de precio, clima, o AMBAS. Determina cual es segun:\n"
+    "   - PRECIO: si menciona precio, cuánto, cuesta, vale, kilo, saco, malla, pesos,\n"
+    "     luca, o cualquier producto agrícola (papa, tomate, cebolla, lechuga, etc.)\n"
+    "   - CLIMA: si menciona clima, tiempo, temperatura, lluvia, lloviendo, pronóstico,\n"
+    "     frío, calor, humedad, viento\n"
+    "   Ejemplos: \"a cuánto está la papa\" -> get_price\n"
+    "             \"cómo está el tiempo mañana\" -> get_weather\n"
+    "             \"a cuánto la papa y cómo viene el clima\" -> AMBAS tools\n"
+    "3. SIEMPRE intenta usar una herramienta antes de pedir reformulación.\n"
+    "   Solo pide reformulación si la consulta NO menciona precio, productos, ni clima.\n"
+    "4. NUNCA das recomendaciones agronómicas. Si preguntan \"¿debo regar?\",\n"
     "   responde con el pronóstico de lluvia, sin interpretar.\n"
-    "3. NUNCA inventas precios ni clima. Si no tienes el dato, lo dices.\n"
-    "4. Respondes en español chileno, con frases cortas y claras (máximo 3 oraciones).\n"
-    "5. Los precios se dan en pesos chilenos, con la unidad de medida.\n"
-    "6. Si no entiendes la pregunta, pides que la reformulen.\n"
+    "5. NUNCA inventas precios ni clima. Si no tienes el dato, lo dices.\n"
+    "6. Respondes en español chileno, con frases cortas y claras (máximo 3 oraciones).\n"
+    "7. Los precios se dan en pesos chilenos, con la unidad de medida.\n"
 )
 
 # Texto de fallback cuando el LLM intenta una tool fuera del whitelist.
@@ -76,9 +87,12 @@ TOOLS = [
         "function": {
             "name": "get_price",
             "description": (
-                "Consulta el precio mas reciente de un producto agricola "
-                "en un mercado mayorista de ODEPA. "
-                "Ejemplo: papa en Lo Valledor."
+                "USAR para PREGUNTAS DE PRECIO. "
+                "Cuando el agricultor pregunte por el valor de un producto agricola, "
+                "por cuanto cuesta, cuanto vale, a como esta, o mencione un producto "
+                "(papa, tomate, cebolla, lechuga, zanahoria, etc). "
+                "Ej: 'a cuanto esta la papa', 'cuanto cuesta el kilo de tomate', "
+                "'precio de la cebolla en Lo Valledor'."
             ),
             "parameters": {
                 "type": "object",
@@ -101,20 +115,22 @@ TOOLS = [
         "function": {
             "name": "get_weather",
             "description": (
-                "Consulta el clima actual (temperatura, humedad, lluvia, viento) "
-                "en una ubicacion especifica. Usa coordenadas de Traiguen "
-                "(-38.23, -72.68) si el agricultor no especifica otra ubicacion."
+                "USAR para PREGUNTAS DE CLIMA. "
+                "Cuando el agricultor pregunte por el clima, la temperatura, si va a "
+                "llover, el pronostico del tiempo, etc. "
+                "Usa coordenadas de Traiguen (-38.23, -72.68) si no especifica ubicacion. "
+                "Ej: 'como esta el clima', 'va a llover hoy', 'temperatura en Traiguen'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "lat": {
                         "type": "number",
-                        "description": "Latitud en grados decimales (-90 a 90)",
+                        "description": "Latitud en grados decimales (-90 a 90). Default: -38.23 para Traiguen.",
                     },
                     "lon": {
                         "type": "number",
-                        "description": "Longitud en grados decimales (-180 a 180)",
+                        "description": "Longitud en grados decimales (-180 a 180). Default: -72.68 para Traiguen.",
                     },
                 },
                 "required": ["lat", "lon"],
@@ -155,20 +171,23 @@ def _get_model() -> Llama | None:
         if _model_loaded:
             return _model
 
-        _model_loaded = True
-
         try:
             from llama_cpp import Llama
         except ImportError:
             _model_error = "llama-cpp-python no instalado"
+            _model_loaded = True  # Permanente: sin reinstalar no se arregla
             logger.warning("llama-cpp-python no instalado — LLM funcionando en modo mock")
             return None
 
         model_path = settings.llm_model_path
         if not model_path or not os.path.isfile(model_path):
             _model_error = f"Modelo LLM no encontrado en {model_path}"
-            logger.warning("Modelo LLM no encontrado en %s — LLM funcionando en modo mock", model_path)
-            return None
+            logger.warning(
+                "Modelo LLM no encontrado en %s — LLM funcionando en modo mock. "
+                "Se reintentara en el proximo request.",
+                model_path,
+            )
+            return None  # NO setea _model_loaded — permite retry cuando el archivo llegue
 
         try:
             logger.info("Cargando modelo LLM desde %s ...", model_path)
@@ -178,11 +197,14 @@ def _get_model() -> Llama | None:
                 n_threads=4,
                 verbose=False,
             )
+            _model_loaded = True  # Solo en exito
             logger.info("Modelo LLM cargado — n_ctx=%d", _N_CTX)
         except Exception as exc:
             _model_error = f"Error al cargar modelo: {exc}"
-            logger.exception("Error al cargar modelo LLM")
-            return None
+            logger.exception(
+                "Error al cargar modelo LLM — se reintentara en el proximo request"
+            )
+            return None  # NO setea _model_loaded — permite retry si fue OOM transitorio
 
     return _model
 
@@ -191,7 +213,7 @@ def _get_model() -> Llama | None:
 
 # Tipos para la tabla de herramientas.
 # Acepta tanto sync (get_price_for_llm) como async (get_weather).
-ToolHandler = Callable[..., Any]
+ToolHandler = Callable[..., object]
 
 
 def _get_tool_handlers() -> dict[str, ToolHandler]:
@@ -259,41 +281,57 @@ async def _execute_tool(name: str, arguments: dict[str, object]) -> str:
 # ── Tool Calling loop ───────────────────────────────────────────────
 
 
-def _parse_tool_calls(response: Any) -> list[dict[str, Any]]:
+def _parse_tool_calls(response: object) -> list[dict[str, object]]:
     """Extrae tool calls de una respuesta del LLM.
 
     Args:
-        response: Respuesta completa de create_chat_completion (Any porque
-                  llama-cpp retorna tipos complejos que varian por version).
+        response: Respuesta completa de create_chat_completion.
+                  Se acepta object porque llama-cpp retorna tipos
+                  internos que no son dict[str, object] puro.
 
     Returns:
         Lista de tool calls (cada una con name y arguments).
     """
-    choices: Any = response.get("choices", [])
-    if not choices:
+    if not isinstance(response, dict):
         return []
-    message: Any = choices[0].get("message", {})
-    tool_calls: Any = message.get("tool_calls", [])
+    choices = response.get("choices", [])
+    if not isinstance(choices, list) or not choices:
+        return []
+    first = choices[0]
+    if not isinstance(first, dict):
+        return []
+    message = first.get("message", {})
+    if not isinstance(message, dict):
+        return []
+    tool_calls = message.get("tool_calls", [])
     if not isinstance(tool_calls, list):
         return []
     return tool_calls
 
 
-def _parse_content(response: Any) -> str:
+def _parse_content(response: object) -> str:
     """Extrae el texto de contenido de una respuesta del LLM.
 
     Args:
-        response: Respuesta completa de create_chat_completion (Any porque
-                  llama-cpp retorna tipos complejos que varian por version).
+        response: Respuesta completa de create_chat_completion.
+                  Se acepta object porque llama-cpp retorna tipos
+                  internos que no son dict[str, object] puro.
 
     Returns:
         Texto de la respuesta, o cadena vacía si no hay.
     """
-    choices: Any = response.get("choices", [])
-    if not choices:
+    if not isinstance(response, dict):
         return ""
-    message: Any = choices[0].get("message", {})
-    content: Any = message.get("content", "")
+    choices = response.get("choices", [])
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first = choices[0]
+    if not isinstance(first, dict):
+        return ""
+    message = first.get("message", {})
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content", "")
     return str(content).strip() if content else ""
 
 
@@ -382,9 +420,11 @@ async def answer(
             messages.append(assistant_msg)
 
             for tc in tool_calls:
-                fn_info: dict[str, Any] = tc.get("function", {})
-                fn_name: str = fn_info.get("name", "")
-                fn_args_str: str = fn_info.get("arguments", "{}")
+                fn_info_raw = tc.get("function", {})
+                if not isinstance(fn_info_raw, dict):
+                    continue
+                fn_name = str(fn_info_raw.get("name", ""))
+                fn_args_str = str(fn_info_raw.get("arguments", "{}"))
 
                 # Whitelist enforcement: solo get_price y get_weather.
                 if fn_name not in WHITELIST_TOOLS:

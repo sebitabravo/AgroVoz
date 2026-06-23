@@ -92,7 +92,7 @@ SYSTEM_PROMPT = textwrap.dedent("""\
     - Backend: Python 3.12+, FastAPI 0.115+, Uvicorn 0.34+, SQLAlchemy 2.0+, SQLite 3.x
     - Validación: Pydantic v2, pydantic-settings
     - HTTP client: httpx 0.28+ (async)
-    - Voz: Whisper open-source (small/tiny), llama-cpp-python (LLM ≤3B params, 4-bit Q4_K_M), Piper TTS (es_ES-carlfm-x_low)
+    - Voz: Whisper open-source (small/tiny), llama-cpp-python (LLM ≤3B params, 4-bit Q4_K_M), Piper TTS (es_MX-claude-high)
     - Audio: ffmpeg (conversión .ogg ↔ .wav 16kHz mono)
     - Frontend Landing: Astro 5.x (SSG, zero JS), Tailwind CSS 4.x, system fonts
     - Admin Dashboard: Jinja2 + HTMX (server-side rendering), Chart.js desde CDN

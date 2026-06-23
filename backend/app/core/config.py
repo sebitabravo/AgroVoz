@@ -71,13 +71,13 @@ class Settings(BaseSettings):
     whisper_model: str = "small"
     whisper_model_path: str = ""  # Directorio para modelos Whisper (vacio = default ~/.cache/whisper/)
     llm_model_path: str = "models/qwen2.5-3b-q4_k_m.gguf"
-    piper_voice: str = "es_ES-carlfm-x_low"
+    piper_voice: str = "es_MX-claude-high"
 
     # ── Admin ────────────────────────────
     admin_api_key: str = ""
 
     # ── Modelos IA (paths) ───────────────
-    piper_model_path: str = "models/es_ES-carlfm-x_low.onnx"
+    piper_model_path: str = "models/es_MX-claude-high.onnx"
 
     # ── Seguridad ────────────────────────
     rate_limit_per_minute: int = 60
