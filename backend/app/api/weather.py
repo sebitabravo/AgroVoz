@@ -4,12 +4,11 @@ Issue #17: GET /api/v1/weather?lat=X&lon=Y
 """
 
 import logging
-from typing import cast
 
 from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas.weather import WeatherResponse
-from app.services.weather_service import DEFAULT_LAT, DEFAULT_LON, _cache_set, _fetch_weather_data, _format_weather
+from app.services.weather_service import DEFAULT_LAT, DEFAULT_LON, get_weather_full
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +26,11 @@ async def get_weather_endpoint(
     Usa cache en memoria con TTL de 30 minutos.
 
     Sin parámetros, usa las coordenadas default de Traiguén (-38.23, -72.68).
+    La lógica de extracción, defaults y decisiones de negocio está centralizada
+    en el servicio (get_weather_full).
     """
     try:
-        data = await _fetch_weather_data(lat, lon)
+        wd = await get_weather_full(lat, lon)
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except (ConnectionError, RuntimeError) as exc:
@@ -38,41 +39,15 @@ async def get_weather_endpoint(
             status_code=502, detail="Servicio de clima no disponible"
         ) from exc
 
-    main = cast(dict[str, object], data.get("main", {}))
-    weather_list = cast(list[dict[str, object]], data.get("weather", []))
-    weather = weather_list[0] if weather_list else {}
-    wind = cast(dict[str, object], data.get("wind", {}))
-    rain = cast(dict[str, object], data.get("rain", {}))
-    coord = cast(dict[str, object], data.get("coord", {}))
-
-    texto = _format_weather(data)
-
-    # Poblar cache para que get_weather() del LLM reutilice el dato.
-    _cache_set(lat, lon, texto)
-
-    # Extraer valores con cast: la respuesta de OWM tiene tipos predecibles.
-    temp_val = cast(float, main.get("temp", 0.0))
-    feels_val = cast(float, main.get("feels_like", 0.0))
-    hum_val = cast(int, main.get("humidity", 0))
-    desc_val = cast(str, weather.get("description", "sin datos"))
-    coord_lat = cast(float, coord.get("lat", lat))
-    coord_lon = cast(float, coord.get("lon", lon))
-    loc_name = cast(str, data.get("name")) or "Desconocido"
-    wind_val = cast(float, wind["speed"]) if "speed" in wind else None
-    rain_val: float | None = None
-    if rain:
-        rain_1h = cast(float, rain.get("1h", rain.get("3h", 0.0)))
-        rain_val = rain_1h if rain_1h > 0 else None
-
     return WeatherResponse(
-        lat=coord_lat,
-        lon=coord_lon,
-        location=loc_name,
-        temperature_c=temp_val,
-        feels_like_c=feels_val,
-        humidity=hum_val,
-        description=desc_val,
-        wind_speed_ms=wind_val,
-        rain_1h_mm=rain_val,
-        texto=texto,
+        lat=wd.lat,
+        lon=wd.lon,
+        location=wd.location,
+        temperature_c=wd.temperature_c,
+        feels_like_c=wd.feels_like_c,
+        humidity=wd.humidity,
+        description=wd.description,
+        wind_speed_ms=wd.wind_speed_ms,
+        rain_1h_mm=wd.rain_1h_mm,
+        texto=wd.texto,
     )

@@ -8,6 +8,7 @@ Plan gratuito: 60 calls/min. Cache en memoria con TTL 30 min.
 import logging
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import cast
 
 import httpx
@@ -30,8 +31,31 @@ _OWM_API_URL = "https://api.openweathermap.org/data/2.5/weather"
 DEFAULT_LAT = -38.23
 DEFAULT_LON = -72.68
 
-# Cache en memoria: {cache_key: (timestamp_monotonic, texto_formateado)}.
-_cache: dict[str, tuple[float, str]] = {}
+
+@dataclass
+class WeatherData:
+    """Datos estructurados de clima extraídos de OpenWeatherMap.
+
+    Punto único de extracción: aquí se aplican defaults, casts
+    y decisiones de negocio (ej: lluvia = 0 se reporta como None).
+    Tanto el endpoint REST como get_weather() del LLM consumen
+    esta estructura.
+    """
+
+    lat: float
+    lon: float
+    location: str
+    temperature_c: float
+    feels_like_c: float
+    humidity: int
+    description: str
+    wind_speed_ms: float | None
+    rain_1h_mm: float | None
+    texto: str
+
+
+# Cache en memoria: {cache_key: (timestamp_monotonic, WeatherData)}.
+_cache: dict[str, tuple[float, WeatherData]] = {}
 
 
 def _cache_key(lat: float, lon: float) -> str:
@@ -39,29 +63,110 @@ def _cache_key(lat: float, lon: float) -> str:
     return f"{lat:.4f}:{lon:.4f}"
 
 
-def _cache_get(lat: float, lon: float) -> str | None:
-    """Devuelve texto cacheado si la entrada existe y no expiró."""
+def _cache_get(lat: float, lon: float) -> WeatherData | None:
+    """Devuelve WeatherData cacheado si la entrada existe y no expiró."""
     key = _cache_key(lat, lon)
     entry = _cache.get(key)
     if entry is None:
         return None
-    ts, text = entry
+    ts, wd = entry
     if time.monotonic() - ts > _CACHE_TTL_SECONDS:
         del _cache[key]
         return None
     logger.debug("Cache hit para %s", key)
-    return text
+    return wd
 
 
-def _cache_set(lat: float, lon: float, text: str) -> None:
-    """Guarda texto en el cache con timestamp actual."""
+def _cache_set(lat: float, lon: float, wd: WeatherData) -> None:
+    """Guarda WeatherData en el cache con timestamp actual."""
     key = _cache_key(lat, lon)
-    _cache[key] = (time.monotonic(), text)
+    _cache[key] = (time.monotonic(), wd)
 
 
 def _clear_cache() -> None:
     """Limpia el cache completo. Útil para tests."""
     _cache.clear()
+
+
+def _extract_weather_data(data: Mapping[str, object], lat: float, lon: float) -> WeatherData:
+    """Extrae datos tipados de la respuesta JSON de OpenWeatherMap.
+
+    Punto ÚNICO de extracción para todo el módulo. Aplica defaults,
+    cast() y decisiones de negocio (umbral de lluvia, valores None).
+    Tanto get_weather_full() como _format_weather() pasan por aquí.
+    """
+    main = cast(dict[str, object], data.get("main", {}))
+    weather_list = cast(list[dict[str, object]], data.get("weather", []))
+    weather = weather_list[0] if weather_list else {}
+    wind = cast(dict[str, object], data.get("wind", {}))
+    rain = cast(dict[str, object], data.get("rain", {}))
+    coord = cast(dict[str, object], data.get("coord", {}))
+
+    temp_val = cast(float, main.get("temp", 0.0))
+    feels_val = cast(float, main.get("feels_like", 0.0))
+    hum_val = cast(int, main.get("humidity", 0))
+    desc_val = cast(str, weather.get("description", "sin datos"))
+    coord_lat = cast(float, coord.get("lat", lat))
+    coord_lon = cast(float, coord.get("lon", lon))
+    loc_name = cast(str, data.get("name")) or "Desconocido"
+
+    wind_val: float | None = None
+    if "speed" in wind:
+        wind_val = cast(float, wind["speed"])
+
+    rain_val: float | None = None
+    if rain:
+        rain_1h = cast(float, rain.get("1h", rain.get("3h", 0.0)))
+        if rain_1h > 0:
+            rain_val = rain_1h
+
+    texto = _format_weather(data)
+
+    return WeatherData(
+        lat=coord_lat,
+        lon=coord_lon,
+        location=loc_name,
+        temperature_c=temp_val,
+        feels_like_c=feels_val,
+        humidity=hum_val,
+        description=desc_val,
+        wind_speed_ms=wind_val,
+        rain_1h_mm=rain_val,
+        texto=texto,
+    )
+
+
+async def get_weather_full(
+    lat: float = DEFAULT_LAT,
+    lon: float = DEFAULT_LON,
+) -> WeatherData:
+    """Consulta clima y devuelve datos estructurados + texto natural.
+
+    Función pública para el endpoint REST. Usa cache en memoria
+    con TTL de 30 minutos. La extracción de campos, defaults y
+    decisiones de negocio están centralizadas en _extract_weather_data().
+
+    Args:
+        lat: Latitud. Default: Traiguén (-38.23).
+        lon: Longitud. Default: Traiguén (-72.68).
+
+    Returns:
+        WeatherData con todos los campos tipados.
+
+    Raises:
+        ValueError: API key no configurada.
+        ConnectionError: Error de red.
+        RuntimeError: Error de API (key inválida, rate limit, etc.).
+    """
+    cached = _cache_get(lat, lon)
+    if cached is not None:
+        return cached
+
+    data = await _fetch_weather_data(lat, lon)
+    wd = _extract_weather_data(data, lat, lon)
+    _cache_set(lat, lon, wd)
+    logger.info("Clima obtenido para (%.4f, %.4f): %s", lat, lon, wd.location)
+    return wd
 
 
 async def _fetch_weather_data(lat: float, lon: float) -> dict[str, object]:
@@ -174,9 +279,8 @@ async def get_weather(
 ) -> str:
     """Consulta el clima actual y devuelve texto natural en español chileno.
 
-    Tool function para el LLM vía Tool Calling. Usa cache en memoria
-    con TTL de 30 minutos para no exceder el rate limit del plan gratuito
-    (60 calls/min).
+    Tool function para el LLM vía Tool Calling. Delega en get_weather_full()
+    la consulta y extracción, y retorna solo el texto.
 
     Args:
         lat: Latitud. Default: Traiguén (-38.23).
@@ -189,17 +293,9 @@ async def get_weather(
         Si hay error, retorna un mensaje informativo en vez de lanzar
         excepción, para que el LLM pueda comunicarlo al agricultor.
     """
-    # Cache: si la respuesta ya está en memoria y no expiró, la reusamos.
-    cached = _cache_get(lat, lon)
-    if cached is not None:
-        return cached
-
     try:
-        data = await _fetch_weather_data(lat, lon)
-        text = _format_weather(data)
-        _cache_set(lat, lon, text)
-        logger.info("Clima obtenido para (%.4f, %.4f): %s", lat, lon, data.get("name", "?"))
-        return text
+        wd = await get_weather_full(lat, lon)
+        return wd.texto
     except ValueError as exc:
         logger.warning("Configuración de clima incompleta: %s", exc)
         return "El servicio de clima no está configurado todavía."

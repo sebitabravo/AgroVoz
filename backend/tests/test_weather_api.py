@@ -2,7 +2,7 @@
 
 Cobertura: 200 con coordenadas default, 200 con coordenadas personalizadas,
 502 por error de red/API, 503 por API key faltante.
-Mockea _fetch_weather_data del servicio (testeado aparte).
+Mockea get_weather_full del servicio (testeado aparte).
 """
 
 from unittest.mock import AsyncMock, patch
@@ -11,22 +11,48 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
+from app.services.weather_service import WeatherData
 
-# ── Fixture de datos JSON que devuelve _fetch_weather_data ─────
+# ── Fixture de datos estructurados que devuelve get_weather_full ─
 
-_OWM_DATA = {
-    "coord": {"lon": -72.68, "lat": -38.23},
-    "weather": [{"id": 804, "main": "Clouds", "description": "nublado"}],
-    "main": {
-        "temp": 18.5,
-        "feels_like": 17.2,
-        "humidity": 65,
-    },
-    "wind": {"speed": 3.6, "deg": 180},
-    "rain": {"1h": 0.5},
-    "clouds": {"all": 90},
-    "name": "Traiguén",
-}
+
+def _weather_data_para(
+    lat: float = -38.23,
+    lon: float = -72.68,
+    location: str = "Traiguén",
+    temperature_c: float = 18.5,
+    feels_like_c: float = 17.2,
+    humidity: int = 65,
+    description: str = "nublado",
+    wind_speed_ms: float | None = 3.6,
+    rain_1h_mm: float | None = 0.5,
+    texto: str | None = None,
+) -> WeatherData:
+    """Helper: construye un WeatherData con defaults de test."""
+    if texto is None:
+        partes = [
+            f"En {location} ahora: {temperature_c:.0f}°C, {description}, "
+            f"humedad {humidity}%",
+        ]
+        if wind_speed_ms is not None:
+            partes.append(f", viento {wind_speed_ms:.1f} m/s")
+        if rain_1h_mm is not None:
+            partes.append(f", lluvia {rain_1h_mm:.1f} mm")
+        texto = "".join(partes) + "."
+
+    return WeatherData(
+        lat=lat,
+        lon=lon,
+        location=location,
+        temperature_c=temperature_c,
+        feels_like_c=feels_like_c,
+        humidity=humidity,
+        description=description,
+        wind_speed_ms=wind_speed_ms,
+        rain_1h_mm=rain_1h_mm,
+        texto=texto,
+    )
+
 
 _TEXTO_ESPERADO = (
     "En Traiguén ahora: 18°C, nublado, humedad 65%, viento 3.6 m/s, lluvia 0.5 mm."
@@ -53,9 +79,11 @@ class TestWeatherEndpoint:
         self, weather_client: AsyncClient
     ) -> None:
         """GET sin parámetros usa Traiguén y devuelve WeatherResponse."""
+        wd = _weather_data_para()
+
         with patch(
-            "app.api.weather._fetch_weather_data",
-            AsyncMock(return_value=_OWM_DATA),
+            "app.api.weather.get_weather_full",
+            AsyncMock(return_value=wd),
         ):
             response = await weather_client.get("/api/v1/weather")
 
@@ -76,17 +104,24 @@ class TestWeatherEndpoint:
         self, weather_client: AsyncClient
     ) -> None:
         """GET con coordenadas de Santiago consulta esa ubicación."""
-        santiago_data = {
-            "coord": {"lon": -70.65, "lat": -33.45},
-            "weather": [{"description": "soleado"}],
-            "main": {"temp": 25.0, "feels_like": 24.0, "humidity": 30},
-            "name": "Santiago",
-        }
         texto_stgo = "En Santiago ahora: 25°C, soleado, humedad 30%."
 
+        wd = _weather_data_para(
+            lat=-33.45,
+            lon=-70.65,
+            location="Santiago",
+            temperature_c=25.0,
+            feels_like_c=24.0,
+            humidity=30,
+            description="soleado",
+            wind_speed_ms=None,
+            rain_1h_mm=None,
+            texto=texto_stgo,
+        )
+
         with patch(
-            "app.api.weather._fetch_weather_data",
-            AsyncMock(return_value=santiago_data),
+            "app.api.weather.get_weather_full",
+            AsyncMock(return_value=wd),
         ):
             response = await weather_client.get(
                 "/api/v1/weather?lat=-33.45&lon=-70.65"
@@ -104,7 +139,7 @@ class TestWeatherEndpoint:
     ) -> None:
         """ValueError → HTTP 503 (servicio no configurado)."""
         with patch(
-            "app.api.weather._fetch_weather_data",
+            "app.api.weather.get_weather_full",
             AsyncMock(side_effect=ValueError("API key no configurada")),
         ):
             response = await weather_client.get("/api/v1/weather")
@@ -117,7 +152,7 @@ class TestWeatherEndpoint:
     ) -> None:
         """ConnectionError → HTTP 502 (error de red)."""
         with patch(
-            "app.api.weather._fetch_weather_data",
+            "app.api.weather.get_weather_full",
             AsyncMock(side_effect=ConnectionError("Timeout")),
         ):
             response = await weather_client.get("/api/v1/weather")
@@ -130,7 +165,7 @@ class TestWeatherEndpoint:
     ) -> None:
         """RuntimeError (ej: API key inválida) → HTTP 502."""
         with patch(
-            "app.api.weather._fetch_weather_data",
+            "app.api.weather.get_weather_full",
             AsyncMock(side_effect=RuntimeError("API key inválida")),
         ):
             response = await weather_client.get("/api/v1/weather")
@@ -142,16 +177,18 @@ class TestWeatherEndpoint:
         self, weather_client: AsyncClient
     ) -> None:
         """Sin campos wind ni rain → wind_speed_ms y rain_1h_mm son None."""
-        data_sin_viento_lluvia = {
-            "coord": {"lon": -72.68, "lat": -38.23},
-            "weather": [{"description": "cielo claro"}],
-            "main": {"temp": 22.0, "feels_like": 21.0, "humidity": 40},
-            "name": "Traiguén",
-        }
+        wd = _weather_data_para(
+            temperature_c=22.0,
+            feels_like_c=21.0,
+            humidity=40,
+            description="cielo claro",
+            wind_speed_ms=None,
+            rain_1h_mm=None,
+        )
 
         with patch(
-            "app.api.weather._fetch_weather_data",
-            AsyncMock(return_value=data_sin_viento_lluvia),
+            "app.api.weather.get_weather_full",
+            AsyncMock(return_value=wd),
         ):
             response = await weather_client.get("/api/v1/weather")
 
