@@ -20,6 +20,7 @@ from starlette.responses import Response
 from app import __version__
 from app.api.health import router as health_router
 from app.api.prices import router as prices_router
+from app.api.weather import router as weather_router
 from app.api.webhooks import router as webhooks_router
 from app.core.config import settings
 from app.core.database import engine
@@ -123,6 +124,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     logger.info("AgroVoz deteniendo — liberando conexiones")
     engine.dispose()
+    from app.services.weather_service import _close_http_client
+    await _close_http_client()
 
 
 app = FastAPI(
@@ -158,6 +161,7 @@ app.add_middleware(RequestIDMiddleware)
 # Routers
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(prices_router, prefix="/api/v1")
+app.include_router(weather_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 
 

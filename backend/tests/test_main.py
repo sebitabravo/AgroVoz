@@ -328,3 +328,28 @@ def test_request_id_formatter_default_sin_contextvar() -> None:
     # No seteamos ContextVar — debe usar el default "-"
     result = formatter.format(record)
     assert result == "- — test message"
+
+
+# ── Lifespan shutdown: _close_http_client ──
+
+
+async def test_lifespan_shutdown_cierra_http_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """El shutdown del lifespan debe llamar a _close_http_client.
+
+    Verifica que el connection pool de httpx se libera correctamente
+    al detener la aplicación, sin dejar conexiones abiertas.
+    """
+    import app.services.weather_service as ws
+
+    # Crear un cliente HTTP para que _close_http_client tenga algo que cerrar.
+    client = await ws._get_http_client()
+    assert not client.is_closed
+
+    # Ejecutar el lifespan completo (startup + shutdown).
+    async with app_main.lifespan(app_main.app):
+        pass
+
+    # Después del shutdown, el cliente debe estar cerrado.
+    assert ws._http_client is None or ws._http_client.is_closed
