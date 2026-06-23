@@ -349,15 +349,26 @@ class AgroVozPipeline:
 
             # Guardar consulta en DB para metricas (en thread aparte
             # para no bloquear el event loop con session.commit() sincrono).
-            await asyncio.to_thread(
-                self._save_consultation,
-                phone_hash=chat_id_hash,
-                intent=intent,
-                query_text=transcribed_text,
-                response_text=response_text,
-                audio_duration_ms=audio_duration_ms,
-                start_time=pipeline_start,
-            )
+            # Envolver en try-except: _save_consultation es fire-and-forget
+            # y un error de programacion (TypeError, AttributeError) no debe
+            # romper el pipeline. El docstring ya advierte que puede fallar.
+            try:
+                await asyncio.to_thread(
+                    self._save_consultation,
+                    phone_hash=chat_id_hash,
+                    intent=intent,
+                    query_text=transcribed_text,
+                    response_text=response_text,
+                    audio_duration_ms=audio_duration_ms,
+                    start_time=pipeline_start,
+                )
+            except Exception:
+                logger.exception(
+                    "Error guardando consulta — continuando pipeline: "
+                    "phone_hash=%s intent=%s",
+                    chat_id_hash[:8],
+                    intent,
+                )
 
         # ── Etapa 3: Sintesis TTS ────────────────────────────────────
         response_ogg_path: str = ""

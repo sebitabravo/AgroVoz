@@ -380,7 +380,7 @@ async def _execute_tool(name: str, arguments: dict[str, object]) -> str:
 
         logger.info("Tool %s ejecutada — args=%s", name, arguments)
         return str(result)
-    except Exception as exc:
+    except (RuntimeError, ValueError, OSError) as exc:
         logger.exception("Error ejecutando tool %s: %s", name, exc)
         return "Hubo un error al consultar ese dato. ¿Probamos con otro?"
 
@@ -680,7 +680,7 @@ async def answer(
                 cleaned = _strip_tool_tags(content)
                 if cleaned:
                     return cleaned
-        except (TimeoutError, Exception) as exc:
+        except (TimeoutError, RuntimeError, OSError, ValueError) as exc:
             logger.warning("Error en respuesta final: %s", exc)
 
         return FALLBACK_TEXT
