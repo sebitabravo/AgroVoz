@@ -62,7 +62,7 @@ Proyecto estudiantil para Desafío Crea INACAP 2026. Etapa actual: IDEA con arqu
 - ruff (linter/formatter), mypy (strict mode)
 
 ### Frontend — Landing
-- Astro 5.x (SSG, zero JS por defecto)
+- Astro 7.x (SSG, zero JS por defecto)
 - Tailwind CSS 4.x
 - System fonts (system-ui, sin Google Fonts)
 - Íconos SVG inline (Lucide)
