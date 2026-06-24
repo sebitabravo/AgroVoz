@@ -1,0 +1,303 @@
+"""Tests unitarios del cliente Open-WA (app.services.openwa_service).
+
+A diferencia de test_webhook.py (que prueba el endpoint HTTP completo con
+payloads reales), estos tests aislan OpenWAService: discovery de sesión,
+caché de session ID, envío de texto, descarga de media, indicador de typing
+y headers de autenticación.
+
+httpx.AsyncClient se mockea para no tocar la red ni el gateway real.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, Mock
+
+import httpx
+import pytest
+
+from app.core.config import settings
+from app.services.openwa_service import OpenWAService
+
+
+@pytest.fixture(autouse=True)
+def _reset_session_cache() -> object:
+    """Limpia el caché de session ID de clase entre tests.
+
+    _cached_session_id es de clase y persiste entre tests si no se resetea,
+    lo que haría que _resolve_session_id no descubra la sesión.
+    """
+    prev = OpenWAService._cached_session_id
+    OpenWAService._cached_session_id = None
+    yield
+    OpenWAService._cached_session_id = prev
+
+
+def _patch_async_client(
+    monkeypatch: pytest.MonkeyPatch, mock_client: AsyncMock
+) -> None:
+    """Reemplaza httpx.AsyncClient por un context manager que retorna mock_client."""
+    mock_ctx = AsyncMock()
+    mock_ctx.__aenter__.return_value = mock_client
+    mock_ctx.__aexit__.return_value = None
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: mock_ctx)
+
+
+def _mock_response(json_data: object | None = None, content: bytes = b"") -> Mock:
+    """Construye una respuesta httpx mockeada con raise_for_status no-op."""
+    resp = Mock()
+    resp.raise_for_status = Mock()
+    resp.json = Mock(return_value=json_data if json_data is not None else {})
+    resp.content = content
+    return resp
+
+
+# ── _resolve_session_id ────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_resolve_session_id_descubre_primera_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_resolve_session_id retorna el ID de la primera sesión con status=ready."""
+    monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
+    monkeypatch.setattr(settings, "openwa_api_key", "k")
+
+    client = AsyncMock()
+    client.get.return_value = _mock_response(
+        [{"id": "sess-1", "status": "ready"}]
+    )
+    _patch_async_client(monkeypatch, client)
+
+    service = OpenWAService()
+    session_id = await service._resolve_session_id()
+
+    assert session_id == "sess-1"
+    assert OpenWAService._cached_session_id == "sess-1"
+
+
+@pytest.mark.asyncio
+async def test_resolve_session_id_acepta_status_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sesiones con status=active también se consideran listas."""
+    monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
+    monkeypatch.setattr(settings, "openwa_api_key", "k")
+
+    client = AsyncMock()
+    client.get.return_value = _mock_response(
+        [{"id": "sess-active", "status": "active"}]
+    )
+    _patch_async_client(monkeypatch, client)
+
+    service = OpenWAService()
+    assert await service._resolve_session_id() == "sess-active"
+
+
+@pytest.mark.asyncio
+async def test_resolve_session_id_cachea_evita_segundo_http(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """La segunda llamada a _resolve_session_id no hace HTTP (caché de clase)."""
+    monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
+    monkeypatch.setattr(settings, "openwa_api_key", "k")
+
+    client = AsyncMock()
+    client.get.return_value = _mock_response(
+        [{"id": "sess-cached", "status": "ready"}]
+    )
+    _patch_async_client(monkeypatch, client)
+
+    service = OpenWAService()
+    await service._resolve_session_id()
+    await service._resolve_session_id()
+
+    assert client.get.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_resolve_session_id_sin_sesiones_lanza_runtime_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Si no hay sesiones ready/active, lanza RuntimeError pidiendo escanear QR."""
+    monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
+    monkeypatch.setattr(settings, "openwa_api_key", "k")
+
+    client = AsyncMock()
+    client.get.return_value = _mock_response([{"id": "x", "status": "qr"}])
+    _patch_async_client(monkeypatch, client)
+
+    service = OpenWAService()
+    with pytest.raises(RuntimeError, match="QR"):
+        await service._resolve_session_id()
+
+
+# ── send_text ──────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_send_text_normaliza_chat_id_y_envia(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """send_text POSTea a send-text con chatId normalizado y header X-API-Key."""
+    monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
+    monkeypatch.setattr(settings, "openwa_api_key", "secret-key")
+
+    client = AsyncMock()
+    client.post.return_value = _mock_response({"status": "sent"})
+    _patch_async_client(monkeypatch, client)
+    OpenWAService._cached_session_id = "sess-1"
+
+    service = OpenWAService()
+    result = await service.send_text("+56912345678", "Hola")
+
+    assert result == {"status": "sent"}
+    client.post.assert_called_once_with(
+        "http://openwa:2785/api/sessions/sess-1/messages/send-text",
+        headers={"X-API-Key": "secret-key"},
+        json={"chatId": "56912345678@c.us", "text": "Hola"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_text_propaga_http_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Si Open-WA retorna error HTTP, send_text propaga httpx.HTTPError."""
+    monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
+    monkeypatch.setattr(settings, "openwa_api_key", "k")
+
+    client = AsyncMock()
+    resp = Mock()
+    resp.raise_for_status = Mock(
+        side_effect=httpx.HTTPStatusError(
+            "500 Server Error",
+            request=httpx.Request("POST", "http://openwa:2785"),
+            response=httpx.Response(500),
+        )
+    )
+    client.post.return_value = resp
+    _patch_async_client(monkeypatch, client)
+    OpenWAService._cached_session_id = "sess-1"
+
+    service = OpenWAService()
+    with pytest.raises(httpx.HTTPError):
+        await service.send_text("569@c.us", "x")
+
+
+# ── download_media ─────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_download_media_retorna_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """download_media retorna el contenido binario del audio."""
+    monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
+    monkeypatch.setattr(settings, "openwa_api_key", "k")
+
+    client = AsyncMock()
+    client.get.return_value = _mock_response(content=b"AUDIO_OGG_BYTES")
+    _patch_async_client(monkeypatch, client)
+    OpenWAService._cached_session_id = "sess-1"
+
+    service = OpenWAService()
+    data = await service.download_media("msg_simple")
+
+    assert data == b"AUDIO_OGG_BYTES"
+
+
+@pytest.mark.asyncio
+async def test_download_media_url_encodea_message_id_con_arroba(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """message_id con '@' debe ir URL-encoded (%40) en la URL de descarga."""
+    monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
+    monkeypatch.setattr(settings, "openwa_api_key", "k")
+
+    client = AsyncMock()
+    client.get.return_value = _mock_response(content=b"x")
+    _patch_async_client(monkeypatch, client)
+    OpenWAService._cached_session_id = "sess-1"
+
+    service = OpenWAService()
+    await service.download_media("true_569@c.us_3EB")
+
+    called_url = client.get.call_args.args[0]
+    assert "%40" in called_url
+    # El '@' crudo no debe quedar en la porción del message_id de la URL.
+    assert "true_569@c.us" not in called_url
+
+
+# ── send_typing_indicator ──────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_send_typing_indicator_no_falla_si_gateway_cae(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Si el indicador typing falla, no propaga excepción (no es crítico)."""
+    monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
+    monkeypatch.setattr(settings, "openwa_api_key", "k")
+
+    client = AsyncMock()
+    client.post.side_effect = httpx.ConnectError("gateway down")
+    _patch_async_client(monkeypatch, client)
+    OpenWAService._cached_session_id = "sess-1"
+
+    service = OpenWAService()
+    # No debe lanzar.
+    await service.send_typing_indicator("569@c.us", "recording")
+
+
+@pytest.mark.asyncio
+async def test_send_typing_indicator_envia_state_recording(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """send_typing_indicator POSTea chatId + state al endpoint chats/typing."""
+    monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
+    monkeypatch.setattr(settings, "openwa_api_key", "k")
+
+    client = AsyncMock()
+    client.post.return_value = _mock_response({})
+    _patch_async_client(monkeypatch, client)
+    OpenWAService._cached_session_id = "sess-1"
+
+    service = OpenWAService()
+    await service.send_typing_indicator("+56912345678", "recording")
+
+    client.post.assert_called_once_with(
+        "http://openwa:2785/api/sessions/sess-1/chats/typing",
+        headers={"X-API-Key": "k"},
+        json={"chatId": "56912345678@c.us", "state": "recording"},
+    )
+
+
+# ── _headers / __init__ ────────────────────────────────────────
+
+
+def test_headers_incluye_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_headers incluye X-API-Key cuando openwa_api_key está seteada."""
+    monkeypatch.setattr(settings, "openwa_api_key", "mi-key")
+    monkeypatch.setattr(settings, "app_env", "test")
+
+    service = OpenWAService()
+    assert service._headers() == {"X-API-Key": "mi-key"}
+
+
+def test_headers_vacio_sin_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_headers retorna dict vacío si no hay API key configurada."""
+    monkeypatch.setattr(settings, "openwa_api_key", "")
+    monkeypatch.setattr(settings, "app_env", "test")
+
+    service = OpenWAService()
+    assert service._headers() == {}
+
+
+def test_base_url_sin_trailing_slash(monkeypatch: pytest.MonkeyPatch) -> None:
+    """El __init__ debe normalizar la URL base quitando el slash final."""
+    monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785/")
+    monkeypatch.setattr(settings, "openwa_api_key", "k")
+    monkeypatch.setattr(settings, "app_env", "test")
+
+    service = OpenWAService()
+    assert service._base_url == "http://openwa:2785"

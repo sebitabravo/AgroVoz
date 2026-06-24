@@ -34,6 +34,8 @@ audio/
 *.mp3
 # Archivos de audio estático comprometidos (respuestas pregrabadas)
 !/backend/app/static/*.ogg
+# Excepción: fixture de audio para tests E2E del pipeline de voz
+!/backend/tests/fixtures/sample_query.ogg
 
 # ── Imágenes — Sesión QR WhatsApp, screenshots, assets binarios ──
 # El proyecto usa SVG inline (Lucide). No debe tener PNG en el repo.

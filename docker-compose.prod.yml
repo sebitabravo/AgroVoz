@@ -62,8 +62,9 @@ services:
         "2",
       ]
     volumes:
-      - backend_models:/app/models    # Modelos IA (persisten entre deploys)
+      - backend_models:/app/models    # Modelos IA (Piper + Qwen GGUF)
       - backend_data:/app/data        # SQLite DB + audio temporal
+      - backend_whisper_cache:/home/agrovoz/.cache  # Cache Whisper (FS read-only)
     expose:
       - "8000"                        # Expuesto a Traefik, NO bind host port
     networks:
@@ -79,7 +80,10 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      # 10 min: primer arranque descarga Piper (~63 MB) + Qwen GGUF (~2 GB) +
+      # Whisper small (~462 MB) si no estan en el volumen. Arranques siguientes
+      # son instantaneos (modelos cacheados en el volumen).
+      start_period: 600s
     logging:
       driver: json-file
       options:
@@ -154,6 +158,7 @@ services:
 volumes:
   backend_models:
   backend_data:
+  backend_whisper_cache:
   openwa_data:
 
 networks:

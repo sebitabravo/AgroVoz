@@ -60,6 +60,9 @@ COPY --chown=agrovoz:agrovoz . .
 # Crear directorios para volúmenes (data/ para SQLite + audio, models/ para modelos IA)
 RUN mkdir -p /app/data /app/models && chown agrovoz:agrovoz /app/data /app/models
 
+# Asegurar permisos de ejecucion en scripts de runtime (entrypoint + download)
+RUN chmod +x /app/scripts/entrypoint.sh /app/scripts/download_models.sh
+
 # Cambiar a usuario no-root
 USER agrovoz
 
@@ -72,7 +75,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8000/api/v1/health?probe=liveness || exit 1
 
-# Entry point: uvicorn con workers ajustados a RAM disponible.
-# 1 worker intencional: los modelos IA cargan ~3.2 GB por worker en memoria.
-# En prod, docker-compose.prod.yml sobreescribe con --workers 2 via command:.
+# Entrypoint: prepara modelos IA + DB antes de arrancar uvicorn (idempotente).
+# entrypoint.sh recibe el CMD (uvicorn ...) como "$@" y hace exec al final.
+# docker-compose.*.yml pueden sobreescribir el CMD via command:.
+ENTRYPOINT ["/app/scripts/entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
