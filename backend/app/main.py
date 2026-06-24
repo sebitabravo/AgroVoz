@@ -3,13 +3,15 @@
 Punto de entrada del backend. Registra routers, middlewares y handlers.
 """
 
+import asyncio
 import contextvars
+import datetime
 import logging
 import re
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -75,6 +77,42 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         return response
 
 
+async def _odepa_scheduler() -> None:
+    """Ejecuta sync ODEPA todos los dias a las 06:00 AM (hora local del VPS).
+
+    Corre en loop infinito como tarea de fondo del lifespan de FastAPI.
+    Calcula el proximo target 06:00, espera, ejecuta sync, repite cada 24h.
+    No depende de crontab externo: funciona en dev y prod sin config extra.
+    """
+    from app.services.odepa_service import sync_odepa
+
+    while True:
+        now = datetime.datetime.now()
+        target = now.replace(hour=6, minute=0, second=0, microsecond=0)
+        if now >= target:
+            target += datetime.timedelta(days=1)
+        wait_seconds = (target - now).total_seconds()
+        logger.info(
+            "ODEPA scheduler: proxima sync en %.1f horas (%s)",
+            wait_seconds / 3600,
+            target.isoformat(),
+        )
+        await asyncio.sleep(wait_seconds)
+        try:
+            resultado = await sync_odepa()
+            logger.info(
+                "ODEPA scheduler: sync OK — %d insertados, %d actualizados",
+                resultado.insertados,
+                resultado.actualizados,
+            )
+        except Exception:
+            # Cron de fondo en loop infinito: cualquier excepcion NO capturada
+            # mata el scheduler para siempre. except Exception es intencional aca
+            # (boundary de resiliencia). CancelledError hereda de BaseException,
+            # no se captura -> shutdown limpio via odepa_task.cancel() en lifespan.
+            logger.exception("ODEPA scheduler: error en sync automatica")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Maneja el ciclo de vida de la aplicación.
@@ -102,8 +140,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # arrancar silenciosamente y fallar en runtime con errores oscuros.
     if settings.app_env == "production":
         missing = []
-        if not settings.openweathermap_api_key.strip():
-            missing.append("OPENWEATHERMAP_API_KEY")
+        # OpenWeatherMap ya no es necesario — migrado a OpenMeteo (issue #51).
         if not settings.openwa_api_key.strip():
             missing.append("OPENWA_API_KEY")
         if not settings.openwa_webhook_secret.strip():
@@ -120,9 +157,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.debug,
     )
 
+    # Pre-cargar modelo LLM en background (~6s en VPS CX43).
+    # Evita cold start timeout en el primer request al pipeline.
+    from app.services.llm_service import preload_model
+    preload_model()
+
+    # Scheduler ODEPA: sync diario a las 06:00 AM hora local.
+    # Tarea de fondo del lifespan. Se cancela automáticamente al detener la app.
+    odepa_task = asyncio.create_task(_odepa_scheduler())
+
     yield
 
     logger.info("AgroVoz deteniendo — liberando conexiones")
+    odepa_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await odepa_task
     engine.dispose()
     from app.services.weather_service import _close_http_client
     await _close_http_client()

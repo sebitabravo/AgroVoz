@@ -153,7 +153,7 @@ Deben quedar productivos y accesibles vía `https://agrovoz.cl` (landing) y `htt
 
   WHISPER_MODEL=small
   LLM_MODEL_PATH=/app/models/qwen2.5-3b-q4_k_m.gguf
-  PIPER_VOICE=es_ES-carlfm-x_low
+  PIPER_VOICE=es_MX-claude-high
 
   ADMIN_API_KEY=
 

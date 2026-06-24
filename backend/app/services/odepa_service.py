@@ -315,6 +315,9 @@ def upsert_prices(
     el valor `excluded` que SQLite aplica en ON CONFLICT DO UPDATE. Sin esto,
     el conteo de insertados/actualizados se inflaría, reportando operaciones
     que ON CONFLICT colapsa en una sola.
+
+    Procesa en chunks de 200 para no exceder el limite de 999 parametros
+    de SQLite: cada tupla en la deteccion usa 3 parametros.
     """
     if not registros:
         return (0, 0)
@@ -326,45 +329,57 @@ def upsert_prices(
         unicos[(r.producto, r.mercado, r.fecha)] = r
     registros_unicos = list(unicos.values())
 
-    # Detecta tuplas existentes en 1 sola query para diferenciar inserts de updates.
-    # tuple_().in_() evita N SELECTs individuales al crecer el catálogo de productos.
-    claves = [(r.producto, r.mercado, r.fecha) for r in registros_unicos]
-    q = select(
-        OdepaPrice.producto, OdepaPrice.mercado, OdepaPrice.fecha
-    ).where(
-        sa_tuple(
+    # SQLite max 999 parametros por query. Cada tupla en IN (VALUES ...)
+    # consume 3 parametros (producto, mercado, fecha). Chunk de 200 deja
+    # margen para 600 parametros en la query de deteccion + 1000 en el insert.
+    _chunk = 200
+    total_insertados = 0
+    total_actualizados = 0
+
+    for i in range(0, len(registros_unicos), _chunk):
+        chunk = registros_unicos[i : i + _chunk]
+
+        # Detecta tuplas existentes para diferenciar inserts de updates.
+        claves = [(r.producto, r.mercado, r.fecha) for r in chunk]
+        q = select(
             OdepaPrice.producto, OdepaPrice.mercado, OdepaPrice.fecha
-        ).in_(claves)
-    )
-    existentes = {tuple(row) for row in session.execute(q).all()}
+        ).where(
+            sa_tuple(
+                OdepaPrice.producto, OdepaPrice.mercado, OdepaPrice.fecha
+            ).in_(claves)
+        )
+        existentes = {tuple(row) for row in session.execute(q).all()}
 
-    valores = [
-        {
-            "producto": r.producto,
-            "mercado": r.mercado,
-            "precio_kg": r.precio_kg,
-            "unidad": r.unidad,
-            "fecha": r.fecha,
-            "fuente": "ODEPA",
-        }
-        for r in registros_unicos
-    ]
-    stmt = sqlite_insert(OdepaPrice).values(valores)
-    stmt = stmt.on_conflict_do_update(
-        index_elements=["producto", "mercado", "fecha"],
-        set_={
-            "precio_kg": stmt.excluded.precio_kg,
-            "unidad": stmt.excluded.unidad,
-        },
-    )
-    session.execute(stmt)
+        valores = [
+            {
+                "producto": r.producto,
+                "mercado": r.mercado,
+                "precio_kg": r.precio_kg,
+                "unidad": r.unidad,
+                "fecha": r.fecha,
+                "fuente": "ODEPA",
+            }
+            for r in chunk
+        ]
+        stmt = sqlite_insert(OdepaPrice).values(valores)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["producto", "mercado", "fecha"],
+            set_={
+                "precio_kg": stmt.excluded.precio_kg,
+                "unidad": stmt.excluded.unidad,
+            },
+        )
+        session.execute(stmt)
+
+        actualizados = sum(
+            1 for r in chunk if (r.producto, r.mercado, r.fecha) in existentes
+        )
+        insertados = len(chunk) - actualizados
+        total_insertados += insertados
+        total_actualizados += actualizados
+
     session.commit()
-
-    actualizados = sum(
-        1 for r in registros_unicos if (r.producto, r.mercado, r.fecha) in existentes
-    )
-    insertados = len(registros_unicos) - actualizados
-    return (insertados, actualizados)
+    return (total_insertados, total_actualizados)
 
 
 async def sync_odepa(session: Session | None = None) -> SyncResult:
@@ -475,20 +490,22 @@ def query_latest_by_product(
 def format_price_text(record: OdepaPrice) -> str:
     """Formatea un registro OdepaPrice como texto natural en español chileno.
 
-    Formato: "Papa está a $1.200 el kilo en Lo Valledor, precio del 20/06/2026."
+    Formato: "Papa está a 1.200 pesos el kilo en Lo Valledor, precio del 20/06/2026."
     Sin artículo para evitar errores de género (el tomate, la papa).
     Usa punto como separador de miles (convención chilena).
     Muestra decimales solo si el precio tiene fracción significativa.
+    Usa "pesos" en vez de "$" para que el LLM no hable de "dólares" al leer el
+    resultado de la tool antes de pasarlo a TTS.
     """
     precio = record.precio_kg
     if precio == precio.to_integral_value():
         parte_entera = f"{int(precio):,}".replace(",", ".")
-        precio_str = f"${parte_entera}"
+        precio_str = f"{parte_entera} pesos"
     else:
         entero, dec = str(precio).split(".")
         parte_entera = f"{int(entero):,}".replace(",", ".")
         dec = dec.ljust(2, "0")[:2]
-        precio_str = f"${parte_entera},{dec}"
+        precio_str = f"{parte_entera} coma {dec} pesos"
 
     fecha_str = record.fecha.strftime("%d/%m/%Y")
     return (
@@ -497,15 +514,41 @@ def format_price_text(record: OdepaPrice) -> str:
     )
 
 
-def get_price_for_llm(session: Session, producto: str, mercado: str) -> str:
+def get_price_for_llm(session: Session, producto: str, mercado: str = "") -> str:
     """Tool function para el LLM: consulta el precio más reciente.
+
+    Si mercado está vacío, consulta todos los mercados y retorna el precio
+    más relevante (el de Lo Valledor si existe, o el primer mercado disponible).
+    Así el agricultor no necesita saber nombres de mercados.
 
     Retorna texto natural en español chileno listo para TTS.
     Si no hay datos, retorna un mensaje informativo en vez de fallar.
-    El LLM usará esta función vía Tool Calling (Issue #18).
     """
+    if not mercado or not mercado.strip():
+        # Sin mercado especificado: buscar en todos los mercados.
+        try:
+            precios_por_mercado = query_latest_by_product(session, producto)
+        except ValueError:
+            return "No entendí el producto. ¿Podrías repetirlo?"
+
+        if not precios_por_mercado:
+            return (
+                f"No tengo datos de precio para {producto.strip()}. "
+                "¿Podrias probar con otro producto?"
+            )
+
+        # Priorizar Lo Valledor (referencia nacional). Si no existe, usar
+        # el primer mercado disponible ordenado alfabeticamente.
+        if "Lo Valledor" in precios_por_mercado:
+            selected = precios_por_mercado["Lo Valledor"]
+        else:
+            primer_mercado = sorted(precios_por_mercado.keys())[0]
+            selected = precios_por_mercado[primer_mercado]
+
+        return format_price_text(selected)
+
     try:
-        record = query_latest_price(session, producto, mercado)
+        record: OdepaPrice | None = query_latest_price(session, producto, mercado)
     except ValueError:
         return "No entendí el producto o mercado. ¿Podrías repetirlo?"
 

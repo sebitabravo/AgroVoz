@@ -46,7 +46,9 @@ class Settings(BaseSettings):
     openwa_webhook_secret: str = "dev-webhook-secret"
     openwa_api_url: str = "http://localhost:2785"
 
-    # ── OpenWeatherMap ───────────────────
+    # ── OpenWeatherMap (DEPRECATED) ───────
+    # Ya no se usa. Migrado a OpenMeteo (sin API key) en issue #51.
+    # Se mantiene por compatibilidad, pero no afecta el funcionamiento.
     openweathermap_api_key: str = ""
 
     # ── ODEPA ────────────────────────────
@@ -64,20 +66,20 @@ class Settings(BaseSettings):
         "precio_mayorista_fruta-hortaliza_2026.csv"
     )
     # Productos a sincronizar, separados por coma (lowercase).
-    # MVP: solo papa. Expandible sin tocar codigo.
-    odepa_productos: str = "papa"
+    # "*" = sincronizar TODOS los productos del CSV (60+ productos ODEPA).
+    odepa_productos: str = "*"
 
     # ── Modelos IA ───────────────────────
     whisper_model: str = "small"
     whisper_model_path: str = ""  # Directorio para modelos Whisper (vacio = default ~/.cache/whisper/)
     llm_model_path: str = "models/qwen2.5-3b-q4_k_m.gguf"
-    piper_voice: str = "es_ES-carlfm-x_low"
+    piper_voice: str = "es_MX-claude-high"
 
     # ── Admin ────────────────────────────
     admin_api_key: str = ""
 
     # ── Modelos IA (paths) ───────────────
-    piper_model_path: str = "models/es_ES-carlfm-x_low.onnx"
+    piper_model_path: str = "models/es_MX-claude-high.onnx"
 
     # ── Seguridad ────────────────────────
     rate_limit_per_minute: int = 60
@@ -93,9 +95,16 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
     @property
-    def odepa_productos_list(self) -> list[str]:
-        """Lista de productos ODEPA normalizada (lowercase, sin espacios)."""
-        return [p.strip().lower() for p in self.odepa_productos.split(",") if p.strip()]
+    def odepa_productos_list(self) -> list[str] | None:
+        """Lista de productos ODEPA normalizada (lowercase, sin espacios).
+
+        Retorna None cuando el valor es '*' (sincronizar todos los productos).
+        Retorna lista vacía cuando el valor es '' o ',' (no sincronizar nada).
+        """
+        raw = self.odepa_productos.strip()
+        if raw == "*":
+            return None
+        return [p.strip().lower() for p in raw.split(",") if p.strip()]
 
     def validate_webhook_secret_not_default(self) -> None:
         """Advierte o bloquea si openwa_webhook_secret es el default público o está vacío.
@@ -199,12 +208,8 @@ class Settings(BaseSettings):
                 RuntimeWarning,
                 stacklevel=2,
             )
-        if not self.openweathermap_api_key:
-            warnings.warn(
-                "OPENWEATHERMAP_API_KEY no está configurada. Las consultas de clima no funcionarán sin esto.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
+        # OpenMeteo no requiere API key (issue #51).
+        # Mantenemos openweathermap_api_key como deprecated por compatibilidad.
 
 
 settings = Settings()

@@ -3,7 +3,7 @@
 # AgroVoz — Descarga de modelos de IA
 # =============================================================================
 # Descarga los modelos necesarios para el pipeline de voz de AgroVoz:
-#   - Piper TTS: voz en español «es_ES-carlfm-x_low» (~5 MB)
+#   - Piper TTS: voz en español «es_MX-claude-high» (~63 MB)
 #
 # Los modelos se almacenan en backend/models/ (ignorado por git).
 #
@@ -28,12 +28,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MODELS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/models"
 
-PIPER_URL="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_ES/carlfm/x_low/es_ES-carlfm-x_low.onnx"
-PIPER_JSON_URL="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_ES/carlfm/x_low/es_ES-carlfm-x_low.onnx.json"
+PIPER_VOICE="es_MX-claude-high"  # Voz principal (calidad high)
+PIPER_URL="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_MX/claude/high/es_MX-claude-high.onnx"
+PIPER_JSON_URL="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_MX/claude/high/es_MX-claude-high.onnx.json"
 
 # SHA256 de los modelos Piper (verificados al descargar)
-PIPER_ONNX_SHA256="d69677323a907cd4963f42b29c20a98b5d6bfa7f3e64df339915e4650c00d125"
-PIPER_JSON_SHA256="d9bdfa9ff01eb2bc9e62e7d2593939d1e4c4d8eb7cf75f972731539d12399966"
+PIPER_ONNX_SHA256="3ef40a71ea63852cd8ab7e6fa7d2ecdcfa67a0b47c9c48e3f10e02ee02083ea0"
+PIPER_JSON_SHA256="1afc81f703c0e4cb3b4d7c0dca096b8b54a98806807f0170cf5eb5557723c12d"
 
 FORCE=false
 PIPER_ONLY=false
@@ -134,12 +135,12 @@ verificar_checksum() {
 }
 
 descargar_piper() {
-    header "Piper TTS — es_ES-carlfm-x_low"
+    header "Piper TTS — $PIPER_VOICE (calidad high)"
 
     mkdir -p "$MODELS_DIR"
 
-    descargar_archivo "$PIPER_URL" "$MODELS_DIR/es_ES-carlfm-x_low.onnx" "Modelo ONNX" "$PIPER_ONNX_SHA256"
-    descargar_archivo "$PIPER_JSON_URL" "$MODELS_DIR/es_ES-carlfm-x_low.onnx.json" "Config JSON" "$PIPER_JSON_SHA256"
+    descargar_archivo "$PIPER_URL" "$MODELS_DIR/es_MX-claude-high.onnx" "Modelo ONNX" "$PIPER_ONNX_SHA256"
+    descargar_archivo "$PIPER_JSON_URL" "$MODELS_DIR/es_MX-claude-high.onnx.json" "Config JSON" "$PIPER_JSON_SHA256"
 
     echo ""
 }

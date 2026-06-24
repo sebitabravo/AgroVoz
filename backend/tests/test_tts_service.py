@@ -73,7 +73,7 @@ def _create_fake_model_file(tmp_path: Path) -> Path:
     Returns:
         Path al archivo .onnx ficticio.
     """
-    model_path = tmp_path / "es_ES-carlfm-x_low.onnx"
+    model_path = tmp_path / "es_MX-claude-high.onnx"
     model_path.write_text("fake model content")
     return model_path
 

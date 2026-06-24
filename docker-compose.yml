@@ -43,6 +43,7 @@ services:
     volumes:
       - ./backend/data:/app/data        # SQLite DB + audio temporal (persiste entre reinicios)
       - ./backend/models:/app/models    # Modelos IA (persisten entre reinicios)
+      - ./backend/models/whisper-cache:/home/agrovoz/.cache/whisper  # Cache Whisper (evita descargar 461MB cada vez)
       - ./backend/app:/app/app          # Hot reload: montar código fuente
     healthcheck:
       test:
