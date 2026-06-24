@@ -4,21 +4,25 @@
 # =============================================================================
 # Descarga los modelos necesarios para el pipeline de voz de AgroVoz:
 #   - Piper TTS: voz en español «es_MX-claude-high» (~63 MB)
+#   - Qwen2.5-3B-Instruct Q4_K_M: LLM cuantizado GGUF (~2.0 GB)
 #
 # Los modelos se almacenan en backend/models/ (ignorado por git).
 #
 # Uso:
-#   ./scripts/download_models.sh                  # descarga solo Piper
-#   ./scripts/download_models.sh --piper-only      # ídem explícito
-#   ./scripts/download_models.sh --force           # re-descarga aunque exista
-#   ./scripts/download_models.sh --help            # muestra este mensaje
+#   ./scripts/download_models.sh                  # descarga Piper + Qwen (default)
+#   ./scripts/download_models.sh --piper-only     # solo Piper TTS
+#   ./scripts/download_models.sh --force          # re-descarga aunque existan
+#   ./scripts/download_models.sh --help           # muestra este mensaje
 #
 # Flags:
-#   --piper-only   Descargar solo el modelo Piper TTS (comportamiento default)
-#   --force        Re-descargar aunque el archivo ya exista
+#   --piper-only   Descargar solo el modelo Piper TTS
+#   --force        Re-descargar aunque los archivos ya existan
 #   --help         Mostrar esta ayuda y salir
 #
-# Requisitos: curl
+# Idempotente: si un modelo ya existe (y no se pasa --force), se skipea.
+# Esto lo usa el entrypoint del container para no re-descargar en cada arranque.
+#
+# Requisitos: curl, sha256sum (o shasum en macOS)
 # =============================================================================
 
 set -euo pipefail
@@ -28,13 +32,22 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MODELS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/models"
 
-PIPER_VOICE="es_MX-claude-high"  # Voz principal (calidad high)
+# Piper TTS — voz en español de México (calidad high)
+PIPER_VOICE="es_MX-claude-high"
 PIPER_URL="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_MX/claude/high/es_MX-claude-high.onnx"
 PIPER_JSON_URL="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_MX/claude/high/es_MX-claude-high.onnx.json"
 
 # SHA256 de los modelos Piper (verificados al descargar)
 PIPER_ONNX_SHA256="3ef40a71ea63852cd8ab7e6fa7d2ecdcfa67a0b47c9c48e3f10e02ee02083ea0"
 PIPER_JSON_SHA256="1afc81f703c0e4cb3b4d7c0dca096b8b54a98806807f0170cf5eb5557723c12d"
+
+# Qwen2.5-3B-Instruct Q4_K_M — LLM cuantizado para inferencia local
+# El archivo en HuggingFace se llama «qwen2.5-3b-instruct-q4_k_m.gguf» pero se
+# guarda como «qwen2.5-3b-q4_k_m.gguf» (nombre esperado por settings.llm_model_path).
+# El SHA256 verifica el contenido, independiente del nombre del archivo.
+QWEN_FILENAME="qwen2.5-3b-q4_k_m.gguf"
+QWEN_URL="https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf"
+QWEN_SHA256="626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d"
 
 FORCE=false
 PIPER_ONLY=false
@@ -80,9 +93,9 @@ descargar_archivo() {
     if curl --fail -L -# -o "$destino" --retry 3 --connect-timeout 60 "$url" 2>&1; then
         if [[ -s "$destino" ]]; then
             echo ""
-            local tamaño
-            tamaño=$(du -h "$destino" | cut -f1)
-            info "$descripcion descargado: $(basename "$destino") ($tamaño)"
+            local tam
+            tam=$(du -h "$destino" | cut -f1)
+            info "$descripcion descargado: $(basename "$destino") ($tam)"
             verificar_checksum "$destino" "$expected_hash" || return 1
             return 0
         else
@@ -145,6 +158,16 @@ descargar_piper() {
     echo ""
 }
 
+descargar_qwen() {
+    header "Qwen2.5-3B-Instruct — Q4_K_M (GGUF cuantizado, ~2.0 GB)"
+
+    mkdir -p "$MODELS_DIR"
+
+    descargar_archivo "$QWEN_URL" "$MODELS_DIR/$QWEN_FILENAME" "Modelo GGUF" "$QWEN_SHA256"
+
+    echo ""
+}
+
 mostrar_resumen() {
     header "Resumen"
 
@@ -153,10 +176,10 @@ mostrar_resumen() {
 
     if ls "$MODELS_DIR"/*.onnx >/dev/null 2>&1; then
         for f in "$MODELS_DIR"/*.onnx; do
-            local nombre tamaño
+            local nombre tam
             nombre=$(basename "$f")
-            tamaño=$(du -h "$f" | cut -f1)
-            info "  $nombre — $tamaño"
+            tam=$(du -h "$f" | cut -f1)
+            info "  $nombre — $tam"
         done
     else
         error "No se encontraron modelos ONNX en $MODELS_DIR"
@@ -165,10 +188,19 @@ mostrar_resumen() {
 
     if ls "$MODELS_DIR"/*.json >/dev/null 2>&1; then
         for f in "$MODELS_DIR"/*.json; do
-            local nombre tamaño
+            local nombre tam
             nombre=$(basename "$f")
-            tamaño=$(du -h "$f" | cut -f1)
-            info "  $nombre — $tamaño"
+            tam=$(du -h "$f" | cut -f1)
+            info "  $nombre — $tam"
+        done
+    fi
+
+    if ls "$MODELS_DIR"/*.gguf >/dev/null 2>&1; then
+        for f in "$MODELS_DIR"/*.gguf; do
+            local nombre tam
+            nombre=$(basename "$f")
+            tam=$(du -h "$f" | cut -f1)
+            info "  $nombre — $tam"
         done
     fi
 
@@ -195,10 +227,13 @@ done
 
 header "AgroVoz — Descarga de modelos"
 
-# Por default se descarga solo Piper (es el único modelo por ahora).
-# En el futuro, si hay más modelos (Whisper, LLM), se agregan acá.
-
+# Por default se descargan Piper + Qwen. Con --piper-only, solo Piper
+# (útil para entornos sin LLM, ej: pruebas de TTS aisladas).
 descargar_piper
+
+if [[ "$PIPER_ONLY" != true ]]; then
+    descargar_qwen
+fi
 
 echo ""
 mostrar_resumen
