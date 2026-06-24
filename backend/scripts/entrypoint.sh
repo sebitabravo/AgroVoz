@@ -66,7 +66,9 @@ if [[ -f "$WHISPER_CACHE/${WHISPER_MODEL}.pt" ]]; then
     info "Whisper $WHISPER_MODEL ya en cache — skip"
 else
     warn "Whisper $WHISPER_MODEL no en cache — descargando (~462 MB)..."
-    if python -c "import whisper; whisper.load_model('${WHISPER_MODEL}')" 2>&1; then
+    # Pasar WHISPER_MODEL via os.environ (no interpolar en el string de Python):
+    # defensa en profundidad ante code injection si la env var se manipula.
+    if WHISPER_MODEL="$WHISPER_MODEL" python -c "import os, whisper; whisper.load_model(os.environ['WHISPER_MODEL'])" 2>&1; then
         info "Whisper $WHISPER_MODEL cacheado"
     else
         warn "No se pudo pre-cargar Whisper (continuando — cargará en runtime)"
