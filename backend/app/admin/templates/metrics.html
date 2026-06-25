@@ -135,74 +135,9 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
-(function() {
-  if (typeof Chart === 'undefined') { console.warn('Chart.js no disponible'); return; }
-  Chart.defaults.font.family = "system-ui, sans-serif";
-  Chart.defaults.color = '#7e827a';
-
-  const ACCENT = '#4f7d5a', INFO = '#2a5f90', ERR = '#c05252';
-
-  // ── Diario (line) ──────────────────────────────
-  const dailyLabels = {{ diario|map(attribute='date')|list|tojson }};
-  const dailyCounts = {{ diario|map(attribute='count')|list|tojson }};
-  new Chart(document.getElementById('chart-daily'), {
-    type: 'line',
-    data: {
-      labels: dailyLabels.map(d => d.slice(5)),
-      datasets: [{
-        data: dailyCounts,
-        borderColor: ACCENT,
-        backgroundColor: 'rgba(79,125,90,0.12)',
-        fill: true, tension: 0.3, borderWidth: 2,
-        pointRadius: 2, pointHoverRadius: 5,
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
-    }
-  });
-
-  // ── Intents (doughnut) ─────────────────────────
-  new Chart(document.getElementById('chart-intents'), {
-    type: 'doughnut',
-    data: {
-      labels: ['Precio', 'Clima', 'Desconocido'],
-      datasets: [{
-        data: [{{ intents.precio }}, {{ intents.clima }}, {{ intents.desconocido }}],
-        backgroundColor: [ACCENT, INFO, '#c8c7bf'],
-        borderWidth: 0,
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false, cutout: '65%',
-      plugins: { legend: { display: false } }
-    }
-  });
-
-  // ── Productos (bar horizontal) ─────────────────
-  {% if productos %}
-  const prodCtx = document.getElementById('chart-products');
-  if (prodCtx) {
-    new Chart(prodCtx, {
-      type: 'bar',
-      data: {
-        labels: {{ productos|map(attribute='name')|list|tojson }},
-        datasets: [{
-          data: {{ productos|map(attribute='queries')|list|tojson }},
-          backgroundColor: ACCENT, borderRadius: 4, barThickness: 16,
-        }]
-      },
-      options: {
-        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: { x: { beginAtZero: true, ticks: { precision: 0 } } }
-      }
-    });
-  }
-  {% endif %}
-})();
-</script>
+{# JSON con los datos de los charts. type="application/json" NO es ejecutable,
+   asi que el CSP script-src 'self' lo permite. La inicializacion de Chart.js
+   vive en /static/metrics.js. #}
+<script type="application/json" id="metrics-data">{{ chart_json|safe }}</script>
+<script src="/static/metrics.js"></script>
 {% endblock %}

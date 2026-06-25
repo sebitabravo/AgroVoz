@@ -14,6 +14,7 @@ rutas /admin/* excepto /admin/login. Acá no repetimos auth.
 """
 
 import datetime
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -116,6 +117,29 @@ async def metrics_page(
     errores = metrics_service.get_error_stats(db, days=days, limit=15)
     total_30d = metrics_service.get_total_30d(db)
     audio_avg = metrics_service.get_audio_avg(db, days=30)
+    # Datos para los charts de Chart.js: se serializan a JSON y se embeben
+    # en un <script type="application/json"> del template, para que la
+    # inicializacion viva en /static/metrics.js y el CSP mantenga
+    # script-src 'self' (sin 'unsafe-inline').
+    chart_data = {
+        "diario": {
+            "labels": [d.date for d in diario],
+            "counts": [d.count for d in diario],
+        },
+        "intents": {
+            "precio": intents.precio,
+            "clima": intents.clima,
+            "desconocido": intents.desconocido,
+        },
+        "productos": (
+            {
+                "labels": [p.name for p in productos],
+                "counts": [p.queries for p in productos],
+            }
+            if productos
+            else None
+        ),
+    }
     return templates.TemplateResponse(
         request,
         "metrics.html",
@@ -129,6 +153,7 @@ async def metrics_page(
             "errores": errores,
             "total_30d": total_30d,
             "audio_avg": audio_avg,
+            "chart_json": json.dumps(chart_data),
             "active_tab": "metrics",
         },
     )
