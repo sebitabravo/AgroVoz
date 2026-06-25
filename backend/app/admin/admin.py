@@ -282,19 +282,14 @@ async def monitor_clear_audio_temp(request: Request) -> HTMLResponse:
 
 def _odepa_status_dict(db: Session) -> dict[str, Any]:
     """Estado ODEPA para el template: totales + fecha más reciente."""
-    from sqlalchemy import func, select
+    from app.services.metrics_service import get_odepa_status
 
-    from app.models.odepa_price import OdepaPrice
-
-    total = db.scalar(select(func.count(OdepaPrice.id))) or 0
-    ultima = db.scalar(select(func.max(OdepaPrice.fecha)))
-    productos_count = db.scalar(select(func.count(func.distinct(OdepaPrice.producto)))) or 0
-    mercados_count = db.scalar(select(func.count(func.distinct(OdepaPrice.mercado)))) or 0
+    status = get_odepa_status(db)
     return {
-        "total_filas": int(total),
-        "ultima_fecha": ultima,
-        "productos": int(productos_count),
-        "mercados": int(mercados_count),
-        "ultima_fecha_iso": ultima.isoformat() if ultima else None,
+        "total_filas": status.total_filas,
+        "ultima_fecha": status.ultima_fecha,
+        "productos": status.productos,
+        "mercados": status.mercados,
+        "ultima_fecha_iso": status.ultima_fecha.isoformat() if status.ultima_fecha else None,
         "ahora": datetime.datetime.now(),
     }

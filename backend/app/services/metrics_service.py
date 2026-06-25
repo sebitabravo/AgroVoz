@@ -97,6 +97,21 @@ class ProductStat:
 
 
 @dataclass(frozen=True)
+class OdepaStatus:
+    """Estado de la data ODEPA: totales y cardinalidades.
+
+    Compartido por el router JSON (/admin/odepa/status) y el dashboard HTML
+    para evitar duplicar las queries. ultima_fecha es proxy de la última
+    sync exitosa (ODEPA publica datos del día anterior).
+    """
+
+    total_filas: int
+    ultima_fecha: datetime.date | None
+    productos: int
+    mercados: int
+
+
+@dataclass(frozen=True)
 class ErrorEntry:
     """Una consulta con intent desconocido para la tabla de errores."""
 
@@ -583,3 +598,25 @@ def get_all_odepa_products(db: Session, days: int = 30) -> list[ProductStat]:
 def build_sparkline_paths(values: list[int]) -> tuple[str, str]:
     """Wrapper público de _build_sparkline para uso desde el template/router."""
     return _build_sparkline(values)
+
+
+def get_odepa_status(db: Session) -> OdepaStatus:
+    """Retorna totales y cardinalidades de ODEPA en una sola query.
+
+    Combina 4 aggregates (count, max fecha, distinct producto, distinct
+    mercado) en un único SELECT para evitar 4 round-trips a la DB. Lo usan
+    tanto el endpoint JSON /admin/odepa/status como el dashboard HTML.
+    """
+    stmt = select(
+        func.count(OdepaPrice.id),
+        func.max(OdepaPrice.fecha),
+        func.count(func.distinct(OdepaPrice.producto)),
+        func.count(func.distinct(OdepaPrice.mercado)),
+    )
+    total, ultima, productos, mercados = db.execute(stmt).one()
+    return OdepaStatus(
+        total_filas=int(total or 0),
+        ultima_fecha=ultima,
+        productos=int(productos or 0),
+        mercados=int(mercados or 0),
+    )

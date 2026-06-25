@@ -11,12 +11,11 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.admin.deps import require_admin_key
 from app.core.database import get_db
-from app.models.odepa_price import OdepaPrice
+from app.services.metrics_service import get_odepa_status
 from app.services.odepa_service import list_products, sync_odepa
 
 logger = logging.getLogger(__name__)
@@ -36,17 +35,12 @@ def status(db: Session = Depends(get_db)) -> dict[str, Any]:  # noqa: B008
     publica datos del día anterior, así que si la fecha máxima es de hoy-1
     la sync está al día.
     """
-    total_filas = db.scalar(select(func.count(OdepaPrice.id))) or 0
-    ultima_fecha = db.scalar(select(func.max(OdepaPrice.fecha)))
-    productos = db.scalar(
-        select(func.count(func.distinct(OdepaPrice.producto)))
-    ) or 0
-    mercados = db.scalar(select(func.count(func.distinct(OdepaPrice.mercado)))) or 0
+    s = get_odepa_status(db)
     return {
-        "total_filas": int(total_filas),
-        "ultima_fecha": ultima_fecha.isoformat() if ultima_fecha else None,
-        "productos": int(productos),
-        "mercados": int(mercados),
+        "total_filas": s.total_filas,
+        "ultima_fecha": s.ultima_fecha.isoformat() if s.ultima_fecha else None,
+        "productos": s.productos,
+        "mercados": s.mercados,
     }
 
 
