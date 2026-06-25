@@ -76,7 +76,13 @@ class Settings(BaseSettings):
     piper_voice: str = "es_MX-claude-high"
 
     # ── Admin ────────────────────────────
-    admin_api_key: str = ""
+    # API key para el dashboard admin. Default de dev — validar en prod.
+    admin_api_key: str = "dev-admin-key"
+    # Secreto para firmar cookies de sesión del admin (itsdangerous).
+    # Default de dev — validar en prod.
+    admin_session_secret: str = "agrovoz-dev-session-secret"
+    # Tiempo de vida de la cookie de sesión admin (segundos). 8h por defecto.
+    admin_session_ttl: int = 8 * 60 * 60
 
     # ── Modelos IA (paths) ───────────────
     piper_model_path: str = "models/es_MX-claude-high.onnx"
@@ -211,8 +217,39 @@ class Settings(BaseSettings):
         # OpenMeteo no requiere API key (issue #51).
         # Mantenemos openweathermap_api_key como deprecated por compatibilidad.
 
+    def validate_admin_keys_not_default(self) -> None:
+        """Bloquea arranque en producción si admin_api_key o admin_session_secret son defaults públicos.
+
+        En development/test, los defaults ('dev-admin-key', 'agrovoz-dev-session-secret')
+        son aceptables para no bloquear el arranque local. En production, cualquier
+        valor default o vacío es un riesgo: cualquiera que conozca el repo podría
+        entrar al dashboard o falsificar cookies de sesión.
+        """
+        _default_key = "dev-admin-key"
+        _default_secret = "agrovoz-dev-session-secret"
+
+        for campo, valor, default in [
+            ("ADMIN_API_KEY", self.admin_api_key, _default_key),
+            ("ADMIN_SESSION_SECRET", self.admin_session_secret, _default_secret),
+        ]:
+            if not valor or valor == default:
+                if self.app_env == "production":
+                    raise ValueError(
+                        f"{campo} es el valor default público o está vacío. "
+                        f"Debe setear {campo} con un valor secreto "
+                        "antes de desplegar a producción."
+                    )
+                if self.app_env != "development":
+                    warnings.warn(
+                        f"{campo} es el valor default público o está vacío. "
+                        "Cámbielo antes de desplegar a producción.",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+
 
 settings = Settings()
 settings.validate_webhook_secret_not_default()
 settings.validate_pepper_not_default()
+settings.validate_admin_keys_not_default()
 settings.validate_api_keys_in_dev()

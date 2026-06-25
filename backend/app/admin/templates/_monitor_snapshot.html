@@ -9,14 +9,14 @@
 
   {# ── Recursos del servidor ─────────────────────────── #}
   <div class="card">
-    <p class="card-label" style="margin-bottom:22px">Recursos del servidor — VPS Hetzner CX43 (8 vCPU · 16 GB)</p>
+    <p class="card-label" style="margin-bottom:22px">Recursos del servidor</p>
     <div class="grid-3">
       {# CPU #}
       {% set cpu = snapshot.system.cpu_percent %}
       {% set cpu_cls = 'err' if cpu > 85 else ('warn' if cpu > 70 else '') %}
       <div>
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
-          <div><p style="font-size:14px;font-weight:700">CPU</p><p style="font-size:11px;color:var(--muted)">8 vCPU</p></div>
+          <div><p style="font-size:14px;font-weight:700">CPU</p></div>
           <span style="font-size:26px;font-weight:800;letter-spacing:-.03em">{{ "%.0f"|format(cpu) }}%</span>
         </div>
         <div class="bar"><div class="bar-fill {{ cpu_cls }}" style="width:{{ cpu }}%"></div></div>

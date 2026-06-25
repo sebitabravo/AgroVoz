@@ -64,7 +64,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if scheme == "https":
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
         )
         response.headers["Permissions-Policy"] = "microphone=(), camera=(), geolocation=()"
@@ -93,6 +95,14 @@ def _get_client_ip(request: Request) -> str:
     return "unknown"
 
 
+# Referencia a la instancia activa de RateLimitMiddleware.
+# Se setea en __init__ para que los tests puedan resetear el contador
+# entre ejecuciones: el middleware vive en el singleton `app` y su estado
+# `_requests` persiste entre tests si no se limpia, saturando el contador
+# global cuando la suite completa acumula más de rate_limit_per_minute.
+_active_rate_limiter: "RateLimitMiddleware | None" = None
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Rate limiting básico en memoria (MVP).
 
@@ -107,6 +117,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._requests: dict[str, list[float]] = {}
         self._lock = threading.Lock()
         self._last_cleanup: float = 0.0  # Timestamp de la última limpieza global
+        # Registrar instancia para que los tests puedan resetear el estado.
+        global _active_rate_limiter
+        _active_rate_limiter = self
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         client_ip: str = _get_client_ip(request)
@@ -142,6 +155,20 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             self._requests.setdefault(client_ip, []).append(now)
 
         return await call_next(request)
+
+
+def reset_rate_limiter_for_tests() -> None:
+    """Limpia los contadores del RateLimitMiddleware activo.
+
+    Pensado para tests: el middleware es un singleton dentro de `app` y su
+    estado `_requests` persiste entre tests, lo que satura el contador global
+    cuando la suite completa acumula requests. Igual patrón que
+    `monitor_service.reset_uptime_for_tests`.
+    """
+    if _active_rate_limiter is not None:
+        with _active_rate_limiter._lock:
+            _active_rate_limiter._requests.clear()
+            _active_rate_limiter._last_cleanup = 0.0
 
 
 # ── Validación HMAC de webhooks de Open-WA ──────────────────────

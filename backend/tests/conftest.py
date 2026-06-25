@@ -9,6 +9,13 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+# Forzar construccion del middleware stack al importar conftest para que
+# RateLimitMiddleware.__init__ registre su instancia en _active_rate_limiter.
+# Sin esto, el primer reset_rate_limiter_for_tests() seria no-op (None).
+from app.main import app as _app
+
+_ = _app.middleware_stack
+
 
 @pytest.fixture
 def db(tmp_path: Path) -> Generator[Session, None, None]:
@@ -92,3 +99,19 @@ async def client(tmp_path: Path) -> AsyncGenerator[AsyncClient, None]:
             # otros test files hayan seteado (ej: test_weather_api.py
             # sobreescribe check_weather_rate_limit a nivel de modulo).
             app.dependency_overrides.pop(original_get_db, None)
+
+
+@pytest.fixture(autouse=True)
+def _reset_global_rate_limiter() -> Generator[None, None, None]:
+    """Resetea el RateLimitMiddleware global antes y despues de cada test.
+
+    El middleware vive en el singleton `app` y su estado `_requests` persiste
+    entre tests. Sin reset, la suite completa satura el contador (60/min/IP,
+    todos los tests comparten IP) y los tests que vienen despues reciben 429
+    inesperado (ej: test_rate_limiter espera 30 x 200, test_weather_api).
+    """
+    from app.core.security import reset_rate_limiter_for_tests
+
+    reset_rate_limiter_for_tests()
+    yield
+    reset_rate_limiter_for_tests()

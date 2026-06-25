@@ -15,11 +15,16 @@ from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import Response
 
 from app import __version__
+from app.admin.admin import router as admin_html_router
+from app.admin.auth import AdminAuthMiddleware
+from app.api.admin.metrics import router as admin_metrics_router
+from app.api.admin.odepa_admin import router as admin_odepa_router
 from app.api.health import router as health_router
 from app.api.prices import router as prices_router
 from app.api.weather import router as weather_router
@@ -202,16 +207,28 @@ app = FastAPI(
 #   al rate limiter y la app.
 # - RateLimitMiddleware es el más interno: solo cuenta requests que pasan
 #   todas las validaciones previas (hosts, firma HMAC).
+# AdminAuthMiddleware: innermost. Protege /admin/* (excepto login) con cookie
+# firmada. Va primero (innermost via insert(0)) así TrustedHost, SecurityHeaders
+# y RequestID envuelven incluso los redirects de auth.
+app.add_middleware(AdminAuthMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestIDMiddleware)
+
+# Static files — JS bundles locales (HTMX, Chart.js) + favicon.
+# Montado antes que los routers para que las rutas estáticas tengan prioridad.
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 # Routers
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(prices_router, prefix="/api/v1")
 app.include_router(weather_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
+# Admin — APIs JSON (autenticadas con X-Admin-Key) + dashboard HTML (cookie).
+app.include_router(admin_metrics_router, prefix="/api/v1")
+app.include_router(admin_odepa_router, prefix="/api/v1")
+app.include_router(admin_html_router)  # prefix "/admin" va en el router
 
 
 @app.exception_handler(Exception)

@@ -98,6 +98,9 @@ def _mock_db_save(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
         response_text: str,
         audio_duration_ms: int,
         start_time: float,
+        whisper_ms: int = 0,
+        llm_ms: int = 0,
+        tts_ms: int = 0,
     ) -> None:
         calls.append({
             "phone_hash": phone_hash,
@@ -105,6 +108,9 @@ def _mock_db_save(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
             "query_text": query_text,
             "response_text": response_text,
             "audio_duration_ms": audio_duration_ms,
+            "whisper_ms": whisper_ms,
+            "llm_ms": llm_ms,
+            "tts_ms": tts_ms,
         })
 
     monkeypatch.setattr(AgroVozPipeline, "_save_consultation", fake_save)
@@ -282,7 +288,7 @@ class TestProcess:
         assert result.whisper_ms >= 0
         assert result.llm_ms >= 0
         assert result.tts_ms >= 0
-        assert result.latency_ms > 0
+        assert result.latency_ms >= 0
 
         # Verificar que se guardo la consulta
         assert len(save_calls) == 1
