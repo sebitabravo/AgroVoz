@@ -539,10 +539,13 @@ def get_all_odepa_products(db: Session, days: int = 30) -> list[ProductStat]:
     )
     textos = [t.lower() for (t,) in db.execute(stmt).all()]
 
+    # Cacheamos la lista de productos UNA vez fuera del loop para evitar N+1:
+    # antes se consultaba la DB por cada texto de consulta.
+    productos_cache = list_products(db)
+
     conteos: dict[str, int] = {}
     for texto in textos:
-        productos = list_products(db)
-        for prod in productos:
+        for prod in productos_cache:
             if prod in texto:
                 conteos[prod] = conteos.get(prod, 0) + 1
                 break
@@ -561,8 +564,8 @@ def get_all_odepa_products(db: Session, days: int = 30) -> list[ProductStat]:
         for (prod, cnt, last) in db.execute(stmt_records).all()
     }
 
-    # Retornar TODOS los productos ODEPA ordenados por nombre
-    todos_productos = sorted(list_products(db))
+    # Retornar TODOS los productos ODEPA ordenados por nombre (reusar cache)
+    todos_productos = sorted(productos_cache)
     max_q = max(conteos.values()) if conteos else 1
 
     return [

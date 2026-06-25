@@ -120,6 +120,10 @@ class TestAdminAuthMiddleware:
         assert resp.headers["location"] == "/admin/login"
 
     async def test_ruta_no_admin_no_se_protige(self, client: AsyncClient) -> None:
-        """Paths fuera de /admin/ no tocan la auth middleware."""
-        resp = await client.get("/api/v1/health", follow_redirects=False)
+        """Paths fuera de /admin/ no tocan la auth middleware.
+
+        Usa probe=liveness para que el test sea determinista y no dependa
+        de ffmpeg/DB en CI (ver patron en tests/test_health.py).
+        """
+        resp = await client.get("/api/v1/health?probe=liveness", follow_redirects=False)
         assert resp.status_code == 200

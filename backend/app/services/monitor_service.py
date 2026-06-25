@@ -312,7 +312,10 @@ def reload_llm() -> dict[str, object]:
 
     try:
         llm_service.preload_model()
-    except Exception as exc:
+    except (RuntimeError, OSError) as exc:
+        # preload_model() solo hace Thread.start(); acotamos a lo que puede
+        # lanzar esa llamada en runtime (creacion de thread / OS), sin
+        # tragar programming bugs que deberian propagar.
         return {"status": "error", "detail": f"Error al iniciar carga del LLM: {exc}", "was_loaded": False}
 
     return {"status": "ok", "detail": "Carga del modelo LLM iniciada en segundo plano.", "was_loaded": False}

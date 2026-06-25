@@ -192,8 +192,7 @@ class TestClearWeatherCache:
 
     def test_clear_devuelve_entradas_eliminadas(self) -> None:
         from app.services.monitor_service import clear_weather_cache
-        from app.services.weather_service import _cache_set, _clear_cache
-        from app.services.weather_service import WeatherData
+        from app.services.weather_service import WeatherData, _cache_set, _clear_cache
 
         # Limpiar estado previo.
         _clear_cache()
@@ -219,7 +218,6 @@ class TestClearAudioTempFiles:
     def test_clear_devuelve_cero_si_directorio_no_existe(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path,
     ) -> None:
-        import pathlib
 
         from app.services.monitor_service import clear_audio_temp_files
 
@@ -233,7 +231,6 @@ class TestClearAudioTempFiles:
     def test_clear_elimina_solo_wav_y_ogg(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path,
     ) -> None:
-        import pathlib
 
         from app.services.monitor_service import (
             clear_audio_temp_files,
@@ -262,7 +259,6 @@ class TestClearAudioTempFiles:
     def test_get_audio_temp_count_devuelve_cero_sin_directorio(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path,
     ) -> None:
-        import pathlib
 
         from app.services.monitor_service import get_audio_temp_count
 
@@ -278,8 +274,8 @@ class TestReloadLlm:
     """Recarga del modelo LLM desde el dashboard."""
 
     def test_reload_con_modelo_ya_cargado(self) -> None:
-        from app.services.monitor_service import reload_llm
         from app.services import llm_service
+        from app.services.monitor_service import reload_llm
 
         # Simular modelo ya cargado.
         llm_service._model_loaded = True
@@ -294,8 +290,8 @@ class TestReloadLlm:
             llm_service._model_loaded = False
 
     def test_reload_sin_modelo_dispara_preload(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from app.services.monitor_service import reload_llm
         from app.services import llm_service
+        from app.services.monitor_service import reload_llm
 
         # Asegurar estado: no cargado.
         llm_service._model = None
@@ -317,8 +313,8 @@ class TestReloadLlm:
     def test_reload_limpia_error_previo_y_reintenta(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from app.services.monitor_service import reload_llm
         from app.services import llm_service
+        from app.services.monitor_service import reload_llm
 
         llm_service._model = None
         llm_service._model_loaded = False

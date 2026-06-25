@@ -11,6 +11,7 @@ Cubre:
 """
 
 from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 from httpx import AsyncClient
@@ -162,7 +163,7 @@ class TestMonitorActions:
             queue_depth=0,
         )
 
-    _ACTION_PATHS = [
+    _ACTION_PATHS: ClassVar[list[str]] = [
         "/admin/monitor/reload-llm",
         "/admin/monitor/clear-weather-cache",
         "/admin/monitor/wa-check",
