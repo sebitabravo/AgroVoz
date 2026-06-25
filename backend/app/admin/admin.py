@@ -139,9 +139,9 @@ async def odepa_page(
     request: Request,
     db: Session = Depends(get_db),  # noqa: B008
 ) -> HTMLResponse:
-    """ODEPA: estado de sync, stats, productos con conteo de consultas."""
+    """ODEPA: estado de sync, stats, TODOS los productos con sus registros."""
     status = _odepa_status_dict(db)
-    productos_stats = metrics_service.get_top_products(db, days=30, limit=50)
+    productos_stats = metrics_service.get_all_odepa_products(db, days=30)
     return templates.TemplateResponse(
         request,
         "odepa.html",

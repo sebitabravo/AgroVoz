@@ -525,6 +525,58 @@ def get_audio_avg(db: Session, days: int = 30) -> float:
     return round(avg_ms / 1000, 1) if avg_ms else 0.0
 
 
+def get_all_odepa_products(db: Session, days: int = 30) -> list[ProductStat]:
+    """Todos los productos ODEPA con sus registros y conteo de consultas.
+
+    A diferencia de get_top_products, esta función retorna TODOS los productos
+    disponibles en ODEPA, incluso si no tienen consultas en el período.
+    """
+    # Obtener consultas por producto
+    cutoff = _days_ago(days)
+    stmt = select(Consultation.query_text).where(
+        Consultation.created_at >= cutoff,
+        Consultation.intent == "precio",
+    )
+    textos = [t.lower() for (t,) in db.execute(stmt).all()]
+
+    conteos: dict[str, int] = {}
+    for texto in textos:
+        productos = list_products(db)
+        for prod in productos:
+            if prod in texto:
+                conteos[prod] = conteos.get(prod, 0) + 1
+                break
+
+    # Obtener registros ODEPA y fecha última actualización por producto
+    stmt_records = (
+        select(
+            OdepaPrice.producto,
+            func.count(OdepaPrice.id).label("cnt"),
+            func.max(OdepaPrice.created_at).label("last"),
+        )
+        .group_by(OdepaPrice.producto)
+    )
+    odepa_data: dict[str, tuple[int, str]] = {
+        prod: (cnt, last.isoformat(timespec="seconds") if last else "")
+        for (prod, cnt, last) in db.execute(stmt_records).all()
+    }
+
+    # Retornar TODOS los productos ODEPA ordenados por nombre
+    todos_productos = sorted(list_products(db))
+    max_q = max(conteos.values()) if conteos else 1
+
+    return [
+        ProductStat(
+            name=nombre,
+            queries=conteos.get(nombre, 0),
+            pct=round(conteos.get(nombre, 0) / max_q * 100, 1) if max_q else 0.0,
+            records=odepa_data.get(nombre, (0, ""))[0],
+            updated=odepa_data.get(nombre, (0, ""))[1],
+        )
+        for nombre in todos_productos
+    ]
+
+
 def build_sparkline_paths(values: list[int]) -> tuple[str, str]:
     """Wrapper público de _build_sparkline para uso desde el template/router."""
     return _build_sparkline(values)
