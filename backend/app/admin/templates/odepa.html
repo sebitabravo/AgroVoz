@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}ODEPA · AgroVoz Admin{% endblock %}
+{% block page_title %}ODEPA — Gestión de datos{% endblock %}
+{% block page_meta %}Sync automática diaria 06:00 AM{% endblock %}
+
+{% block content %}
+{# ── Estado de sincronización ──────────────────────────── #}
+{% include "_odepa_status.html" %}
+
+{# ── Productos ODEPA disponibles ─────────────────────────── #}
+<div class="card">
+  <p style="font-size:15px;font-weight:700;letter-spacing:-.015em;margin-bottom:18px">Productos ODEPA disponibles</p>
+  <div style="display:grid;grid-template-columns:1fr 108px 140px 148px;gap:12px;padding-bottom:10px;border-bottom:1px solid #e8e7e0">
+    <span style="font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#7e827a">Producto</span>
+    <span style="font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#7e827a">Registros</span>
+    <span style="font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#7e827a">Consultas (30d)</span>
+    <span style="font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#7e827a">Actualización</span>
+  </div>
+  {% if productos_stats %}
+  {% for p in productos_stats %}
+  <div style="display:grid;grid-template-columns:1fr 108px 140px 148px;gap:12px;padding:10px 0;border-bottom:1px solid #f5f4f0;align-items:center">
+    <div style="display:flex;align-items:center;gap:9px">
+      <span style="width:7px;height:7px;border-radius:50%;background:#4f7d5a;display:inline-block;flex-shrink:0"></span>
+      <span style="font-size:14px;font-weight:500">{{ p.name }}</span>
+    </div>
+    <span style="font-size:13px;color:#7e827a">{{ p.records }}</span>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:13px;font-weight:600;min-width:30px">{{ p.queries }}</span>
+      <div style="flex:1;height:4px;background:#e8e7e0;border-radius:999px;overflow:hidden">
+        <div style="height:100%;background:#4f7d5a;border-radius:999px;width:{{ p.pct }}%"></div>
+      </div>
+    </div>
+    <span style="font-size:13px;color:#7e827a">{{ p.updated[:10] if p.updated else '-' }}</span>
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="notice">Sin productos con consultas en los últimos 30 días.</p>
+  {% endif %}
+</div>
+{% endblock %}
