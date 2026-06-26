@@ -8,7 +8,7 @@ Todos requieren header X-Admin-Key (hmac.compare_digest).
 """
 
 from dataclasses import asdict
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -29,7 +29,7 @@ Limit = Annotated[int, Query(ge=1, le=100, description="Máximo de resultados")]
 
 
 @router.get("/dashboard")
-def dashboard(db: Session = Depends(get_db)) -> dict[str, Any]:  # noqa: B008
+def dashboard(db: Session = Depends(get_db)) -> dict[str, object]:  # noqa: B008
     """KPIs principales: hoy, latencia, tasa de éxito, agricultores activos."""
     kpis = metrics_service.get_dashboard_kpis(db)
     spark_line, spark_fill = metrics_service.build_sparkline_paths(kpis.sparkline)
@@ -43,7 +43,7 @@ def dashboard(db: Session = Depends(get_db)) -> dict[str, Any]:  # noqa: B008
 def daily(
     db: Session = Depends(get_db),  # noqa: B008
     days: Days = 30,
-) -> list[dict[str, Any]]:
+) -> list[dict[str, object]]:
     """Consultas agrupadas por día (sin huecos) para los últimos N días."""
     return [asdict(d) for d in metrics_service.get_daily_counts(db, days=days)]
 
@@ -52,7 +52,7 @@ def daily(
 def latency(
     db: Session = Depends(get_db),  # noqa: B008
     days: Days = 30,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Estadísticos de latencia (avg, p50, p95, p99) en ms."""
     return asdict(metrics_service.get_latency_stats(db, days=days))
 
@@ -61,7 +61,7 @@ def latency(
 def stages(
     db: Session = Depends(get_db),  # noqa: B008
     days: Days = 30,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Desglose de latencia promedio por etapa del pipeline (Whisper/LLM/TTS) en ms."""
     return asdict(metrics_service.get_stage_stats(db, days=days))
 
@@ -70,7 +70,7 @@ def stages(
 def intents(
     db: Session = Depends(get_db),  # noqa: B008
     days: Days = 30,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Distribución de intents (precio, clima, desconocido)."""
     return asdict(metrics_service.get_intent_distribution(db, days=days))
 
@@ -80,7 +80,7 @@ def products(
     db: Session = Depends(get_db),  # noqa: B008
     days: Days = 30,
     limit: Limit = 10,
-) -> list[dict[str, Any]]:
+) -> list[dict[str, object]]:
     """Top productos mencionados en consultas de precio."""
     return [asdict(p) for p in metrics_service.get_top_products(db, days=days, limit=limit)]
 
@@ -90,7 +90,7 @@ def errors(
     db: Session = Depends(get_db),  # noqa: B008
     days: Days = 30,
     limit: Limit = 20,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Tasa de error (intent desconocido) + últimos errores."""
     return asdict(metrics_service.get_error_stats(db, days=days, limit=limit))
 
@@ -100,6 +100,6 @@ def recent(
     db: Session = Depends(get_db),  # noqa: B008
     hours: Annotated[int, Query(ge=1, le=168, description="Horas hacia atrás")] = 24,
     limit: Limit = 20,
-) -> list[dict[str, Any]]:
+) -> list[dict[str, object]]:
     """Consultas más recientes para la tabla del dashboard."""
     return [asdict(r) for r in metrics_service.get_recent_queries(db, hours=hours, limit=limit)]

@@ -16,7 +16,6 @@ rutas /admin/* excepto /admin/login. Acá no repetimos auth.
 import datetime
 import logging
 from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -305,7 +304,7 @@ async def monitor_clear_audio_temp(request: Request) -> HTMLResponse:
 # ── Helpers ─────────────────────────────────────────────────────────
 
 
-def _odepa_status_dict(db: Session) -> dict[str, Any]:
+def _odepa_status_dict(db: Session) -> dict[str, object]:
     """Estado ODEPA para el template: totales + fecha más reciente."""
     from app.services.metrics_service import get_odepa_status
 

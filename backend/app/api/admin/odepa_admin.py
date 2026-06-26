@@ -8,7 +8,6 @@ Todos requieren header X-Admin-Key.
 """
 
 import logging
-from typing import Any
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -28,7 +27,7 @@ router = APIRouter(
 
 
 @router.get("/status")
-def status(db: Session = Depends(get_db)) -> dict[str, Any]:  # noqa: B008
+def status(db: Session = Depends(get_db)) -> dict[str, object]:  # noqa: B008
     """Estado de la data ODEPA: totales, fecha más reciente, cardinalidades.
 
     El campo ``ultima_fecha`` es proxy de la última sync exitosa: ODEPA
@@ -45,7 +44,7 @@ def status(db: Session = Depends(get_db)) -> dict[str, Any]:  # noqa: B008
 
 
 @router.post("/sync")
-async def sync() -> dict[str, Any]:
+async def sync() -> dict[str, object]:
     """Dispara sincronización ODEPA manual (descarga + parseo + upsert).
 
     El scheduler automático corre a las 06:00 AM; este endpoint es para

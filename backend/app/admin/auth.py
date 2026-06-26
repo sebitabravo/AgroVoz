@@ -17,7 +17,7 @@ para APIs JSON programáticas. Acá validamos una cookie de navegador.
 import hmac
 from collections.abc import Awaitable, Callable
 
-from fastapi import Form, Request, Response
+from fastapi import Request, Response
 from fastapi.responses import RedirectResponse
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -97,11 +97,3 @@ class AdminAuthMiddleware(BaseHTTPMiddleware):
             if not verify_session_cookie(cookie):
                 return RedirectResponse("/admin/login", status_code=303)
         return await call_next(request)
-
-
-def parse_login_form(admin_key: str = Form(..., alias="admin_key")) -> str:
-    """Dependencia que extrae admin_key del formulario de login.
-
-    Solo lee el campo; la validación la hace el endpoint contra is_valid_login.
-    """
-    return admin_key
