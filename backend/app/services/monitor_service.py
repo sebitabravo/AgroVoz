@@ -10,6 +10,7 @@ por lo que la profundidad de cola (queue_depth) es siempre 0. Se mantiene
 el campo para compatibilidad con el modo asíncrono futuro.
 """
 
+import asyncio
 import datetime
 import logging
 from dataclasses import dataclass, field
@@ -180,8 +181,10 @@ async def _check_openwa() -> ServiceCheck:
     """Ping a la API de Open-WA para verificar que el gateway WhatsApp responde.
 
     Timeout corto (3s) para no bloquear el dashboard si Open-WA está caído.
-    Cualquier HTTP < 500 se considera operativo (la sesión puede no estar
-    lista pero el servicio corre).
+    Solo HTTP 2xx indica sesión activa: 401/403 significan auth fallida o
+    sesión expirada (QR sin escanear, desconexión WhatsApp Web), y se
+    reportan como fallo para que el equipo reaccione antes de que los
+    mensajes de los agricultores queden sin responder.
     """
     base = settings.openwa_api_url.rstrip("/")
     headers: dict[str, str] = {}
@@ -199,8 +202,12 @@ async def _check_openwa() -> ServiceCheck:
             resp = await client.get(f"{base}/api/sessions", headers=headers)
     except (httpx.HTTPError, OSError) as exc:
         return ServiceCheck("Open-WA", False, f"sin conexión: {exc}")
-    if resp.status_code < 500:
+    if 200 <= resp.status_code < 300:
         return ServiceCheck("Open-WA", True, f":{puerto} · sesión activa")
+    if resp.status_code in (401, 403):
+        return ServiceCheck(
+            "Open-WA", False, f":{puerto} · sesión NO autenticada (HTTP {resp.status_code})"
+        )
     return ServiceCheck("Open-WA", False, f"HTTP {resp.status_code}")
 
 
@@ -214,7 +221,12 @@ async def check_services() -> list[ServiceCheck]:
     Orden de la grilla (3 columnas): pipeline de voz arriba (Whisper, LLM,
     Piper) e infraestructura/datos abajo (SQLite, ODEPA, Open-WA).
     """
-    checks = [_check_whisper(), _check_llm(), _check_tts(), _check_sqlite(), _check_odepa_data()]
+    # _check_sqlite y _check_odepa_data son síncronos (SessionLocal + queries):
+    # delegarlos a un thread evita bloquear el event loop durante el poll de
+    # monitoreo (cada 30s vía HTMX), que compite con requests del pipeline.
+    sqlite_check = await asyncio.to_thread(_check_sqlite)
+    odepa_check = await asyncio.to_thread(_check_odepa_data)
+    checks = [_check_whisper(), _check_llm(), _check_tts(), sqlite_check, odepa_check]
     checks.append(await _check_openwa())
     return checks
 

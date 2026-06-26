@@ -359,3 +359,70 @@ class TestCheckOpenwaNow:
         result = await check_openwa_now()
         assert result["ok"] is False
         assert "timeout" in str(result["detail"])
+
+
+class TestCheckOpenwaHttpStatus:
+    """Regresión P1 (review PR #70): clasificación de status code en _check_openwa.
+
+    Antes, cualquier HTTP < 500 se reportaba como 'sesión activa', lo que
+    enmascaraba 401/403 (auth fallida o sesión de WhatsApp Web expirada y los
+    mensajes de los agricultores quedaban sin responder sin alarma). Solo 2xx
+    es sesión activa; 401/403 y 5xx deben reportarse como fallo.
+    """
+
+    @staticmethod
+    def _fake_async_client(status_code: int) -> type:
+        """AsyncClient fake cuyo get() siempre responde con status_code fijo."""
+
+        class _FakeResp:
+            def __init__(self) -> None:
+                self.status_code = status_code
+
+        class _FakeAsyncClient:
+            def __init__(self, **kwargs: object) -> None:
+                pass
+
+            async def __aenter__(self) -> "_FakeAsyncClient":
+                return self
+
+            async def __aexit__(self, *exc: object) -> None:
+                return None
+
+            async def get(self, url: str, headers: dict[str, str]) -> _FakeResp:
+                return _FakeResp()
+
+        return _FakeAsyncClient
+
+    async def test_2xx_es_sesion_activa(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app.services import monitor_service
+
+        monkeypatch.setattr(monitor_service.httpx, "AsyncClient", self._fake_async_client(200))
+        result = await monitor_service._check_openwa()
+        assert result.ok is True
+        assert "sesión activa" in result.detail
+
+    async def test_401_es_fallo_no_enmascarado(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app.services import monitor_service
+
+        monkeypatch.setattr(monitor_service.httpx, "AsyncClient", self._fake_async_client(401))
+        result = await monitor_service._check_openwa()
+        assert result.ok is False
+        assert "NO autenticada" in result.detail
+        assert "401" in result.detail
+
+    async def test_403_es_fallo_no_enmascarado(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app.services import monitor_service
+
+        monkeypatch.setattr(monitor_service.httpx, "AsyncClient", self._fake_async_client(403))
+        result = await monitor_service._check_openwa()
+        assert result.ok is False
+        assert "NO autenticada" in result.detail
+        assert "403" in result.detail
+
+    async def test_500_es_fallo(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app.services import monitor_service
+
+        monkeypatch.setattr(monitor_service.httpx, "AsyncClient", self._fake_async_client(500))
+        result = await monitor_service._check_openwa()
+        assert result.ok is False
+        assert "HTTP 500" in result.detail
