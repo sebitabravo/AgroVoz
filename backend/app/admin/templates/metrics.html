@@ -136,8 +136,10 @@
 
 {% block scripts %}
 {# JSON con los datos de los charts. type="application/json" NO es ejecutable,
-   asi que el CSP script-src 'self' lo permite. La inicializacion de Chart.js
-   vive en /static/metrics.js. #}
-<script type="application/json" id="metrics-data">{{ chart_json|safe }}</script>
+   asi que el CSP script-src 'self' lo permite. El filtro |tojson de Jinja2
+   escapa < > & para que el JSON no pueda romper el contexto del <script>
+   (defense-in-depth contra XSS si un nombre de producto ODEPA trajera
+   caracteres HTML). La inicializacion de Chart.js vive en /static/metrics.js. #}
+<script type="application/json" id="metrics-data">{{ chart_data|tojson }}</script>
 <script src="/static/metrics.js"></script>
 {% endblock %}

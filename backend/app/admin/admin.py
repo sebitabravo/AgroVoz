@@ -14,7 +14,6 @@ rutas /admin/* excepto /admin/login. Acá no repetimos auth.
 """
 
 import datetime
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -117,10 +116,11 @@ async def metrics_page(
     errores = metrics_service.get_error_stats(db, days=days, limit=15)
     total_30d = metrics_service.get_total_30d(db)
     audio_avg = metrics_service.get_audio_avg(db, days=30)
-    # Datos para los charts de Chart.js: se serializan a JSON y se embeben
-    # en un <script type="application/json"> del template, para que la
-    # inicializacion viva en /static/metrics.js y el CSP mantenga
-    # script-src 'self' (sin 'unsafe-inline').
+    # Datos para los charts de Chart.js: se pasan como dict al template,
+    # que los serializa con el filtro |tojson de Jinja2 (escapa < > & para
+    # que no puedan romper el contexto del <script>). La inicializacion de
+    # Chart.js vive en /static/metrics.js y el CSP mantiene script-src
+    # 'self' (sin 'unsafe-inline').
     chart_data = {
         "diario": {
             "labels": [d.date for d in diario],
@@ -153,7 +153,7 @@ async def metrics_page(
             "errores": errores,
             "total_30d": total_30d,
             "audio_avg": audio_avg,
-            "chart_json": json.dumps(chart_data),
+            "chart_data": chart_data,
             "active_tab": "metrics",
         },
     )
