@@ -277,6 +277,31 @@ class TestProducts:
         assert data[0]["queries"] == 2
         assert data[0]["pct"] == 100.0
 
+    async def test_substring_no_cuenta_papa_en_papaya(
+        self, client: AsyncClient, tmp_path: Path
+    ) -> None:
+        # Regresión (review PR #70): el match era por substring, así una
+        # consulta sobre "papaya" contaba falsamente como "papa" (papa está
+        # antes en orden A-Z y el break se queda con el primero). Ahora usa
+        # word-boundary: cada producto cuenta solo cuando aparece como palabra.
+        with next(_session_test_db(tmp_path)) as db:
+            db.add(OdepaPrice(
+                producto="papa", mercado="X", precio_kg=1,
+                unidad="kg", fecha=datetime.date.today(),
+            ))
+            db.add(OdepaPrice(
+                producto="papaya", mercado="X", precio_kg=1,
+                unidad="kg", fecha=datetime.date.today(),
+            ))
+            db.commit()
+            _consulta(db, intent="precio", query_text="¿cuánto cuesta la papaya?")
+        resp = await client.get(
+            "/api/v1/admin/metrics/products?days=1", headers=_ADMIN_HEADERS
+        )
+        nombres = {p["name"]: p["queries"] for p in resp.json()}
+        assert nombres.get("papaya") == 1
+        assert "papa" not in nombres
+
     async def test_sin_productos_retorna_lista_vacia(
         self, client: AsyncClient
     ) -> None:

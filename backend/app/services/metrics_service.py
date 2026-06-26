@@ -19,6 +19,7 @@ api/admin/metrics.py las serializa a JSON.
 
 import datetime
 import logging
+import re
 from dataclasses import dataclass, field
 
 from sqlalchemy import func, select
@@ -354,10 +355,14 @@ def get_top_products(
     textos = [t.lower() for (t,) in db.execute(stmt).all()]
     productos = list_products(db)
 
+    # Match por word-boundary (no substring): "papa" no debe contar en
+    # "papaya", ni "trigo" en "trigésimo". re.escape por si el nombre trae
+    # caracteres especiales; \b es Unicode-aware en Python 3 (ñ, acentos).
+    patrones = {prod: re.compile(rf"\b{re.escape(prod)}\b") for prod in productos}
     conteos: dict[str, int] = {}
     for texto in textos:
-        for prod in productos:
-            if prod in texto:
+        for prod, patron in patrones.items():
+            if patron.search(texto):
                 conteos[prod] = conteos.get(prod, 0) + 1
                 break  # una consulta cuenta para un solo producto
 
