@@ -28,6 +28,7 @@ from app.admin.auth import (
     is_valid_login,
     set_session_cookie,
 )
+from app.core.config import settings
 from app.core.database import get_db
 from app.services import metrics_service, monitor_service
 
@@ -49,7 +50,12 @@ router = APIRouter(prefix="/admin", include_in_schema=False)
 @router.get("/login")
 async def login_form(request: Request) -> HTMLResponse:
     """Formulario de login. Público (middleware no lo protege)."""
-    return templates.TemplateResponse(request, "login.html", {})
+    # El hint con la key default solo se ve fuera de produccion: en prod
+    # validate_admin_keys_not_default() bloquea el arranque si la key sigue
+    # siendo la default, asi que mostrarla aca seria filtrar credencial.
+    return templates.TemplateResponse(
+        request, "login.html", {"is_dev": settings.app_env != "production"}
+    )
 
 
 @router.post("/login")
@@ -184,7 +190,7 @@ async def monitor_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "monitor.html",
-        {"snapshot": snapshot, "active_tab": "monitor"},
+        {"snapshot": snapshot, "now": _now_ts(), "active_tab": "monitor"},
     )
 
 
@@ -240,7 +246,7 @@ async def monitor_refresh(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "_monitor_snapshot.html",
-        {"snapshot": snapshot},
+        {"snapshot": snapshot, "now": _now_ts()},
     )
 
 
@@ -255,7 +261,7 @@ async def monitor_reload_llm(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "_monitor_snapshot.html",
-        {"snapshot": snapshot, "action_result": result},
+        {"snapshot": snapshot, "now": _now_ts(), "action_result": result},
     )
 
 
@@ -268,7 +274,7 @@ async def monitor_clear_weather_cache(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "_monitor_snapshot.html",
-        {"snapshot": snapshot, "action_result": result},
+        {"snapshot": snapshot, "now": _now_ts(), "action_result": result},
     )
 
 
@@ -280,7 +286,7 @@ async def monitor_wa_check(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "_monitor_snapshot.html",
-        {"snapshot": snapshot, "action_result": wa_result},
+        {"snapshot": snapshot, "now": _now_ts(), "action_result": wa_result},
     )
 
 
@@ -297,11 +303,16 @@ async def monitor_clear_audio_temp(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "_monitor_snapshot.html",
-        {"snapshot": snapshot, "action_result": result},
+        {"snapshot": snapshot, "now": _now_ts(), "action_result": result},
     )
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
+
+
+def _now_ts() -> str:
+    """Timestamp HH:MM:SS para el "Actualizado:" de los partials de monitor."""
+    return datetime.datetime.now().strftime("%H:%M:%S")
 
 
 def _odepa_status_dict(db: Session) -> dict[str, object]:

@@ -7,6 +7,7 @@ import asyncio
 import contextvars
 import datetime
 import logging
+import pathlib
 import re
 import time
 import uuid
@@ -218,7 +219,10 @@ app.add_middleware(RequestIDMiddleware)
 
 # Static files — JS bundles locales (HTMX, Chart.js) + favicon.
 # Montado antes que los routers para que las rutas estáticas tengan prioridad.
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+# Path absoluto (igual que _TEMPLATES_DIR): no depende del CWD desde donde
+# se lanza uvicorn, lo que importa en Docker/systemd con WORKDIR distinto.
+_STATIC_DIR = pathlib.Path(__file__).resolve().parent / "static"
+app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 # Routers
 app.include_router(health_router, prefix="/api/v1")
