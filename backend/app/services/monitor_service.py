@@ -14,6 +14,7 @@ import datetime
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 import psutil
@@ -186,7 +187,13 @@ async def _check_openwa() -> ServiceCheck:
     headers: dict[str, str] = {}
     if settings.openwa_api_key:
         headers["X-API-Key"] = settings.openwa_api_key
-    puerto = base.rsplit(":", 1)[-1] if ":" in base else "?"
+    parsed = urlparse(base)
+    if parsed.port:
+        puerto = str(parsed.port)
+    elif parsed.scheme == "https":
+        puerto = "443"
+    else:
+        puerto = "80"
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(f"{base}/api/sessions", headers=headers)

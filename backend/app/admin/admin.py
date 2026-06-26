@@ -50,11 +50,12 @@ router = APIRouter(prefix="/admin", include_in_schema=False)
 @router.get("/login")
 async def login_form(request: Request) -> HTMLResponse:
     """Formulario de login. Público (middleware no lo protege)."""
-    # El hint con la key default solo se ve fuera de produccion: en prod
-    # validate_admin_keys_not_default() bloquea el arranque si la key sigue
-    # siendo la default, asi que mostrarla aca seria filtrar credencial.
+    # El hint con la key default solo se ve en desarrollo: en prod
+    # validate_admin_keys_not_default() bloquea el arranque con key default,
+    # y en staging/testing solo hace warning, asi que restringirlo a dev evita
+    # filtrar la credencial si staging mantiene la key default.
     return templates.TemplateResponse(
-        request, "login.html", {"is_dev": settings.app_env != "production"}
+        request, "login.html", {"is_dev": settings.app_env == "development"}
     )
 
 
