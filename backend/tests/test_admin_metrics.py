@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import settings
 from app.models.consultation import Consultation
 from app.models.odepa_price import OdepaPrice
+from app.services.metrics_service import _contar_productos_en_textos
 
 _ADMIN_HEADERS = {"X-Admin-Key": settings.admin_api_key}
 
@@ -416,3 +417,35 @@ class TestStages:
         assert data["count"] == 1  # solo la que tiene timing
         assert data["whisper_ms"] == pytest.approx(500.0)
         assert data["total_ms"] == pytest.approx(1500.0)
+
+
+class TestContarProductosEnTextos:
+    """Contrato del helper _contar_productos_en_textos (unitario, sin DB).
+
+    Regresión (review PR #70 run 7): el helper debe ser case-insensitive para
+    no depender del contrato implícito de que callers y list_products()
+    entreguen todo en minúsculas.
+    """
+
+    def test_producto_capitalizado_matchea_texto_lowercased(self) -> None:
+        """Producto 'Papa' (mayúscula) debe contar en 'precio papa' (minúscula)."""
+        conteos = _contar_productos_en_textos(["precio papa"], ["Papa"])
+        assert conteos == {"Papa": 1}
+
+    def test_texto_capitalizado_matchea_producto_lowercased(self) -> None:
+        """Texto 'PRECIO PAPA' debe matchear producto 'papa'."""
+        conteos = _contar_productos_en_textos(["PRECIO PAPA"], ["papa"])
+        assert conteos == {"papa": 1}
+
+    def test_word_boundary_sigue_aplicando(self) -> None:
+        """re.IGNORECASE no relaja el word-boundary: 'papa' no cuenta en 'papaya'."""
+        conteos = _contar_productos_en_textos(["¿cuánto cuesta la papaya?"], ["papa"])
+        assert conteos == {}
+
+    def test_una_consulta_un_producto(self) -> None:
+        """El break hace que una consulta cuente para un solo producto."""
+        conteos = _contar_productos_en_textos(
+            ["precio papa lo valledor"], ["papa", "valledor"]
+        )
+        # 'papa' aparece antes en orden A-Z -> se queda con ese.
+        assert conteos == {"papa": 1}

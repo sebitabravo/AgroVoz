@@ -347,10 +347,17 @@ def _contar_productos_en_textos(textos: list[str], productos: list[str]) -> dict
     especiales; \\b es Unicode-aware en Python 3 (ñ, acentos). Una consulta
     cuenta para el primer producto que matchea (orden A-Z), por eso el break.
 
+    re.IGNORECASE: aunque hoy los callers lowercasean el texto y
+    list_products() ya retorna nombres en minúsculas (vía func.lower), hacer
+    el match case-insensitive vuelve al helper autocontenido — no depende del
+    contrato implícito de que las entradas vengan normalizadas.
+
     Compartido por get_top_products y get_all_odepa_products para que ambas
     vistas del dashboard muestren conteos consistentes.
     """
-    patrones = {prod: re.compile(rf"\b{re.escape(prod)}\b") for prod in productos}
+    patrones = {
+        prod: re.compile(rf"\b{re.escape(prod)}\b", re.IGNORECASE) for prod in productos
+    }
     conteos: dict[str, int] = {}
     for texto in textos:
         for prod, patron in patrones.items():
