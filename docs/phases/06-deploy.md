@@ -15,7 +15,7 @@ Deben quedar productivos y accesibles vía `https://agrovoz.cl` (landing) y `htt
 ### T6.1: Provisioning del VPS Hetzner + Dokploy
 
 - [ ] Contratar VPS Hetzner CX43 (8 vCPU, 16 GB RAM, 160 GB SSD, Ubuntu 24.04 LTS)
-- [ ] Crear `scripts/provision-vps.sh`:
+- [x] Crear `scripts/provision-vps.sh` (hecho — branch fix/mvp-prod-readiness):
   ```bash
   #!/bin/bash
   # Provisioning inicial del VPS Hetzner para AgroVoz con Dokploy
@@ -76,7 +76,7 @@ Deben quedar productivos y accesibles vía `https://agrovoz.cl` (landing) y `htt
 
 ### T6.2: Docker Compose para Dokploy
 
-- [ ] Crear `docker-compose.prod.yml` en raíz del proyecto:
+- [x] Crear `docker-compose.prod.yml` en raíz del proyecto (hecho):
   ```yaml
   services:
     backend:
@@ -136,7 +136,7 @@ Deben quedar productivos y accesibles vía `https://agrovoz.cl` (landing) y `htt
     dokploy-network:
       external: true               # Red externa creada por Dokploy
   ```
-- [ ] Crear `.env.production.example`:
+- [x] Crear `.env.production.example` (hecho):
   ```
   # AgroVoz — Variables de entorno PRODUCCIÓN
   # Copiar a .env.production en el VPS: cp .env.production.example .env.production
@@ -208,8 +208,8 @@ Deben quedar productivos y accesibles vía `https://agrovoz.cl` (landing) y `htt
 
 ### T6.4: CI/CD como quality gate (deploy por Dokploy)
 
-- [ ] NO crear workflow `deploy.yml` — Dokploy hace auto-deploy en cada push a `main`
-- [ ] `.github/workflows/ci.yml` ya existe como quality gate:
+- [x] NO crear workflow `deploy.yml` — Dokploy hace auto-deploy en cada push a `main`
+- [x] `.github/workflows/ci.yml` ya existe como quality gate:
   - Lint (ruff), type check (mypy), tests (pytest) para backend
   - Build check para landing
   - Compose config check
@@ -222,7 +222,7 @@ Deben quedar productivos y accesibles vía `https://agrovoz.cl` (landing) y `htt
 
 ### T6.5: Script de smoke test
 
-- [ ] Crear `scripts/smoke-test.sh`:
+- [x] Crear `scripts/smoke-test.sh` (hecho):
   ```bash
   #!/bin/bash
   # Smoke test post-deploy: verifica que todo el pipeline responde
@@ -321,3 +321,31 @@ docker-compose.prod.yml       (NUEVO)
 - **Base de datos SQLite**: está en volumen `backend_data`. Backup simple: `scp ubuntu@vps:/opt/agrovoz/data/agrovoz.db ./backups/`. Agregar cron de backup diario.
 - **Monitoreo**: para MVP basta con dashboard Dokploy + health check. Post-MVP: UptimeRobot gratuito monitoreando `/api/v1/health`.
 - **Landing en Cloudflare Pages**: alternativa más simple que Dokploy static si el equipo prefiere CF para frontend (CDN global, cache, preview deployments).
+
+---
+
+## Estado de implementación
+
+**Parte automatizable completada.** Lo que requiere VPS real queda pendiente (trabajo manual de infra).
+
+### Hecho (verificado contra `main` + branch `fix/mvp-prod-readiness`)
+
+- `scripts/provision-vps.sh` commiteado + ejecutable (T6.1). Idempotente.
+- `scripts/smoke-test.sh` commiteado + ejecutable (T6.5).
+- `docker-compose.prod.yml` completo: secrets vía Dokploy, `expose` (no `ports`), red externa `dokploy-network`, healthchecks, resource limits, `cap_drop: ALL`, `no-new-privileges`, `read_only` (T6.2).
+- `.env.production.example` completo: todas las variables que el compose referencia, incluyendo `PHONE_HASH_PEPPER` (fix branch) y puerto Open-WA 2785 correcto.
+- `.github/workflows/ci.yml` como quality gate (T6.4).
+
+### Pendiente (requiere VPS Hetzner + acceso manual)
+
+- [ ] Contratar VPS Hetzner CX43.
+- [ ] Ejecutar `provision-vps.sh` en el VPS.
+- [ ] Configurar DNS: `agrovoz.cl` y `api.agrovoz.cl` → IP del VPS.
+- [ ] Primer setup Dokploy (`http://<vps-ip>:3000`), crear cuenta admin.
+- [ ] Configurar secrets en Dokploy (vault): `OPENWA_API_KEY`, `OPENWA_WEBHOOK_SECRET`, `ADMIN_API_KEY`, `ADMIN_SESSION_SECRET`, `PHONE_HASH_PEPPER`.
+- [ ] Crear apps en Dokploy (`agrovoz-backend` compose + landing static/CF Pages).
+- [ ] Escanear QR de Open-WA vía SSH tunnel (`ssh -L 2886:localhost:2886 ...`).
+- [ ] Smoke test contra `https://api.agrovoz.cl` y `https://agrovoz.cl`.
+- [ ] Pin de digest SHA256 de la imagen Open-WA (`:latest` → `@sha256:...`) después del primer pull (supply chain hardening, marcado como `⚠️ PENDIENTE` en el compose).
+
+> Estos pasos no son automatizables desde el repo: requieren acceso al panel de Hetzner, al dashboard de Dokploy, y un teléfono físico para el QR de WhatsApp.

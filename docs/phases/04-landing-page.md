@@ -117,3 +117,15 @@ landing/
         ├── TeamCard.astro
         └── ContactForm.astro
 ```
+
+---
+
+## Estado de implementación
+
+**Fase completada.** Verificado contra `main` (PR #57 landing, PR #66 migración Astro 7 + Tailwind 4.3). Desviaciones respecto al spec:
+
+- **Astro 7 + Tailwind 4.3**: migrado desde Astro 5 (PR #66). `compressHTML: true`.
+- **Componentes extra**: además de los 8 del spec, hay `DemoPhone.astro`, `PlanCard.astro`, `Waveform.astro` (10 componentes total).
+- **Sin Google Fonts**: system-ui confirmado.
+- **Icons Lucide**: SVG inline confirmado.
+- **Build**: `bun run build` genera `dist/` sin errores (391ms, 1 página). Playwright verificó 0 console errors.

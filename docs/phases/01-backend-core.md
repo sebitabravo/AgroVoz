@@ -144,3 +144,15 @@ backend/tests/
 ├── test_weather_service.py
 └── test_api.py
 ```
+
+---
+
+## Estado de implementación
+
+**Fase completada.** Verificado contra `main`. Desviaciones respecto al spec:
+
+- **Weather migrado a OpenMeteo** (issue #51): `weather_service.py` consulta OpenMeteo (sin API key) en vez de OpenWeatherMap. `OPENWEATHERMAP_API_KEY` queda como deprecated por compatibilidad. Rate limit interno sigue activo.
+- **Cron ODEPA embebido**: además del script `sync_odepa.py` standalone, el scheduler corre como tarea de fondo del lifespan de FastAPI (`_odepa_scheduler` en `main.py`), sin depender de crontab externo.
+- **ODEPA URL real 2026**: `odepa_csv_url` apunta al CSV anual publicado por ODEPA (fix `bd1d8db`). Sincroniza todos los productos (`odepa_productos="*"`), no solo papa.
+- **Fixture**: `odepa_sample.csv` en `backend/tests/fixtures/` confirmado.
+- **Tests**: `test_database.py`, `test_odepa_service.py`, `test_sync_odepa.py`, `test_weather_service.py`, `test_prices_api.py`, `test_weather_api.py`, `test_health.py`.
