@@ -105,12 +105,20 @@ def _check_whisper() -> ServiceCheck:
 def _check_llm() -> ServiceCheck:
     """Verifica el estado del modelo LLM (Qwen2.5-3B) leyendo las variables de módulo."""
     # Import local: llm_service importa llama_cpp (pesado) solo al usar.
-    from app.services import llm_service
-
-    if llm_service._model is not None and llm_service._model_loaded:
+    # try/except por simetría con _check_whisper/_check_tts: si un refactor
+    # renombra los attrs privados (_model, _model_loaded, _model_error) o
+    # llama_cpp no está instalado, reportamos fallo del check en vez de
+    # tirar toda la página de monitor (que se polled cada 30s vía HTMX).
+    try:
+        from app.services import llm_service
+        loaded = llm_service._model is not None and llm_service._model_loaded
+        error = llm_service._model_error
+    except (AttributeError, ImportError) as exc:
+        return ServiceCheck("LLM Qwen 2.5", False, f"error: {exc}")
+    if loaded:
         return ServiceCheck("LLM Qwen 2.5", True, "3B Q4 · en memoria")
-    if llm_service._model_error:
-        return ServiceCheck("LLM Qwen 2.5", False, llm_service._model_error)
+    if error:
+        return ServiceCheck("LLM Qwen 2.5", False, error)
     return ServiceCheck("LLM Qwen 2.5", False, "lazy (sin cargar)")
 
 

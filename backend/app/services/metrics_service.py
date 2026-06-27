@@ -339,6 +339,27 @@ def get_intent_distribution(db: Session, days: int = _DEFAULT_WINDOW_DAYS) -> In
     )
 
 
+def _contar_productos_en_textos(textos: list[str], productos: list[str]) -> dict[str, int]:
+    """Cuenta cuántas consultas mencionan cada producto ODEPA (una por consulta).
+
+    Match por word-boundary (no substring): 'papa' no cuenta en 'papaya', ni
+    'trigo' en 'trigésimo'. re.escape por si el nombre trae caracteres
+    especiales; \\b es Unicode-aware en Python 3 (ñ, acentos). Una consulta
+    cuenta para el primer producto que matchea (orden A-Z), por eso el break.
+
+    Compartido por get_top_products y get_all_odepa_products para que ambas
+    vistas del dashboard muestren conteos consistentes.
+    """
+    patrones = {prod: re.compile(rf"\b{re.escape(prod)}\b") for prod in productos}
+    conteos: dict[str, int] = {}
+    for texto in textos:
+        for prod, patron in patrones.items():
+            if patron.search(texto):
+                conteos[prod] = conteos.get(prod, 0) + 1
+                break
+    return conteos
+
+
 def get_top_products(
     db: Session, days: int = _DEFAULT_WINDOW_DAYS, limit: int = 10
 ) -> list[ProductStat]:
@@ -355,16 +376,7 @@ def get_top_products(
     textos = [t.lower() for (t,) in db.execute(stmt).all()]
     productos = list_products(db)
 
-    # Match por word-boundary (no substring): "papa" no debe contar en
-    # "papaya", ni "trigo" en "trigésimo". re.escape por si el nombre trae
-    # caracteres especiales; \b es Unicode-aware en Python 3 (ñ, acentos).
-    patrones = {prod: re.compile(rf"\b{re.escape(prod)}\b") for prod in productos}
-    conteos: dict[str, int] = {}
-    for texto in textos:
-        for prod, patron in patrones.items():
-            if patron.search(texto):
-                conteos[prod] = conteos.get(prod, 0) + 1
-                break  # una consulta cuenta para un solo producto
+    conteos = _contar_productos_en_textos(textos, productos)
 
     # Obtener registros ODEPA y fecha última actualización por producto
     stmt_records = (
@@ -563,12 +575,7 @@ def get_all_odepa_products(db: Session, days: int = 30) -> list[ProductStat]:
     # antes se consultaba la DB por cada texto de consulta.
     productos_cache = list_products(db)
 
-    conteos: dict[str, int] = {}
-    for texto in textos:
-        for prod in productos_cache:
-            if prod in texto:
-                conteos[prod] = conteos.get(prod, 0) + 1
-                break
+    conteos = _contar_productos_en_textos(textos, productos_cache)
 
     # Obtener registros ODEPA y fecha última actualización por producto
     stmt_records = (
