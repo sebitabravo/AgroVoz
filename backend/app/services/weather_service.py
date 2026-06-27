@@ -155,6 +155,22 @@ def _clear_cache() -> None:
     _cache.clear()
 
 
+def clear_weather_cache() -> int:
+    """Limpia el cache de clima en memoria. Retorna el número de entradas eliminadas.
+
+    Función pública para el dashboard admin. No requiere parámetros:
+    el cache es global al módulo.
+    """
+    count = len(_cache)
+    _cache.clear()
+    return count
+
+
+def weather_cache_size() -> int:
+    """Retorna el número de entradas activas en el cache de clima."""
+    return len(_cache)
+
+
 async def _get_http_client() -> httpx.AsyncClient:
     """Devuelve un AsyncClient compartido con connection pooling.
 

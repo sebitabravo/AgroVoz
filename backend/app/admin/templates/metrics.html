@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Métricas · AgroVoz Admin{% endblock %}
+{% block page_title %}Métricas{% endblock %}
+{% block page_meta %}Ventana: {{ days }} días{% endblock %}
+
+{% block head_scripts %}
+{{ super() }}
+<script src="/static/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+{# ── Consultas por período ──────────────────────────── #}
+<div style="background:#fff;border:1px solid #e8e7e0;border-radius:16px;padding:24px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px">
+    <div>
+      <p style="font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#7e827a;margin-bottom:6px">Consultas por período</p>
+      <p style="font-size:28px;font-weight:800;letter-spacing:-.03em;line-height:1">{{ diario|map(attribute='count')|sum }}</p>
+      <p style="font-size:12px;color:#7e827a;margin-top:4px">consultas en el período</p>
+    </div>
+    <div style="display:flex;gap:5px;align-items:center">
+      {% set btn_cls = "padding:6px 13px;background:#fff;color:#7e827a;border:1.5px solid #e8e7e0;border-radius:999px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit" %}
+      {% set btn_active = "background:#1c1e1a;color:#fff;border:none" %}
+      <a href="/admin/metrics?days=1" style="text-decoration:none;{{ btn_cls }};{{ btn_active if days == 1 else '' }}">24h</a>
+      <a href="/admin/metrics?days=7" style="text-decoration:none;{{ btn_cls }};{{ btn_active if days == 7 else '' }}">7d</a>
+      <a href="/admin/metrics?days=30" style="text-decoration:none;{{ btn_cls }};{{ btn_active if days == 30 else '' }}">30d</a>
+    </div>
+  </div>
+  <div style="height:200px;position:relative">
+    <canvas id="chart-daily"></canvas>
+  </div>
+</div>
+
+{# ── Intents + Productos ─────────────────────────────── #}
+<div style="display:grid;grid-template-columns:288px 1fr;gap:18px">
+  {# Intents #}
+  <div style="background:#fff;border:1px solid #e8e7e0;border-radius:16px;padding:24px">
+    <p style="font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#7e827a;margin-bottom:20px">Distribución de intents</p>
+    <div style="height:160px;position:relative;margin-bottom:18px">
+      <canvas id="chart-intents"></canvas>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="display:flex;align-items:center;gap:7px"><span style="width:9px;height:9px;border-radius:2px;background:#4f7d5a;display:inline-block"></span><span style="font-size:13px">Precio</span></div>
+        <span style="font-size:13px;font-weight:700">{{ "%.0f"|format(intents.precio / (intents.precio + intents.clima + intents.desconocido) * 100) if (intents.precio + intents.clima + intents.desconocido) > 0 else 0 }}%</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="display:flex;align-items:center;gap:7px"><span style="width:9px;height:9px;border-radius:2px;background:#2a5f90;display:inline-block"></span><span style="font-size:13px">Clima</span></div>
+        <span style="font-size:13px;font-weight:700">{{ "%.0f"|format(intents.clima / (intents.precio + intents.clima + intents.desconocido) * 100) if (intents.precio + intents.clima + intents.desconocido) > 0 else 0 }}%</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="display:flex;align-items:center;gap:7px"><span style="width:9px;height:9px;border-radius:2px;background:#c8c7bf;display:inline-block"></span><span style="font-size:13px">Desconocido</span></div>
+        <span style="font-size:13px;font-weight:700">{{ "%.0f"|format(intents.desconocido / (intents.precio + intents.clima + intents.desconocido) * 100) if (intents.precio + intents.clima + intents.desconocido) > 0 else 0 }}%</span>
+      </div>
+    </div>
+  </div>
+  {# Productos #}
+  <div style="background:#fff;border:1px solid #e8e7e0;border-radius:16px;padding:24px">
+    <p style="font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#7e827a;margin-bottom:20px">Top {{ productos|length }} productos consultados</p>
+    {% if productos %}
+    <div style="height:226px;position:relative">
+      <canvas id="chart-products"></canvas>
+    </div>
+    {% else %}
+    <div style="height:226px;display:grid;place-items:center"><span class="muted">Sin consultas de precio en el período</span></div>
+    {% endif %}
+  </div>
+</div>
+
+{# ── Latencia del pipeline ────────────────────────────── #}
+<div style="background:#fff;border:1px solid #e8e7e0;border-radius:16px;padding:24px">
+  <p style="font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#7e827a;margin-bottom:20px">Latencia del pipeline de voz</p>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#e8e7e0;border-radius:12px;overflow:hidden;margin-bottom:14px">
+    <div style="background:#fff;padding:18px 22px;text-align:center">
+      <p style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#7e827a;margin-bottom:8px">Promedio</p>
+      <p style="font-size:30px;font-weight:800;letter-spacing:-.03em">{{ "%.1f"|format(latencia.avg / 1000) }}s</p>
+    </div>
+    <div style="background:#fff;padding:18px 22px;text-align:center">
+      <p style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#7e827a;margin-bottom:8px">p50</p>
+      <p style="font-size:30px;font-weight:800;letter-spacing:-.03em">{{ "%.1f"|format(latencia.p50 / 1000) }}s</p>
+    </div>
+    <div style="background:#fff;padding:18px 22px;text-align:center">
+      <p style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#7e827a;margin-bottom:8px">p95</p>
+      <p style="font-size:30px;font-weight:800;letter-spacing:-.03em">{{ "%.1f"|format(latencia.p95 / 1000) }}s</p>
+    </div>
+    <div style="background:#fff;padding:18px 22px;text-align:center">
+      <p style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#7e827a;margin-bottom:8px">p99</p>
+      <p style="font-size:30px;font-weight:800;letter-spacing:-.03em">{{ "%.1f"|format(latencia.p99 / 1000) }}s</p>
+    </div>
+  </div>
+  {# Tarjetas extra: tasa error, audio promedio, total 30d #}
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+    <div style="background:#FBFAF7;border-radius:10px;padding:16px 18px">
+      <p style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#7e827a;margin-bottom:6px">Tasa de error</p>
+      <p style="font-size:24px;font-weight:800;letter-spacing:-.025em">{{ "%.1f"|format(errores.rate * 100) }}%</p>
+      <p style="font-size:12px;color:#7e827a;margin-top:3px">{{ errores.total_errors }} errores / {{ errores.total_queries }} consultas</p>
+    </div>
+    <div style="background:#FBFAF7;border-radius:10px;padding:16px 18px">
+      <p style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#7e827a;margin-bottom:6px">Total (30 días)</p>
+      <p style="font-size:24px;font-weight:800;letter-spacing:-.025em">{{ total_30d }}</p>
+      <p style="font-size:12px;color:#7e827a;margin-top:3px">consultas procesadas</p>
+    </div>
+    <div style="background:#FBFAF7;border-radius:10px;padding:16px 18px">
+      <p style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#7e827a;margin-bottom:6px">Audio promedio</p>
+      <p style="font-size:24px;font-weight:800;letter-spacing:-.025em">{{ "%.1f"|format(audio_avg) }}s</p>
+      <p style="font-size:12px;color:#7e827a;margin-top:3px">duración de mensajes de entrada</p>
+    </div>
+  </div>
+</div>
+
+{# ── Últimos errores ──────────────────────────────────── #}
+<div style="background:#fff;border:1px solid #e8e7e0;border-radius:16px;padding:24px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
+    <p style="font-size:15px;font-weight:700;letter-spacing:-.015em">Últimos errores</p>
+    <span style="font-size:12px;color:#7e827a">intent = desconocido · últimos 20</span>
+  </div>
+  {% if errores.recent %}
+  <div style="display:grid;grid-template-columns:140px 1fr 1fr 80px;gap:12px;padding-bottom:10px;border-bottom:1px solid #e8e7e0">
+    <span style="font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#7e827a">Timestamp</span>
+    <span style="font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#7e827a">Consulta</span>
+    <span style="font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#7e827a">Respuesta</span>
+    <span style="font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#7e827a">Latencia</span>
+  </div>
+  {% for e in errores.recent %}
+  <div style="display:grid;grid-template-columns:140px 1fr 1fr 80px;gap:12px;padding:10px 0;border-bottom:1px solid #f5f4f0;align-items:start">
+    <span style="font-size:11px;color:#7e827a;font-weight:500">{{ e.ts }}</span>
+    <span style="font-size:12px;color:#1c1e1a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ e.query }}</span>
+    <span style="font-size:12px;color:#7e827a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-style:italic">{{ e.response }}</span>
+    <span style="font-size:12px;font-weight:600;color:#c05252">{{ e.latency_ms }}ms</span>
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="notice">Sin errores registrados en el período.</p>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{# JSON con los datos de los charts. type="application/json" NO es ejecutable,
+   asi que el CSP script-src 'self' lo permite. El filtro |tojson de Jinja2
+   escapa < > & para que el JSON no pueda romper el contexto del <script>
+   (defense-in-depth contra XSS si un nombre de producto ODEPA trajera
+   caracteres HTML). La inicializacion de Chart.js vive en /static/metrics.js. #}
+<script type="application/json" id="metrics-data">{{ chart_data|tojson }}</script>
+<script src="/static/metrics.js"></script>
+{% endblock %}

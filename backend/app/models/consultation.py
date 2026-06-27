@@ -42,6 +42,13 @@ class Consultation(Base):
     response_text: Mapped[str] = mapped_column(Text, nullable=False)
     audio_duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Desglose de latencia por etapa del pipeline (ms). Se persisten para
+    # metricas historicas (dashboard admin). default=0 para no romper
+    # registros creados antes de esta migracion ni consultas donde la
+    # etapa fallo (ej: tts_ms=0 si TTS no corrio).
+    whisper_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    llm_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tts_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
 
     def __repr__(self) -> str:
