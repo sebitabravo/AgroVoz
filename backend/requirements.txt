@@ -2,10 +2,10 @@
 # Versiones exactas sincronizadas con uv.lock.
 # Para desarrollo usar: uv sync --extra dev
 
-fastapi==0.137.2
+fastapi==0.138.0
 uvicorn[standard]==0.49.0
 sqlalchemy==2.0.51
-alembic==1.18.4
+alembic==1.18.5
 pydantic-settings==2.14.2
 httpx==0.28.1
 openai-whisper==20250625
