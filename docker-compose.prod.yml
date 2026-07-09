@@ -37,6 +37,10 @@ services:
       - OPENWA_API_URL=http://openwa:2785
       - OPENWEATHERMAP_API_KEY=${OPENWEATHERMAP_API_KEY}
       - ADMIN_API_KEY=${ADMIN_API_KEY}
+      # Secret para firmar cookies de sesión del dashboard SSR (itsdangerous).
+      # Sin esto el backend arranca con default y validate_admin_keys_not_default
+      # bloquea el arranque en producción.
+      - ADMIN_SESSION_SECRET=${ADMIN_SESSION_SECRET}
       # ── Modelos IA (paths dentro del contenedor) ──
       - WHISPER_MODEL=${WHISPER_MODEL:-small}
       - LLM_MODEL_PATH=${LLM_MODEL_PATH:-/app/models/qwen2.5-3b-q4_k_m.gguf}

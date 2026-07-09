@@ -197,3 +197,15 @@ AgroVoz/
 
 > **Nota**: Archivos marcados "YA EXISTE" fueron creados en el setup inicial del proyecto.
 > NO se recrean. Solo verificar que estén correctos.
+
+---
+
+## Estado de implementación
+
+**Fase completada.** Verificado contra `main`. Desviaciones respecto al spec:
+
+- **Modelo ODEPA**: se llama `odepa_price.py` (no `odepa.py`), clase `OdepaPrice`. Más explícito que el spec original.
+- **Scripts de backend**: `scripts/` trae `create_db.py`, `download_models.sh`, `entrypoint.sh`, `eval_wer.py`, `seed_demo_data.py`.
+- **CI/CD**: `.github/workflows/` con `ci.yml` y `pr-check.yml` reales (no `.gitkeep`).
+- **Raíz `scripts/`**: `smoke-test.sh` + `provision-vps.sh` commiteados.
+- **Migraciones**: 5 revisiones Alembic (`c9acd3385f90_initial` → `8f2a4c7e1d90_add_consultation_stage_timing`).

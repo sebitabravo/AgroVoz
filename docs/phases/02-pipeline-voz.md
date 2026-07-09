@@ -159,3 +159,17 @@ backend/tests/
 └── fixtures/
     └── sample_query.ogg
 ```
+
+---
+
+## Estado de implementación
+
+**Fase completada.** Verificado contra `main` (PR #51 — Qwen2.5-3B Q4 + Tool Calling). Desviaciones respecto al spec:
+
+- **Audio utils**: se llama `audio_service.py` (no `audio_utils.py`). Misma responsabilidad (convert/duration/validate con ffmpeg).
+- **LLM**: Qwen2.5-3B-Instruct Q4_K_M vía llama-cpp-python con **Tool Calling real** (no keyword matching). Whitelist de tools: `get_price`, `get_weather`. PR #51 mergeado.
+- **Stage timing**: migración `8f2a4c7e1d90` agrega `whisper_ms`/`llm_ms`/`tts_ms` a `Consultation` para desglose de latencia por etapa.
+- **Descarga de modelos**: `scripts/download_models.sh` + `scripts/entrypoint.sh` idempotente (descarga Whisper/Qwen GGUF/Piper ONNX al arranque si no están). PR #64.
+- **Preload LLM**: el lifespan precarga el modelo LLM en background para evitar cold start en el primer request.
+- **Fixture**: `sample_query.ogg` en `backend/tests/fixtures/` confirmado.
+- **Tests**: `test_whisper_service.py`, `test_llm_service.py`, `test_tts_service.py`, `test_pipeline_service.py`, `test_pipeline_e2e.py`, `test_tts_benchmark.py`.

@@ -196,3 +196,17 @@ docker-compose.yml         (modificado: +servicio openwa +volumen)
 docs/
 └── DEV-GUIDE.md           (NUEVO)
 ```
+
+---
+
+## Estado de implementación
+
+**Fase completada.** Verificado contra `main`. Desviaciones respecto al spec:
+
+- **Phone hashing**: además de validar firma HMAC del webhook, los números se anonimizan con HMAC-SHA256 + pepper (`phone_hash.py`). Pepper validado en arranque prod (`validate_pepper_not_default`).
+- **Rate limiting**: middleware global `RateLimitMiddleware` (no solo por número). Reset entre tests vía `reset_rate_limiter_for_tests()` en `conftest.py`.
+- **Security headers + TrustedHost**: además de HMAC, hay `SecurityHeadersMiddleware` y `TrustedHostMiddleware`.
+- **Request ID**: `RequestIDMiddleware` inyecta `X-Request-ID` en cada request para trazabilidad en logs.
+- **Fixture**: `openwa_webhook_payload.json` en `backend/tests/fixtures/` confirmado.
+- **Docs**: `docs/DEV-GUIDE.md` confirmado.
+- **Tests**: `test_webhook.py`, `test_openwa_service.py`, `test_security.py`, `test_rate_limiter.py`.
