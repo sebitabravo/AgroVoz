@@ -43,7 +43,8 @@ class TestConstantes:
     def test_system_prompt_contiene_reglas_estrictas(self) -> None:
         """El system prompt debe contener las 6 reglas del issue #18."""
         assert "REGLAS ESTRICTAS" in SYSTEM_PROMPT
-        assert "Tienes DOS herramientas" in SYSTEM_PROMPT
+        assert "Tienes TRES herramientas" in SYSTEM_PROMPT
+        assert "get_price_history" in SYSTEM_PROMPT
         assert "NUNCA das recomendaciones" in SYSTEM_PROMPT
         assert "NUNCA inventas precios" in SYSTEM_PROMPT
         assert "español chileno" in SYSTEM_PROMPT
@@ -60,13 +61,16 @@ class TestConstantes:
         assert len(NO_RESPONSE_TEXT) > 10
         assert "reformular" in NO_RESPONSE_TEXT.lower()
 
-    def test_whitelist_solo_dos_tools(self) -> None:
-        """La whitelist solo permite get_price y get_weather."""
-        assert frozenset({"get_price", "get_weather"}) == WHITELIST_TOOLS
+    def test_whitelist_solo_tres_tools(self) -> None:
+        """La whitelist solo permite get_price, get_price_history y get_weather."""
+        assert (
+            frozenset({"get_price", "get_price_history", "get_weather"})
+            == WHITELIST_TOOLS
+        )
 
     def test_tools_definition_formato_openai(self) -> None:
         """Las tool definitions siguen el formato OpenAI function-calling."""
-        assert len(TOOLS) == 2
+        assert len(TOOLS) == 3
         for tool in TOOLS:
             assert tool["type"] == "function"
             fn = tool["function"]

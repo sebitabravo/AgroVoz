@@ -5,8 +5,9 @@ Singleton con lazy loading: el modelo se carga en la primera llamada,
 no al importar el modulo.
 
 Tools disponibles (whitelist):
-  - get_price(producto, mercado) -> odepa_service.get_price_for_llm()
-  - get_weather(lat, lon)     -> weather_service.get_weather()
+  - get_price(producto, mercado)       -> odepa_service.get_price_for_llm()
+  - get_price_history(producto, dias)  -> odepa_service.get_price_history_for_llm()
+  - get_weather(lat, lon)              -> weather_service.get_weather()
 
 Si el LLM intenta usar cualquier otra tool, se responde con texto
 de fallback. Si no entiende la query, pide reformular.
@@ -39,15 +40,19 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = (
     "Eres AgroVoz, un asistente de voz para pequeños agricultores chilenos.\n"
     "REGLAS ESTRICTAS:\n"
-    "1. Tienes DOS herramientas. USA LA CORRECTA:\n"
-    "   - get_price(producto, mercado): para consultar PRECIOS de productos agrícolas ODEPA.\n"
+    "1. Tienes TRES herramientas. USA LA CORRECTA:\n"
+    "   - get_price(producto, mercado): para consultar PRECIOS ACTUALES de productos agrícolas ODEPA.\n"
+    "   - get_price_history(producto, dias): para PRECIOS PASADOS y cómo ha variado el precio.\n"
     "   - get_weather(lat, lon): para consultar CLIMA (temperatura, lluvia, viento).\n"
     "2. La consulta PUEDE ser de precio, clima, o AMBAS. Determina cual es segun:\n"
     "   - PRECIO: si menciona precio, cuánto, cuesta, vale, kilo, saco, malla, pesos,\n"
     "     luca, o cualquier producto agrícola (papa, tomate, cebolla, lechuga, etc.)\n"
+    "   - PRECIO PASADO: si pregunta cuánto ESTABA, la semana pasada, ayer, hace días,\n"
+    "     si subió o bajó -> get_price_history\n"
     "   - CLIMA: si menciona clima, tiempo, temperatura, lluvia, lloviendo, pronóstico,\n"
     "     frío, calor, humedad, viento\n"
     "   Ejemplos: \"a cuánto está la papa\" -> get_price\n"
+    "             \"a cuánto estaba la papa la semana pasada\" -> get_price_history\n"
     "             \"cómo está el tiempo mañana\" -> get_weather\n"
     "             \"a cuánto la papa y cómo viene el clima\" -> AMBAS tools\n"
     "3. SIEMPRE intenta usar una herramienta antes de pedir reformulación.\n"
@@ -68,7 +73,7 @@ FALLBACK_TEXT = (
 NO_RESPONSE_TEXT = "No entendí tu consulta. ¿Podrías reformularla?"
 
 # Tool names permitidas. Cualquier otra -> fallback.
-WHITELIST_TOOLS = frozenset({"get_price", "get_weather"})
+WHITELIST_TOOLS = frozenset({"get_price", "get_price_history", "get_weather"})
 
 # Máximo de iteraciones del Tool Calling loop (previene loops infinitos).
 MAX_TOOL_ITERATIONS = 3
@@ -123,6 +128,37 @@ _TOOLS_LINES = "\n".join([
                         "mercado": {
                             "type": "string",
                             "description": "Nombre del mercado mayorista (ej: Lo Valledor, La Vega, Talca)",
+                        },
+                    },
+                    "required": ["producto"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_price_history",
+                "description": (
+                    "USAR para PRECIOS PASADOS o VARIACION de precio. "
+                    "Cuando el agricultor pregunte cuanto ESTABA un producto, "
+                    "el precio de la semana pasada, de ayer, de hace unos dias, "
+                    "o si el precio subio o bajo. "
+                    "Ej: 'a cuanto estaba la papa la semana pasada', "
+                    "'cuanto valia el tomate ayer', 'ha subido la cebolla?'."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "producto": {
+                            "type": "string",
+                            "description": "Nombre del producto en singular (ej: papa, tomate, lechuga, cebolla)",
+                        },
+                        "dias": {
+                            "type": "integer",
+                            "description": (
+                                "Cuantos dias hacia atras comparar "
+                                "(7 = semana pasada, 1 = ayer, 30 = mes pasado). Default: 7."
+                            ),
                         },
                     },
                     "required": ["producto"],
@@ -211,6 +247,37 @@ TOOLS = [
                     },
                 },
                 "required": ["producto", "mercado"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_price_history",
+            "description": (
+                "USAR para PRECIOS PASADOS o VARIACION de precio. "
+                "Cuando el agricultor pregunte cuanto ESTABA un producto, "
+                "el precio de la semana pasada, de ayer, de hace unos dias, "
+                "o si el precio subio o bajo. "
+                "Ej: 'a cuanto estaba la papa la semana pasada', "
+                "'cuanto valia el tomate ayer', 'ha subido la cebolla?'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "producto": {
+                        "type": "string",
+                        "description": "Nombre del producto en singular (ej: papa, tomate, lechuga, cebolla)",
+                    },
+                    "dias": {
+                        "type": "integer",
+                        "description": (
+                            "Cuantos dias hacia atras comparar "
+                            "(7 = semana pasada, 1 = ayer, 30 = mes pasado). Default: 7."
+                        ),
+                    },
+                },
+                "required": ["producto"],
             },
         },
     },
@@ -339,11 +406,15 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
     Los imports son lazy para evitar dependencias circulares y permitir
     que el modulo llm_service.py sea importable sin DB ni servicios.
     """
-    from app.services.odepa_service import get_price_for_llm
+    from app.services.odepa_service import (
+        get_price_for_llm,
+        get_price_history_for_llm,
+    )
     from app.services.weather_service import get_weather
 
     return {
         "get_price": get_price_for_llm,
+        "get_price_history": get_price_history_for_llm,
         "get_weather": get_weather,
     }
 
@@ -389,8 +460,8 @@ async def _execute_tool(name: str, arguments: dict[str, object]) -> str:
     valid_args = _filter_handler_args(handler, arguments)
 
     try:
-        # get_price necesita session de DB. Se la pasamos como kwarg.
-        if name == "get_price":
+        # Las tools de precio necesitan session de DB. Se la pasamos como kwarg.
+        if name in ("get_price", "get_price_history"):
             from app.core.database import SessionLocal
 
             # Completar defaults para argumentos vacios que el LLM no especifico.
@@ -400,8 +471,7 @@ async def _execute_tool(name: str, arguments: dict[str, object]) -> str:
                     "No entendi que producto queres consultar. "
                     "¿Podrias repetir el nombre del producto?"
                 )
-            # Mercado es opcional: si no se especifica, get_price_for_llm
-            # consulta todos los mercados disponibles y devuelve el mas relevante.
+            # Mercado/dias son opcionales: cada handler aplica su default.
 
             session = SessionLocal()
             try:
@@ -634,24 +704,42 @@ async def _force_keyword_tool(query_text: str) -> str | None:
         Resultado textual de la tool, o None si no se detecta keyword.
     """
     from app.core.database import SessionLocal
-    from app.services.odepa_service import get_price_for_llm
+    from app.services.odepa_service import (
+        get_price_for_llm,
+        get_price_history_for_llm,
+    )
 
     q = query_text.strip().lower()
 
     # 1. Detectar productos agricolas en la consulta.
     product = _extract_product_from_query(q)
     if product:
+        # Keywords de precio pasado: "estaba", "semana pasada", "ayer", etc.
+        # -> historial en vez de precio actual.
+        historia_kw = [
+            "estaba", "semana pasada", "ayer", "hace ", "valia", "valía",
+            "ha subido", "ha bajado", "subio", "subió", "bajo el precio",
+            "bajó", "antes",
+        ]
+        es_historia = any(kw in q for kw in historia_kw)
+
         session = SessionLocal()
         try:
-            # Llamada en thread pool: get_price_for_llm es sincrono (query SQLite)
-            # y no debe bloquear el event loop mientras otros requests se procesan.
-            result = await asyncio.to_thread(
-                get_price_for_llm, session, producto=product
-            )
+            # Llamada en thread pool: las tools de precio son sincronas
+            # (query SQLite) y no deben bloquear el event loop.
+            if es_historia:
+                result = await asyncio.to_thread(
+                    get_price_history_for_llm, session, producto=product
+                )
+            else:
+                result = await asyncio.to_thread(
+                    get_price_for_llm, session, producto=product
+                )
             # Solo retornar si encontro datos reales (no "No tengo datos...").
             if not result.startswith("No tengo datos"):
                 logger.info(
-                    "Fallback tool forzado: get_price(producto=%s) — query=%.100s",
+                    "Fallback tool forzado: %s(producto=%s) — query=%.100s",
+                    "get_price_history" if es_historia else "get_price",
                     product, query_text,
                 )
                 return result

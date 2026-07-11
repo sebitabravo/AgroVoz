@@ -602,6 +602,28 @@ def format_price_text(record: OdepaPrice) -> str:
     )
 
 
+def _select_registro_referencia(
+    precios_por_mercado: dict[str, OdepaPrice],
+) -> OdepaPrice:
+    """Elige el registro de referencia cuando no se especifica mercado.
+
+    Prioriza Lo Valledor (referencia nacional). ODEPA lo publica como
+    "Mercado Mayorista Lo Valledor de Santiago", por eso el match es
+    por substring case-insensitive, no por clave exacta. Entre varios
+    matches (ej: seeds de demo con nombre corto) gana el dato más
+    reciente. Sin match, gana el mercado con dato más reciente:
+    el orden alfabético sesgaba a "Agrícola del Norte S.A. de Arica".
+    """
+    candidatos = [
+        registro
+        for mercado_nombre, registro in precios_por_mercado.items()
+        if "lo valledor" in mercado_nombre.lower()
+    ]
+    if not candidatos:
+        candidatos = list(precios_por_mercado.values())
+    return max(candidatos, key=lambda registro: registro.fecha)
+
+
 def get_price_for_llm(session: Session, producto: str, mercado: str = "") -> str:
     """Tool function para el LLM: consulta el precio más reciente.
 
@@ -625,22 +647,7 @@ def get_price_for_llm(session: Session, producto: str, mercado: str = "") -> str
                 "¿Podrias probar con otro producto?"
             )
 
-        # Priorizar Lo Valledor (referencia nacional). ODEPA lo publica como
-        # "Mercado Mayorista Lo Valledor de Santiago", por eso el match es
-        # por substring case-insensitive, no por clave exacta. Entre varios
-        # matches (ej: seeds de demo con nombre corto) gana el dato más
-        # reciente. Sin match, gana el mercado con dato más reciente:
-        # el orden alfabético sesgaba a "Agrícola del Norte S.A. de Arica".
-        candidatos = [
-            registro
-            for mercado_nombre, registro in precios_por_mercado.items()
-            if "lo valledor" in mercado_nombre.lower()
-        ]
-        if not candidatos:
-            candidatos = list(precios_por_mercado.values())
-        selected = max(candidatos, key=lambda registro: registro.fecha)
-
-        return format_price_text(selected)
+        return format_price_text(_select_registro_referencia(precios_por_mercado))
 
     try:
         record: OdepaPrice | None = query_latest_price(session, producto, mercado)
@@ -653,6 +660,87 @@ def get_price_for_llm(session: Session, producto: str, mercado: str = "") -> str
             f"en {mercado.strip()}."
         )
     return format_price_text(record)
+
+
+def _formatear_variacion(actual: Decimal, antiguo: Decimal) -> str:
+    """Describe la variación porcentual entre dos precios, hablada para TTS.
+
+    "ha subido un 8 coma 7 por ciento" / "ha bajado un 11 coma 7 por ciento"
+    / "se mantiene igual" (variación bajo 0,05%).
+    """
+    if antiguo == 0:
+        return "no puedo calcular la variación"
+    variacion = (actual - antiguo) / antiguo * 100
+    if abs(variacion) < Decimal("0.05"):
+        return "se mantiene igual"
+    direccion = "subido" if variacion > 0 else "bajado"
+    pct = abs(variacion).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    entero, _, dec = str(pct).partition(".")
+    pct_str = entero if not dec or dec == "0" else f"{entero} coma {dec}"
+    return f"ha {direccion} un {pct_str} por ciento"
+
+
+def get_price_history_for_llm(
+    session: Session, producto: str, dias: int = 7
+) -> str:
+    """Tool function para el LLM: compara el precio actual con el histórico.
+
+    Responde "¿a cuánto estaba la papa la semana pasada?" comparando el
+    dato más reciente del mercado de referencia con el dato de hace `dias`
+    días en el MISMO mercado y la MISMA unidad de venta — comparar sacos
+    con mallas daría variaciones falsas.
+
+    Retorna texto natural en español chileno listo para TTS. Si no hay
+    punto histórico comparable, lo dice honesto con el precio actual.
+    """
+    # El LLM puede pasar dias como string o valores absurdos: normalizar.
+    try:
+        dias_norm = int(dias)
+    except (TypeError, ValueError):
+        dias_norm = 7
+    dias_norm = min(max(dias_norm, 1), 90)
+
+    try:
+        precios_por_mercado = query_latest_by_product(session, producto)
+    except ValueError:
+        return "No entendí el producto. ¿Podrías repetirlo?"
+
+    if not precios_por_mercado:
+        return (
+            f"No tengo datos de precio para {producto.strip()}. "
+            "¿Podrias probar con otro producto?"
+        )
+
+    actual = _select_registro_referencia(precios_por_mercado)
+    fecha_limite = actual.fecha - datetime.timedelta(days=dias_norm)
+
+    # Punto histórico: mismo mercado y misma unidad, lo más reciente
+    # que tenga al menos `dias` días de distancia del dato actual.
+    q = (
+        select(OdepaPrice)
+        .where(
+            func.lower(OdepaPrice.producto) == actual.producto.lower(),
+            OdepaPrice.mercado == actual.mercado,
+            OdepaPrice.unidad == actual.unidad,
+            OdepaPrice.fecha <= fecha_limite,
+        )
+        .order_by(OdepaPrice.fecha.desc())
+        .limit(1)
+    )
+    antiguo = session.scalars(q).first()
+
+    if antiguo is None:
+        return (
+            f"{format_price_text(actual)} "
+            f"No tengo datos comparables de hace {dias_norm} días para ese mercado."
+        )
+
+    dias_reales = (actual.fecha - antiguo.fecha).days
+    return (
+        f"{format_price_text(actual)} "
+        f"Hace {dias_reales} días estaba a {_formatear_pesos(antiguo.precio_kg)}, "
+        f"{_formatear_variacion(actual.precio_kg, antiguo.precio_kg)}."
+    )
 
 
 def list_products(session: Session) -> list[str]:
