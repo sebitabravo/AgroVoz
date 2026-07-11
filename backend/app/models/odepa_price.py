@@ -40,11 +40,15 @@ class OdepaPrice(Base):
     # (ej: 500.1 → 500.09999999999997). SQLite almacena NUMERIC como
     # afinidad ANY, pero SQLAlchemy devuelve Decimal. Al migrar a
     # PostgreSQL, Numeric(10,2) mapea a NUMERIC(10,2) nativo.
+    # OJO: pese al nombre, guarda el precio en la unidad de venta que ODEPA
+    # reporta para ese mercado (columna `unidad`), que no siempre es el kilo.
+    # La conversión a kilo se hace al formatear (format_price_text), nunca acá.
     precio_kg: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
-    # Constante "kg": ODEPA siempre reporta precios en kilogramos.
-    # Si en el futuro se incorporan otras unidades, se modela como
-    # columna variable sin default.
-    unidad: Mapped[str] = mapped_column(String(20), nullable=False, default="kg")
+    # ODEPA usa 130+ unidades de venta distintas ("$/saco 25 kilos",
+    # "$/bandeja 12 canastillos 125 gramos", ...). String(100) cubre la más
+    # larga observada (38 chars) con margen; SQLite no enforcea largo, pero
+    # PostgreSQL sí lo hará al migrar.
+    unidad: Mapped[str] = mapped_column(String(100), nullable=False, default="kg")
     fecha: Mapped[datetime.date] = mapped_column(Date, nullable=False, index=True)
     # Constante "ODEPA": único origen de datos de precios para MVP.
     fuente: Mapped[str] = mapped_column(String(100), nullable=False, default="ODEPA")

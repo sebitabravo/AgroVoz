@@ -426,13 +426,13 @@ class TestMigraciones:
         alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
         alembic_cfg.set_main_option("script_location", str(_MIGRATIONS_DIR))
 
-        # Aplicar todas las migraciones (head = 8f2a4c7e1d90 add_consultation_stage_timing)
         command.upgrade(alembic_cfg, "head")
 
-        # Downgrade dos pasos → 9fad6bdb1443 unique_constraint_odepa.
-        # -1 baja a 37086656cc4e (refine_column_types, precio_kg NUMERIC).
-        # -2 baja a 9fad6bdb1443 (precio_kg FLOAT, lo que verifica este test).
-        command.downgrade(alembic_cfg, "-2")
+        # Downgrade a revisión explícita 9fad6bdb1443 (unique_constraint_odepa),
+        # anterior a refine_column_types: ahí precio_kg es FLOAT, que es lo que
+        # verifica este test. Revisión fija en vez de pasos relativos (-N) para
+        # que el test no se rompa cada vez que se agrega una migración nueva.
+        command.downgrade(alembic_cfg, "9fad6bdb1443")
 
         engine = create_engine(f"sqlite:///{db_path}")
         inspector = inspect(engine)
