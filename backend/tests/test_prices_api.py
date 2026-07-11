@@ -22,6 +22,7 @@ from app.models.odepa_price import OdepaPrice
 from app.services.odepa_service import (
     format_price_text,
     get_price_for_llm,
+    get_price_history_for_llm,
     list_mercados,
     list_products,
     query_latest_by_product,
@@ -436,6 +437,103 @@ class TestGetPriceForLlmSeleccionMercado:
         texto = get_price_for_llm(db, "papa", "")
         assert "Temuco" in texto
         assert "Arica" not in texto
+
+
+class TestGetPriceHistoryForLlm:
+    """Tool get_price_history (Issue #85): comparación con precio histórico."""
+
+    def test_compara_precio_actual_con_hace_7_dias(self, db: Session) -> None:
+        _insertar_precio(
+            db, mercado="Mercado Mayorista Lo Valledor de Santiago",
+            precio_kg=Decimal("10000"), unidad="$/saco 25 kilos",
+            fecha=datetime.date(2026, 6, 26),
+        )
+        _insertar_precio(
+            db, mercado="Mercado Mayorista Lo Valledor de Santiago",
+            precio_kg=Decimal("8833.33"), unidad="$/saco 25 kilos",
+            fecha=datetime.date(2026, 7, 3),
+        )
+        texto = get_price_history_for_llm(db, "papa", dias=7)
+        assert "8.833 coma 33 pesos por saco de 25 kilos" in texto
+        assert "Hace 7 días estaba a 10.000 pesos" in texto
+        assert "ha bajado un 11 coma 7 por ciento" in texto
+
+    def test_precio_al_alza_dice_subido(self, db: Session) -> None:
+        _insertar_precio(
+            db, precio_kg=Decimal("1000"), fecha=datetime.date(2026, 6, 26)
+        )
+        _insertar_precio(
+            db, precio_kg=Decimal("1200"), fecha=datetime.date(2026, 7, 3)
+        )
+        texto = get_price_history_for_llm(db, "papa", dias=7)
+        assert "ha subido un 20 por ciento" in texto
+
+    def test_sin_historico_responde_honesto_con_precio_actual(
+        self, db: Session
+    ) -> None:
+        _insertar_precio(
+            db, precio_kg=Decimal("1200"), fecha=datetime.date(2026, 7, 3)
+        )
+        texto = get_price_history_for_llm(db, "papa", dias=7)
+        assert "1.200 pesos" in texto
+        assert "No tengo datos comparables de hace 7 días" in texto
+
+    def test_no_compara_unidades_distintas(self, db: Session) -> None:
+        # Hace 7 días se vendía por malla; hoy por saco. Comparar sería falso.
+        _insertar_precio(
+            db, precio_kg=Decimal("10766.66"), unidad="$/malla 25 kilos",
+            fecha=datetime.date(2026, 6, 26),
+        )
+        _insertar_precio(
+            db, precio_kg=Decimal("8833.33"), unidad="$/saco 25 kilos",
+            fecha=datetime.date(2026, 7, 3),
+        )
+        texto = get_price_history_for_llm(db, "papa", dias=7)
+        assert "No tengo datos comparables" in texto
+        assert "10.766" not in texto
+
+    def test_usa_punto_historico_mas_cercano_al_limite(self, db: Session) -> None:
+        # Hay datos de hace 14 y de hace 8 días: debe comparar contra el de 8
+        # (el más reciente que cumple la distancia mínima pedida).
+        _insertar_precio(
+            db, precio_kg=Decimal("900"), fecha=datetime.date(2026, 6, 19)
+        )
+        _insertar_precio(
+            db, precio_kg=Decimal("1000"), fecha=datetime.date(2026, 6, 25)
+        )
+        _insertar_precio(
+            db, precio_kg=Decimal("1200"), fecha=datetime.date(2026, 7, 3)
+        )
+        texto = get_price_history_for_llm(db, "papa", dias=7)
+        assert "Hace 8 días estaba a 1.000 pesos" in texto
+
+    def test_producto_sin_datos(self, db: Session) -> None:
+        texto = get_price_history_for_llm(db, "zanahoria")
+        assert "No tengo datos de precio" in texto
+
+    def test_producto_vacio(self, db: Session) -> None:
+        texto = get_price_history_for_llm(db, "")
+        assert "No entendí el producto" in texto
+
+    def test_dias_invalido_usa_default(self, db: Session) -> None:
+        _insertar_precio(
+            db, precio_kg=Decimal("1000"), fecha=datetime.date(2026, 6, 26)
+        )
+        _insertar_precio(
+            db, precio_kg=Decimal("1200"), fecha=datetime.date(2026, 7, 3)
+        )
+        texto = get_price_history_for_llm(db, "papa", dias="no-numero")  # type: ignore[arg-type]
+        assert "Hace 7 días" in texto
+
+    def test_variacion_minima_dice_se_mantiene(self, db: Session) -> None:
+        _insertar_precio(
+            db, precio_kg=Decimal("1000.00"), fecha=datetime.date(2026, 6, 26)
+        )
+        _insertar_precio(
+            db, precio_kg=Decimal("1000.20"), fecha=datetime.date(2026, 7, 3)
+        )
+        texto = get_price_history_for_llm(db, "papa", dias=7)
+        assert "se mantiene igual" in texto
 
 
 # ── list_products ──────────────────────────────────────────────────
