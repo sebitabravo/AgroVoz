@@ -1,4 +1,6 @@
 .coverage
-models/
+# Anclado a la raiz de backend/: solo modelos IA descargados.
+# Sin anclar ignoraba tambien app/models/ (codigo SQLAlchemy).
+/models/
 *.gguf
-data/
+/data/
