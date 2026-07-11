@@ -256,6 +256,95 @@ class TestFormatPriceText:
         )
 
 
+class TestFormatPriceTextUnidades:
+    """Regresión Issue #81: el texto debe respetar la unidad de venta ODEPA.
+
+    Bug original: format_price_text decía siempre "el kilo" aunque la unidad
+    fuera "$/saco 25 kilos" — el agricultor escuchaba un precio 25x el real.
+    """
+
+    def test_saco_25_kilos_dice_unidad_real_y_equivalencia(self, db: Session) -> None:
+        registro = _insertar_precio(
+            db,
+            precio_kg=Decimal("8833.33"),
+            unidad="$/saco 25 kilos",
+            fecha=datetime.date(2026, 7, 3),
+        )
+        texto = format_price_text(registro)
+        assert texto == (
+            "Papa está a 8.833 coma 33 pesos por saco de 25 kilos en Lo Valledor, "
+            "unos 353 pesos el kilo, precio del 03/07/2026."
+        )
+
+    def test_bandeja_con_sufijo_granel_es_convertible(self, db: Session) -> None:
+        registro = _insertar_precio(
+            db, precio_kg=Decimal("9000"), unidad="$/bandeja 18 kilos granel"
+        )
+        texto = format_price_text(registro)
+        assert "por bandeja de 18 kilos granel" in texto
+        assert "unos 500 pesos el kilo" in texto
+
+    def test_bins_con_parentesis_es_convertible(self, db: Session) -> None:
+        registro = _insertar_precio(
+            db, precio_kg=Decimal("200000"), unidad="$/bins (400 kilos)"
+        )
+        texto = format_price_text(registro)
+        assert "200.000 pesos por bins de 400 kilos" in texto
+        assert "unos 500 pesos el kilo" in texto
+
+    def test_docena_de_atados_no_inventa_conversion(self, db: Session) -> None:
+        registro = _insertar_precio(
+            db, producto="cilantro", precio_kg=Decimal("1200"),
+            unidad="$/docena de atados",
+        )
+        texto = format_price_text(registro)
+        assert "por docena de atados" in texto
+        assert "el kilo" not in texto
+        assert "unos" not in texto
+
+    def test_caja_por_unidades_no_inventa_conversion(self, db: Session) -> None:
+        registro = _insertar_precio(
+            db, producto="lechuga", precio_kg=Decimal("15000"),
+            unidad="$/caja 50 unidades",
+        )
+        texto = format_price_text(registro)
+        assert "por caja de 50 unidades" in texto
+        assert "el kilo" not in texto
+
+    def test_atado_con_rango_no_inventa_conversion(self, db: Session) -> None:
+        registro = _insertar_precio(
+            db, producto="acelga", precio_kg=Decimal("800"),
+            unidad="$/atado 0,5 a 1 kilo",
+        )
+        texto = format_price_text(registro)
+        assert "por atado de 0,5 a 1 kilo" in texto
+        assert "unos" not in texto
+
+    def test_unidad_generica_dice_por_unidad(self, db: Session) -> None:
+        registro = _insertar_precio(
+            db, producto="piña", precio_kg=Decimal("1500"), unidad="$/unidad"
+        )
+        texto = format_price_text(registro)
+        assert "1.500 pesos por unidad" in texto
+        assert "el kilo" not in texto
+
+    def test_dolar_kilo_con_parentesis_usa_formato_kilo(self, db: Session) -> None:
+        registro = _insertar_precio(
+            db, precio_kg=Decimal("450"), unidad="$/kilo (en caja de 17 kilos)"
+        )
+        texto = format_price_text(registro)
+        assert "450 pesos el kilo en" in texto
+        assert "por " not in texto
+
+    def test_envase_1_kilo_sin_equivalencia_redundante(self, db: Session) -> None:
+        registro = _insertar_precio(
+            db, producto="jengibre", precio_kg=Decimal("4000"), unidad="$/envase 1 kilo"
+        )
+        texto = format_price_text(registro)
+        assert "4.000 pesos por envase de 1 kilo" in texto
+        assert "unos" not in texto
+
+
 # ── get_price_for_llm ──────────────────────────────────────────────
 
 

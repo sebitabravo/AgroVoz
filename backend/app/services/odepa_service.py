@@ -13,9 +13,10 @@ import csv
 import datetime
 import io
 import logging
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 import httpx
 from sqlalchemy import func, select
@@ -487,30 +488,117 @@ def query_latest_by_product(
     return result
 
 
+# Contenedores de peso con conversión no ambigua a kilos. Docenas, atados,
+# paquetes y cajas "por unidades" quedan fuera: su peso total es ambiguo
+# (ej: "$/docena de atados (12 kilos)" no aclara si son 12 kilos la docena
+# o cada atado) y una conversión inventada sería peor que no darla.
+_PESO_CONTENEDOR_RE = re.compile(
+    r"^(?:saco|malla|caja|bandeja|bins|cuna|envase)\s*\(?\s*"
+    r"(\d+(?:[.,]\d+)?)\s+kilos?\)?"
+    r"(?:\s+(?:granel|empedrada|embalada|importada))?$",
+    re.IGNORECASE,
+)
+
+# Contenedores a los que se les inserta "de" para el texto hablado:
+# "saco 25 kilos" -> "saco de 25 kilos".
+_CONTENEDOR_HABLADO_RE = re.compile(
+    r"^(saco|malla|caja|bandeja|bins|cuna|envase|paquete|atado|trenza|bolsa)\s+(\d)",
+    re.IGNORECASE,
+)
+
+
+def _normalizar_unidad(unidad: str) -> str:
+    """Quita el prefijo '$/' de la unidad ODEPA: '$/saco 25 kilos' -> 'saco 25 kilos'."""
+    return unidad.strip().removeprefix("$").removeprefix("/").strip()
+
+
+def _es_unidad_kilo(unidad: str) -> bool:
+    """True si el precio ya está expresado por kilo ('kg', '$/kilo (...)')."""
+    norm = _normalizar_unidad(unidad).lower()
+    return norm == "kg" or norm.startswith("kilo")
+
+
+def _kilos_por_unidad(unidad: str) -> Decimal | None:
+    """Kilos que contiene la unidad de venta, o None si no es convertible.
+
+    Solo convierte contenedores simples con peso explícito (saco/malla/caja/
+    bandeja/bins/cuna/envase de N kilos, con sufijos granel/empedrada/
+    embalada/importada). El resto retorna None: mejor no dar equivalencia
+    que darla mal.
+    """
+    match = _PESO_CONTENEDOR_RE.match(_normalizar_unidad(unidad))
+    if match is None:
+        return None
+    kilos = Decimal(match.group(1).replace(",", "."))
+    return kilos if kilos > 0 else None
+
+
+def _unidad_hablada(unidad: str) -> str:
+    """Convierte la unidad ODEPA a texto hablable para TTS.
+
+    '$/saco 25 kilos' -> 'saco de 25 kilos'
+    '$/bins (400 kilos)' -> 'bins de 400 kilos'
+    '$/docena de atados' -> 'docena de atados'
+    """
+    texto = _normalizar_unidad(unidad).replace("(", "").replace(")", "")
+    texto = re.sub(r"\s+", " ", texto).strip()
+    return _CONTENEDOR_HABLADO_RE.sub(r"\1 de \2", texto)
+
+
+def _formatear_pesos(precio: Decimal) -> str:
+    """Formatea un Decimal como pesos hablados: 1200 -> '1.200 pesos'.
+
+    Usa punto como separador de miles (convención chilena) y "coma" para
+    decimales significativos. Usa "pesos" en vez de "$" para que el LLM no
+    hable de "dólares" al leer el resultado de la tool antes de pasarlo a TTS.
+    """
+    if precio == precio.to_integral_value():
+        parte_entera = f"{int(precio):,}".replace(",", ".")
+        return f"{parte_entera} pesos"
+    entero, dec = str(precio).split(".")
+    parte_entera = f"{int(entero):,}".replace(",", ".")
+    dec = dec.ljust(2, "0")[:2]
+    return f"{parte_entera} coma {dec} pesos"
+
+
 def format_price_text(record: OdepaPrice) -> str:
     """Formatea un registro OdepaPrice como texto natural en español chileno.
 
-    Formato: "Papa está a 1.200 pesos el kilo en Lo Valledor, precio del 20/06/2026."
-    Sin artículo para evitar errores de género (el tomate, la papa).
-    Usa punto como separador de miles (convención chilena).
-    Muestra decimales solo si el precio tiene fracción significativa.
-    Usa "pesos" en vez de "$" para que el LLM no hable de "dólares" al leer el
-    resultado de la tool antes de pasarlo a TTS.
-    """
-    precio = record.precio_kg
-    if precio == precio.to_integral_value():
-        parte_entera = f"{int(precio):,}".replace(",", ".")
-        precio_str = f"{parte_entera} pesos"
-    else:
-        entero, dec = str(precio).split(".")
-        parte_entera = f"{int(entero):,}".replace(",", ".")
-        dec = dec.ljust(2, "0")[:2]
-        precio_str = f"{parte_entera} coma {dec} pesos"
+    ODEPA publica precios en la unidad de venta de cada mercado (saco de
+    25 kilos, bandeja de 18 kilos, docena de atados...), no siempre por kilo.
+    El texto respeta esa unidad y, cuando la conversión es segura, agrega
+    la equivalencia aproximada por kilo.
 
+    Por kilo:      "Papa está a 850 pesos el kilo en Vega Central, precio del 19/06/2026."
+    Convertible:   "Papa está a 8.833 pesos por saco de 25 kilos en Lo Valledor,
+                    unos 353 pesos el kilo, precio del 03/07/2026."
+    No convertible: "Lechuga está a 1.200 pesos por docena de atados en Lo Valledor,
+                    precio del 03/07/2026."
+
+    Sin artículo para evitar errores de género (el tomate, la papa).
+    """
+    precio_str = _formatear_pesos(record.precio_kg)
     fecha_str = record.fecha.strftime("%d/%m/%Y")
+    producto_str = f"{record.producto[0].upper()}{record.producto[1:]}"
+
+    if _es_unidad_kilo(record.unidad):
+        return (
+            f"{producto_str} está a {precio_str} el kilo en {record.mercado}, "
+            f"precio del {fecha_str}."
+        )
+
+    unidad_str = _unidad_hablada(record.unidad)
+    kilos = _kilos_por_unidad(record.unidad)
+    equivalencia = ""
+    if kilos is not None and kilos != 1:
+        por_kilo = (record.precio_kg / kilos).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
+        equivalencia = f", unos {_formatear_pesos(por_kilo)} el kilo"
+
     return (
-        f"{record.producto[0].upper()}{record.producto[1:]} está a {precio_str} "
-        f"el kilo en {record.mercado}, precio del {fecha_str}."
+        f"{producto_str} está a {precio_str} por {unidad_str} en {record.mercado}"
+        f"{equivalencia}, precio del {fecha_str}."
     )
 
 
