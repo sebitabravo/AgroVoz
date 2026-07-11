@@ -625,13 +625,20 @@ def get_price_for_llm(session: Session, producto: str, mercado: str = "") -> str
                 "¿Podrias probar con otro producto?"
             )
 
-        # Priorizar Lo Valledor (referencia nacional). Si no existe, usar
-        # el primer mercado disponible ordenado alfabeticamente.
-        if "Lo Valledor" in precios_por_mercado:
-            selected = precios_por_mercado["Lo Valledor"]
-        else:
-            primer_mercado = sorted(precios_por_mercado.keys())[0]
-            selected = precios_por_mercado[primer_mercado]
+        # Priorizar Lo Valledor (referencia nacional). ODEPA lo publica como
+        # "Mercado Mayorista Lo Valledor de Santiago", por eso el match es
+        # por substring case-insensitive, no por clave exacta. Entre varios
+        # matches (ej: seeds de demo con nombre corto) gana el dato más
+        # reciente. Sin match, gana el mercado con dato más reciente:
+        # el orden alfabético sesgaba a "Agrícola del Norte S.A. de Arica".
+        candidatos = [
+            registro
+            for mercado_nombre, registro in precios_por_mercado.items()
+            if "lo valledor" in mercado_nombre.lower()
+        ]
+        if not candidatos:
+            candidatos = list(precios_por_mercado.values())
+        selected = max(candidatos, key=lambda registro: registro.fecha)
 
         return format_price_text(selected)
 

@@ -383,6 +383,61 @@ class TestGetPriceForLlm:
         assert "papa" in texto
 
 
+class TestGetPriceForLlmSeleccionMercado:
+    """Regresión Issue #83: selección de mercado cuando no se especifica uno.
+
+    Bug original: prioridad por clave exacta "Lo Valledor" solo matcheaba
+    seeds de demo; con DB real caía al fallback alfabético (Arica).
+    """
+
+    def test_prioriza_mercado_valledor_real_de_odepa(self, db: Session) -> None:
+        _insertar_precio(
+            db, mercado="Agrícola del Norte S.A. de Arica",
+            precio_kg=Decimal("12833.33"), unidad="$/saco 25 kilos",
+            fecha=datetime.date(2026, 7, 2),
+        )
+        _insertar_precio(
+            db, mercado="Mercado Mayorista Lo Valledor de Santiago",
+            precio_kg=Decimal("8833.33"), unidad="$/saco 25 kilos",
+            fecha=datetime.date(2026, 7, 3),
+        )
+        texto = get_price_for_llm(db, "papa", "")
+        assert "Lo Valledor" in texto
+        assert "Arica" not in texto
+
+    def test_entre_varios_valledor_gana_el_dato_mas_reciente(
+        self, db: Session
+    ) -> None:
+        # Seed de demo con nombre corto y fecha vieja (fuente=test)
+        _insertar_precio(
+            db, mercado="Lo Valledor", precio_kg=Decimal("1200"),
+            fecha=datetime.date(2026, 6, 20), fuente="test",
+        )
+        _insertar_precio(
+            db, mercado="Mercado Mayorista Lo Valledor de Santiago",
+            precio_kg=Decimal("8833.33"), unidad="$/saco 25 kilos",
+            fecha=datetime.date(2026, 7, 3),
+        )
+        texto = get_price_for_llm(db, "papa", "")
+        assert "8.833" in texto
+        assert "1.200" not in texto
+
+    def test_sin_valledor_gana_el_mas_reciente_no_el_alfabetico(
+        self, db: Session
+    ) -> None:
+        _insertar_precio(
+            db, mercado="Agrícola del Norte S.A. de Arica",
+            precio_kg=Decimal("500"), fecha=datetime.date(2026, 6, 25),
+        )
+        _insertar_precio(
+            db, mercado="Vega Modelo de Temuco",
+            precio_kg=Decimal("700"), fecha=datetime.date(2026, 7, 3),
+        )
+        texto = get_price_for_llm(db, "papa", "")
+        assert "Temuco" in texto
+        assert "Arica" not in texto
+
+
 # ── list_products ──────────────────────────────────────────────────
 
 
