@@ -14,7 +14,7 @@ Pre-producción: encriptar query_text en reposo (AES-256-GCM).
 
 import datetime
 
-from sqlalchemy import Integer, String, Text, func
+from sqlalchemy import Boolean, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -49,6 +49,19 @@ class Consultation(Base):
     whisper_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     llm_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     tts_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # ── Cola de revisión humana (issue #99) ─────────────────────────
+    # Se marca automáticamente cuando el pipeline produce fallback,
+    # intent desconocido, o alguna etapa falló.
+    requires_review: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0", index=True
+    )
+    revisado_por: Mapped[str | None] = mapped_column(
+        String(100), nullable=True
+    )
+    nota_revision: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resuelto: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
 
     def __repr__(self) -> str:
