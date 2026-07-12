@@ -1,0 +1,40 @@
+<tr id="revision-row-{{ c.id }}">
+  <td class="mono">{{ c.id }}</td>
+  <td class="mono">{{ c.phone_hash_short }}</td>
+  <td>
+    {% if c.intent == 'precio' %}
+    <span class="badge badge-precio">precio</span>
+    {% elif c.intent == 'clima' %}
+    <span class="badge badge-clima">clima</span>
+    {% elif c.intent == 'desconocido' %}
+    <span class="badge badge-error">desconocido</span>
+    {% else %}
+    <span class="badge badge-webhook">{{ c.intent }}</span>
+    {% endif %}
+  </td>
+  <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ c.query_text }}">{{ c.query_text_short }}</td>
+  <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ c.response_text }}">{{ c.response_text_short }}</td>
+  <td class="mono">{{ c.created_at }}</td>
+  <td>
+    {% if c.resuelto %}
+    <span style="font-size:11px;font-weight:600;color:#4f7d5a">✓ resuelta</span>
+    {% if c.revisado_por %}<br><span style="font-size:10px;color:#7e827a">por {{ c.revisado_por }}</span>{% endif %}
+    {% if c.nota_revision %}<br><span style="font-size:10px;color:#7e827a;font-style:italic">{{ c.nota_revision[:50] }}</span>{% endif %}
+    {% else %}
+    <span style="font-size:11px;font-weight:600;color:#a07c20">⏳ pendiente</span>
+    {% endif %}
+  </td>
+  <td>
+    <button class="btn-action"
+            hx-post="/admin/consultations/{{ c.id }}/resolve"
+            hx-target="#revision-row-{{ c.id }}"
+            hx-swap="outerHTML"
+            hx-vals='{"nota": "", "revisado_por": "admin"}'>
+      {% if c.resuelto %}
+      Reabrir
+      {% else %}
+      Resolver
+      {% endif %}
+    </button>
+  </td>
+</tr>

@@ -20,6 +20,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import __version__
@@ -206,6 +207,125 @@ async def activity_page(
         request,
         "activity.html",
         {"recientes": recientes, "active_tab": "activity"},
+    )
+
+
+# ── Cola de revisión humana (issue #99) ────────────────────────────
+
+
+@router.get("/revision")
+async def revision_page(
+    request: Request,
+    db: Session = Depends(get_db),  # noqa: B008
+    status: str = "pending",
+) -> HTMLResponse:
+    """Cola de revisión: consultas marcadas para revisión humana.
+
+    Query params:
+        status: "pending" (default), "resolved", "all"
+    """
+    from app.models.consultation import Consultation
+
+    query = select(Consultation).where(Consultation.requires_review.is_(True))
+
+    if status == "pending":
+        query = query.where(Consultation.resuelto.is_(False))
+    elif status == "resolved":
+        query = query.where(Consultation.resuelto.is_(True))
+    # "all" no agrega filtro extra.
+
+    query = query.order_by(Consultation.created_at.desc()).limit(100)
+    results = db.execute(query).scalars().all()
+
+    consultas = []
+    for c in results:
+        consultas.append({
+            "id": c.id,
+            "phone_hash_short": c.phone_hash[:8] + "..." if c.phone_hash else "",
+            "intent": c.intent,
+            "query_text_short": c.query_text[:80] + ("..." if len(c.query_text) > 80 else ""),
+            "response_text_short": c.response_text[:80] + ("..." if len(c.response_text) > 80 else ""),
+            "query_text": c.query_text,
+            "response_text": c.response_text,
+            "created_at": c.created_at.strftime("%Y-%m-%d %H:%M") if c.created_at else "",
+            "resuelto": c.resuelto,
+            "revisado_por": c.revisado_por or "",
+            "nota_revision": c.nota_revision or "",
+        })
+
+    # Contadores para los filtros.
+    pending_count = db.execute(
+        select(func.count()).select_from(Consultation)
+        .where(Consultation.requires_review.is_(True), Consultation.resuelto.is_(False))
+    ).scalar() or 0
+    resolved_count = db.execute(
+        select(func.count()).select_from(Consultation)
+        .where(Consultation.requires_review.is_(True), Consultation.resuelto.is_(True))
+    ).scalar() or 0
+
+    return templates.TemplateResponse(
+        request,
+        "revision.html",
+        {
+            "consultas": consultas,
+            "status": status,
+            "pending_count": pending_count,
+            "resolved_count": resolved_count,
+            "active_tab": "revision",
+        },
+    )
+
+
+@router.post("/consultations/{consultation_id}/resolve")
+async def resolve_consultation(
+    consultation_id: int,
+    request: Request,
+    db: Session = Depends(get_db),  # noqa: B008
+    nota: str = Form(default=""),
+    revisado_por: str = Form(default=""),
+) -> HTMLResponse:
+    """Marca o desmarca una consulta como resuelta (toggle).
+
+    HTMX: hx-post="/admin/consultations/{id}/resolve".
+    Retorna el partial de la fila actualizada.
+    """
+    from app.models.consultation import Consultation
+
+    consulta = db.get(Consultation, consultation_id)
+    if consulta is None:
+        return HTMLResponse("<span class='badge-error'>No encontrada</span>", status_code=404)
+
+    # Toggle resuelto.
+    consulta.resuelto = not consulta.resuelto
+    if nota:
+        consulta.nota_revision = nota
+    if revisado_por:
+        consulta.revisado_por = revisado_por
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Error al actualizar consulta %d", consultation_id)
+        return HTMLResponse("<span class='badge-error'>Error</span>", status_code=500)
+
+    # Retornar partial HTMX con el estado actualizado.
+    return templates.TemplateResponse(
+        request,
+        "_revision_row.html",
+        {"c": {
+            "id": consulta.id,
+            "phone_hash_short": consulta.phone_hash[:8] + "..." if consulta.phone_hash else "",
+            "intent": consulta.intent,
+            "query_text_short": consulta.query_text[:80] + ("..." if len(consulta.query_text) > 80 else ""),
+            "response_text_short": consulta.response_text[:80] + ("..." if len(consulta.response_text) > 80 else ""),
+            "query_text": consulta.query_text,
+            "response_text": consulta.response_text,
+            "created_at": consulta.created_at.strftime("%Y-%m-%d %H:%M") if consulta.created_at else "",
+            "resuelto": consulta.resuelto,
+            "revisado_por": consulta.revisado_por or "",
+            "nota_revision": consulta.nota_revision or "",
+        }},
     )
 
 
