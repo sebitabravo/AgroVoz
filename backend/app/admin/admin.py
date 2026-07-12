@@ -20,7 +20,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app import __version__
@@ -237,31 +237,22 @@ async def revision_page(
     query = query.order_by(Consultation.created_at.desc()).limit(100)
     results = db.execute(query).scalars().all()
 
-    consultas = []
-    for c in results:
-        consultas.append({
-            "id": c.id,
-            "phone_hash_short": c.phone_hash[:8] + "..." if c.phone_hash else "",
-            "intent": c.intent,
-            "query_text_short": c.query_text[:80] + ("..." if len(c.query_text) > 80 else ""),
-            "response_text_short": c.response_text[:80] + ("..." if len(c.response_text) > 80 else ""),
-            "query_text": c.query_text,
-            "response_text": c.response_text,
-            "created_at": c.created_at.strftime("%Y-%m-%d %H:%M") if c.created_at else "",
-            "resuelto": c.resuelto,
-            "revisado_por": c.revisado_por or "",
-            "nota_revision": c.nota_revision or "",
-        })
+    # Usa helper para consistencia en formato.
+    consultas = [_format_consultation_for_view(c) for c in results]
 
-    # Contadores para los filtros.
-    pending_count = db.execute(
-        select(func.count()).select_from(Consultation)
-        .where(Consultation.requires_review.is_(True), Consultation.resuelto.is_(False))
-    ).scalar() or 0
-    resolved_count = db.execute(
-        select(func.count()).select_from(Consultation)
-        .where(Consultation.requires_review.is_(True), Consultation.resuelto.is_(True))
-    ).scalar() or 0
+    # Contadores para los filtros: consolidar en una sola query con case/sum.
+    # select(count(case((Consultation.resuelto==False, 1)))) para pendientes,
+    # select(count(case((Consultation.resuelto==True, 1)))) para resueltas.
+    counts = db.execute(
+        select(
+            func.sum(case((Consultation.resuelto.is_(False), 1), else_=0)).label("pending"),
+            func.sum(case((Consultation.resuelto.is_(True), 1), else_=0)).label("resolved"),
+        )
+        .select_from(Consultation)
+        .where(Consultation.requires_review.is_(True))
+    ).one()
+    pending_count = counts.pending or 0
+    resolved_count = counts.resolved or 0
 
     return templates.TemplateResponse(
         request,
@@ -282,12 +273,17 @@ async def resolve_consultation(
     request: Request,
     db: Session = Depends(get_db),  # noqa: B008
     nota: str = Form(default=""),
-    revisado_por: str = Form(default=""),
 ) -> HTMLResponse:
     """Marca o desmarca una consulta como resuelta (toggle).
 
     HTMX: hx-post="/admin/consultations/{id}/resolve".
     Retorna el partial de la fila actualizada.
+
+    Notas:
+    - revisado_por siempre se asigna como "admin" (server-side).
+      TODO post-MVP: capturar desde sesión de admin autenticado.
+    - Si nota está vacía en el form, el campo NO se borra (append-only).
+      Ver línea ~300 para el update condicional.
     """
     from app.models.consultation import Consultation
 
@@ -297,10 +293,14 @@ async def resolve_consultation(
 
     # Toggle resuelto.
     consulta.resuelto = not consulta.resuelto
+    # La nota es append-only: si llega vacía, no se borra.
+    # El form HTMX siempre manda nota="" en toggle, pero un update incondicional
+    # la borraría. Por eso hacemos if nota para solo actualizar si hay valor.
     if nota:
         consulta.nota_revision = nota
-    if revisado_por:
-        consulta.revisado_por = revisado_por
+    # revisado_por asignado server-side (actualmente hardcoded a "admin").
+    # Post-MVP: obtener de sesión autenticada.
+    consulta.revisado_por = "admin"
 
     try:
         db.commit()
@@ -309,23 +309,11 @@ async def resolve_consultation(
         logger.exception("Error al actualizar consulta %d", consultation_id)
         return HTMLResponse("<span class='badge-error'>Error</span>", status_code=500)
 
-    # Retornar partial HTMX con el estado actualizado.
+    # Retornar partial HTMX con el estado actualizado usando helper.
     return templates.TemplateResponse(
         request,
         "_revision_row.html",
-        {"c": {
-            "id": consulta.id,
-            "phone_hash_short": consulta.phone_hash[:8] + "..." if consulta.phone_hash else "",
-            "intent": consulta.intent,
-            "query_text_short": consulta.query_text[:80] + ("..." if len(consulta.query_text) > 80 else ""),
-            "response_text_short": consulta.response_text[:80] + ("..." if len(consulta.response_text) > 80 else ""),
-            "query_text": consulta.query_text,
-            "response_text": consulta.response_text,
-            "created_at": consulta.created_at.strftime("%Y-%m-%d %H:%M") if consulta.created_at else "",
-            "resuelto": consulta.resuelto,
-            "revisado_por": consulta.revisado_por or "",
-            "nota_revision": consulta.nota_revision or "",
-        }},
+        {"c": _format_consultation_for_view(consulta)},
     )
 
 
@@ -429,6 +417,39 @@ async def monitor_clear_audio_temp(request: Request) -> HTMLResponse:
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
+
+
+def truncate_text(text: str, max_len: int = 80, suffix: str = "...") -> str:
+    """Trunca texto a max_len caracteres, agregando suffix si es necesario.
+
+    Uso: truncate_text(long_text, max_len=80) retorna 'primeros 80 chars...'
+    si el texto es más largo que max_len.
+    """
+    if len(text) <= max_len:
+        return text
+    return text[:max_len] + suffix
+
+
+def _format_consultation_for_view(c: object) -> dict[str, object]:
+    """Arma dict de consulta para renderizar en vista de revisión.
+
+    Normaliza truncado de texts sensibles y formatting.
+    Se usa en revision_page() y resolve_consultation() para mantener
+    consistencia en la representación.
+    """
+    return {
+        "id": c.id,  # type: ignore[attr-defined]
+        "phone_hash_short": (c.phone_hash[:8] + "..." if c.phone_hash else ""),  # type: ignore[attr-defined]
+        "intent": c.intent,  # type: ignore[attr-defined]
+        "query_text_short": truncate_text(c.query_text, max_len=80),  # type: ignore[attr-defined]
+        "response_text_short": truncate_text(c.response_text, max_len=80),  # type: ignore[attr-defined]
+        "query_text": c.query_text,  # type: ignore[attr-defined]
+        "response_text": c.response_text,  # type: ignore[attr-defined]
+        "created_at": c.created_at.strftime("%Y-%m-%d %H:%M") if c.created_at else "",  # type: ignore[attr-defined]
+        "resuelto": c.resuelto,  # type: ignore[attr-defined]
+        "revisado_por": c.revisado_por or "",  # type: ignore[attr-defined]
+        "nota_revision": c.nota_revision or "",  # type: ignore[attr-defined]
+    }
 
 
 def _now_ts() -> str:

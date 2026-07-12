@@ -29,7 +29,7 @@
             hx-post="/admin/consultations/{{ c.id }}/resolve"
             hx-target="#revision-row-{{ c.id }}"
             hx-swap="outerHTML"
-            hx-vals='{"nota": "", "revisado_por": "admin"}'>
+            hx-vals='{"nota": ""}'>
       {% if c.resuelto %}
       Reabrir
       {% else %}

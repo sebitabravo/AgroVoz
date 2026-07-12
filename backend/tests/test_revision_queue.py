@@ -339,14 +339,15 @@ class TestResolveConsultation:
 
         resp = await review_client.post(
             f"/admin/consultations/{c.id}/resolve",
-            data={"nota": "fallback por producto no mapeado", "revisado_por": "sebastian"},
+            data={"nota": "fallback por producto no mapeado"},
         )
         assert resp.status_code == 200
 
         # Verificar en DB.
         review_db.refresh(c)
         assert c.resuelto is True
-        assert c.revisado_por == "sebastian"
+        # revisado_por se asigna server-side como "admin" (TODO post-MVP: desde sesión).
+        assert c.revisado_por == "admin"
         assert c.nota_revision == "fallback por producto no mapeado"
 
     @pytest.mark.asyncio
