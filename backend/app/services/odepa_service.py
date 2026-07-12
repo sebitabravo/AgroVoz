@@ -662,6 +662,126 @@ def get_price_for_llm(session: Session, producto: str, mercado: str = "") -> str
     return format_price_text(record)
 
 
+def _obtener_registro_referencia(
+    session: Session, producto: str, mercado: str = ""
+) -> OdepaPrice | None:
+    """Obtiene el registro de referencia para una tool de precio.
+
+    Encapsula el lookup compartido por las tools de precio: si mercado
+    está vacío, busca en todos los mercados y elige el de referencia
+    (Lo Valledor si existe, vía _select_registro_referencia); si no, busca
+    el mercado específico.
+
+    Lanza ValueError si producto está vacío (propagada de query_latest_*),
+    para que el caller genere el mensaje de fallback adecuado.
+
+    Retorna None si no hay datos para el producto/mercado.
+    """
+    if not mercado or not mercado.strip():
+        precios_por_mercado = query_latest_by_product(session, producto)
+        if not precios_por_mercado:
+            return None
+        return _select_registro_referencia(precios_por_mercado)
+    return query_latest_price(session, producto, mercado)
+
+
+def calculate_sale_value_for_llm(
+    session: Session, producto: str, cantidad_kg: str, mercado: str = ""
+) -> str:
+    """Tool function para el LLM: calcula el valor total de venta.
+
+    Responde "voy a vender 30 kilos de papa" con el monto total referencial
+    basado en el precio mayorista ODEPA. El cálculo se hace en Python con
+    Decimal (nunca por el LLM) para evitar alucinaciones aritméticas.
+
+    Flujo:
+    1. Parsea cantidad_kg a Decimal (0/negativo/no-numérico -> pide reformular).
+    2. Obtiene el registro de referencia (igual que get_price_for_llm).
+    3. Deriva precio por kilo:
+       - Unidad kilo: directo (record.precio_kg).
+       - Unidad convertible (saco/bandeja de N kilos): precio_kg / kilos.
+       - Unidad NO convertible (docena de atados, caja por unidades):
+         retorna el precio por unidad de venta + aviso honesto, sin
+         inventar el cálculo por kilo (regresión #81).
+    4. monto_total = precio_por_kilo * cantidad (Decimal, redondeado a entero).
+    5. Texto natural listo para TTS.
+
+    El precio por kilo se redondea a entero antes de multiplicar para que
+    el monto cuadre con lo que se dice (353 * 30 = 10.590, no 353.33 * 30).
+
+    El texto dice "referencia mayorista" / "según ODEPA": el precio de
+    predio (lo que recibe el agricultor) es distinto y menor.
+    """
+    # 1. Parsear cantidad. El LLM/Whisper pueden pasar "30", "30,5", "abc".
+    try:
+        cantidad = Decimal(str(cantidad_kg).strip().replace(",", "."))
+    except InvalidOperation:
+        return (
+            "No entendí la cantidad. ¿Podrías repetir cuántos kilos vas a vender?"
+        )
+    if cantidad <= 0:
+        return (
+            "La cantidad tiene que ser mayor a cero. "
+            "¿Podrías repetir cuántos kilos vas a vender?"
+        )
+
+    # 2. Obtener registro de referencia.
+    try:
+        record = _obtener_registro_referencia(session, producto, mercado)
+    except ValueError:
+        return "No entendí el producto. ¿Podrías repetirlo?"
+
+    if record is None:
+        if not mercado or not mercado.strip():
+            return (
+                f"No tengo datos de precio para {producto.strip()}. "
+                "¿Podrias probar con otro producto?"
+            )
+        return (
+            f"No tengo datos de precio para {producto.strip()} "
+            f"en {mercado.strip()}."
+        )
+
+    producto_str = f"{record.producto[0].upper()}{record.producto[1:]}"
+
+    # 3. Derivar precio por kilo según la unidad de venta ODEPA.
+    if _es_unidad_kilo(record.unidad):
+        precio_por_kilo = record.precio_kg
+    else:
+        kilos = _kilos_por_unidad(record.unidad)
+        if kilos is None:
+            # Unidad no convertible: precio por unidad de venta + aviso honesto.
+            # Reusa format_price_text para consistencia con get_price_for_llm.
+            return (
+                f"{format_price_text(record)} "
+                "No puedo calcular el total por kilo porque ODEPA publica "
+                "el precio por unidad de venta, no por kilo. "
+                "¿Podrías consultar el precio por kilo?"
+            )
+        precio_por_kilo = record.precio_kg / kilos
+
+    # Redondear precio por kilo a entero (peso chileno no usa centavos en
+    # referencia mayorista) antes de multiplicar, para que el monto cuadre.
+    precio_por_kilo = precio_por_kilo.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    monto_total = (precio_por_kilo * cantidad).quantize(
+        Decimal("1"), rounding=ROUND_HALF_UP
+    )
+
+    # 4. Formatear cantidad para TTS: entero "30", decimal "30 coma 5".
+    if cantidad == cantidad.to_integral_value():
+        cantidad_str = str(int(cantidad))
+    else:
+        entero, _, dec = str(cantidad).partition(".")
+        dec = dec.rstrip("0") or "0"
+        cantidad_str = f"{entero} coma {dec}"
+
+    return (
+        f"{producto_str} está a unos {_formatear_pesos(precio_por_kilo)} "
+        f"el kilo según ODEPA. Por {cantidad_str} kilos recibirás unos "
+        f"{_formatear_pesos(monto_total)} como referencia mayorista."
+    )
+
+
 def _formatear_variacion(actual: Decimal, antiguo: Decimal) -> str:
     """Describe la variación porcentual entre dos precios, hablada para TTS.
 
