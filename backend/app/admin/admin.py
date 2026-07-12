@@ -13,13 +13,16 @@ El middleware AdminAuthMiddleware (montado en main.py) protege todas las
 rutas /admin/* excepto /admin/login. Acá no repetimos auth.
 """
 
+import csv
 import datetime
+import io
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import __version__
@@ -30,6 +33,7 @@ from app.admin.auth import (
 )
 from app.core.config import settings
 from app.core.database import get_db
+from app.models.odepa_price import OdepaPrice
 from app.services import metrics_service, monitor_service
 
 logger = logging.getLogger(__name__)
@@ -209,6 +213,66 @@ async def activity_page(
     )
 
 
+# ── Export CSV ──────────────────────────────────────────────────────
+
+
+@router.get("/prices/export")
+async def export_prices_csv(
+    producto: str | None = None,
+    mercado: str | None = None,
+    desde: str | None = None,
+    hasta: str | None = None,
+    db: Session = Depends(get_db),  # noqa: B008 — FastAPI DI pattern
+) -> StreamingResponse:
+    """Exporta el historial de precios ODEPA como CSV descargable.
+
+    Filtros opcionales (todos match exacto contra lo almacenado):
+    - ``producto``: nombre del producto (ej: "papa").
+    - ``mercado``: nombre del mercado (ej: "Lo Valledor").
+    - ``desde``/``hasta``: fechas ISO YYYY-MM-DD (inclusivas).
+
+    Sin filtros = todos los registros, ordenados por fecha descendente.
+
+    Protegido por ``AdminAuthMiddleware`` (cookie de sesión, path="/admin"),
+    igual que el resto del dashboard. Un ``<a href="/admin/prices/export">``
+    en el template dispara la descarga: el navegador envía la cookie
+    automáticamente (el path de la cookie cubre esta ruta). Un <a> simple
+    no puede mandar headers custom, por eso el endpoint vive bajo /admin/
+    y no bajo /api/v1/admin/ (que usa header X-Admin-Key).
+
+    El CSV lleva BOM UTF-8 al inicio para que Excel en español reconozca
+    el encoding. Fecha como YYYY-MM-DD, precio_kg como número crudo.
+    """
+    fecha_desde = _parse_iso_date(desde, "desde")
+    fecha_hasta = _parse_iso_date(hasta, "hasta")
+
+    stmt = select(OdepaPrice)
+    if producto:
+        stmt = stmt.where(OdepaPrice.producto == producto)
+    if mercado:
+        stmt = stmt.where(OdepaPrice.mercado == mercado)
+    if fecha_desde is not None:
+        stmt = stmt.where(OdepaPrice.fecha >= fecha_desde)
+    if fecha_hasta is not None:
+        stmt = stmt.where(OdepaPrice.fecha <= fecha_hasta)
+    stmt = stmt.order_by(
+        OdepaPrice.fecha.desc(),
+        OdepaPrice.producto,
+        OdepaPrice.mercado,
+    )
+
+    rows: list[OdepaPrice] = list(db.scalars(stmt))
+    contenido = _build_prices_csv(rows)
+    hoy = datetime.date.today().strftime("%Y%m%d")
+    return StreamingResponse(
+        iter([contenido]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="odepa_prices_{hoy}.csv"',
+        },
+    )
+
+
 # ── Partials HTMX ───────────────────────────────────────────────────
 
 
@@ -329,3 +393,41 @@ def _odepa_status_dict(db: Session) -> dict[str, object]:
         "ultima_fecha_iso": status.ultima_fecha.isoformat() if status.ultima_fecha else None,
         "ahora": datetime.datetime.now(),
     }
+
+
+def _parse_iso_date(valor: str | None, campo: str) -> datetime.date | None:
+    """Parsea una fecha ISO (YYYY-MM-DD). None pasa sin validar.
+
+    Lanza 400 si el string no es una fecha ISO válida, para no dejar
+    pasar filtros mal formados que devolverían DB vacía silenciosamente.
+    """
+    if valor is None:
+        return None
+    try:
+        return datetime.date.fromisoformat(valor)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Formato de '{campo}' inválido. Usar YYYY-MM-DD.",
+        ) from None
+
+
+def _build_prices_csv(rows: list[OdepaPrice]) -> bytes:
+    """Construye el CSV de precios ODEPA como bytes UTF-8 con BOM.
+
+    Headers: fecha, producto, mercado, precio_kg, unidad.
+    - Fecha en YYYY-MM-DD (sin hora).
+    - precio_kg como número crudo (str(Decimal)), sin formato chileno ni
+      separador de miles: la planilla/INDAP hace el análisis numérico.
+    - BOM UTF-8 (\\ufeff) al inicio para que Excel en español detecte el
+      encoding correctamente (sin BOM, Excel推断 latin-1 y rompe tildes).
+    """
+    buffer = io.StringIO()
+    buffer.write("\ufeff")  # BOM UTF-8 para Excel en español.
+    writer = csv.writer(buffer)
+    writer.writerow(["fecha", "producto", "mercado", "precio_kg", "unidad"])
+    for r in rows:
+        writer.writerow(
+            [r.fecha.isoformat(), r.producto, r.mercado, str(r.precio_kg), r.unidad]
+        )
+    return buffer.getvalue().encode("utf-8")
