@@ -62,6 +62,9 @@ SYSTEM_PROMPT = (
     "5. NUNCA inventas precios ni clima. Si no tienes el dato, lo dices.\n"
     "6. Respondes en español chileno, con frases cortas y claras (máximo 3 oraciones).\n"
     "7. Los precios se dan en pesos chilenos, con la unidad de medida.\n"
+    "8. Cuando reformules la respuesta de una herramienta, CONSERVA SIEMPRE la\n"
+    "   mención de la fuente (ODEPA para precios, OpenMeteo para clima).\n"
+    "   Nunca omitas \"según ODEPA\" o \"según OpenMeteo\" al resumir.\n"
 )
 
 # Texto de fallback cuando el LLM intenta una tool fuera del whitelist.
