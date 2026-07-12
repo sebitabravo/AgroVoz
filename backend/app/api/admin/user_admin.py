@@ -11,7 +11,6 @@ Endpoints:
 Todos requieren header X-Admin-Key.
 """
 
-import datetime
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
@@ -34,6 +33,22 @@ router = APIRouter(
 )
 
 
+def _validate_phone_hash_param(phone_hash: str) -> None:
+    """Valida que phone_hash sea un hash HMAC-SHA256 válido.
+
+    Args:
+        phone_hash: Hash a validar.
+
+    Raises:
+        HTTPException: Si el formato es inválido (422).
+    """
+    if not validate_phone_hash(phone_hash):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="phone_hash debe ser 64 caracteres hexadecimales minúscula.",
+        )
+
+
 @router.put("/{phone_hash}/comuna", response_model=UserPrefsResponse)
 def set_comuna(
     phone_hash: str = Path(
@@ -53,12 +68,7 @@ def set_comuna(
     productor, recibe su primer audio, anota el phone_hash del log y
     registra su comuna acá.
     """
-    if not validate_phone_hash(phone_hash):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="phone_hash debe ser 64 caracteres hexadecimales minúscula.",
-        )
-
+    _validate_phone_hash_param(phone_hash)
     comuna = body.comuna.strip()
     if not comuna:
         raise HTTPException(
@@ -125,12 +135,7 @@ def get_user_prefs(
 
     Retorna 404 si el phone_hash no tiene prefs registradas.
     """
-    if not validate_phone_hash(phone_hash):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="phone_hash debe ser 64 caracteres hexadecimales minúscula.",
-        )
-
+    _validate_phone_hash_param(phone_hash)
     prefs = db.scalar(select(UserPrefs).where(UserPrefs.phone_hash == phone_hash))
     if prefs is None:
         raise HTTPException(
@@ -138,17 +143,8 @@ def get_user_prefs(
             detail="No hay preferencias registradas para este phone_hash.",
         )
 
-    if prefs.created_at is None:
-        logger.warning(
-            "created_at es None para phone_hash=%s — usando datetime.now() como fallback",
-            phone_hash[:8],
-        )
-        created_at = datetime.datetime.now()
-    else:
-        created_at = prefs.created_at
-
     return UserPrefsResponse(
         phone_hash=prefs.phone_hash,
         comuna=prefs.comuna,
-        created_at=created_at,
+        created_at=prefs.created_at,
     )
