@@ -18,6 +18,7 @@ from pathlib import Path
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.schemas.pipeline import AudioResponse
+from app.services.llm_service import FALLBACK_TEXT, NO_RESPONSE_TEXT
 from app.services.tts_service import PiperModelNotFoundError, TTSService
 from app.services.whisper_service import WhisperService
 
@@ -73,6 +74,47 @@ class AgroVozPipeline:
                               Default 120s (red de seguridad, no target).
         """
         self._timeout = pipeline_timeout
+
+    @staticmethod
+    def _should_mark_for_review(
+        response_text: str,
+        intent: str,
+        whisper_ms: int,
+        llm_ms: int,
+        transcribed_text: str,
+    ) -> bool:
+        """Determina si una consulta requiere revisión humana.
+
+        Se marca automáticamente cuando:
+        - La respuesta del LLM es FALLBACK_TEXT o NO_RESPONSE_TEXT
+        - El intent es "desconocido"
+        - La transcripción falló (whisper_ms=0 con texto vacío)
+        - El LLM falló (llm_ms=0 con texto transcrito válido)
+
+        Args:
+            response_text: Texto de respuesta generado por el LLM.
+            intent: Intención detectada ("precio", "clima", "desconocido").
+            whisper_ms: Latencia de Whisper en ms (0 si falló).
+            llm_ms: Latencia del LLM en ms (0 si falló).
+            transcribed_text: Texto transcrito por Whisper.
+
+        Returns:
+            True si la consulta debe marcarse para revisión.
+        """
+        # Respuesta de fallback del LLM.
+        if response_text in (FALLBACK_TEXT, NO_RESPONSE_TEXT):
+            return True
+
+        # Intent no clasificado.
+        if intent == "desconocido":
+            return True
+
+        # Transcripción falló pero había audio (whisper_ms=0 y texto vacío).
+        if whisper_ms == 0 and not transcribed_text.strip():
+            return True
+
+        # LLM falló (llm_ms=0) cuando debería haber procesado.
+        return bool(llm_ms == 0 and transcribed_text.strip())
 
     @staticmethod
     def _detect_intent(query_text: str, llm_response: str) -> str:
@@ -171,6 +213,7 @@ class AgroVozPipeline:
         whisper_ms: int = 0,
         llm_ms: int = 0,
         tts_ms: int = 0,
+        requires_review: bool = False,
     ) -> None:
         """Guarda la consulta en SQLite para metricas anonimizadas.
 
@@ -184,6 +227,10 @@ class AgroVozPipeline:
             response_text: Texto de respuesta del LLM.
             audio_duration_ms: Duracion del audio en ms.
             start_time: time.monotonic() del inicio del pipeline.
+            whisper_ms: Latencia de Whisper en ms.
+            llm_ms: Latencia del LLM en ms.
+            tts_ms: Latencia de TTS en ms.
+            requires_review: Si la consulta debe marcarse para revisión humana.
         """
         import time as _time
 
@@ -204,6 +251,7 @@ class AgroVozPipeline:
                     whisper_ms=whisper_ms,
                     llm_ms=llm_ms,
                     tts_ms=tts_ms,
+                    requires_review=requires_review,
                 )
                 session.add(consulta)
                 session.commit()
@@ -411,6 +459,14 @@ class AgroVozPipeline:
         # (whisper/llm/tts). Fire-and-forget: si falla, loguea y continua.
         # Solo se persiste si hubo transcripcion valida (igual que antes).
         if transcribed_text and transcribed_text.strip():
+            # Determinar si esta consulta requiere revisión humana (issue #99).
+            mark_review = self._should_mark_for_review(
+                response_text=response_text,
+                intent=intent,
+                whisper_ms=whisper_ms_ref[0],
+                llm_ms=llm_ms_ref[0],
+                transcribed_text=transcribed_text,
+            )
             try:
                 await asyncio.to_thread(
                     self._save_consultation,
@@ -423,6 +479,7 @@ class AgroVozPipeline:
                     whisper_ms=whisper_ms_ref[0],
                     llm_ms=llm_ms_ref[0],
                     tts_ms=tts_ms_ref[0],
+                    requires_review=mark_review,
                 )
             except (RuntimeError, OSError, SQLAlchemyError, TypeError, AttributeError, KeyError):
                 logger.exception(
