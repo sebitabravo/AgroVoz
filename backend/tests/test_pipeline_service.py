@@ -599,3 +599,332 @@ class TestTimeout:
 
     def test_max_whisper_audio_ms_es_12_segundos(self) -> None:
         assert _MAX_WHISPER_AUDIO_MS == 12_000
+
+
+# ── Onboarding: primer contacto y bienvenida (#86) ──────────────────
+
+
+def _mock_first_contact(
+    monkeypatch: pytest.MonkeyPatch, is_first: bool
+) -> None:
+    """Mockea AgroVozPipeline._is_first_contact para controlar el resultado.
+
+    Usa staticmethod() para preservar el comportamiento de staticmethod:
+    sin eso, self._is_first_contact pasaria self como primer argumento.
+
+    Args:
+        monkeypatch: Fixture de pytest.
+        is_first: True simula primer contacto (0 consultas previas),
+                   False simula contacto repetido.
+    """
+
+    def fake_is_first(_phone_hash: str) -> bool:
+        return is_first
+
+    monkeypatch.setattr(AgroVozPipeline, "_is_first_contact", staticmethod(fake_is_first))
+
+
+@pytest.mark.asyncio
+class TestOnboarding:
+    """Deteccion de primer contacto y audio de bienvenida (#86)."""
+
+    @pytest.fixture
+    def wav_path(self, tmp_path: Path) -> Path:
+        """Crea un archivo WAV falso para los tests."""
+        p = tmp_path / "test_audio.wav"
+        p.write_bytes(b"FAKE_WAV_16KHZ_MONO")
+        return p
+
+    @pytest.fixture
+    def tts_ogg(self, tmp_path: Path) -> str:
+        """Crea un OGG falso para simular salida de TTS."""
+        p = tmp_path / "pipeline_output.ogg"
+        p.write_bytes(b"FAKE_TTS_OGG")
+        return str(p)
+
+    @pytest.fixture
+    def welcome_ogg(self, tmp_path: Path) -> str:
+        """Crea un OGG falso para simular salida de TTS de bienvenida."""
+        p = tmp_path / "welcome_output.ogg"
+        p.write_bytes(b"FAKE_WELCOME_OGG")
+        return str(p)
+
+    async def test_primer_contacto_genera_bienvenida(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        wav_path: Path,
+        tts_ogg: str,
+        welcome_ogg: str,
+    ) -> None:
+        """Primer audio de un numero nuevo retorna welcome_audio_path no None."""
+        _mock_whisper_transcribe(monkeypatch)
+        _mock_llm_answer(monkeypatch, "La papa esta a 450 pesos el kilo")
+        _mock_tts_synthesize(monkeypatch, tts_ogg)
+        _mock_db_save(monkeypatch)
+        _mock_first_contact(monkeypatch, is_first=True)
+
+        # TTS de bienvenida: la primera llamada sintetiza _WELCOME_TEXT,
+        # la segunda sintetiza la respuesta normal. Usamos un contador para
+        # diferenciarlas.
+        call_count = [0]
+
+        def fake_synthesize(_self: object, text: str, output_dir: str | Path | None = None) -> str:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # Primera llamada = bienvenida
+                return welcome_ogg
+            # Segunda llamada = respuesta normal
+            return tts_ogg
+
+        monkeypatch.setattr(
+            "app.services.pipeline_service.TTSService.synthesize",
+            fake_synthesize,
+        )
+
+        pipeline = AgroVozPipeline()
+        result = await pipeline.process(
+            wav_path=wav_path,
+            audio_duration_ms=3000,
+            message_id="test-onboard-1",
+            chat_id_hash="abc123def456",
+            request_id="req-onboard-1",
+        )
+
+        assert result.welcome_audio_path == welcome_ogg
+        assert result.audio_path == tts_ogg
+        assert "450" in result.text_response
+
+    async def test_contacto_repetido_sin_bienvenida(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        wav_path: Path,
+        tts_ogg: str,
+    ) -> None:
+        """Segundo audio en adelante: welcome_audio_path es None."""
+        _mock_whisper_transcribe(monkeypatch)
+        _mock_llm_answer(monkeypatch, "La papa esta a 500 pesos el kilo")
+        _mock_tts_synthesize(monkeypatch, tts_ogg)
+        _mock_db_save(monkeypatch)
+        _mock_first_contact(monkeypatch, is_first=False)
+
+        pipeline = AgroVozPipeline()
+        result = await pipeline.process(
+            wav_path=wav_path,
+            audio_duration_ms=2500,
+            message_id="test-onboard-2",
+            chat_id_hash="def456abc789",
+            request_id="req-onboard-2",
+        )
+
+        assert result.welcome_audio_path is None
+        assert result.audio_path == tts_ogg
+
+    async def test_bienvenida_falla_tts_no_bloquea_pipeline(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        wav_path: Path,
+        tts_ogg: str,
+    ) -> None:
+        """Si el TTS de bienvenida falla, el pipeline continua sin bienvenida."""
+        _mock_whisper_transcribe(monkeypatch)
+        _mock_llm_answer(monkeypatch, "La papa esta a 450 pesos el kilo")
+        _mock_db_save(monkeypatch)
+        _mock_first_contact(monkeypatch, is_first=True)
+
+        # TTS falla siempre (tanto bienvenida como respuesta).
+        def fake_synthesize_err(_self: object, text: str, output_dir: str | Path | None = None) -> str:
+            raise RuntimeError("TTS roto")
+
+        monkeypatch.setattr(
+            "app.services.pipeline_service.TTSService.synthesize",
+            fake_synthesize_err,
+        )
+
+        pipeline = AgroVozPipeline()
+        result = await pipeline.process(
+            wav_path=wav_path,
+            audio_duration_ms=3000,
+            message_id="test-onboard-tts-fail",
+            chat_id_hash="ghi789jkl012",
+            request_id="req-onboard-tts-fail",
+        )
+
+        # Bienvenida fallo → welcome_audio_path es None (no cuelga el pipeline).
+        assert result.welcome_audio_path is None
+        # La respuesta normal tampoco tiene audio (TTS fallo), pero el texto existe.
+        assert "450" in result.text_response
+        assert result.audio_path == ""
+
+    async def test_deteccion_falla_no_bloquea_pipeline(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        wav_path: Path,
+        tts_ogg: str,
+    ) -> None:
+        """Si la query de deteccion de primer contacto falla, pipeline continua."""
+        _mock_whisper_transcribe(monkeypatch)
+        _mock_llm_answer(monkeypatch, "La papa esta a 450 pesos el kilo")
+        _mock_tts_synthesize(monkeypatch, tts_ogg)
+        _mock_db_save(monkeypatch)
+
+        def fake_is_first_error(_phone_hash: str) -> bool:
+            raise RuntimeError("DB caida")
+
+        monkeypatch.setattr(AgroVozPipeline, "_is_first_contact", staticmethod(fake_is_first_error))
+
+        pipeline = AgroVozPipeline()
+        result = await pipeline.process(
+            wav_path=wav_path,
+            audio_duration_ms=3000,
+            message_id="test-onboard-detect-fail",
+            chat_id_hash="jkl012mno345",
+            request_id="req-onboard-detect-fail",
+        )
+
+        # Deteccion fallo → safe default: no bienvenida.
+        assert result.welcome_audio_path is None
+        # Pipeline normal continua.
+        assert result.audio_path == tts_ogg
+        assert "450" in result.text_response
+
+    async def test_chat_hash_vacio_no_detecta_bienvenida(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        wav_path: Path,
+        tts_ogg: str,
+    ) -> None:
+        """Si chat_id_hash es 'sin_chat', no se intenta detectar primer contacto."""
+        _mock_whisper_transcribe(monkeypatch)
+        _mock_llm_answer(monkeypatch, "La papa esta a 450 pesos el kilo")
+        _mock_tts_synthesize(monkeypatch, tts_ogg)
+        _mock_db_save(monkeypatch)
+
+        # Si se llamara _is_first_contact, el test fallaria.
+        def fake_is_first_should_not_be_called(_phone_hash: str) -> bool:
+            raise AssertionError("_is_first_contact no deberia llamarse con sin_chat")
+
+        monkeypatch.setattr(AgroVozPipeline, "_is_first_contact", staticmethod(fake_is_first_should_not_be_called))
+
+        pipeline = AgroVozPipeline()
+        result = await pipeline.process(
+            wav_path=wav_path,
+            audio_duration_ms=3000,
+            message_id="test-onboard-no-chat",
+            chat_id_hash="sin_chat",
+            request_id="req-onboard-no-chat",
+        )
+
+        assert result.welcome_audio_path is None
+
+    async def test_bienvenida_texto_es_fijo_predefinido(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        wav_path: Path,
+        tts_ogg: str,
+        welcome_ogg: str,
+    ) -> None:
+        """El texto de bienvenida es _WELCOME_TEXT (constante), no generado por LLM."""
+        _mock_whisper_transcribe(monkeypatch)
+        _mock_llm_answer(monkeypatch, "no deberia usarse para bienvenida")
+        _mock_db_save(monkeypatch)
+        _mock_first_contact(monkeypatch, is_first=True)
+
+        synthesized_texts: list[str] = []
+
+        def fake_synthesize_capture(_self: object, text: str, output_dir: str | Path | None = None) -> str:
+            synthesized_texts.append(text)
+            if len(synthesized_texts) == 1:
+                return welcome_ogg
+            return tts_ogg
+
+        monkeypatch.setattr(
+            "app.services.pipeline_service.TTSService.synthesize",
+            fake_synthesize_capture,
+        )
+
+        pipeline = AgroVozPipeline()
+        result = await pipeline.process(
+            wav_path=wav_path,
+            audio_duration_ms=3000,
+            message_id="test-onboard-text",
+            chat_id_hash="mno345pqr678",
+            request_id="req-onboard-text",
+        )
+
+        # La primera sintesis (bienvenida) usa _WELCOME_TEXT.
+        from app.services.pipeline_service import _WELCOME_TEXT
+
+        assert synthesized_texts[0] == _WELCOME_TEXT
+        assert result.welcome_audio_path == welcome_ogg
+
+
+# ── _is_first_contact (unit test) ───────────────────────────────────
+
+
+class TestIsFirstContact:
+    """Deteccion de primer contacto via SELECT COUNT en consultations."""
+
+    def test_retorna_true_sin_consultas_previas(self, db) -> None:  # type: ignore[no-untyped-def]
+        """Phone_hash sin consultas previas retorna True (primer contacto)."""
+        import app.core.database as db_module
+
+        # Mockear SessionLocal para usar la DB temporal del test.
+        original = db_module.SessionLocal
+        db_module.SessionLocal = lambda: db  # type: ignore[misc]
+        try:
+            result = AgroVozPipeline._is_first_contact("a" * 64)
+        finally:
+            db_module.SessionLocal = original  # type: ignore[misc]
+
+        assert result is True
+
+    def test_retorna_false_con_consultas_previas(self, db) -> None:  # type: ignore[no-untyped-def]
+        """Phone_hash con consultas previas retorna False (contacto repetido)."""
+        from app.models.consultation import Consultation
+
+        # Insertar una consulta previa para este phone_hash.
+        db.add(Consultation(
+            phone_hash="b" * 64,
+            intent="precio",
+            query_text="precio de la papa",
+            response_text="450 pesos",
+            audio_duration_ms=2000,
+            latency_ms=1000,
+        ))
+        db.commit()
+
+        import app.core.database as db_module
+
+        original = db_module.SessionLocal
+        db_module.SessionLocal = lambda: db  # type: ignore[misc]
+        try:
+            result = AgroVozPipeline._is_first_contact("b" * 64)
+        finally:
+            db_module.SessionLocal = original  # type: ignore[misc]
+
+        assert result is False
+
+    def test_phone_hash_distinto_no_afecta(self, db) -> None:  # type: ignore[no-untyped-def]
+        """Consultas de OTRO phone_hash no cuentan como previas para este."""
+        from app.models.consultation import Consultation
+
+        db.add(Consultation(
+            phone_hash="c" * 64,
+            intent="clima",
+            query_text="clima en traiguen",
+            response_text="8 grados",
+            audio_duration_ms=1500,
+            latency_ms=800,
+        ))
+        db.commit()
+
+        import app.core.database as db_module
+
+        original = db_module.SessionLocal
+        db_module.SessionLocal = lambda: db  # type: ignore[misc]
+        try:
+            result = AgroVozPipeline._is_first_contact("d" * 64)
+        finally:
+            db_module.SessionLocal = original  # type: ignore[misc]
+
+        assert result is True  # d*64 no tiene consultas, es primer contacto
