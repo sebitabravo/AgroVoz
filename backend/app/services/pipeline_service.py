@@ -392,6 +392,14 @@ class AgroVozPipeline:
         # audio de bienvenida (TTS de texto fijo, sin LLM). AudioService
         # lo enviara ANTES de la respuesta normal. Fire-and-forget: si
         # la deteccion o el TTS fallan, el pipeline continua sin bienvenida.
+        #
+        # TRADE-OFF ACEPTADO: la deteccion de primer contacto es racy bajo
+        # concurrencia. Si dos audios del mismo numero llegan simultaneamente,
+        # ambos pueden ver count=0 y generar dos bienvenidas (race between
+        # SELECT COUNT y INSERT). El stub con query_text="" en _save_consultation
+        # solo previene repeticion en el SIGUIENTE request. Aceptado para piloto
+        # MVP de 3-5 productores; post-MVP considerar flag de bienvenida_enviada
+        # con unique constraint para atomicidad.
         if chat_id_hash and chat_id_hash != "sin_chat":
             try:
                 is_first = await asyncio.to_thread(self._is_first_contact, chat_id_hash)

@@ -326,8 +326,8 @@ class AudioService:
             # Onboarding (#86): si es primer contacto, enviar bienvenida PRIMERO.
             # El pipeline ya sintetizo el audio de bienvenida via TTS (sin LLM).
             # Se envia antes de la respuesta normal y se limpia el archivo despues.
+            openwa = OpenWAService()
             if pipeline_result.welcome_audio_path:
-                openwa = OpenWAService()
                 try:
                     await openwa.send_audio(chat_id, pipeline_result.welcome_audio_path)
                     logger.info(
@@ -348,7 +348,6 @@ class AudioService:
 
             # Enviar respuesta de audio
             if response_ogg_path:
-                openwa = OpenWAService()
                 try:
                     await openwa.send_audio(chat_id, response_ogg_path)
                     e2e_ms = int((time.monotonic() - start_time) * 1000)
