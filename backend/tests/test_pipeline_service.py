@@ -275,7 +275,7 @@ class TestGenerateResponse:
             "La papa cuesta 450 pesos el kilo en Lo Valledor",
         )
         text, intent = await AgroVozPipeline._generate_response(
-            "precio de la papa en lo valledor"
+            "precio de la papa en lo valledor", "test-chat-hash"
         )
         assert "450" in text
         assert intent == "precio"
@@ -283,14 +283,14 @@ class TestGenerateResponse:
     async def test_query_vacia(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Si el texto transcrito esta vacio, retorna mensaje de error y desconocido."""
         _mock_llm_answer(monkeypatch, "no deberia llamarse")
-        text, intent = await AgroVozPipeline._generate_response("")
+        text, intent = await AgroVozPipeline._generate_response("", "test-chat-hash")
         assert "entendi" in text.lower() or "entendí" in text.lower()
         assert intent == "desconocido"
 
     async def test_query_solo_espacios(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Si el texto transcrito son solo espacios, retorna mensaje de error."""
         _mock_llm_answer(monkeypatch, "no deberia llamarse")
-        text, intent = await AgroVozPipeline._generate_response("   ")
+        text, intent = await AgroVozPipeline._generate_response("   ", "test-chat-hash")
         assert "entendi" in text.lower() or "entendí" in text.lower()
         assert intent == "desconocido"
 
@@ -302,7 +302,7 @@ class TestGenerateResponse:
 
         monkeypatch.setattr("app.services.llm_service.answer", fake_answer_error)
         # Query SIN keywords de precio ni clima → intent debe ser "desconocido"
-        text, intent = await AgroVozPipeline._generate_response("hola como estas")
+        text, intent = await AgroVozPipeline._generate_response("hola como estas", "test-chat-hash")
         assert "problema" in text.lower() or "intentar" in text.lower()
         assert intent == "desconocido"
 

@@ -18,6 +18,7 @@ from pathlib import Path
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.schemas.pipeline import AudioResponse
+from app.services.llm_service import _COMMON_PRODUCTS
 from app.services.tts_service import PiperModelNotFoundError, TTSService
 from app.services.whisper_service import WhisperService
 
@@ -163,8 +164,6 @@ class AgroVozPipeline:
         Returns:
             Nombre del producto en minúscula, o None.
         """
-        from app.services.llm_service import _COMMON_PRODUCTS
-
         q = query_text.strip().lower()
         # Ordenar por largo descendente para que "pimentón" matchee antes
         # que "pimenton" y "sandía" antes que "sandia".
@@ -174,22 +173,54 @@ class AgroVozPipeline:
         return None
 
     @staticmethod
-    async def _generate_response(transcribed_text: str) -> tuple[str, str]:
-        """Genera respuesta textual usando el LLM con Tool Calling.
+    async def _generate_response(
+        transcribed_text: str, chat_id_hash: str
+    ) -> tuple[str, str]:
+        """Genera respuesta textual: resumen o LLM con Tool Calling.
+
+        Detecta si la consulta pide un resumen (por keyword). Si es así,
+        consulta la DB para generar estadísticas del agricultor. Si no,
+        ejecuta el LLM con Tool Calling normal.
 
         Args:
             transcribed_text: Texto transcrito por Whisper.
+            chat_id_hash: Hash anonimizado del chat (para resumen).
 
         Returns:
             Tupla (texto_respuesta, intent).
         """
-        from app.services.llm_service import answer
-
         if not transcribed_text or not transcribed_text.strip():
             return (
                 "No entendi tu mensaje. ¿Podrias enviar un audio mas claro?",
                 "desconocido",
             )
+
+        # Detectar "resumen" por keyword ANTES del LLM: es mas rapido y determinista.
+        if AgroVozPipeline._is_resumen_query(transcribed_text):
+            try:
+                # Import local para evitar ciclo con summary_service
+                from app.core.database import SessionLocal
+                from app.services.summary_service import get_consultation_summary
+
+                session = SessionLocal()
+                try:
+                    response_text = await asyncio.to_thread(
+                        get_consultation_summary, session, chat_id_hash
+                    )
+                finally:
+                    session.close()
+                return response_text, "resumen"
+            except (TimeoutError, RuntimeError, OSError, ValueError):
+                logger.exception("Error generando resumen")
+                return (
+                    "Tuve un problema al generar tu resumen. "
+                    "¿Podrias intentar de nuevo?",
+                    "resumen",
+                )
+
+        # Pipeline normal: LLM con tool calling.
+        # Import local para permitir mocking en tests
+        from app.services.llm_service import answer
 
         try:
             response_text = await answer(transcribed_text.strip())
@@ -400,72 +431,40 @@ class AgroVozPipeline:
                     request_id,
                 )
 
-        # ── Etapa 2: Generacion LLM + guardar consulta ───────────────
+        # ── Etapa 2: Generacion de respuesta (resumen o LLM) ─────────────
         response_text = ""
         intent = "desconocido"
         producto: str | None = None
         t_llm_start = time.monotonic()
 
         if transcribed_text and transcribed_text.strip():
-            # Detectar "resumen" por keyword ANTES del LLM: es mas rapido
-            # y determinista que pasar por el LLM + tool calling.
-            if self._is_resumen_query(transcribed_text):
-                intent = "resumen"
-                try:
-                    from app.core.database import SessionLocal
-                    from app.services.summary_service import get_consultation_summary
+            # Extraer producto antes de generar respuesta (para guardar en consulta).
+            producto = self._extract_producto(transcribed_text)
 
-                    session = SessionLocal()
-                    try:
-                        response_text = await asyncio.to_thread(
-                            get_consultation_summary, session, chat_id_hash
-                        )
-                    finally:
-                        session.close()
-                    llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
-                    logger.info(
-                        "Resumen generado por keyword — message_id=%s chars=%d llm_ms=%d request_id=%s",
-                        message_id,
-                        len(response_text),
-                        llm_ms_ref[0],
-                        request_id,
-                    )
-                except (TimeoutError, RuntimeError, OSError, ValueError):
-                    logger.exception(
-                        "Error generando resumen — message_id=%s request_id=%s",
-                        message_id,
-                        request_id,
-                    )
-                    response_text = (
-                        "Tuve un problema al generar tu resumen. "
-                        "¿Podrias intentar de nuevo?"
-                    )
+            # _generate_response detecta internally si es resumen o LLM,
+            # maneja su propia lógica y error handling.
+            response_text, intent = await self._generate_response(
+                transcribed_text, chat_id_hash
+            )
+            llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
+
+            if intent == "resumen":
+                logger.info(
+                    "Resumen generado — message_id=%s chars=%d llm_ms=%d request_id=%s",
+                    message_id,
+                    len(response_text),
+                    llm_ms_ref[0],
+                    request_id,
+                )
             else:
-                # Pipeline normal: LLM con tool calling.
-                # Extraer producto antes del LLM para guardarlo en la consulta.
-                producto = self._extract_producto(transcribed_text)
-
-                try:
-                    response_text, intent = await self._generate_response(transcribed_text)
-                    llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
-                    logger.info(
-                        "Respuesta LLM generada — message_id=%s intent=%s chars=%d llm_ms=%d request_id=%s",
-                        message_id,
-                        intent,
-                        len(response_text),
-                        llm_ms_ref[0],
-                        request_id,
-                    )
-                except (TimeoutError, RuntimeError, OSError, ValueError):
-                    logger.exception(
-                        "Error generando respuesta LLM — message_id=%s request_id=%s",
-                        message_id,
-                        request_id,
-                    )
-                    response_text = (
-                        "Tuve un problema al procesar tu consulta. "
-                        "¿Podrias intentar de nuevo?"
-                    )
+                logger.info(
+                    "Respuesta LLM generada — message_id=%s intent=%s chars=%d llm_ms=%d request_id=%s",
+                    message_id,
+                    intent,
+                    len(response_text),
+                    llm_ms_ref[0],
+                    request_id,
+                )
 
         # ── Etapa 3: Sintesis TTS ────────────────────────────────────
         response_ogg_path: str = ""
