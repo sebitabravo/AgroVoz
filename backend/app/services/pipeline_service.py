@@ -39,6 +39,16 @@ _MAX_WHISPER_AUDIO_MS = 12_000
 # Cache singleton de TTSService: el modelo Piper se carga UNA vez.
 _tts_service: TTSService | None = None
 
+# Texto fijo de bienvenida para primer contacto (issue #86).
+# No requiere LLM: es un mensaje predefinido sintetizado con TTS.
+# Corto (<200 chars) para que el audio dure <10s y no fatigue al agricultor.
+_WELCOME_TEXT = (
+    "Hola, te doy la bienvenida a AgroVoz. "
+    "Soy un asistente de voz que te ayuda a consultar "
+    "precios de productos agricolas y el clima. "
+    "Solo mandame un audio con tu pregunta y te respondere."
+)
+
 
 def _get_tts_service() -> TTSService:
     """Retorna la instancia singleton de TTSService."""
@@ -95,33 +105,63 @@ class AgroVozPipeline:
 
         # Indicadores fuertes de precio (datos reales, no keywords ambiguos).
         precio_patterns = [
-            "pesos el kilo", "pesos kilo", "precio del", "precio de la",
-            "precio de el", "precios en", "está a", "cuesta $",
-            "el kilo de", "la malla de", "el saco de", "la caja de",
-            "pesos la", "pesos el",
+            "pesos el kilo",
+            "pesos kilo",
+            "precio del",
+            "precio de la",
+            "precio de el",
+            "precios en",
+            "está a",
+            "cuesta $",
+            "el kilo de",
+            "la malla de",
+            "el saco de",
+            "la caja de",
+            "pesos la",
+            "pesos el",
         ]
         if any(p in text for p in precio_patterns):
             return "precio"
 
         # Indicadores de precio mas debiles (solo si no matcheo clima).
         precio_kw = [
-            "precio", "kilo", "saco", "malla", "caja",
-            "pesos", "luca", "feria", "mayorista",
-            "lo valledor", "la vega",
+            "precio",
+            "kilo",
+            "saco",
+            "malla",
+            "caja",
+            "pesos",
+            "luca",
+            "feria",
+            "mayorista",
+            "lo valledor",
+            "la vega",
         ]
 
         # Indicadores de clima (datos reales).
         clima_patterns = [
-            "grados", "nublado", "despejado", "lluvia", "viento",
-            "humedad", "temperatura", "pronóstico", "pronostico",
-            "clima en", "tiempo en",
+            "grados",
+            "nublado",
+            "despejado",
+            "lluvia",
+            "viento",
+            "humedad",
+            "temperatura",
+            "pronóstico",
+            "pronostico",
+            "clima en",
+            "tiempo en",
         ]
         if any(p in text for p in clima_patterns):
             return "clima"
 
         # Fallback: keywords en la consulta original (menos preciso).
         clima_kw = [
-            "clima", "tiempo", "lloviendo", "frio", "calor",
+            "clima",
+            "tiempo",
+            "lloviendo",
+            "frio",
+            "calor",
         ]
         if any(kw in text for kw in clima_kw):
             return "clima"
@@ -152,10 +192,7 @@ class AgroVozPipeline:
             response_text = await answer(transcribed_text.strip())
         except (TimeoutError, RuntimeError, OSError, ValueError):
             logger.exception("Error en generacion LLM — usando fallback")
-            response_text = (
-                "Tuve un problema al procesar tu consulta. "
-                "¿Podrias intentar de nuevo?"
-            )
+            response_text = "Tuve un problema al procesar tu consulta. ¿Podrias intentar de nuevo?"
 
         intent = AgroVozPipeline._detect_intent(transcribed_text, response_text)
         return response_text, intent
@@ -225,6 +262,40 @@ class AgroVozPipeline:
                 intent,
             )
 
+    @staticmethod
+    def _is_first_contact(phone_hash: str) -> bool:
+        """Retorna True si el phone_hash no tiene consultas previas en DB.
+
+        Consulta SELECT COUNT(*) en consultations WHERE phone_hash = ?.
+        Si la consulta falla, retorna False (safe default: no enviar
+        bienvenida a todos los mensajes si la DB no responde).
+
+        Args:
+            phone_hash: Hash HMAC-SHA256 del numero de telefono.
+
+        Returns:
+            True si es el primer contacto (0 consultas previas).
+        """
+        from sqlalchemy import func, select
+
+        from app.core.database import SessionLocal
+        from app.models.consultation import Consultation
+
+        session = SessionLocal()
+        try:
+            count = session.scalar(
+                select(func.count()).select_from(Consultation).where(Consultation.phone_hash == phone_hash)
+            )
+            return count == 0
+        except SQLAlchemyError:
+            logger.exception(
+                "Error consultando consultas previas — phone_hash=%s",
+                phone_hash[:8],
+            )
+            return False
+        finally:
+            session.close()
+
     async def process(
         self,
         wav_path: Path,
@@ -252,6 +323,7 @@ class AgroVozPipeline:
         whisper_ms_ref = [0]
         llm_ms_ref = [0]
         tts_ms_ref = [0]
+        welcome_ogg_ref: list[str | None] = [None]
 
         try:
             # Ejecutar pipeline con timeout.
@@ -266,6 +338,7 @@ class AgroVozPipeline:
                     whisper_ms_ref=whisper_ms_ref,
                     llm_ms_ref=llm_ms_ref,
                     tts_ms_ref=tts_ms_ref,
+                    welcome_ogg_ref=welcome_ogg_ref,
                 ),
                 timeout=self._timeout,
             )
@@ -278,12 +351,13 @@ class AgroVozPipeline:
                 total_ms,
                 request_id,
             )
+            # Si se genero bienvenida antes del timeout, limpiar el archivo
+            # para evitar leak en audio_temp/ (el ref se captura antes del cancel).
+            if welcome_ogg_ref[0]:
+                Path(welcome_ogg_ref[0]).unlink(missing_ok=True)
             return AudioResponse(
                 audio_path="",
-                text_response=(
-                    "Tuve problemas para responder a tiempo. "
-                    "¿Podrias preguntar de nuevo mas breve?"
-                ),
+                text_response=("Tuve problemas para responder a tiempo. ¿Podrias preguntar de nuevo mas breve?"),
                 latency_ms=total_ms,
                 intent="desconocido",
                 whisper_ms=whisper_ms_ref[0],
@@ -302,6 +376,7 @@ class AgroVozPipeline:
         whisper_ms_ref: list[int],
         llm_ms_ref: list[int],
         tts_ms_ref: list[int],
+        welcome_ogg_ref: list[str | None],
     ) -> AudioResponse:
         """Ejecuta las etapas del pipeline secuencialmente con benchmark.
 
@@ -309,6 +384,40 @@ class AgroVozPipeline:
         dentro de la coroutine (Python no permite asignar nonlocal
         en closures anidadas de forma limpia).
         """
+        # ── Etapa 0: Onboarding — deteccion de primer contacto (#86) ─
+        # Si el phone_hash no tiene consultas previas, se sintetiza un
+        # audio de bienvenida (TTS de texto fijo, sin LLM). AudioService
+        # lo enviara ANTES de la respuesta normal. Fire-and-forget: si
+        # la deteccion o el TTS fallan, el pipeline continua sin bienvenida.
+        #
+        # TRADE-OFF ACEPTADO: la deteccion de primer contacto es racy bajo
+        # concurrencia. Si dos audios del mismo numero llegan simultaneamente,
+        # ambos pueden ver count=0 y generar dos bienvenidas (race between
+        # SELECT COUNT y INSERT). El stub con query_text="" en _save_consultation
+        # solo previene repeticion en el SIGUIENTE request. Aceptado para piloto
+        # MVP de 3-5 productores; post-MVP considerar flag de bienvenida_enviada
+        # con unique constraint para atomicidad.
+        if chat_id_hash and chat_id_hash != "sin_chat":
+            try:
+                is_first = await asyncio.to_thread(self._is_first_contact, chat_id_hash)
+                if is_first:
+                    tts_welcome = _get_tts_service()
+                    welcome_ogg_ref[0] = await asyncio.to_thread(tts_welcome.synthesize, _WELCOME_TEXT)
+                    logger.info(
+                        "Primer contacto detectado — bienvenida generada — phone_hash=%s message_id=%s request_id=%s",
+                        chat_id_hash[:8],
+                        message_id,
+                        request_id,
+                    )
+            except (SQLAlchemyError, RuntimeError, OSError, ValueError) as exc:
+                logger.warning(
+                    "Deteccion de primer contacto o TTS de bienvenida fallo — "
+                    "continuando sin bienvenida: message_id=%s error=%s request_id=%s",
+                    message_id,
+                    exc,
+                    request_id,
+                )
+
         # ── Etapa 1: Transcripcion Whisper ──────────────────────────
         transcribed_text = ""
         t_whisper_start = time.monotonic()
@@ -330,9 +439,7 @@ class AgroVozPipeline:
                     timeout=30.0,
                 )
                 transcribed_text = str(transcription.get("text", ""))
-                whisper_ms_ref[0] = int(
-                    (time.monotonic() - t_whisper_start) * 1000
-                )
+                whisper_ms_ref[0] = int((time.monotonic() - t_whisper_start) * 1000)
                 logger.info(
                     "Audio transcrito — message_id=%s text=%.200s chars=%d whisper_ms=%d request_id=%s",
                     message_id,
@@ -343,8 +450,7 @@ class AgroVozPipeline:
                 )
             except (RuntimeError, FileNotFoundError, ValueError, TimeoutError) as exc:
                 logger.warning(
-                    "Whisper fallo — continuando sin transcripcion: message_id=%s "
-                    "error=%s request_id=%s",
+                    "Whisper fallo — continuando sin transcripcion: message_id=%s error=%s request_id=%s",
                     message_id,
                     exc,
                     request_id,
@@ -373,10 +479,7 @@ class AgroVozPipeline:
                     message_id,
                     request_id,
                 )
-                response_text = (
-                    "Tuve un problema al procesar tu consulta. "
-                    "¿Podrias intentar de nuevo?"
-                )
+                response_text = "Tuve un problema al procesar tu consulta. ¿Podrias intentar de nuevo?"
 
         # ── Etapa 3: Sintesis TTS ────────────────────────────────────
         response_ogg_path: str = ""
@@ -385,9 +488,7 @@ class AgroVozPipeline:
         if response_text:
             try:
                 tts = _get_tts_service()
-                response_ogg_path = await asyncio.to_thread(
-                    tts.synthesize, response_text
-                )
+                response_ogg_path = await asyncio.to_thread(tts.synthesize, response_text)
                 tts_ms_ref[0] = int((time.monotonic() - t_tts_start) * 1000)
                 logger.info(
                     "TTS sintetizado — message_id=%s tts_ms=%d request_id=%s",
@@ -409,28 +510,28 @@ class AgroVozPipeline:
         # bloquear el event loop con session.commit() sincrono). Se guarda
         # al FINAL del pipeline para persistir el desglose por etapa completo
         # (whisper/llm/tts). Fire-and-forget: si falla, loguea y continua.
-        # Solo se persiste si hubo transcripcion valida (igual que antes).
-        if transcribed_text and transcribed_text.strip():
-            try:
-                await asyncio.to_thread(
-                    self._save_consultation,
-                    phone_hash=chat_id_hash,
-                    intent=intent,
-                    query_text=transcribed_text,
-                    response_text=response_text,
-                    audio_duration_ms=audio_duration_ms,
-                    start_time=pipeline_start,
-                    whisper_ms=whisper_ms_ref[0],
-                    llm_ms=llm_ms_ref[0],
-                    tts_ms=tts_ms_ref[0],
-                )
-            except (RuntimeError, OSError, SQLAlchemyError, TypeError, AttributeError, KeyError):
-                logger.exception(
-                    "Error guardando consulta — continuando pipeline: "
-                    "phone_hash=%s intent=%s",
-                    chat_id_hash[:8],
-                    intent,
-                )
+        # Se persiste SIEMPRE: incluso si Whisper fallo, se guarda un stub
+        # con query_text="" para que _is_first_contact() no retorne True
+        # en el siguiente audio (evita bienvenida repetida, fix #105).
+        try:
+            await asyncio.to_thread(
+                self._save_consultation,
+                phone_hash=chat_id_hash,
+                intent=intent,
+                query_text=transcribed_text.strip() if transcribed_text else "",
+                response_text=response_text,
+                audio_duration_ms=audio_duration_ms,
+                start_time=pipeline_start,
+                whisper_ms=whisper_ms_ref[0],
+                llm_ms=llm_ms_ref[0],
+                tts_ms=tts_ms_ref[0],
+            )
+        except (RuntimeError, OSError, SQLAlchemyError, TypeError, AttributeError, KeyError):
+            logger.exception(
+                "Error guardando consulta — continuando pipeline: phone_hash=%s intent=%s",
+                chat_id_hash[:8],
+                intent,
+            )
 
         # Log de benchmark agregado: latencia total + breakdown por etapa.
         logger.info(
@@ -452,4 +553,5 @@ class AgroVozPipeline:
             whisper_ms=whisper_ms_ref[0],
             llm_ms=llm_ms_ref[0],
             tts_ms=tts_ms_ref[0],
+            welcome_audio_path=welcome_ogg_ref[0],
         )
