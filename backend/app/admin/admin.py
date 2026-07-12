@@ -20,7 +20,6 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import __version__
@@ -225,14 +224,7 @@ async def piloto_page(
     """
     metrics = metrics_service.get_piloto_metrics(db)
     # Consultas recientes con feedback para la tabla.
-    from app.models.consultation import Consultation
-
-    consultas = db.scalars(
-        select(Consultation)
-        .where(Consultation.feedback.is_not(None))
-        .order_by(Consultation.created_at.desc())
-        .limit(50)
-    ).all()
+    consultas = metrics_service.get_piloto_consultations_with_feedback(db)
     consultas_data = [
         {
             "id": c.id,

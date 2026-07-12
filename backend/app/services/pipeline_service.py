@@ -459,12 +459,15 @@ class AgroVozPipeline:
         intent = "desconocido"
         t_llm_start = time.monotonic()
 
-        if transcribed_text and transcribed_text.strip():
+        if not transcribed_text or not transcribed_text.strip():
+            # Sin transcripcion: no hay nada que procesar.
+            llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
+        else:
             # Detectar si el mensaje es feedback del agricultor.
             feedback = _detect_feedback(transcribed_text)
             if feedback is not None:
-                # Es feedback: actualizar la consulta anterior y responder
-                # con TTS corto. No generar nueva consulta.
+                # Es feedback: actualizar la consulta anterior y responder con TTS corto.
+                # No generar nueva consulta.
                 intent = "feedback"
                 updated = await asyncio.to_thread(
                     self._update_previous_feedback,
@@ -493,7 +496,7 @@ class AgroVozPipeline:
                     )
                 llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
             else:
-                # No es feedback: procesar como consulta normal.
+                # No es feedback: procesar como consulta normal con LLM.
                 try:
                     response_text, intent = await self._generate_response(transcribed_text)
                     llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)

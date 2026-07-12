@@ -18,12 +18,15 @@ _ = _app.middleware_stack
 
 
 @pytest.fixture
-def db(tmp_path: Path) -> Generator[Session, None, None]:
+def db(tmp_path: Path, monkeypatch) -> Generator[Session, None, None]:
     """Engine SQLite temporal con tablas creadas desde los modelos.
 
     Cada test recibe una DB fresh en un archivo temporal distinto.
     Los modelos se importan dentro de la fixture para garantizar que
     Base.metadata los incluya antes de create_all().
+
+    SessionLocal se parchea para que funciones que crean sus propias sesiones
+    (como _update_previous_feedback) usen la misma DB temporal.
     """
     from app.core.database import Base
     from app.models import Consultation, OdepaPrice  # noqa: F401 — registra modelos en Base.metadata
@@ -34,7 +37,13 @@ def db(tmp_path: Path) -> Generator[Session, None, None]:
         connect_args={"check_same_thread": False},
     )
     Base.metadata.create_all(engine)
-    session = sessionmaker(bind=engine)()
+    TestSessionLocal = sessionmaker(bind=engine)
+
+    # Parchear SessionLocal para que funciones internas usen la misma DB.
+    import app.core.database as db_module
+    monkeypatch.setattr(db_module, "SessionLocal", TestSessionLocal)
+
+    session = TestSessionLocal()
     try:
         yield session
     finally:

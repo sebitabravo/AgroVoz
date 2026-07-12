@@ -762,16 +762,33 @@ def get_piloto_export_data(db: Session) -> list[dict[str, object]]:
     ]
 
 
+def get_piloto_consultations_with_feedback(db: Session, limit: int = 50) -> list[Consultation]:
+    """Obtiene consultas recientes con feedback para la tabla del piloto.
+
+    Args:
+        db: Sesión de SQLAlchemy.
+        limit: Número máximo de consultas a retornar.
+
+    Returns:
+        Lista de Consultation con feedback, ordenadas por created_at descendente.
+    """
+    consultas = db.scalars(
+        select(Consultation)
+        .where(Consultation.feedback.is_not(None))
+        .order_by(Consultation.created_at.desc())
+        .limit(limit)
+    ).all()
+    return list(consultas)
+
+
 def toggle_decision_productiva(db: Session, consultation_id: int) -> bool | None:
     """Toggle del campo decision_productiva de una consulta.
 
     Retorna el nuevo valor de decision_productiva si se encontró y actualizó,
     None si no se encontró la consulta.
     """
-    from sqlalchemy import select as _select
-
     consulta = db.scalars(
-        _select(Consultation).where(Consultation.id == consultation_id)
+        select(Consultation).where(Consultation.id == consultation_id)
     ).first()
     if consulta is None:
         return None

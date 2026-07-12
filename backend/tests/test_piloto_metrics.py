@@ -13,8 +13,7 @@ import datetime
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 from app.admin.auth import COOKIE_NAME, create_session_cookie
 from app.models.consultation import Consultation
@@ -50,39 +49,6 @@ def _crear_consultation(
     db.add(c)
     db.flush()  # Asegura que el ID esté disponible.
     return c
-
-
-@pytest.fixture
-def db_session(tmp_path, monkeypatch):
-    """Session + SessionLocal parcheados para tests de feedback.
-
-    Crea una DB temporal. SessionLocal se parchea para que las funciones
-    que crean sus propias sesiones (como _update_previous_feedback) usen
-    la misma DB. La sesión `session` se usa para crear datos de prueba.
-    """
-    from app.core.database import Base
-    from app.models import Consultation as _C, OdepaPrice as _O  # noqa: F401
-
-    db_path = tmp_path / "test_feedback.db"
-    engine = create_engine(
-        f"sqlite:///{db_path}",
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(engine)
-    TestSessionLocal = sessionmaker(bind=engine)
-
-    # Parchear SessionLocal.
-    import app.core.database as db_module
-    original_session_local = db_module.SessionLocal
-    db_module.SessionLocal = TestSessionLocal
-
-    session = TestSessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
-        engine.dispose()
-        db_module.SessionLocal = original_session_local
 
 
 # ── Detección de feedback ──────────────────────────────────────────
@@ -133,14 +99,14 @@ class TestFeedbackDetection:
 class TestFeedbackAssociation:
     """Tests de asociación de feedback a la consulta anterior."""
 
-    def test_feedback_se_asocia_a_consulta_anterior(self, db_session: Session) -> None:
+    def test_feedback_se_asocia_a_consulta_anterior(self, db: Session) -> None:
         """El feedback actualiza el campo feedback de la última consulta."""
         from app.services.pipeline_service import AgroVozPipeline
 
         # Crear dos consultas previas.
-        c1 = _crear_consultation(db_session, phone_hash="user1", intent="precio")
-        c2 = _crear_consultation(db_session, phone_hash="user1", intent="clima")
-        db_session.commit()
+        c1 = _crear_consultation(db, phone_hash="user1", intent="precio")
+        c2 = _crear_consultation(db, phone_hash="user1", intent="clima")
+        db.commit()
 
         # Simular feedback "util" — SessionLocal() crea sesión sobre misma DB.
         pipeline = AgroVozPipeline()
@@ -148,25 +114,25 @@ class TestFeedbackAssociation:
 
         assert updated is True
         # Verificar: expire objetos y re-leer.
-        db_session.expire_all()
-        assert db_session.get(Consultation, c2.id).feedback == "util"
-        assert db_session.get(Consultation, c1.id).feedback is None
+        db.expire_all()
+        assert db.get(Consultation, c2.id).feedback == "util"
+        assert db.get(Consultation, c1.id).feedback is None
 
-    def test_feedback_no_util_se_asocia_correctamente(self, db_session: Session) -> None:
+    def test_feedback_no_util_se_asocia_correctamente(self, db: Session) -> None:
         from app.services.pipeline_service import AgroVozPipeline
 
-        _crear_consultation(db_session, phone_hash="user2", intent="precio")
-        c2 = _crear_consultation(db_session, phone_hash="user2", intent="clima")
-        db_session.commit()
+        _crear_consultation(db, phone_hash="user2", intent="precio")
+        c2 = _crear_consultation(db, phone_hash="user2", intent="clima")
+        db.commit()
 
         pipeline = AgroVozPipeline()
         updated = pipeline._update_previous_feedback("user2", "no_util")
 
         assert updated is True
-        db_session.expire_all()
-        assert db_session.get(Consultation, c2.id).feedback == "no_util"
+        db.expire_all()
+        assert db.get(Consultation, c2.id).feedback == "no_util"
 
-    def test_feedback_sin_consulta_previa_retorna_false(self, db_session: Session) -> None:
+    def test_feedback_sin_consulta_previa_retorna_false(self, db: Session) -> None:
         from app.services.pipeline_service import AgroVozPipeline
 
         pipeline = AgroVozPipeline()
@@ -174,19 +140,19 @@ class TestFeedbackAssociation:
 
         assert updated is False
 
-    def test_feedback_no_afecta_otro_phone_hash(self, db_session: Session) -> None:
+    def test_feedback_no_afecta_otro_phone_hash(self, db: Session) -> None:
         """El feedback solo actualiza consultas del mismo phone_hash."""
         from app.services.pipeline_service import AgroVozPipeline
 
-        c1 = _crear_consultation(db_session, phone_hash="user_a", intent="precio")
-        _crear_consultation(db_session, phone_hash="user_b", intent="clima")
-        db_session.commit()
+        c1 = _crear_consultation(db, phone_hash="user_a", intent="precio")
+        _crear_consultation(db, phone_hash="user_b", intent="clima")
+        db.commit()
 
         pipeline = AgroVozPipeline()
         pipeline._update_previous_feedback("user_b", "util")
 
-        db_session.expire_all()
-        assert db_session.get(Consultation, c1.id).feedback is None
+        db.expire_all()
+        assert db.get(Consultation, c1.id).feedback is None
 
 
 # ── Métricas del piloto ────────────────────────────────────────────
