@@ -14,12 +14,17 @@ import asyncio
 import logging
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.schemas.pipeline import AudioResponse
 from app.services.tts_service import PiperModelNotFoundError, TTSService
 from app.services.whisper_service import WhisperService
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +44,19 @@ _MAX_WHISPER_AUDIO_MS = 12_000
 # Cache singleton de TTSService: el modelo Piper se carga UNA vez.
 _tts_service: TTSService | None = None
 
+# Keywords de feedback del agricultor. Se detectan como intent especial
+# y actualizan la consulta ANTERIOR (no generan nueva consulta).
+_FEEDBACK_UTIL = [
+    "me sirvió", "me sirve", "me sirvio", "util", "útil",
+    "gracias", "eso era", "eso es", "perfecto", "bacán", "bakan",
+    "buena", "buenísimo", "buenisimo", "ok", "dale",
+]
+_FEEDBACK_NO_UTIL = [
+    "no me sirvió", "no me sirve", "no me sirvio", "no útil", "no util",
+    "no entendi", "no entendí", "no cache", "no cacho",
+    "mal", "malo", "pesimo", "pésimo", "no es eso",
+]
+
 
 def _get_tts_service() -> TTSService:
     """Retorna la instancia singleton de TTSService."""
@@ -46,6 +64,26 @@ def _get_tts_service() -> TTSService:
     if _tts_service is None:
         _tts_service = TTSService()
     return _tts_service
+
+
+def _detect_feedback(text: str) -> str | None:
+    """Detecta si el texto es feedback del agricultor sobre la consulta anterior.
+
+    Args:
+        text: Texto transcrito por Whisper.
+
+    Returns:
+        "util", "no_util", o None si no es feedback.
+    """
+    text_lower = text.lower().strip()
+    # Priorizar feedback negativo (más específico).
+    for kw in _FEEDBACK_NO_UTIL:
+        if kw in text_lower:
+            return "no_util"
+    for kw in _FEEDBACK_UTIL:
+        if kw in text_lower:
+            return "util"
+    return None
 
 
 class AgroVozPipeline:
@@ -225,6 +263,72 @@ class AgroVozPipeline:
                 intent,
             )
 
+    @staticmethod
+    def _update_previous_feedback(
+        phone_hash: str,
+        feedback: str,
+        session: Session | None = None,
+    ) -> bool:
+        """Actualiza el feedback de la ultima consulta del phone_hash.
+
+        Busca la consulta más reciente del mismo phone_hash y actualiza
+        su campo feedback. Si no hay consulta previa, retorna False.
+
+        Args:
+            phone_hash: Hash del numero de telefono.
+            feedback: "util" o "no_util".
+            session: Sesión de SQLAlchemy opcional. Si no se provee, crea una nueva.
+
+        Returns:
+            True si se actualizó una consulta, False si no había previa.
+        """
+        from app.core.database import SessionLocal
+        from app.models.consultation import Consultation
+
+        own_session = session is None
+        if session is None:
+            session = SessionLocal()
+        try:
+            # Buscar la última consulta del mismo phone_hash.
+            # Ordenar por id DESC (más confiable que created_at con
+            # server_default que puede tener el mismo timestamp para
+            # filas insertadas en la misma transacción).
+            stmt = (
+                select(Consultation)
+                .where(Consultation.phone_hash == phone_hash)
+                .order_by(Consultation.id.desc())
+                .limit(1)
+            )
+            consulta = session.scalars(stmt).first()
+            if consulta is None:
+                logger.warning(
+                    "Feedback sin consulta previa — phone_hash=%s feedback=%s",
+                    phone_hash[:8],
+                    feedback,
+                )
+                return False
+
+            consulta.feedback = feedback
+            session.commit()
+            logger.info(
+                "Feedback actualizado — consultation_id=%d phone_hash=%s feedback=%s",
+                consulta.id,
+                phone_hash[:8],
+                feedback,
+            )
+            return True
+        except SQLAlchemyError:
+            session.rollback()
+            logger.exception(
+                "Error actualizando feedback — phone_hash=%s feedback=%s",
+                phone_hash[:8],
+                feedback,
+            )
+            return False
+        finally:
+            if own_session:
+                session.close()
+
     async def process(
         self,
         wav_path: Path,
@@ -350,33 +454,67 @@ class AgroVozPipeline:
                     request_id,
                 )
 
-        # ── Etapa 2: Generacion LLM + guardar consulta ───────────────
+        # ── Etapa 2: Detectar feedback o generar respuesta LLM ────────
         response_text = ""
         intent = "desconocido"
         t_llm_start = time.monotonic()
 
         if transcribed_text and transcribed_text.strip():
-            try:
-                response_text, intent = await self._generate_response(transcribed_text)
+            # Detectar si el mensaje es feedback del agricultor.
+            feedback = _detect_feedback(transcribed_text)
+            if feedback is not None:
+                # Es feedback: actualizar la consulta anterior y responder
+                # con TTS corto. No generar nueva consulta.
+                intent = "feedback"
+                updated = await asyncio.to_thread(
+                    self._update_previous_feedback,
+                    phone_hash=chat_id_hash,
+                    feedback=feedback,
+                )
+                if updated:
+                    response_text = (
+                        "Me alegra haberte ayudado."
+                        if feedback == "util"
+                        else "Gracias, lo tendré en cuenta."
+                    )
+                    logger.info(
+                        "Feedback procesado — message_id=%s feedback=%s request_id=%s",
+                        message_id,
+                        feedback,
+                        request_id,
+                    )
+                else:
+                    response_text = "Gracias por tu respuesta."
+                    logger.warning(
+                        "Feedback sin consulta previa — message_id=%s feedback=%s request_id=%s",
+                        message_id,
+                        feedback,
+                        request_id,
+                    )
                 llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
-                logger.info(
-                    "Respuesta LLM generada — message_id=%s intent=%s chars=%d llm_ms=%d request_id=%s",
-                    message_id,
-                    intent,
-                    len(response_text),
-                    llm_ms_ref[0],
-                    request_id,
-                )
-            except (TimeoutError, RuntimeError, OSError, ValueError):
-                logger.exception(
-                    "Error generando respuesta LLM — message_id=%s request_id=%s",
-                    message_id,
-                    request_id,
-                )
-                response_text = (
-                    "Tuve un problema al procesar tu consulta. "
-                    "¿Podrias intentar de nuevo?"
-                )
+            else:
+                # No es feedback: procesar como consulta normal.
+                try:
+                    response_text, intent = await self._generate_response(transcribed_text)
+                    llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
+                    logger.info(
+                        "Respuesta LLM generada — message_id=%s intent=%s chars=%d llm_ms=%d request_id=%s",
+                        message_id,
+                        intent,
+                        len(response_text),
+                        llm_ms_ref[0],
+                        request_id,
+                    )
+                except (TimeoutError, RuntimeError, OSError, ValueError):
+                    logger.exception(
+                        "Error generando respuesta LLM — message_id=%s request_id=%s",
+                        message_id,
+                        request_id,
+                    )
+                    response_text = (
+                        "Tuve un problema al procesar tu consulta. "
+                        "¿Podrias intentar de nuevo?"
+                    )
 
         # ── Etapa 3: Sintesis TTS ────────────────────────────────────
         response_ogg_path: str = ""
@@ -409,8 +547,9 @@ class AgroVozPipeline:
         # bloquear el event loop con session.commit() sincrono). Se guarda
         # al FINAL del pipeline para persistir el desglose por etapa completo
         # (whisper/llm/tts). Fire-and-forget: si falla, loguea y continua.
-        # Solo se persiste si hubo transcripcion valida (igual que antes).
-        if transcribed_text and transcribed_text.strip():
+        # Solo se persiste si hubo transcripcion valida Y no es feedback
+        # (el feedback actualiza la consulta anterior, no crea una nueva).
+        if transcribed_text and transcribed_text.strip() and intent != "feedback":
             try:
                 await asyncio.to_thread(
                     self._save_consultation,
