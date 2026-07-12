@@ -60,11 +60,14 @@ def set_comuna(
         )
 
     comuna = body.comuna.strip()
+    if not comuna:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="comuna no puede estar vacía después de limpiar espacios.",
+        )
 
     try:
-        prefs = db.scalar(
-            select(UserPrefs).where(UserPrefs.phone_hash == phone_hash)
-        )
+        prefs = db.scalar(select(UserPrefs).where(UserPrefs.phone_hash == phone_hash))
         if prefs is None:
             prefs = UserPrefs(phone_hash=phone_hash, comuna=comuna)
             db.add(prefs)
@@ -86,9 +89,7 @@ def set_comuna(
         db.rollback()
         # Race condition: otro request insertó el mismo phone_hash entre
         # nuestro SELECT y INSERT. Reintentar el SELECT para devolver la fila.
-        prefs = db.scalar(
-            select(UserPrefs).where(UserPrefs.phone_hash == phone_hash)
-        )
+        prefs = db.scalar(select(UserPrefs).where(UserPrefs.phone_hash == phone_hash))
         if prefs is None:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -130,17 +131,24 @@ def get_user_prefs(
             detail="phone_hash debe ser 64 caracteres hexadecimales minúscula.",
         )
 
-    prefs = db.scalar(
-        select(UserPrefs).where(UserPrefs.phone_hash == phone_hash)
-    )
+    prefs = db.scalar(select(UserPrefs).where(UserPrefs.phone_hash == phone_hash))
     if prefs is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No hay preferencias registradas para este phone_hash.",
         )
 
+    if prefs.created_at is None:
+        logger.warning(
+            "created_at es None para phone_hash=%s — usando datetime.now() como fallback",
+            phone_hash[:8],
+        )
+        created_at = datetime.datetime.now()
+    else:
+        created_at = prefs.created_at
+
     return UserPrefsResponse(
         phone_hash=prefs.phone_hash,
         comuna=prefs.comuna,
-        created_at=prefs.created_at or datetime.datetime.now(),
+        created_at=created_at,
     )

@@ -69,9 +69,7 @@ def _mock_tts_synthesize(monkeypatch: pytest.MonkeyPatch, output_path: str) -> N
     )
 
 
-def _mock_tts_fail(
-    monkeypatch: pytest.MonkeyPatch, exc: type[Exception] = RuntimeError, msg: str = "TTS roto"
-) -> None:
+def _mock_tts_fail(monkeypatch: pytest.MonkeyPatch, exc: type[Exception] = RuntimeError, msg: str = "TTS roto") -> None:
     """Mockea TTSService.synthesize para lanzar excepcion."""
 
     def fake_synthesize_err(_self: object, text: str, output_dir: str | Path | None = None) -> str:
@@ -102,16 +100,18 @@ def _mock_db_save(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
         llm_ms: int = 0,
         tts_ms: int = 0,
     ) -> None:
-        calls.append({
-            "phone_hash": phone_hash,
-            "intent": intent,
-            "query_text": query_text,
-            "response_text": response_text,
-            "audio_duration_ms": audio_duration_ms,
-            "whisper_ms": whisper_ms,
-            "llm_ms": llm_ms,
-            "tts_ms": tts_ms,
-        })
+        calls.append(
+            {
+                "phone_hash": phone_hash,
+                "intent": intent,
+                "query_text": query_text,
+                "response_text": response_text,
+                "audio_duration_ms": audio_duration_ms,
+                "whisper_ms": whisper_ms,
+                "llm_ms": llm_ms,
+                "tts_ms": tts_ms,
+            }
+        )
 
     monkeypatch.setattr(AgroVozPipeline, "_save_consultation", fake_save)
     return calls
@@ -124,15 +124,11 @@ class TestDetectIntent:
     """Keyword matching para metrica de intencion."""
 
     def test_precio_por_keyword_papa(self) -> None:
-        intent = AgroVozPipeline._detect_intent(
-            "precio de la papa en lo valledor", ""
-        )
+        intent = AgroVozPipeline._detect_intent("precio de la papa en lo valledor", "")
         assert intent == "precio"
 
     def test_precio_por_keyword_luca(self) -> None:
-        intent = AgroVozPipeline._detect_intent(
-            "a cuanto estan las papas", "en la feria estan a 200 pesos el kilo"
-        )
+        intent = AgroVozPipeline._detect_intent("a cuanto estan las papas", "en la feria estan a 200 pesos el kilo")
         assert intent == "precio"
 
     def test_precio_por_keyword_cuesta_en_respuesta(self) -> None:
@@ -143,21 +139,15 @@ class TestDetectIntent:
         assert intent == "precio"
 
     def test_clima_por_keyword_temperatura(self) -> None:
-        intent = AgroVozPipeline._detect_intent(
-            "cual es la temperatura en traiguen", ""
-        )
+        intent = AgroVozPipeline._detect_intent("cual es la temperatura en traiguen", "")
         assert intent == "clima"
 
     def test_clima_por_keyword_lluvia(self) -> None:
         # "llover" NO esta en keywords de clima, "lluvia" y "lloviendo" si
-        intent_sin_match = AgroVozPipeline._detect_intent(
-            "va a llover manana", ""
-        )
+        intent_sin_match = AgroVozPipeline._detect_intent("va a llover manana", "")
         assert intent_sin_match != "clima"  # "llover" no es keyword
         # Con keyword correcta
-        intent = AgroVozPipeline._detect_intent(
-            "habra lluvia manana", ""
-        )
+        intent = AgroVozPipeline._detect_intent("habra lluvia manana", "")
         assert intent == "clima"
 
     def test_clima_por_keyword_frio_en_respuesta(self) -> None:
@@ -168,9 +158,7 @@ class TestDetectIntent:
         assert intent == "clima"
 
     def test_desconocido_sin_keywords(self) -> None:
-        intent = AgroVozPipeline._detect_intent(
-            "hola buenos dias", "en que puedo ayudarte"
-        )
+        intent = AgroVozPipeline._detect_intent("hola buenos dias", "en que puedo ayudarte")
         assert intent == "desconocido"
 
     def test_desconocido_textos_vacios(self) -> None:
@@ -186,9 +174,7 @@ class TestDetectIntent:
         assert intent == "precio"
 
     def test_mayusculas_insensibles(self) -> None:
-        intent = AgroVozPipeline._detect_intent(
-            "PRECIO DE LA PAPA EN LO VALLEDOR", ""
-        )
+        intent = AgroVozPipeline._detect_intent("PRECIO DE LA PAPA EN LO VALLEDOR", "")
         assert intent == "precio"
 
 
@@ -204,9 +190,7 @@ class TestGenerateResponse:
             monkeypatch,
             "La papa cuesta 450 pesos el kilo en Lo Valledor",
         )
-        text, intent = await AgroVozPipeline._generate_response(
-            "precio de la papa en lo valledor"
-        )
+        text, intent = await AgroVozPipeline._generate_response("precio de la papa en lo valledor")
         assert "450" in text
         assert intent == "precio"
 
@@ -302,6 +286,7 @@ class TestProcess:
         tts_ogg: str,
     ) -> None:
         """Pipeline completo: Whisper → LLM → TTS con consulta de clima."""
+
         # Usar texto transcrito con keyword de clima
         def fake_transcribe_clima(_self: object, audio_path: str) -> dict[str, object]:
             return {
@@ -339,6 +324,7 @@ class TestProcess:
         tts_ogg: str,
     ) -> None:
         """Pipeline con consulta fuera de scope → intent desconocido."""
+
         def fake_transcribe_out(_self: object, audio_path: str) -> dict[str, object]:
             return {
                 "text": "hola como estas",
@@ -450,7 +436,11 @@ class TestProcess:
         wav_path: Path,
         tts_ogg: str,
     ) -> None:
-        """Si Whisper lanza RuntimeError, pipeline continua con respuesta generica."""
+        """Si Whisper lanza RuntimeError, pipeline continua con respuesta generica.
+
+        Fix #105: se guarda un stub consultation para que _is_first_contact()
+        retorne False en el siguiente audio (evita bienvenida repetida).
+        """
 
         def fake_transcribe_err(_self: object, audio_path: str) -> dict[str, object]:
             raise RuntimeError("Whisper OOM")
@@ -469,7 +459,7 @@ class TestProcess:
 
         monkeypatch.setattr("app.services.llm_service.answer", fake_answer_check)
         _mock_tts_synthesize(monkeypatch, tts_ogg)
-        _mock_db_save(monkeypatch)
+        save_calls = _mock_db_save(monkeypatch)
 
         pipeline = AgroVozPipeline()
         result = await pipeline.process(
@@ -484,6 +474,12 @@ class TestProcess:
         # Sin texto transcrito, response_text queda vacio → TTS no sintetiza → audio_path vacio
         assert result.audio_path == ""
         assert result.intent == "desconocido"
+        # Fix #105: se guarda stub consultation incluso cuando Whisper falla.
+        # Esto previene que _is_first_contact retorne True en el siguiente audio
+        # (bienvenida repetida).
+        assert len(save_calls) == 1
+        assert save_calls[0]["query_text"] == ""
+        assert save_calls[0]["intent"] == "desconocido"
 
     # ── TTS falla ───────────────────────────────────────────────
 
@@ -604,9 +600,7 @@ class TestTimeout:
 # ── Onboarding: primer contacto y bienvenida (#86) ──────────────────
 
 
-def _mock_first_contact(
-    monkeypatch: pytest.MonkeyPatch, is_first: bool
-) -> None:
+def _mock_first_contact(monkeypatch: pytest.MonkeyPatch, is_first: bool) -> None:
     """Mockea AgroVozPipeline._is_first_contact para controlar el resultado.
 
     Usa staticmethod() para preservar el comportamiento de staticmethod:
@@ -883,14 +877,16 @@ class TestIsFirstContact:
         from app.models.consultation import Consultation
 
         # Insertar una consulta previa para este phone_hash.
-        db.add(Consultation(
-            phone_hash="b" * 64,
-            intent="precio",
-            query_text="precio de la papa",
-            response_text="450 pesos",
-            audio_duration_ms=2000,
-            latency_ms=1000,
-        ))
+        db.add(
+            Consultation(
+                phone_hash="b" * 64,
+                intent="precio",
+                query_text="precio de la papa",
+                response_text="450 pesos",
+                audio_duration_ms=2000,
+                latency_ms=1000,
+            )
+        )
         db.commit()
 
         import app.core.database as db_module
@@ -908,14 +904,16 @@ class TestIsFirstContact:
         """Consultas de OTRO phone_hash no cuentan como previas para este."""
         from app.models.consultation import Consultation
 
-        db.add(Consultation(
-            phone_hash="c" * 64,
-            intent="clima",
-            query_text="clima en traiguen",
-            response_text="8 grados",
-            audio_duration_ms=1500,
-            latency_ms=800,
-        ))
+        db.add(
+            Consultation(
+                phone_hash="c" * 64,
+                intent="clima",
+                query_text="clima en traiguen",
+                response_text="8 grados",
+                audio_duration_ms=1500,
+                latency_ms=800,
+            )
+        )
         db.commit()
 
         import app.core.database as db_module
