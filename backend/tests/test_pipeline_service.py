@@ -51,7 +51,7 @@ def _mock_whisper_transcribe(monkeypatch: pytest.MonkeyPatch) -> None:
 def _mock_llm_answer(monkeypatch: pytest.MonkeyPatch, answer_text: str) -> None:
     """Mockea llm_service.answer para retornar texto fijo."""
 
-    async def fake_answer(query: str) -> str:
+    async def fake_answer(query: str, phone_hash: str | None = None) -> str:
         return answer_text
 
     monkeypatch.setattr("app.services.llm_service.answer", fake_answer)
@@ -211,7 +211,7 @@ class TestGenerateResponse:
     async def test_answer_lanza_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Si answer() lanza excepcion, retorna fallback pero no propaga."""
 
-        async def fake_answer_error(_query: str) -> str:
+        async def fake_answer_error(_query: str, phone_hash: str | None = None) -> str:
             raise RuntimeError("LLM colapso")
 
         monkeypatch.setattr("app.services.llm_service.answer", fake_answer_error)
@@ -368,7 +368,7 @@ class TestProcess:
         _mock_whisper_transcribe(monkeypatch)
 
         # LLM mock que se demora mas que el timeout
-        async def fake_answer_slow(_query: str) -> str:
+        async def fake_answer_slow(_query: str, phone_hash: str | None = None) -> str:
             await asyncio.sleep(999.0)  # Nunca termina
             return "muy tarde"
 
@@ -452,7 +452,7 @@ class TestProcess:
         # LLM NO deberia llamarse porque no hay texto transcrito
         llm_called = False
 
-        async def fake_answer_check(_query: str) -> str:
+        async def fake_answer_check(_query: str, phone_hash: str | None = None) -> str:
             nonlocal llm_called
             llm_called = True
             return "no deberia generarse"
