@@ -11,9 +11,9 @@ Sin modelo real: todos los tests corren en CI sin llama-cpp-python ni GGUF.
 
 import pytest
 
+from app.services.llm_keywords import _VENTA_KILOS_RE, _force_keyword_tool
 from app.services.llm_service import (
     _TOOLS_SECTION,
-    _VENTA_KILOS_RE,
     FALLBACK_TEXT,
     MAX_TOOL_ITERATIONS,
     NO_RESPONSE_TEXT,
@@ -23,7 +23,6 @@ from app.services.llm_service import (
     _build_messages,
     _execute_tool,
     _filter_handler_args,
-    _force_keyword_tool,
     _mock_answer,
     _parse_content,
     _parse_text_tool_calls,
