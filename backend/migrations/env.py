@@ -21,7 +21,7 @@ if config.config_file_name is not None:
 # Si un modelo no se importa aquí, --autogenerate NO lo detecta.
 from app.core.config import settings  # noqa: E402 — import después de fileConfig
 from app.core.database import Base  # noqa: E402
-from app.models import Consultation, OdepaPrice  # noqa: E402, F401 — necesario para metadata
+from app.models import Consultation, OdepaPrice, UserPrefs  # noqa: E402, F401 — necesario para metadata
 
 target_metadata = Base.metadata
 
