@@ -328,3 +328,89 @@ class TestCsvExportEdgeCases:
         assert resp.status_code == 200
         rows = _parse_csv_rows(resp.content)
         assert len(rows) == 1  # solo headers
+
+
+# ── Seguridad (formula injection) ───────────────────────────────────
+
+
+class TestCsvExportSecurity:
+    async def test_formula_injection_sanitized(
+        self, client: AsyncClient, tmp_path: Path
+    ) -> None:
+        """CSV formula injection: producto que empieza con '=SUMA(...)' es escapado.
+
+        Si un producto/mercado empieza con '=', '+', '-', '@' o tab, Excel lo
+        interpreta como fórmula. El export debe prefijarlo con apóstrofo (')
+        para obligar tratamiento como texto.
+
+        Regresión para: issue #90, PR #108 — sanitización de CSV values.
+        """
+        with next(_session_test_db(tmp_path)) as db:
+            # Inserta un producto "malicioso" con fórmula
+            _precio(db, producto="=SUMA(A1:A10)", mercado="Lo Valledor")
+
+        _autenticar(client)
+        resp = await client.get("/admin/prices/export", follow_redirects=False)
+        assert resp.status_code == 200
+        rows = _parse_csv_rows(resp.content)
+        datos = rows[1]
+        # El valor del producto debe estar escapado: "'=SUMA(A1:A10)"
+        assert datos[1] == "'=SUMA(A1:A10)"
+
+    async def test_formula_injection_mercado_sanitized(
+        self, client: AsyncClient, tmp_path: Path
+    ) -> None:
+        """Mercado que empieza con '+' es escapado."""
+        with next(_session_test_db(tmp_path)) as db:
+            _precio(db, producto="papa", mercado="+1234567")
+
+        _autenticar(client)
+        resp = await client.get("/admin/prices/export", follow_redirects=False)
+        assert resp.status_code == 200
+        rows = _parse_csv_rows(resp.content)
+        datos = rows[1]
+        assert datos[2] == "'+1234567"
+
+    async def test_formula_injection_minus_sign_sanitized(
+        self, client: AsyncClient, tmp_path: Path
+    ) -> None:
+        """Mercado que empieza con '-' es escapado."""
+        with next(_session_test_db(tmp_path)) as db:
+            _precio(db, producto="papa", mercado="-1000")
+
+        _autenticar(client)
+        resp = await client.get("/admin/prices/export", follow_redirects=False)
+        assert resp.status_code == 200
+        rows = _parse_csv_rows(resp.content)
+        datos = rows[1]
+        assert datos[2] == "'-1000"
+
+    async def test_formula_injection_at_sign_sanitized(
+        self, client: AsyncClient, tmp_path: Path
+    ) -> None:
+        """Producto que empieza con '@' es escapado."""
+        with next(_session_test_db(tmp_path)) as db:
+            _precio(db, producto="@malicious", mercado="Lo Valledor")
+
+        _autenticar(client)
+        resp = await client.get("/admin/prices/export", follow_redirects=False)
+        assert resp.status_code == 200
+        rows = _parse_csv_rows(resp.content)
+        datos = rows[1]
+        assert datos[1] == "'@malicious"
+
+    async def test_no_sanitize_normal_values(
+        self, client: AsyncClient, tmp_path: Path
+    ) -> None:
+        """Valores que NO empiezan con caracteres especiales no son modificados."""
+        with next(_session_test_db(tmp_path)) as db:
+            _precio(db, producto="papa", mercado="Lo Valledor")
+
+        _autenticar(client)
+        resp = await client.get("/admin/prices/export", follow_redirects=False)
+        assert resp.status_code == 200
+        rows = _parse_csv_rows(resp.content)
+        datos = rows[1]
+        # Sin sanitización para valores normales
+        assert datos[1] == "papa"
+        assert datos[2] == "Lo Valledor"
