@@ -18,8 +18,9 @@ import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import __version__
@@ -206,6 +207,104 @@ async def activity_page(
         request,
         "activity.html",
         {"recientes": recientes, "active_tab": "activity"},
+    )
+
+
+# ── Piloto (Issue #97) ────────────────────────────────────────────
+
+
+@router.get("/piloto")
+async def piloto_page(
+    request: Request,
+    db: Session = Depends(get_db),  # noqa: B008
+) -> HTMLResponse:
+    """Piloto: métricas de éxito del piloto para Crea INACAP (sección 7.3).
+
+    Muestra: productores activos, consultas por productor, % útiles,
+    latencia promedio vs target, casos de decisión productiva.
+    """
+    metrics = metrics_service.get_piloto_metrics(db)
+    # Consultas recientes con feedback para la tabla.
+    from app.models.consultation import Consultation
+
+    consultas = db.scalars(
+        select(Consultation)
+        .where(Consultation.feedback.is_not(None))
+        .order_by(Consultation.created_at.desc())
+        .limit(50)
+    ).all()
+    consultas_data = [
+        {
+            "id": c.id,
+            "phone_hash": c.phone_hash,
+            "intent": c.intent,
+            "feedback": c.feedback,
+            "decision_productiva": c.decision_productiva,
+            "latency_ms": c.latency_ms,
+            "ts": c.created_at.isoformat(timespec="seconds"),
+        }
+        for c in consultas
+    ]
+    return templates.TemplateResponse(
+        request,
+        "piloto.html",
+        {
+            "metrics": metrics,
+            "consultas_con_feedback": consultas_data,
+            "active_tab": "piloto",
+        },
+    )
+
+
+@router.post("/consultations/{consultation_id}/decision")
+async def toggle_decision(
+    consultation_id: int,
+    request: Request,
+    db: Session = Depends(get_db),  # noqa: B008
+) -> HTMLResponse:
+    """Toggle decision_productiva de una consulta. Endpoint HTMX.
+
+    Retorna un partial HTML con el estado actualizado del botón.
+    """
+    nuevo_valor = metrics_service.toggle_decision_productiva(db, consultation_id)
+    if nuevo_valor is None:
+        return HTMLResponse(
+            '<span style="font-size:11px;color:#c05252">no encontrada</span>',
+            status_code=404,
+        )
+    if nuevo_valor:
+        return HTMLResponse(
+            '<span style="font-size:11px;font-weight:700;color:#4f7d5a">✓ productiva</span>'
+        )
+    return HTMLResponse(
+        '<span style="font-size:11px;color:#7e827a">marcar</span>'
+    )
+
+
+@router.get("/piloto/export")
+async def piloto_export(
+    db: Session = Depends(get_db),  # noqa: B008
+) -> StreamingResponse:
+    """Export CSV de las métricas del piloto.
+
+    Genera un CSV con las métricas calculadas para el informe de Crea INACAP.
+    """
+    import csv
+    import io
+
+    data = metrics_service.get_piloto_export_data(db)
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=["metrica", "valor"])
+    writer.writeheader()
+    writer.writerows(data)
+    output.seek(0)
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=agrovoz_piloto_metricas.csv"
+        },
     )
 
 
