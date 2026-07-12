@@ -171,11 +171,14 @@ class AgroVozPipeline:
         return "desconocido"
 
     @staticmethod
-    async def _generate_response(transcribed_text: str) -> tuple[str, str]:
+    async def _generate_response(
+        transcribed_text: str, phone_hash: str | None = None
+    ) -> tuple[str, str]:
         """Genera respuesta textual usando el LLM con Tool Calling.
 
         Args:
             transcribed_text: Texto transcrito por Whisper.
+            phone_hash: Hash del teléfono para resolver mercado cercano (Issue #89).
 
         Returns:
             Tupla (texto_respuesta, intent).
@@ -189,7 +192,7 @@ class AgroVozPipeline:
             )
 
         try:
-            response_text = await answer(transcribed_text.strip())
+            response_text = await answer(transcribed_text.strip(), phone_hash=phone_hash)
         except (TimeoutError, RuntimeError, OSError, ValueError):
             logger.exception("Error en generacion LLM — usando fallback")
             response_text = "Tuve un problema al procesar tu consulta. ¿Podrias intentar de nuevo?"
@@ -455,7 +458,9 @@ class AgroVozPipeline:
 
         if transcribed_text and transcribed_text.strip():
             try:
-                response_text, intent = await self._generate_response(transcribed_text)
+                response_text, intent = await self._generate_response(
+                    transcribed_text, phone_hash=chat_id_hash
+                )
                 llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
                 logger.info(
                     "Respuesta LLM generada — message_id=%s intent=%s chars=%d llm_ms=%d request_id=%s",
