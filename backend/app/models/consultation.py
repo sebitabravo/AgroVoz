@@ -14,7 +14,7 @@ Pre-producción: encriptar query_text en reposo (AES-256-GCM).
 
 import datetime
 
-from sqlalchemy import Integer, String, Text, func
+from sqlalchemy import Boolean, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -50,9 +50,20 @@ class Consultation(Base):
     llm_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     tts_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
+    # Feedback del agricultor tras la respuesta. Nullable para no romper
+    # registros existentes. Valores: "util", "no_util", None (sin feedback).
+    # Se detecta como intent especial en el pipeline: el agricultor responde
+    # "me sirvió" / "no me sirvió" y se asocia a la consulta ANTERIOR.
+    feedback: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Marcado manual por el equipo como "caso de decisión productiva".
+    # Criterio de éxito del piloto (sección 7.3 del paper).
+    decision_productiva: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
 
     def __repr__(self) -> str:
         return (
             f"<Consultation(phone_hash='{self.phone_hash[:8]}...', "
-            f"intent='{self.intent}', latency_ms={self.latency_ms})>"
+            f"intent='{self.intent}', latency_ms={self.latency_ms}, "
+            f"feedback={self.feedback})>"
         )
