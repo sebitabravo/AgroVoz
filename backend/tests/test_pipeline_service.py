@@ -99,6 +99,7 @@ def _mock_db_save(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
         whisper_ms: int = 0,
         llm_ms: int = 0,
         tts_ms: int = 0,
+        requires_review: bool = False,
     ) -> None:
         calls.append(
             {
@@ -110,6 +111,7 @@ def _mock_db_save(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
                 "whisper_ms": whisper_ms,
                 "llm_ms": llm_ms,
                 "tts_ms": tts_ms,
+                "requires_review": requires_review,
             }
         )
 
