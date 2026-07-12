@@ -812,8 +812,8 @@ async def answer(
     1. Construir mensajes (system prompt con tools en formato Qwen2.5 nativo).
     2. Llamar al LLM SIN tools parameter (usa <tool_call> en texto plano).
     3. Si el texto contiene <tool_call> -> parsear -> ejecutar (whitelist)
-       -> devolver resultado como țool_response -> generar respuesta final.
-    4. Si no hay țool_call -> retornar contenido como respuesta final.
+       -> devolver resultado como tool_response -> generar respuesta final.
+    4. Si no hay tool_call -> retornar contenido como respuesta final.
     5. Si no hay modelo -> fallback mock para desarrollo.
 
     Args:

@@ -733,6 +733,16 @@ def _select_registro_referencia(
     return max(candidatos, key=lambda registro: registro.fecha)
 
 
+def _find_market_record(
+    precios_por_mercado: dict[str, OdepaPrice], substring: str
+) -> OdepaPrice | None:
+    """Busca registro de mercado por substring case-insensitive."""
+    for nombre, registro in precios_por_mercado.items():
+        if substring.lower() in nombre.lower():
+            return registro
+    return None
+
+
 def get_price_for_llm(
     session: Session,
     producto: str,
@@ -768,19 +778,13 @@ def get_price_for_llm(
         mercado_cercano = _resolve_mercado_cercano(session, phone_hash or "")
 
         if mercado_cercano and mercado_cercano.lower() != "lo valledor":
-            registro_local = None
-            for nombre, registro in precios_por_mercado.items():
-                if mercado_cercano.lower() in nombre.lower():
-                    registro_local = registro
-                    break
+            registro_local = _find_market_record(precios_por_mercado, mercado_cercano)
 
             if registro_local:
                 # Buscar también el precio en Lo Valledor para comparar.
-                registro_valledor = None
-                for nombre, registro in precios_por_mercado.items():
-                    if "lo valledor" in nombre.lower():
-                        registro_valledor = registro
-                        break
+                registro_valledor = _find_market_record(
+                    precios_por_mercado, "lo valledor"
+                )
 
                 if registro_valledor:
                     return (
