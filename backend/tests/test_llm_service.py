@@ -50,6 +50,19 @@ class TestConstantes:
         assert "español chileno" in SYSTEM_PROMPT
         assert "pesos chilenos" in SYSTEM_PROMPT
 
+    def test_system_prompt_instruye_conservar_cita_fuente(self) -> None:
+        """Issue #95: el system prompt debe instruir al LLM conservar la
+        mención de la fuente (ODEPA / OpenMeteo) al reformular respuestas.
+
+        Sin esta regla, el LLM tiende a resumir omitiendo la fuente, perdiendo
+        el respaldo institucional del dato.
+        """
+        assert "CONSERVA SIEMPRE" in SYSTEM_PROMPT
+        assert "ODEPA" in SYSTEM_PROMPT
+        assert "OpenMeteo" in SYSTEM_PROMPT
+        assert "según ODEPA" in SYSTEM_PROMPT
+        assert "según OpenMeteo" in SYSTEM_PROMPT
+
     def test_fallback_text_no_vacio(self) -> None:
         """El texto de fallback es un mensaje informativo no vacio."""
         assert len(FALLBACK_TEXT) > 20

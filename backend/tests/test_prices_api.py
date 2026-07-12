@@ -253,8 +253,21 @@ class TestFormatPriceText:
         )
         texto = format_price_text(registro)
         assert texto == (
-            "Tomate está a 850 pesos el kilo en Vega Central, precio del 19/06/2026."
+            "Tomate está a 850 pesos el kilo en Vega Central, según ODEPA, "
+            "precio del 19/06/2026."
         )
+
+    def test_texto_incluye_cita_fuente_odepa(self, db: Session) -> None:
+        """Issue #95: el texto de precio cita ODEPA como fuente del dato.
+
+        Sin la mención explícita, el agricultor no distingue un dato oficial
+        de un rumor. La cita convierte el precio en dato OFICIAL.
+        """
+        registro = _insertar_precio(db, producto="papa", precio_kg=Decimal("1200"))
+        texto = format_price_text(registro)
+        assert "según ODEPA" in texto
+        # La cita aparece antes de la fecha, no al final suelto.
+        assert "según ODEPA, precio del" in texto
 
 
 class TestFormatPriceTextUnidades:
@@ -274,7 +287,7 @@ class TestFormatPriceTextUnidades:
         texto = format_price_text(registro)
         assert texto == (
             "Papa está a 8.833 coma 33 pesos por saco de 25 kilos en Lo Valledor, "
-            "unos 353 pesos el kilo, precio del 03/07/2026."
+            "unos 353 pesos el kilo, según ODEPA, precio del 03/07/2026."
         )
 
     def test_bandeja_con_sufijo_granel_es_convertible(self, db: Session) -> None:
