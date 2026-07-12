@@ -467,10 +467,12 @@ def _format_weather(
     if rain_mm is not None and rain_mm > 0:
         partes.append(f", lluvia {rain_mm:.1f} mm")
 
-    # Mención explícita de OpenMeteo como fuente del dato de clima (Issue #95).
-    # Refuerza confianza: el agricultor sabe que el clima viene de un servicio
-    # meteorológico, no es inventado. El system prompt del LLM instruye
-    # conservarla al reformular la respuesta de la tool.
+    # Cita "según OpenMeteo" incluida SIEMPRE en el dato retornado (capa determinista).
+    # El system prompt refuerza que el LLM la conserve si reformula.
+    # Diseño deliberado de defensa en profundidad (Issue #95):
+    # - Capa 1 (determinista): hardcode en esta función garantiza la presencia.
+    # - Capa 2 (LLM): instrucción del prompt previene que sea borrada.
+    # Sin ambas, el LLM 3B podría descartar la fuente buscando ser "conciso".
     return "".join(partes) + ", según OpenMeteo."
 
 

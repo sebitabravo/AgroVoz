@@ -576,9 +576,12 @@ def format_price_text(record: OdepaPrice) -> str:
     No convertible: "Lechuga está a 1.200 pesos por docena de atados en Lo Valledor,
                     según ODEPA, precio del 03/07/2026."
 
-    La mención explícita de ODEPA como fuente convierte el dato en dato OFICIAL
-    y refuerza la confianza institucional (PRODESAL/INDAP) y del agricultor
-    (Issue #95). El system prompt del LLM instruye conservarla al reformular.
+    La cita "según ODEPA" se incluye SIEMPRE en el dato retornado por esta función
+    (capa determinista). El system prompt refuerza que el LLM la conserve si reformula.
+    Diseño deliberado de defensa en profundidad (Issue #95):
+    - Capa 1 (determinista): el hardcode en formato_price_text() garantiza la presencia.
+    - Capa 2 (LLM): la instrucción del prompt previene que sea borrada en reformulaciones.
+    Sin ambas capas, el LLM 3B podría descartar la fuente buscando ser "conciso".
 
     Sin artículo para evitar errores de género (el tomate, la papa).
     """

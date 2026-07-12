@@ -101,7 +101,15 @@ class TestConstantes:
 
 
 class TestParseToolCalls:
-    """_parse_tool_calls extrae tool calls de respuestas del LLM."""
+    """_parse_tool_calls extrae tool calls de respuestas del LLM.
+
+    Nota: estos tests verifican que la instrucción sobre conservar citas
+    (ODEPA/OpenMeteo) existe en el SYSTEM_PROMPT, no el comportamiento E2E
+    del LLM con modelo real. La garantía determinista de la cita viene del
+    hardcode en format_price_text() y _format_weather() (ver test_prices_api
+    línea 260 y test_weather_service línea 153). El system prompt es defensa
+    en profundidad: refuerza que el LLM no borre la cita si reformula.
+    """
 
     def test_respuesta_con_tool_calls(self) -> None:
         """Extrae tool calls cuando la respuesta las incluye."""
