@@ -39,6 +39,16 @@ _MAX_WHISPER_AUDIO_MS = 12_000
 # Cache singleton de TTSService: el modelo Piper se carga UNA vez.
 _tts_service: TTSService | None = None
 
+# Texto fijo de bienvenida para primer contacto (issue #86).
+# No requiere LLM: es un mensaje predefinido sintetizado con TTS.
+# Corto (<200 chars) para que el audio dure <10s y no fatigue al agricultor.
+_WELCOME_TEXT = (
+    "Hola, te doy la bienvenida a AgroVoz. "
+    "Soy un asistente de voz que te ayuda a consultar "
+    "precios de productos agricolas y el clima. "
+    "Solo mandame un audio con tu pregunta y te respondere."
+)
+
 
 def _get_tts_service() -> TTSService:
     """Retorna la instancia singleton de TTSService."""
@@ -225,6 +235,42 @@ class AgroVozPipeline:
                 intent,
             )
 
+    @staticmethod
+    def _is_first_contact(phone_hash: str) -> bool:
+        """Retorna True si el phone_hash no tiene consultas previas en DB.
+
+        Consulta SELECT COUNT(*) en consultations WHERE phone_hash = ?.
+        Si la consulta falla, retorna False (safe default: no enviar
+        bienvenida a todos los mensajes si la DB no responde).
+
+        Args:
+            phone_hash: Hash HMAC-SHA256 del numero de telefono.
+
+        Returns:
+            True si es el primer contacto (0 consultas previas).
+        """
+        from sqlalchemy import func, select
+
+        from app.core.database import SessionLocal
+        from app.models.consultation import Consultation
+
+        session = SessionLocal()
+        try:
+            count = session.scalar(
+                select(func.count())
+                .select_from(Consultation)
+                .where(Consultation.phone_hash == phone_hash)
+            )
+            return count == 0
+        except SQLAlchemyError:
+            logger.exception(
+                "Error consultando consultas previas — phone_hash=%s",
+                phone_hash[:8],
+            )
+            return False
+        finally:
+            session.close()
+
     async def process(
         self,
         wav_path: Path,
@@ -252,6 +298,7 @@ class AgroVozPipeline:
         whisper_ms_ref = [0]
         llm_ms_ref = [0]
         tts_ms_ref = [0]
+        welcome_ogg_ref: list[str | None] = [None]
 
         try:
             # Ejecutar pipeline con timeout.
@@ -266,6 +313,7 @@ class AgroVozPipeline:
                     whisper_ms_ref=whisper_ms_ref,
                     llm_ms_ref=llm_ms_ref,
                     tts_ms_ref=tts_ms_ref,
+                    welcome_ogg_ref=welcome_ogg_ref,
                 ),
                 timeout=self._timeout,
             )
@@ -278,6 +326,10 @@ class AgroVozPipeline:
                 total_ms,
                 request_id,
             )
+            # Si se genero bienvenida antes del timeout, limpiar el archivo
+            # para evitar leak en audio_temp/ (el ref se captura antes del cancel).
+            if welcome_ogg_ref[0]:
+                Path(welcome_ogg_ref[0]).unlink(missing_ok=True)
             return AudioResponse(
                 audio_path="",
                 text_response=(
@@ -302,6 +354,7 @@ class AgroVozPipeline:
         whisper_ms_ref: list[int],
         llm_ms_ref: list[int],
         tts_ms_ref: list[int],
+        welcome_ogg_ref: list[str | None],
     ) -> AudioResponse:
         """Ejecuta las etapas del pipeline secuencialmente con benchmark.
 
@@ -309,6 +362,35 @@ class AgroVozPipeline:
         dentro de la coroutine (Python no permite asignar nonlocal
         en closures anidadas de forma limpia).
         """
+        # ── Etapa 0: Onboarding — deteccion de primer contacto (#86) ─
+        # Si el phone_hash no tiene consultas previas, se sintetiza un
+        # audio de bienvenida (TTS de texto fijo, sin LLM). AudioService
+        # lo enviara ANTES de la respuesta normal. Fire-and-forget: si
+        # la deteccion o el TTS fallan, el pipeline continua sin bienvenida.
+        if chat_id_hash and chat_id_hash != "sin_chat":
+            try:
+                is_first = await asyncio.to_thread(self._is_first_contact, chat_id_hash)
+                if is_first:
+                    tts_welcome = _get_tts_service()
+                    welcome_ogg_ref[0] = await asyncio.to_thread(
+                        tts_welcome.synthesize, _WELCOME_TEXT
+                    )
+                    logger.info(
+                        "Primer contacto detectado — bienvenida generada — "
+                        "phone_hash=%s message_id=%s request_id=%s",
+                        chat_id_hash[:8],
+                        message_id,
+                        request_id,
+                    )
+            except (SQLAlchemyError, RuntimeError, OSError, ValueError) as exc:
+                logger.warning(
+                    "Deteccion de primer contacto o TTS de bienvenida fallo — "
+                    "continuando sin bienvenida: message_id=%s error=%s request_id=%s",
+                    message_id,
+                    exc,
+                    request_id,
+                )
+
         # ── Etapa 1: Transcripcion Whisper ──────────────────────────
         transcribed_text = ""
         t_whisper_start = time.monotonic()
@@ -452,4 +534,5 @@ class AgroVozPipeline:
             whisper_ms=whisper_ms_ref[0],
             llm_ms=llm_ms_ref[0],
             tts_ms=tts_ms_ref[0],
+            welcome_audio_path=welcome_ogg_ref[0],
         )

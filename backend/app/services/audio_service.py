@@ -326,6 +326,30 @@ class AudioService:
                         _HELLO_OGG_PATH,
                     )
 
+            # Onboarding (#86): si es primer contacto, enviar bienvenida PRIMERO.
+            # El pipeline ya sintetizo el audio de bienvenida via TTS (sin LLM).
+            # Se envia antes de la respuesta normal y se limpia el archivo despues.
+            if pipeline_result.welcome_audio_path:
+                openwa = OpenWAService()
+                try:
+                    await openwa.send_audio(chat_id, pipeline_result.welcome_audio_path)
+                    logger.info(
+                        "Bienvenida enviada — message_id=%s chat_id_hash=%s request_id=%s",
+                        message_id,
+                        chat_id_hash,
+                        request_id,
+                    )
+                except (httpx.HTTPError, OSError, RuntimeError):
+                    logger.warning(
+                        "Envio de bienvenida fallo (no critico) — "
+                        "message_id=%s request_id=%s",
+                        message_id,
+                        request_id,
+                    )
+                finally:
+                    # Limpiar archivo de bienvenida siempre (exito o fallo).
+                    Path(pipeline_result.welcome_audio_path).unlink(missing_ok=True)
+
             # Enviar respuesta de audio
             if response_ogg_path:
                 openwa = OpenWAService()
