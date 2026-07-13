@@ -17,9 +17,10 @@ import datetime
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app import __version__
@@ -30,7 +31,8 @@ from app.admin.auth import (
 )
 from app.core.config import settings
 from app.core.database import get_db
-from app.services import metrics_service, monitor_service
+from app.models.alert import Alert
+from app.services import export_service, metrics_service, monitor_service
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +56,7 @@ async def login_form(request: Request) -> HTMLResponse:
     # validate_admin_keys_not_default() bloquea el arranque con key default,
     # y en staging/testing solo hace warning, asi que restringirlo a dev evita
     # filtrar la credencial si staging mantiene la key default.
-    return templates.TemplateResponse(
-        request, "login.html", {"is_dev": settings.app_env == "development"}
-    )
+    return templates.TemplateResponse(request, "login.html", {"is_dev": settings.app_env == "development"})
 
 
 @router.post("/login")
@@ -209,6 +209,286 @@ async def activity_page(
     )
 
 
+# ── Export CSV ──────────────────────────────────────────────────────
+
+
+@router.get("/prices/export")
+async def export_prices_csv(
+    producto: str | None = None,
+    mercado: str | None = None,
+    desde: str | None = None,
+    hasta: str | None = None,
+    db: Session = Depends(get_db),  # noqa: B008 — FastAPI DI pattern
+) -> StreamingResponse:
+    """Exporta el historial de precios ODEPA como CSV descargable.
+
+    Filtros opcionales (todos match exacto contra lo almacenado):
+    - ``producto``: nombre del producto (ej: "papa").
+    - ``mercado``: nombre del mercado (ej: "Lo Valledor").
+    - ``desde``/``hasta``: fechas ISO YYYY-MM-DD (inclusivas).
+
+    Sin filtros = todos los registros, ordenados por fecha descendente.
+
+    Protegido por ``AdminAuthMiddleware`` (cookie de sesión, path="/admin"),
+    igual que el resto del dashboard. Un ``<a href="/admin/prices/export">``
+    en el template dispara la descarga: el navegador envía la cookie
+    automáticamente (el path de la cookie cubre esta ruta). Un <a> simple
+    no puede mandar headers custom, por eso el endpoint vive bajo /admin/
+    y no bajo /api/v1/admin/ (que usa header X-Admin-Key).
+
+    El CSV lleva BOM UTF-8 al inicio para que Excel en español reconozca
+    el encoding. Fecha como YYYY-MM-DD, precio_kg como número crudo.
+    """
+    fecha_desde = _parse_iso_date(desde, "desde")
+    fecha_hasta = _parse_iso_date(hasta, "hasta")
+
+    rows = export_service.get_prices_for_export(
+        db, producto=producto, mercado=mercado, desde=fecha_desde, hasta=fecha_hasta
+    )
+    contenido = export_service.build_prices_csv(rows)
+    hoy = datetime.date.today().strftime("%Y%m%d")
+    return StreamingResponse(
+        iter([contenido]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="odepa_prices_{hoy}.csv"',
+        },
+    )
+
+
+# ── Piloto (Issue #97) ────────────────────────────────────────────
+
+
+@router.get("/piloto")
+async def piloto_page(
+    request: Request,
+    db: Session = Depends(get_db),  # noqa: B008
+) -> HTMLResponse:
+    """Piloto: métricas de éxito del piloto para Crea INACAP (sección 7.3).
+
+    Muestra: productores activos, consultas por productor, % útiles,
+    latencia promedio vs target, casos de decisión productiva.
+    """
+    metrics = metrics_service.get_piloto_metrics(db)
+    # Consultas recientes con feedback para la tabla.
+    consultas = metrics_service.get_piloto_consultations_with_feedback(db)
+    consultas_data = [
+        {
+            "id": c.id,
+            "phone_hash": c.phone_hash,
+            "intent": c.intent,
+            "feedback": c.feedback,
+            "decision_productiva": c.decision_productiva,
+            "latency_ms": c.latency_ms,
+            "ts": c.created_at.isoformat(timespec="seconds"),
+        }
+        for c in consultas
+    ]
+    return templates.TemplateResponse(
+        request,
+        "piloto.html",
+        {
+            "metrics": metrics,
+            "consultas_con_feedback": consultas_data,
+            "active_tab": "piloto",
+        },
+    )
+
+
+# ── Alertas proactivas (issue #88) ────────────────────────────────
+
+
+@router.get("/alerts")
+async def alerts_page(
+    request: Request,
+    db: Session = Depends(get_db),  # noqa: B008
+) -> HTMLResponse:
+    """Lista alertas proactivas de precio y clima."""
+    from sqlalchemy import func
+
+    alertas = list(db.scalars(select(Alert).order_by(Alert.activa.desc(), Alert.created_at.desc()).limit(200)).all())
+    activas_count = db.scalar(select(func.count()).select_from(Alert).where(Alert.activa.is_(True)))
+    total = db.scalar(select(func.count()).select_from(Alert))
+    return templates.TemplateResponse(
+        request,
+        "alerts.html",
+        {
+            "alertas": alertas,
+            "activas_count": activas_count or 0,
+            "total": total or 0,
+            "active_tab": "alerts",
+        },
+    )
+
+
+@router.post("/alerts/{alert_id}/cancel")
+async def cancel_alert(
+    alert_id: int,
+    request: Request,
+    db: Session = Depends(get_db),  # noqa: B008
+) -> RedirectResponse:
+    """Desactiva una alerta manualmente desde el admin."""
+    alerta = db.get(Alert, alert_id)
+    if alerta is not None:
+        alerta.activa = False
+        db.commit()
+        logger.info("Alerta cancelada desde admin — alert_id=%d", alert_id)
+    return RedirectResponse("/admin/alerts", status_code=303)
+
+
+# ── Cola de revisión humana (issue #99) ────────────────────────────
+
+
+@router.get("/revision")
+async def revision_page(
+    request: Request,
+    db: Session = Depends(get_db),  # noqa: B008
+    status: str = "pending",
+) -> HTMLResponse:
+    """Cola de revisión: consultas marcadas para revisión humana.
+
+    Query params:
+        status: "pending" (default), "resolved", "all"
+    """
+    from app.models.consultation import Consultation
+
+    query = select(Consultation).where(Consultation.requires_review.is_(True))
+
+    if status == "pending":
+        query = query.where(Consultation.resuelto.is_(False))
+    elif status == "resolved":
+        query = query.where(Consultation.resuelto.is_(True))
+    # "all" no agrega filtro extra.
+
+    query = query.order_by(Consultation.created_at.desc()).limit(100)
+    results = db.execute(query).scalars().all()
+
+    # Usa helper para consistencia en formato.
+    consultas = [_format_consultation_for_view(c) for c in results]
+
+    # Contadores para los filtros: consolidar en una sola query con case/sum.
+    # select(count(case((Consultation.resuelto==False, 1)))) para pendientes,
+    # select(count(case((Consultation.resuelto==True, 1)))) para resueltas.
+    counts = db.execute(
+        select(
+            func.sum(case((Consultation.resuelto.is_(False), 1), else_=0)).label("pending"),
+            func.sum(case((Consultation.resuelto.is_(True), 1), else_=0)).label("resolved"),
+        )
+        .select_from(Consultation)
+        .where(Consultation.requires_review.is_(True))
+    ).one()
+    pending_count = counts.pending or 0
+    resolved_count = counts.resolved or 0
+
+    return templates.TemplateResponse(
+        request,
+        "revision.html",
+        {
+            "consultas": consultas,
+            "status": status,
+            "pending_count": pending_count,
+            "resolved_count": resolved_count,
+            "active_tab": "revision",
+        },
+    )
+
+
+@router.post("/consultations/{consultation_id}/decision")
+async def toggle_decision(
+    consultation_id: int,
+    request: Request,
+    db: Session = Depends(get_db),  # noqa: B008
+) -> HTMLResponse:
+    """Toggle decision_productiva de una consulta. Endpoint HTMX.
+
+    Retorna un partial HTML con el estado actualizado del botón.
+    """
+    nuevo_valor = metrics_service.toggle_decision_productiva(db, consultation_id)
+    if nuevo_valor is None:
+        return HTMLResponse(
+            '<span style="font-size:11px;color:#c05252">no encontrada</span>',
+            status_code=404,
+        )
+    if nuevo_valor:
+        return HTMLResponse('<span style="font-size:11px;font-weight:700;color:#4f7d5a">✓ productiva</span>')
+    return HTMLResponse('<span style="font-size:11px;color:#7e827a">marcar</span>')
+
+
+@router.get("/piloto/export")
+async def piloto_export(
+    db: Session = Depends(get_db),  # noqa: B008
+) -> StreamingResponse:
+    """Export CSV de las métricas del piloto.
+
+    Genera un CSV con las métricas calculadas para el informe de Crea INACAP.
+    """
+    import csv
+    import io
+
+    data = metrics_service.get_piloto_export_data(db)
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=["metrica", "valor"])
+    writer.writeheader()
+    writer.writerows(data)
+    output.seek(0)
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=agrovoz_piloto_metricas.csv"},
+    )
+
+
+@router.post("/consultations/{consultation_id}/resolve")
+async def resolve_consultation(
+    consultation_id: int,
+    request: Request,
+    db: Session = Depends(get_db),  # noqa: B008
+    nota: str = Form(default=""),
+) -> HTMLResponse:
+    """Marca o desmarca una consulta como resuelta (toggle).
+
+    HTMX: hx-post="/admin/consultations/{id}/resolve".
+    Retorna el partial de la fila actualizada.
+
+    Notas:
+    - revisado_por siempre se asigna como "admin" (server-side).
+      TODO post-MVP: capturar desde sesión de admin autenticado.
+    - Si nota está vacía en el form, el campo NO se borra (append-only).
+      Ver línea ~300 para el update condicional.
+    """
+    from app.models.consultation import Consultation
+
+    consulta = db.get(Consultation, consultation_id)
+    if consulta is None:
+        return HTMLResponse("<span class='badge-error'>No encontrada</span>", status_code=404)
+
+    # Toggle resuelto.
+    consulta.resuelto = not consulta.resuelto
+    # La nota es append-only: si llega vacía, no se borra.
+    # El form HTMX siempre manda nota="" en toggle, pero un update incondicional
+    # la borraría. Por eso hacemos if nota para solo actualizar si hay valor.
+    if nota:
+        consulta.nota_revision = nota
+    # revisado_por asignado server-side (actualmente hardcoded a "admin").
+    # Post-MVP: obtener de sesión autenticada.
+    consulta.revisado_por = "admin"
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Error al actualizar consulta %d", consultation_id)
+        return HTMLResponse("<span class='badge-error'>Error</span>", status_code=500)
+
+    # Retornar partial HTMX con el estado actualizado usando helper.
+    return templates.TemplateResponse(
+        request,
+        "_revision_row.html",
+        {"c": _format_consultation_for_view(consulta)},
+    )
+
+
 # ── Partials HTMX ───────────────────────────────────────────────────
 
 
@@ -311,6 +591,39 @@ async def monitor_clear_audio_temp(request: Request) -> HTMLResponse:
 # ── Helpers ─────────────────────────────────────────────────────────
 
 
+def truncate_text(text: str, max_len: int = 80, suffix: str = "...") -> str:
+    """Trunca texto a max_len caracteres, agregando suffix si es necesario.
+
+    Uso: truncate_text(long_text, max_len=80) retorna 'primeros 80 chars...'
+    si el texto es más largo que max_len.
+    """
+    if len(text) <= max_len:
+        return text
+    return text[:max_len] + suffix
+
+
+def _format_consultation_for_view(c: object) -> dict[str, object]:
+    """Arma dict de consulta para renderizar en vista de revisión.
+
+    Normaliza truncado de texts sensibles y formatting.
+    Se usa en revision_page() y resolve_consultation() para mantener
+    consistencia en la representación.
+    """
+    return {
+        "id": c.id,  # type: ignore[attr-defined]
+        "phone_hash_short": (c.phone_hash[:8] + "..." if c.phone_hash else ""),  # type: ignore[attr-defined]
+        "intent": c.intent,  # type: ignore[attr-defined]
+        "query_text_short": truncate_text(c.query_text, max_len=80),  # type: ignore[attr-defined]
+        "response_text_short": truncate_text(c.response_text, max_len=80),  # type: ignore[attr-defined]
+        "query_text": c.query_text,  # type: ignore[attr-defined]
+        "response_text": c.response_text,  # type: ignore[attr-defined]
+        "created_at": c.created_at.strftime("%Y-%m-%d %H:%M") if c.created_at else "",  # type: ignore[attr-defined]
+        "resuelto": c.resuelto,  # type: ignore[attr-defined]
+        "revisado_por": c.revisado_por or "",  # type: ignore[attr-defined]
+        "nota_revision": c.nota_revision or "",  # type: ignore[attr-defined]
+    }
+
+
 def _now_ts() -> str:
     """Timestamp HH:MM:SS para el "Actualizado:" de los partials de monitor."""
     return datetime.datetime.now().strftime("%H:%M:%S")
@@ -329,3 +642,20 @@ def _odepa_status_dict(db: Session) -> dict[str, object]:
         "ultima_fecha_iso": status.ultima_fecha.isoformat() if status.ultima_fecha else None,
         "ahora": datetime.datetime.now(),
     }
+
+
+def _parse_iso_date(valor: str | None, campo: str) -> datetime.date | None:
+    """Parsea una fecha ISO (YYYY-MM-DD). None pasa sin validar.
+
+    Lanza 400 si el string no es una fecha ISO válida, para no dejar
+    pasar filtros mal formados que devolverían DB vacía silenciosamente.
+    """
+    if valor is None:
+        return None
+    try:
+        return datetime.date.fromisoformat(valor)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Formato de '{campo}' inválido. Usar YYYY-MM-DD.",
+        ) from None

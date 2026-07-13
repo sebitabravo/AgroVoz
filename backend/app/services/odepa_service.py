@@ -26,11 +26,84 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.odepa_price import OdepaPrice
+from app.models.user_prefs import UserPrefs
 
 logger = logging.getLogger(__name__)
 
 # Timeout de descarga. ODEPA publica CSVs pequeños (<1MB), 30s sobra.
 _TIMEOUT_SEGUNDOS = 30
+
+# ── Mapeo comuna → mercado ODEPA más cercano (Issue #89) ──────────
+# Diccionario estático: 15 mercados ODEPA, dataset chico, sin dependencia externa.
+# Normalizado a lowercase para matching case-insensitive.
+# Cobertura: comunas del piloto Traiguén + regiones principales.
+COMUNA_TO_MERCADO: dict[str, str] = {
+    # Región de La Araucanía
+    "traiguén": "Vega Modelo de Temuco",
+    "traiguen": "Vega Modelo de Temuco",
+    "temuco": "Vega Modelo de Temuco",
+    "padre las casas": "Vega Modelo de Temuco",
+    "nueva imperial": "Vega Modelo de Temuco",
+    "lautaro": "Vega Modelo de Temuco",
+    "villarrica": "Vega Modelo de Temuco",
+    "pucón": "Vega Modelo de Temuco",
+    "pucon": "Vega Modelo de Temuco",
+    "angol": "Vega Modelo de Temuco",
+    "collipulli": "Vega Modelo de Temuco",
+    "pitrufquén": "Vega Modelo de Temuco",
+    "pitrufquen": "Vega Modelo de Temuco",
+    # Región del Biobío
+    "concepción": "Vega Monumental de Concepción",
+    "concepcion": "Vega Monumental de Concepción",
+    "talcahuano": "Vega Monumental de Concepción",
+    "los ángeles": "Vega Monumental de Concepción",
+    "los angeles": "Vega Monumental de Concepción",
+    "chillán": "Vega Chillán",
+    "chillan": "Vega Chillán",
+    # Región de Los Lagos
+    "puerto montt": "Vega de Puerto Montt",
+    "osorno": "Vega de Osorno",
+    "castro": "Vega de Puerto Montt",
+    # Región de Valparaíso
+    "valparaíso": "Vega de Valparaíso",
+    "valparaiso": "Vega de Valparaíso",
+    "viña del mar": "Vega de Valparaíso",
+    "vina del mar": "Vega de Valparaíso",
+    "quillota": "Vega de Valparaíso",
+    "san antonio": "Vega de Valparaíso",
+    # Región Metropolitana
+    "santiago": "Mercado Mayorista Lo Valledor de Santiago",
+    "maipú": "Mercado Mayorista Lo Valledor de Santiago",
+    "maipu": "Mercado Mayorista Lo Valledor de Santiago",
+    "puente alto": "Mercado Mayorista Lo Valledor de Santiago",
+    "san bernardo": "Mercado Mayorista Lo Valledor de Santiago",
+    "la florida": "Mercado Mayorista Lo Valledor de Santiago",
+    # Región de O'Higgins
+    "rancagua": "Vega de Rancagua",
+    "san fernando": "Vega de San Fernando",
+    "santa cruz": "Vega de San Fernando",
+    # Región del Maule
+    "talca": "Vega de Talca",
+    "curicó": "Vega de Curicó",
+    "curico": "Vega de Curicó",
+    "linares": "Vega de Talca",
+    # Región de Ñuble
+    "quirihue": "Vega Chillán",
+    "yungay": "Vega Chillán",
+    # Región de Atacama
+    "copiapó": "Vega de Copiapó",
+    "copiapo": "Vega de Copiapó",
+    # Región de Coquimbo
+    "la serena": "Vega de La Serena",
+    "coquimbo": "Vega de La Serena",
+    # Región de Arica y Parinacota
+    "arica": "Agrícola del Norte S.A. de Arica",
+    # Región de Tarapacá
+    "iquique": "Vega de Iquique",
+}
+
+# Mercado de referencia nacional (Issue #83).
+_MERCADO_DEFAULT = "Mercado Mayorista Lo Valledor de Santiago"
 
 # Substrings a buscar en cada header normalizado (strip + lower).
 # COLS: cada tupla es un grupo de substrings a buscar en los headers (case-insensitive).
@@ -86,9 +159,7 @@ async def download_csv(url: str, timeout: float = _TIMEOUT_SEGUNDOS) -> str:
             response = await client.get(url, follow_redirects=True)
             response.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        raise OdepaSyncError(
-            f"ODEPA respondió HTTP {exc.response.status_code} para {url}"
-        ) from exc
+        raise OdepaSyncError(f"ODEPA respondió HTTP {exc.response.status_code} para {url}") from exc
     except httpx.RequestError as exc:
         raise OdepaSyncError(f"Error de red al descargar CSV ODEPA: {exc}") from exc
 
@@ -108,13 +179,8 @@ async def download_csv(url: str, timeout: float = _TIMEOUT_SEGUNDOS) -> str:
     # evita que el parser intente interpretar HTML como CSV y tire
     # errores confusos como "sin columnas requeridas".
     _prefix = texto.lstrip()[:256].lower()
-    if any(
-        marcador in _prefix
-        for marcador in ("<!doctype", "<html", "<head", "<body", "<meta", "<title")
-    ):
-        raise OdepaSyncError(
-            f"ODEPA devolvió HTML en vez de CSV. ¿Cambió la URL? ({url})"
-        )
+    if any(marcador in _prefix for marcador in ("<!doctype", "<html", "<head", "<body", "<meta", "<title")):
+        raise OdepaSyncError(f"ODEPA devolvió HTML en vez de CSV. ¿Cambió la URL? ({url})")
 
     return texto
 
@@ -233,9 +299,7 @@ def parse_csv(
         if col is None
     ]
     if faltantes:
-        raise OdepaSyncError(
-            f"CSV ODEPA sin columnas requeridas: {faltantes}. Headers: {headers}"
-        )
+        raise OdepaSyncError(f"CSV ODEPA sin columnas requeridas: {faltantes}. Headers: {headers}")
 
     # mypy: tras el guard de faltantes, todas las columnas requeridas son str.
     assert col_producto is not None
@@ -301,9 +365,7 @@ def parse_csv(
     return registros
 
 
-def upsert_prices(
-    session: Session, registros: Sequence[OdepaCsvRecord]
-) -> tuple[int, int]:
+def upsert_prices(session: Session, registros: Sequence[OdepaCsvRecord]) -> tuple[int, int]:
     """Hace upsert de registros en odepa_prices. Devuelve (insertados, actualizados).
 
     Usa INSERT ... ON CONFLICT DO UPDATE sobre (producto, mercado, fecha).
@@ -342,12 +404,8 @@ def upsert_prices(
 
         # Detecta tuplas existentes para diferenciar inserts de updates.
         claves = [(r.producto, r.mercado, r.fecha) for r in chunk]
-        q = select(
-            OdepaPrice.producto, OdepaPrice.mercado, OdepaPrice.fecha
-        ).where(
-            sa_tuple(
-                OdepaPrice.producto, OdepaPrice.mercado, OdepaPrice.fecha
-            ).in_(claves)
+        q = select(OdepaPrice.producto, OdepaPrice.mercado, OdepaPrice.fecha).where(
+            sa_tuple(OdepaPrice.producto, OdepaPrice.mercado, OdepaPrice.fecha).in_(claves)
         )
         existentes = {tuple(row) for row in session.execute(q).all()}
 
@@ -372,9 +430,7 @@ def upsert_prices(
         )
         session.execute(stmt)
 
-        actualizados = sum(
-            1 for r in chunk if (r.producto, r.mercado, r.fecha) in existentes
-        )
+        actualizados = sum(1 for r in chunk if (r.producto, r.mercado, r.fecha) in existentes)
         insertados = len(chunk) - actualizados
         total_insertados += insertados
         total_actualizados += actualizados
@@ -429,9 +485,7 @@ async def sync_odepa(session: Session | None = None) -> SyncResult:
 # ── Funciones de consulta para Tool Calling (Issue #16) ──────────
 
 
-def query_latest_price(
-    session: Session, producto: str, mercado: str
-) -> OdepaPrice | None:
+def query_latest_price(session: Session, producto: str, mercado: str) -> OdepaPrice | None:
     """Busca el precio más reciente para un producto en un mercado.
 
     Normaliza producto (lower, strip) y mercado (lower, strip).
@@ -460,9 +514,7 @@ def query_latest_price(
     return session.scalars(q).first()
 
 
-def query_latest_by_product(
-    session: Session, producto: str
-) -> dict[str, OdepaPrice]:
+def query_latest_by_product(session: Session, producto: str) -> dict[str, OdepaPrice]:
     """Precio más reciente por mercado para un producto. Una sola query.
 
     Alternativa a llamar query_latest_price por cada mercado (N+1).
@@ -569,11 +621,19 @@ def format_price_text(record: OdepaPrice) -> str:
     El texto respeta esa unidad y, cuando la conversión es segura, agrega
     la equivalencia aproximada por kilo.
 
-    Por kilo:      "Papa está a 850 pesos el kilo en Vega Central, precio del 19/06/2026."
+    Por kilo:      "Papa está a 850 pesos el kilo en Vega Central, según ODEPA,
+                    precio del 19/06/2026."
     Convertible:   "Papa está a 8.833 pesos por saco de 25 kilos en Lo Valledor,
-                    unos 353 pesos el kilo, precio del 03/07/2026."
+                    unos 353 pesos el kilo, según ODEPA, precio del 03/07/2026."
     No convertible: "Lechuga está a 1.200 pesos por docena de atados en Lo Valledor,
-                    precio del 03/07/2026."
+                    según ODEPA, precio del 03/07/2026."
+
+    La cita "según ODEPA" se incluye SIEMPRE en el dato retornado por esta función
+    (capa determinista). El system prompt refuerza que el LLM la conserve si reformula.
+    Diseño deliberado de defensa en profundidad (Issue #95):
+    - Capa 1 (determinista): el hardcode en formato_price_text() garantiza la presencia.
+    - Capa 2 (LLM): la instrucción del prompt previene que sea borrada en reformulaciones.
+    Sin ambas capas, el LLM 3B podría descartar la fuente buscando ser "conciso".
 
     Sin artículo para evitar errores de género (el tomate, la papa).
     """
@@ -582,24 +642,58 @@ def format_price_text(record: OdepaPrice) -> str:
     producto_str = f"{record.producto[0].upper()}{record.producto[1:]}"
 
     if _es_unidad_kilo(record.unidad):
-        return (
-            f"{producto_str} está a {precio_str} el kilo en {record.mercado}, "
-            f"precio del {fecha_str}."
-        )
+        return f"{producto_str} está a {precio_str} el kilo en {record.mercado}, según ODEPA, precio del {fecha_str}."
 
     unidad_str = _unidad_hablada(record.unidad)
     kilos = _kilos_por_unidad(record.unidad)
     equivalencia = ""
     if kilos is not None and kilos != 1:
-        por_kilo = (record.precio_kg / kilos).quantize(
-            Decimal("1"), rounding=ROUND_HALF_UP
-        )
+        por_kilo = (record.precio_kg / kilos).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
         equivalencia = f", unos {_formatear_pesos(por_kilo)} el kilo"
 
     return (
         f"{producto_str} está a {precio_str} por {unidad_str} en {record.mercado}"
-        f"{equivalencia}, precio del {fecha_str}."
+        f"{equivalencia}, según ODEPA, precio del {fecha_str}."
     )
+
+
+def _resolve_mercado_cercano(session: Session, phone_hash: str) -> str | None:
+    """Resuelve el mercado ODEPA más cercano según la comuna registrada.
+
+    Busca la comuna del productor en user_prefs y la mapea al mercado
+    ODEPA más cercano via COMUNA_TO_MERCADO. Retorna None si:
+    - phone_hash vacío o None
+    - El productor no tiene comuna registrada
+    - La comuna no está en el mapeo
+    """
+    if not phone_hash or not phone_hash.strip():
+        return None
+
+    try:
+        user = session.query(UserPrefs).filter_by(phone_hash=phone_hash.strip()).first()
+    except Exception:
+        logger.warning("Error consultando UserPrefs para phone_hash=%s", phone_hash[:8])
+        return None
+
+    if not user or not user.comuna or not user.comuna.strip():
+        return None
+
+    comuna_lower = user.comuna.strip().lower()
+    mercado = COMUNA_TO_MERCADO.get(comuna_lower)
+    if mercado:
+        logger.info(
+            "Comuna '%s' → mercado cercano '%s' (phone_hash=%s)",
+            user.comuna,
+            mercado,
+            phone_hash[:8],
+        )
+    else:
+        logger.info(
+            "Comuna '%s' no está en el mapeo — usando default (phone_hash=%s)",
+            user.comuna,
+            phone_hash[:8],
+        )
+    return mercado
 
 
 def _select_registro_referencia(
@@ -615,21 +709,35 @@ def _select_registro_referencia(
     el orden alfabético sesgaba a "Agrícola del Norte S.A. de Arica".
     """
     candidatos = [
-        registro
-        for mercado_nombre, registro in precios_por_mercado.items()
-        if "lo valledor" in mercado_nombre.lower()
+        registro for mercado_nombre, registro in precios_por_mercado.items() if "lo valledor" in mercado_nombre.lower()
     ]
     if not candidatos:
         candidatos = list(precios_por_mercado.values())
     return max(candidatos, key=lambda registro: registro.fecha)
 
 
-def get_price_for_llm(session: Session, producto: str, mercado: str = "") -> str:
+def _find_market_record(precios_por_mercado: dict[str, OdepaPrice], substring: str) -> OdepaPrice | None:
+    """Busca registro de mercado por substring case-insensitive."""
+    for nombre, registro in precios_por_mercado.items():
+        if substring.lower() in nombre.lower():
+            return registro
+    return None
+
+
+def get_price_for_llm(
+    session: Session,
+    producto: str,
+    mercado: str = "",
+    phone_hash: str | None = None,
+) -> str:
     """Tool function para el LLM: consulta el precio más reciente.
 
-    Si mercado está vacío, consulta todos los mercados y retorna el precio
-    más relevante (el de Lo Valledor si existe, o el primer mercado disponible).
-    Así el agricultor no necesita saber nombres de mercados.
+    Si mercado está vacío, busca el mercado más cercano según la comuna
+    registrada del productor (Issue #89). Si no hay comuna o el mercado
+    cercano no tiene datos, usa Lo Valledor como referencia nacional.
+
+    Cuando el mercado elegido NO es Lo Valledor, menciona ambos:
+    "En Temuco está a X; la referencia nacional (Lo Valledor) es Y".
 
     Retorna texto natural en español chileno listo para TTS.
     Si no hay datos, retorna un mensaje informativo en vez de fallar.
@@ -642,11 +750,28 @@ def get_price_for_llm(session: Session, producto: str, mercado: str = "") -> str
             return "No entendí el producto. ¿Podrías repetirlo?"
 
         if not precios_por_mercado:
-            return (
-                f"No tengo datos de precio para {producto.strip()}. "
-                "¿Podrias probar con otro producto?"
-            )
+            return f"No tengo datos de precio para {producto.strip()}. ¿Podrias probar con otro producto?"
 
+        # Issue #89: buscar mercado cercano según comuna registrada.
+        mercado_cercano = _resolve_mercado_cercano(session, phone_hash or "")
+
+        if mercado_cercano and mercado_cercano.lower() != "lo valledor":
+            registro_local = _find_market_record(precios_por_mercado, mercado_cercano)
+
+            if registro_local:
+                # Buscar también el precio en Lo Valledor para comparar.
+                registro_valledor = _find_market_record(precios_por_mercado, "lo valledor")
+
+                if registro_valledor:
+                    return (
+                        f"En {registro_local.mercado}, "
+                        f"{format_price_text(registro_local)} "
+                        f"La referencia nacional (Lo Valledor) es "
+                        f"{_formatear_pesos(registro_valledor.precio_kg)}."
+                    )
+                return format_price_text(registro_local)
+
+        # Fallback: Lo Valledor (comportamiento original, Issue #83).
         return format_price_text(_select_registro_referencia(precios_por_mercado))
 
     try:
@@ -655,11 +780,111 @@ def get_price_for_llm(session: Session, producto: str, mercado: str = "") -> str
         return "No entendí el producto o mercado. ¿Podrías repetirlo?"
 
     if record is None:
-        return (
-            f"No tengo datos de precio para {producto.strip()} "
-            f"en {mercado.strip()}."
-        )
+        return f"No tengo datos de precio para {producto.strip()} en {mercado.strip()}."
     return format_price_text(record)
+
+
+def _obtener_registro_referencia(session: Session, producto: str, mercado: str = "") -> OdepaPrice | None:
+    """Obtiene el registro de referencia para una tool de precio.
+
+    Encapsula el lookup compartido por las tools de precio: si mercado
+    está vacío, busca en todos los mercados y elige el de referencia
+    (Lo Valledor si existe, vía _select_registro_referencia); si no, busca
+    el mercado específico.
+
+    Lanza ValueError si producto está vacío (propagada de query_latest_*),
+    para que el caller genere el mensaje de fallback adecuado.
+
+    Retorna None si no hay datos para el producto/mercado.
+    """
+    if not mercado or not mercado.strip():
+        precios_por_mercado = query_latest_by_product(session, producto)
+        if not precios_por_mercado:
+            return None
+        return _select_registro_referencia(precios_por_mercado)
+    return query_latest_price(session, producto, mercado)
+
+
+def calculate_sale_value_for_llm(session: Session, producto: str, cantidad_kg: str, mercado: str = "") -> str:
+    """Tool function para el LLM: calcula el valor total de venta.
+
+    Responde "voy a vender 30 kilos de papa" con el monto total referencial
+    basado en el precio mayorista ODEPA. El cálculo se hace en Python con
+    Decimal (nunca por el LLM) para evitar alucinaciones aritméticas.
+
+    Flujo:
+    1. Parsea cantidad_kg a Decimal (0/negativo/no-numérico -> pide reformular).
+    2. Obtiene el registro de referencia (igual que get_price_for_llm).
+    3. Deriva precio por kilo:
+       - Unidad kilo: directo (record.precio_kg).
+       - Unidad convertible (saco/bandeja de N kilos): precio_kg / kilos.
+       - Unidad NO convertible (docena de atados, caja por unidades):
+         retorna el precio por unidad de venta + aviso honesto, sin
+         inventar el cálculo por kilo (regresión #81).
+    4. monto_total = precio_por_kilo * cantidad (Decimal, redondeado a entero).
+    5. Texto natural listo para TTS.
+
+    El precio por kilo se redondea a entero antes de multiplicar para que
+    el monto cuadre con lo que se dice (353 * 30 = 10.590, no 353.33 * 30).
+
+    El texto dice "referencia mayorista" / "según ODEPA": el precio de
+    predio (lo que recibe el agricultor) es distinto y menor.
+    """
+    # 1. Parsear cantidad. El LLM/Whisper pueden pasar "30", "30,5", "abc".
+    try:
+        cantidad = Decimal(str(cantidad_kg).strip().replace(",", "."))
+    except InvalidOperation:
+        return "No entendí la cantidad. ¿Podrías repetir cuántos kilos vas a vender?"
+    if cantidad <= 0:
+        return "La cantidad tiene que ser mayor a cero. ¿Podrías repetir cuántos kilos vas a vender?"
+
+    # 2. Obtener registro de referencia.
+    try:
+        record = _obtener_registro_referencia(session, producto, mercado)
+    except ValueError:
+        return "No entendí el producto. ¿Podrías repetirlo?"
+
+    if record is None:
+        if not mercado or not mercado.strip():
+            return f"No tengo datos de precio para {producto.strip()}. ¿Podrias probar con otro producto?"
+        return f"No tengo datos de precio para {producto.strip()} en {mercado.strip()}."
+
+    producto_str = f"{record.producto[0].upper()}{record.producto[1:]}"
+
+    # 3. Derivar precio por kilo según la unidad de venta ODEPA.
+    if _es_unidad_kilo(record.unidad):
+        precio_por_kilo = record.precio_kg
+    else:
+        kilos = _kilos_por_unidad(record.unidad)
+        if kilos is None:
+            # Unidad no convertible: precio por unidad de venta + aviso honesto.
+            # Reusa format_price_text para consistencia con get_price_for_llm.
+            return (
+                f"{format_price_text(record)} "
+                "No puedo calcular el total por kilo porque ODEPA publica "
+                "el precio por unidad de venta, no por kilo. "
+                "¿Podrías consultar el precio por kilo?"
+            )
+        precio_por_kilo = record.precio_kg / kilos
+
+    # Redondear precio por kilo a entero (peso chileno no usa centavos en
+    # referencia mayorista) antes de multiplicar, para que el monto cuadre.
+    precio_por_kilo = precio_por_kilo.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    monto_total = (precio_por_kilo * cantidad).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+    # 4. Formatear cantidad para TTS: entero "30", decimal "30 coma 5".
+    if cantidad == cantidad.to_integral_value():
+        cantidad_str = str(int(cantidad))
+    else:
+        entero, _, dec = str(cantidad).partition(".")
+        dec = dec.rstrip("0") or "0"
+        cantidad_str = f"{entero} coma {dec}"
+
+    return (
+        f"{producto_str} está a unos {_formatear_pesos(precio_por_kilo)} "
+        f"el kilo según ODEPA. Por {cantidad_str} kilos recibirás unos "
+        f"{_formatear_pesos(monto_total)} como referencia mayorista."
+    )
 
 
 def _formatear_variacion(actual: Decimal, antiguo: Decimal) -> str:
@@ -680,9 +905,7 @@ def _formatear_variacion(actual: Decimal, antiguo: Decimal) -> str:
     return f"ha {direccion} un {pct_str} por ciento"
 
 
-def get_price_history_for_llm(
-    session: Session, producto: str, dias: int = 7
-) -> str:
+def get_price_history_for_llm(session: Session, producto: str, dias: int = 7) -> str:
     """Tool function para el LLM: compara el precio actual con el histórico.
 
     Responde "¿a cuánto estaba la papa la semana pasada?" comparando el
@@ -706,10 +929,7 @@ def get_price_history_for_llm(
         return "No entendí el producto. ¿Podrías repetirlo?"
 
     if not precios_por_mercado:
-        return (
-            f"No tengo datos de precio para {producto.strip()}. "
-            "¿Podrias probar con otro producto?"
-        )
+        return f"No tengo datos de precio para {producto.strip()}. ¿Podrias probar con otro producto?"
 
     actual = _select_registro_referencia(precios_por_mercado)
     fecha_limite = actual.fecha - datetime.timedelta(days=dias_norm)
@@ -730,10 +950,7 @@ def get_price_history_for_llm(
     antiguo = session.scalars(q).first()
 
     if antiguo is None:
-        return (
-            f"{format_price_text(actual)} "
-            f"No tengo datos comparables de hace {dias_norm} días para ese mercado."
-        )
+        return f"{format_price_text(actual)} No tengo datos comparables de hace {dias_norm} días para ese mercado."
 
     dias_reales = (actual.fecha - antiguo.fecha).days
     return (
@@ -749,11 +966,7 @@ def list_products(session: Session) -> list[str]:
     Útil para que el LLM sepa qué productos puede consultar y para
     autocompletar en el dashboard admin.
     """
-    q = (
-        select(func.lower(OdepaPrice.producto).label("producto"))
-        .distinct()
-        .order_by(func.lower(OdepaPrice.producto))
-    )
+    q = select(func.lower(OdepaPrice.producto).label("producto")).distinct().order_by(func.lower(OdepaPrice.producto))
     return list(session.scalars(q).all())
 
 

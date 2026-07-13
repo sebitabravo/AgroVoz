@@ -6,7 +6,7 @@ filas existentes y nuevas. Solo se retiene audio cuando el productor firmó
 el Acuerdo de Uso y Consentimiento.
 
 ID de revisión: 885fa6daf453
-Revisión anterior: 63283fa287d5
+Revisión anterior: 8fbcbe020460
 Fecha: 2026-07-12 22:02:34.320182
 """
 from collections.abc import Sequence
@@ -17,7 +17,7 @@ import sqlalchemy as sa
 
 # Identificadores de revisión usados por Alembic.
 revision: str = '885fa6daf453'
-down_revision: str | None = '63283fa287d5'
+down_revision: str | None = '8fbcbe020460'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

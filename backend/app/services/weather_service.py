@@ -7,6 +7,7 @@ Cache en memoria con TTL 30 min.
 """
 
 import asyncio
+import datetime
 import logging
 import time
 from dataclasses import dataclass
@@ -18,8 +19,10 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "DEFAULT_LAT",
     "DEFAULT_LON",
+    "ForecastDay",
     "WeatherData",
     "get_weather",
+    "get_weather_forecast_daily",
     "get_weather_full",
 ]
 
@@ -204,10 +207,7 @@ def _location_name(lat: float, lon: float) -> str:
     nombre genérico. Si las coordenadas están cerca de Traiguén
     (default MVP), lo llamamos por su nombre.
     """
-    if (
-        abs(lat - DEFAULT_LAT) < _TRAIGUEN_THRESHOLD
-        and abs(lon - DEFAULT_LON) < _TRAIGUEN_THRESHOLD
-    ):
+    if abs(lat - DEFAULT_LAT) < _TRAIGUEN_THRESHOLD and abs(lon - DEFAULT_LON) < _TRAIGUEN_THRESHOLD:
         return "Traiguén"
     return "la zona consultada"
 
@@ -222,9 +222,7 @@ def _wmo_description(code: int | None) -> str:
     return _WMO_CODES.get(code, "sin datos")
 
 
-def _parse_openmeteo_response(
-    data: dict[str, object], lat: float, lon: float
-) -> WeatherData:
+def _parse_openmeteo_response(data: dict[str, object], lat: float, lon: float) -> WeatherData:
     """Parsea la respuesta JSON de OpenMeteo a WeatherData.
 
     La respuesta de OpenMeteo tiene esta estructura:
@@ -360,8 +358,11 @@ async def get_weather_full(
     logger.info("Clima obtenido para (%.4f, %.4f): %s", lat, lon, wd.location)
     logger.debug(
         "OpenMeteo raw — temp=%s hum=%s code=%s wind=%s rain=%s",
-        wd.temperature_c, wd.humidity, wd.description,
-        wd.wind_speed_ms, wd.rain_1h_mm,
+        wd.temperature_c,
+        wd.humidity,
+        wd.description,
+        wd.wind_speed_ms,
+        wd.rain_1h_mm,
     )
     return wd
 
@@ -400,22 +401,14 @@ async def _fetch_weather_data(lat: float, lon: float) -> dict[str, object]:
         data: dict[str, object] = response.json()
         return data
     except httpx.HTTPStatusError as exc:
-        logger.warning(
-            "OpenMeteo respondió HTTP %s", exc.response.status_code
-        )
-        raise RuntimeError(
-            f"OpenMeteo respondió HTTP {exc.response.status_code}"
-        ) from exc
+        logger.warning("OpenMeteo respondió HTTP %s", exc.response.status_code)
+        raise RuntimeError(f"OpenMeteo respondió HTTP {exc.response.status_code}") from exc
     except httpx.RequestError as exc:
         logger.warning("Error de red al consultar OpenMeteo: %s", exc)
-        raise ConnectionError(
-            "Error de red al consultar OpenMeteo"
-        ) from exc
+        raise ConnectionError("Error de red al consultar OpenMeteo") from exc
     except ValueError as exc:
         # Captura json.JSONDecodeError
-        raise RuntimeError(
-            f"Respuesta de OpenMeteo malformada: {exc}"
-        ) from exc
+        raise RuntimeError(f"Respuesta de OpenMeteo malformada: {exc}") from exc
 
 
 def _format_weather(
@@ -441,17 +434,15 @@ def _format_weather(
         location: Nombre de la ubicación.
 
     Returns:
-        Texto natural listo para Piper TTS.
+        Texto natural listo para Piper TTS. Termina con "según OpenMeteo"
+        para citar la fuente del dato (Issue #95).
     """
     temp_str = f"{temp:.0f}°C" if temp is not None else "temperatura no disponible"
 
     partes: list[str] = []
 
     if temp is not None and humidity is not None and description != "sin datos":
-        partes.append(
-            f"En {location} ahora: {temp_str}, {description}, "
-            f"humedad {humidity}%"
-        )
+        partes.append(f"En {location} ahora: {temp_str}, {description}, humedad {humidity}%")
     else:
         # Respuesta degradada: incluir lo que tengamos.
         partes.append(f"En {location} ahora: {temp_str}")
@@ -466,7 +457,13 @@ def _format_weather(
     if rain_mm is not None and rain_mm > 0:
         partes.append(f", lluvia {rain_mm:.1f} mm")
 
-    return "".join(partes) + "."
+    # Cita "según OpenMeteo" incluida SIEMPRE en el dato retornado (capa determinista).
+    # El system prompt refuerza que el LLM la conserve si reformula.
+    # Diseño deliberado de defensa en profundidad (Issue #95):
+    # - Capa 1 (determinista): hardcode en esta función garantiza la presencia.
+    # - Capa 2 (LLM): instrucción del prompt previene que sea borrada.
+    # Sin ambas, el LLM 3B podría descartar la fuente buscando ser "conciso".
+    return "".join(partes) + ", según OpenMeteo."
 
 
 async def get_weather(
@@ -486,7 +483,8 @@ async def get_weather(
 
     Returns:
         Texto natural listo para TTS. Ejemplo:
-        "En Traiguén ahora: 18°C, cielo nublado, humedad 65%, viento 3.6 m/s."
+        "En Traiguén ahora: 18°C, cielo nublado, humedad 65%, viento 3.6 m/s,
+         según OpenMeteo."
 
         Si hay error, retorna un mensaje informativo en vez de lanzar
         excepción, para que el LLM pueda comunicarlo al agricultor.
@@ -506,3 +504,103 @@ async def get_weather(
     except RuntimeError as exc:
         logger.warning("Error de API al consultar clima: %s", exc)
         return "El servicio de clima no está disponible en este momento."
+
+
+# ── Pronostico diario para alertas proactivas (issue #88) ─────────
+
+
+@dataclass
+class ForecastDay:
+    """Un dia de pronostico climatico diario."""
+
+    fecha: datetime.date
+    temp_min_c: float | None
+    temp_max_c: float | None
+    precipitation_sum_mm: float | None
+
+
+async def get_weather_forecast_daily(
+    lat: float = DEFAULT_LAT,
+    lon: float = DEFAULT_LON,
+    days: int = 3,
+) -> list[ForecastDay]:
+    """Consulta el pronostico diario de OpenMeteo.
+
+    Retorna los proximos `days` dias con temperatura minima/maxima y
+    precipitacion acumulada. Usado por el servicio de alertas climaticas.
+
+    Args:
+        lat: Latitud.
+        lon: Longitud.
+        days: Cantidad de dias de pronostico (1-7).
+
+    Returns:
+        Lista de ForecastDay ordenada por fecha.
+
+    Raises:
+        ConnectionError: Error de red.
+        RuntimeError: Error de API o respuesta malformada.
+    """
+    if not (-90.0 <= lat <= 90.0):
+        raise ValueError("Latitud fuera de rango")
+    if not (-180.0 <= lon <= 180.0):
+        raise ValueError("Longitud fuera de rango")
+    days = min(max(days, 1), 7)
+
+    params: dict[str, str | float | int] = {
+        "latitude": lat,
+        "longitude": lon,
+        "daily": "temperature_2m_min,temperature_2m_max,precipitation_sum",
+        "timezone": "auto",
+        "forecast_days": days,
+    }
+
+    try:
+        client = await _get_http_client()
+        response = await client.get(_OPENMETEO_URL, params=params)
+        response.raise_for_status()
+        data: dict[str, object] = response.json()
+    except httpx.HTTPStatusError as exc:
+        logger.warning("OpenMeteo respondio HTTP %s", exc.response.status_code)
+        raise RuntimeError(f"OpenMeteo respondio HTTP {exc.response.status_code}") from exc
+    except httpx.RequestError as exc:
+        logger.warning("Error de red al consultar OpenMeteo: %s", exc)
+        raise ConnectionError("Error de red al consultar OpenMeteo") from exc
+    except ValueError as exc:
+        raise RuntimeError(f"Respuesta de OpenMeteo malformada: {exc}") from exc
+
+    return _parse_forecast_daily(data)
+
+
+def _parse_forecast_daily(data: dict[str, object]) -> list[ForecastDay]:
+    """Parsea la respuesta de OpenMeteo a una lista de ForecastDay."""
+    daily: dict[str, object] = {}
+    if isinstance(data.get("daily"), dict):
+        daily = data["daily"]  # type: ignore[assignment]
+
+    fechas_raw = daily.get("time", [])
+    mins_raw = daily.get("temperature_2m_min", [])
+    maxs_raw = daily.get("temperature_2m_max", [])
+    precips_raw = daily.get("precipitation_sum", [])
+
+    if not isinstance(fechas_raw, list):
+        raise RuntimeError("OpenMeteo: daily.time no es una lista")
+
+    dias: list[ForecastDay] = []
+    for i, fecha_str in enumerate(fechas_raw):
+        try:
+            fecha = datetime.date.fromisoformat(str(fecha_str))
+        except ValueError as exc:
+            raise RuntimeError(f"Fecha de pronostico invalida: {fecha_str}") from exc
+        temp_min = _safe_float(mins_raw[i]) if isinstance(mins_raw, list) and i < len(mins_raw) else None
+        temp_max = _safe_float(maxs_raw[i]) if isinstance(maxs_raw, list) and i < len(maxs_raw) else None
+        precip = _safe_float(precips_raw[i]) if isinstance(precips_raw, list) and i < len(precips_raw) else None
+        dias.append(
+            ForecastDay(
+                fecha=fecha,
+                temp_min_c=temp_min,
+                temp_max_c=temp_max,
+                precipitation_sum_mm=precip,
+            )
+        )
+    return dias

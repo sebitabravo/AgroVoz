@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}Piloto · AgroVoz Admin{% endblock %}
+{% block page_title %}Métricas de piloto{% endblock %}
+{% block page_meta %}Crea INACAP · sección 7.3{% endblock %}
+
+{% block content %}
+{# ── KPIs del piloto ───────────────────────────────────────────── #}
+<div class="kpi-grid">
+  <div class="kpi">
+    <div class="kpi-label">Productores activos</div>
+    <div class="kpi-value">{{ metrics.productores_activos }}</div>
+    <div class="kpi-sub">3+ consultas</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Consultas / productor</div>
+    <div class="kpi-value">{{ metrics.consultas_por_productor }}</div>
+    <div class="kpi-sub">promedio</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">% respuestas útiles</div>
+    <div class="kpi-value {% if metrics.pct_utiles >= 80 %}up{% elif metrics.pct_utiles > 0 %}down{% endif %}">{{ metrics.pct_utiles }}%</div>
+    <div class="kpi-sub {% if metrics.pct_utiles >= 80 %}up{% elif metrics.pct_utiles > 0 %}down{% endif %}">target: &gt;80%</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Latencia promedio</div>
+    <div class="kpi-value {% if metrics.latencia_promedio_ms <= 15000 %}up{% else %}down{% endif %}">{{ "%.1f"|format(metrics.latencia_promedio_ms / 1000) }}s</div>
+    <div class="kpi-sub {% if metrics.latencia_promedio_ms <= 15000 %}up{% else %}down{% endif %}">target: &lt;15s</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Decisiones productivas</div>
+    <div class="kpi-value">{{ metrics.decisiones_productivas }}</div>
+    <div class="kpi-sub">casos documentados</div>
+  </div>
+</div>
+
+{# ── Detalle de feedback ───────────────────────────────────────── #}
+<div class="grid-2">
+  <div class="card">
+    <div class="card-head">
+      <span class="card-title">Distribución de feedback</span>
+    </div>
+    {% if metrics.total_con_feedback > 0 %}
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <span style="font-size:12px;font-weight:600;color:#4f7d5a">Útil</span>
+          <span style="font-size:12px;color:#7e827a">{{ metrics.total_feedback_util }} ({{ "%.0f"|format(metrics.total_feedback_util / metrics.total_con_feedback * 100) }}%)</span>
+        </div>
+        <div class="bar">
+          <div class="bar-fill" style="width:{{ (metrics.total_feedback_util / metrics.total_con_feedback * 100)|round }}%"></div>
+        </div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <span style="font-size:12px;font-weight:600;color:#c05252">No útil</span>
+          <span style="font-size:12px;color:#7e827a">{{ metrics.total_feedback_no_util }} ({{ "%.0f"|format(metrics.total_feedback_no_util / metrics.total_con_feedback * 100) }}%)</span>
+        </div>
+        <div class="bar">
+          <div class="bar-fill err" style="width:{{ (metrics.total_feedback_no_util / metrics.total_con_feedback * 100)|round }}%"></div>
+        </div>
+      </div>
+      <p class="notice" style="margin-top:8px">{{ metrics.total_con_feedback }} de {{ metrics.total_consultas }} consultas tienen feedback ({{ "%.0f"|format(metrics.total_con_feedback / metrics.total_consultas * 100) if metrics.total_consultas > 0 else 0 }}%)</p>
+    </div>
+    {% else %}
+    <p class="notice">Sin feedback registrado. El feedback se captura cuando el agricultor responde "me sirvió" o "no me sirvió" tras una consulta.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <span class="card-title">Resumen del piloto</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f5f4f0">
+        <span style="font-size:12px;color:#7e827a">Total consultas</span>
+        <span style="font-size:12px;font-weight:700">{{ metrics.total_consultas }}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f5f4f0">
+        <span style="font-size:12px;color:#7e827a">Productores únicos</span>
+        <span style="font-size:12px;font-weight:700">{{ metrics.productores_activos }}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f5f4f0">
+        <span style="font-size:12px;color:#7e827a">Latencia target</span>
+        <span style="font-size:12px;font-weight:700">{{ "%.1f"|format(metrics.latencia_target_ms / 1000) }}s</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:8px 0">
+        <span style="font-size:12px;color:#7e827a">Útil target</span>
+        <span style="font-size:12px;font-weight:700">&gt;80%</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Tabla de consultas recientes con feedback ─────────────────── #}
+<div class="card">
+  <div class="card-head">
+    <span class="card-title">Consultas recientes con feedback</span>
+    <a href="/admin/piloto/export" class="btn btn-action">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Export CSV
+    </a>
+  </div>
+  {% if consultas_con_feedback %}
+  <table>
+    <thead>
+      <tr>
+        <th>Hora</th>
+        <th>Productor</th>
+        <th>Intent</th>
+        <th>Feedback</th>
+        <th>Decisión</th>
+        <th>Latencia</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in consultas_con_feedback %}
+      <tr>
+        <td class="mono">{{ c.ts[11:] if c.ts|length > 11 else c.ts }}</td>
+        <td class="mono">{{ c.phone_hash[:8] }}...</td>
+        <td>
+          {% if c.intent == 'precio' %}
+          <span class="badge badge-precio">precio</span>
+          {% elif c.intent == 'clima' %}
+          <span class="badge badge-clima">clima</span>
+          {% else %}
+          <span class="badge badge-webhook">{{ c.intent }}</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if c.feedback == 'util' %}
+          <span style="font-size:11px;font-weight:700;color:#4f7d5a">✓ útil</span>
+          {% elif c.feedback == 'no_util' %}
+          <span style="font-size:11px;font-weight:700;color:#c05252">✗ no útil</span>
+          {% else %}
+          <span style="font-size:11px;color:#7e827a">—</span>
+          {% endif %}
+        </td>
+        <td>
+          <button
+            class="btn-action"
+            hx-post="/admin/consultations/{{ c.id }}/decision"
+            hx-target="closest td"
+            hx-swap="innerHTML"
+            title="Toggle decisión productiva"
+          >
+            {% if c.decision_productiva %}
+            <span style="font-size:11px;font-weight:700;color:#4f7d5a">✓ productiva</span>
+            {% else %}
+            <span style="font-size:11px;color:#7e827a">marcar</span>
+            {% endif %}
+          </button>
+        </td>
+        <td class="mono">{{ "%.1f"|format(c.latency_ms / 1000) }}s</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="notice">Sin consultas con feedback. Las consultas aparecen aquí cuando el agricultor responde tras recibir una respuesta.</p>
+  {% endif %}
+</div>
+{% endblock %}
