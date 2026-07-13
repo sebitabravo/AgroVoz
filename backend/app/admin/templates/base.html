@@ -7,7 +7,8 @@
   <meta name="theme-color" content="#4f7d5a">
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
-  <link rel="manifest" href="/admin/manifest.json">
+  {# theme-color arriba esta duplicado en static/manifest.json — mantener en sync. #}
+  <link rel="manifest" href="/static/manifest.json">
   <title>{% block title %}Admin · AgroVoz{% endblock %}</title>
   {# HTMX: bundle local (sin CDN, supply chain hardening). #}
   {% block head_scripts %}

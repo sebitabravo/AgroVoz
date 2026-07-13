@@ -1,10 +1,12 @@
 """Tests de PWA para el dashboard admin (Issue #92).
 
 Cubre:
-- Manifest JSON valido y con iconos requeridos.
-- Endpoint del Service Worker accesible con content-type correcto.
+- Manifest JSON estatico valido, con scope e iconos requeridos.
+- Endpoint del Service Worker accesible, con content-type y no-cache.
 - base.html incluye manifest, theme-color y registro del SW.
-- Service Worker NO cachea endpoints dinamicos ni datos sensibles.
+- El Service Worker NO cachea el dashboard autenticado ni datos sensibles.
+- Respuestas del admin llevan Cache-Control: no-store (regresion privacidad).
+- _PUBLIC_PATHS matchea exacto: sin bypass por prefijo (regresion auth).
 """
 
 from httpx import AsyncClient
@@ -18,10 +20,10 @@ def _autenticar(client: AsyncClient) -> None:
 
 
 class TestManifestPwa:
-    """Validacion del manifest.json del admin."""
+    """Validacion del manifest.json estatico del admin."""
 
     async def test_manifest_json_es_valido(self, client: AsyncClient) -> None:
-        resp = await client.get("/admin/manifest.json", follow_redirects=False)
+        resp = await client.get("/static/manifest.json", follow_redirects=False)
         assert resp.status_code == 200
         data = resp.json()
         assert data["name"] == "AgroVoz Admin"
@@ -31,14 +33,26 @@ class TestManifestPwa:
         assert "theme_color" in data
         assert "background_color" in data
 
+    async def test_manifest_declara_scope_admin(self, client: AsyncClient) -> None:
+        # El manifest vive en /static/: sin scope explicito el navegador
+        # inferiria /static/ y start_url quedaria fuera (manifest invalido).
+        resp = await client.get("/static/manifest.json", follow_redirects=False)
+        assert resp.json()["scope"] == "/admin/"
+
     async def test_manifest_tiene_iconos(self, client: AsyncClient) -> None:
-        resp = await client.get("/admin/manifest.json", follow_redirects=False)
+        resp = await client.get("/static/manifest.json", follow_redirects=False)
         assert resp.status_code == 200
         icons = resp.json()["icons"]
         assert len(icons) >= 2
         sizes = {icon["sizes"] for icon in icons}
         assert "192x192" in sizes
         assert "512x512" in sizes
+
+    async def test_iconos_pwa_existen(self, client: AsyncClient) -> None:
+        for icono in ("/static/icon-192.png", "/static/icon-512.png"):
+            resp = await client.get(icono, follow_redirects=False)
+            assert resp.status_code == 200, f"falta {icono}"
+            assert resp.headers["content-type"] == "image/png"
 
 
 class TestServiceWorker:
@@ -49,6 +63,17 @@ class TestServiceWorker:
         assert resp.status_code == 200
         assert "javascript" in resp.headers["content-type"]
         assert "self.addEventListener" in resp.text
+
+    async def test_service_worker_revalida_siempre(self, client: AsyncClient) -> None:
+        # no-cache: los cambios del SW llegan al navegador sin esperar TTL.
+        resp = await client.get("/admin/sw.js", follow_redirects=False)
+        assert resp.headers["cache-control"] == "no-cache"
+
+    async def test_service_worker_no_cachea_dashboard(self, client: AsyncClient) -> None:
+        """Regresion PR #118: '/admin/' en SHELL_ASSETS cacheaba HTML autenticado."""
+        resp = await client.get("/admin/sw.js", follow_redirects=False)
+        assert resp.status_code == 200
+        assert '"/admin/"' not in resp.text
 
     async def test_service_worker_no_cachea_api(self, client: AsyncClient) -> None:
         resp = await client.get("/admin/sw.js", follow_redirects=False)
@@ -63,6 +88,36 @@ class TestServiceWorker:
         assert "/admin/activity" not in sw
 
 
+class TestCacheControlAdmin:
+    """El HTML del admin nunca debe persistir en caches (Ley 21.719)."""
+
+    async def test_dashboard_autenticado_es_no_store(self, client: AsyncClient) -> None:
+        _autenticar(client)
+        resp = await client.get("/admin/", follow_redirects=False)
+        assert resp.status_code == 200
+        assert resp.headers["cache-control"] == "no-store"
+
+    async def test_login_es_no_store(self, client: AsyncClient) -> None:
+        resp = await client.get("/admin/login", follow_redirects=False)
+        assert resp.status_code == 200
+        assert resp.headers["cache-control"] == "no-store"
+
+
+class TestPublicPathsExactos:
+    """Regresion PR #118: matching por prefijo dejaba rutas sin proteccion."""
+
+    async def test_manifest_en_admin_ya_no_es_publico(self, client: AsyncClient) -> None:
+        # El manifest se movio a /static/: bajo /admin/ requiere sesion.
+        resp = await client.get("/admin/manifest.json", follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/admin/login"
+
+    async def test_prefijo_de_path_publico_requiere_sesion(self, client: AsyncClient) -> None:
+        resp = await client.get("/admin/sw.js.map", follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/admin/login"
+
+
 class TestBaseHtmlPwa:
     """Validacion de base.html como shell de la PWA."""
 
@@ -70,7 +125,7 @@ class TestBaseHtmlPwa:
         _autenticar(client)
         resp = await client.get("/admin/", follow_redirects=False)
         assert resp.status_code == 200
-        assert '<link rel="manifest" href="/admin/manifest.json">' in resp.text
+        assert '<link rel="manifest" href="/static/manifest.json">' in resp.text
 
     async def test_base_html_incluye_theme_color(self, client: AsyncClient) -> None:
         _autenticar(client)

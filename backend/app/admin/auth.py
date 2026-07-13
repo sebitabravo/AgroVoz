@@ -31,11 +31,11 @@ COOKIE_NAME = "agrovoz_admin"
 _SALT = "admin-session-v1"
 
 # Paths que NO requieren cookie válida (login se autentica con el formulario).
-# El manifest y el service worker de la PWA deben ser publicos para que el
-# navegador pueda evaluar la instalabilidad incluso antes del login.
+# El service worker de la PWA debe ser publico para que el navegador pueda
+# registrarlo y actualizarlo incluso sin sesion activa. Matching EXACTO:
+# un prefijo dejaria sin proteccion rutas futuras colgadas de estos paths.
 _PUBLIC_PATHS = {
     "/admin/login",
-    "/admin/manifest.json",
     "/admin/sw.js",
 }
 
@@ -98,8 +98,15 @@ class AdminAuthMiddleware(BaseHTTPMiddleware):
         call_next: Callable[[Request], Awaitable[StarletteResponse]],
     ) -> StarletteResponse:
         path = request.url.path
-        if path.startswith("/admin") and not path.startswith(tuple(_PUBLIC_PATHS)):
+        if path.startswith("/admin") and path not in _PUBLIC_PATHS:
             cookie = request.cookies.get(COOKIE_NAME)
             if not verify_session_cookie(cookie):
                 return RedirectResponse("/admin/login", status_code=303)
-        return await call_next(request)
+        response = await call_next(request)
+        # El HTML del admin es autenticado y contiene datos sensibles: no debe
+        # persistir en caches del navegador ni proxies (Ley 21.719). Default
+        # no-store, salvo endpoints que declaran su propio Cache-Control
+        # (ej: /admin/sw.js usa no-cache para revalidar).
+        if path.startswith("/admin") and "cache-control" not in response.headers:
+            response.headers["Cache-Control"] = "no-store"
+        return response
