@@ -14,13 +14,18 @@ import asyncio
 import logging
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.schemas.pipeline import AudioResponse
 from app.services.llm_service import _COMMON_PRODUCTS, FALLBACK_TEXT, NO_RESPONSE_TEXT
 from app.services.tts_service import PiperModelNotFoundError, TTSService
 from app.services.whisper_service import WhisperService
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +45,19 @@ _MAX_WHISPER_AUDIO_MS = 12_000
 # Cache singleton de TTSService: el modelo Piper se carga UNA vez.
 _tts_service: TTSService | None = None
 
+# Keywords de feedback del agricultor. Se detectan como intent especial
+# y actualizan la consulta ANTERIOR (no generan nueva consulta).
+_FEEDBACK_UTIL = [
+    "me sirvió", "me sirve", "me sirvio", "util", "útil",
+    "gracias", "eso era", "eso es", "perfecto", "bacán", "bakan",
+    "buena", "buenísimo", "buenisimo", "ok", "dale",
+]
+_FEEDBACK_NO_UTIL = [
+    "no me sirvió", "no me sirve", "no me sirvio", "no útil", "no util",
+    "no entendi", "no entendí", "no cache", "no cacho",
+    "mal", "malo", "pesimo", "pésimo", "no es eso",
+]
+
 # Texto fijo de bienvenida para primer contacto (issue #86).
 # No requiere LLM: es un mensaje predefinido sintetizado con TTS.
 # Corto (<200 chars) para que el audio dure <10s y no fatigue al agricultor.
@@ -57,6 +75,26 @@ def _get_tts_service() -> TTSService:
     if _tts_service is None:
         _tts_service = TTSService()
     return _tts_service
+
+
+def _detect_feedback(text: str) -> str | None:
+    """Detecta si el texto es feedback del agricultor sobre la consulta anterior.
+
+    Args:
+        text: Texto transcrito por Whisper.
+
+    Returns:
+        "util", "no_util", o None si no es feedback.
+    """
+    text_lower = text.lower().strip()
+    # Priorizar feedback negativo (más específico).
+    for kw in _FEEDBACK_NO_UTIL:
+        if kw in text_lower:
+            return "no_util"
+    for kw in _FEEDBACK_UTIL:
+        if kw in text_lower:
+            return "util"
+    return None
 
 
 class AgroVozPipeline:
@@ -389,6 +427,72 @@ class AgroVozPipeline:
             )
 
     @staticmethod
+    def _update_previous_feedback(
+        phone_hash: str,
+        feedback: str,
+        session: Session | None = None,
+    ) -> bool:
+        """Actualiza el feedback de la ultima consulta del phone_hash.
+
+        Busca la consulta más reciente del mismo phone_hash y actualiza
+        su campo feedback. Si no hay consulta previa, retorna False.
+
+        Args:
+            phone_hash: Hash del numero de telefono.
+            feedback: "util" o "no_util".
+            session: Sesión de SQLAlchemy opcional. Si no se provee, crea una nueva.
+
+        Returns:
+            True si se actualizó una consulta, False si no había previa.
+        """
+        from app.core.database import SessionLocal
+        from app.models.consultation import Consultation
+
+        own_session = session is None
+        if session is None:
+            session = SessionLocal()
+        try:
+            # Buscar la última consulta del mismo phone_hash.
+            # Ordenar por id DESC (más confiable que created_at con
+            # server_default que puede tener el mismo timestamp para
+            # filas insertadas en la misma transacción).
+            stmt = (
+                select(Consultation)
+                .where(Consultation.phone_hash == phone_hash)
+                .order_by(Consultation.id.desc())
+                .limit(1)
+            )
+            consulta = session.scalars(stmt).first()
+            if consulta is None:
+                logger.warning(
+                    "Feedback sin consulta previa — phone_hash=%s feedback=%s",
+                    phone_hash[:8],
+                    feedback,
+                )
+                return False
+
+            consulta.feedback = feedback
+            session.commit()
+            logger.info(
+                "Feedback actualizado — consultation_id=%d phone_hash=%s feedback=%s",
+                consulta.id,
+                phone_hash[:8],
+                feedback,
+            )
+            return True
+        except SQLAlchemyError:
+            session.rollback()
+            logger.exception(
+                "Error actualizando feedback — phone_hash=%s feedback=%s",
+                phone_hash[:8],
+                feedback,
+            )
+            return False
+        finally:
+            if own_session:
+                session.close()
+
+    @staticmethod
     def _is_first_contact(phone_hash: str) -> bool:
         """Retorna True si el phone_hash no tiene consultas previas en DB.
 
@@ -582,40 +686,73 @@ class AgroVozPipeline:
                     request_id,
                 )
 
-        # ── Etapa 2: Generacion de respuesta (resumen o LLM) ─────────────
+        # ── Etapa 2: Generacion de respuesta (feedback, resumen o LLM) ───
         response_text = ""
         intent = "desconocido"
         producto: str | None = None
         t_llm_start = time.monotonic()
 
         if transcribed_text and transcribed_text.strip():
-            # Extraer producto antes de generar respuesta (para guardar en consulta).
-            producto = self._extract_producto(transcribed_text)
-
-            # _generate_response detecta internally si es resumen o LLM,
-            # maneja su propia lógica y error handling.
-            response_text, intent = await self._generate_response(
-                transcribed_text, chat_id_hash
-            )
-            llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
-
-            if intent == "resumen":
-                logger.info(
-                    "Resumen generado — message_id=%s chars=%d llm_ms=%d request_id=%s",
-                    message_id,
-                    len(response_text),
-                    llm_ms_ref[0],
-                    request_id,
+            # Detectar si el mensaje es feedback del agricultor. El feedback
+            # actualiza la consulta ANTERIOR (no crea una nueva) y responde
+            # con un TTS corto sin pasar por el LLM.
+            feedback = _detect_feedback(transcribed_text)
+            if feedback is not None:
+                intent = "feedback"
+                updated = await asyncio.to_thread(
+                    self._update_previous_feedback,
+                    phone_hash=chat_id_hash,
+                    feedback=feedback,
                 )
+                if updated:
+                    response_text = (
+                        "Me alegra haberte ayudado."
+                        if feedback == "util"
+                        else "Gracias, lo tendré en cuenta."
+                    )
+                    logger.info(
+                        "Feedback procesado — message_id=%s feedback=%s request_id=%s",
+                        message_id,
+                        feedback,
+                        request_id,
+                    )
+                else:
+                    response_text = "Gracias por tu respuesta."
+                    logger.warning(
+                        "Feedback sin consulta previa — message_id=%s feedback=%s request_id=%s",
+                        message_id,
+                        feedback,
+                        request_id,
+                    )
+                llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
             else:
-                logger.info(
-                    "Respuesta LLM generada — message_id=%s intent=%s chars=%d llm_ms=%d request_id=%s",
-                    message_id,
-                    intent,
-                    len(response_text),
-                    llm_ms_ref[0],
-                    request_id,
+                # Extraer producto antes de generar respuesta (para guardar en consulta).
+                producto = self._extract_producto(transcribed_text)
+
+                # _generate_response detecta internally si es resumen o LLM,
+                # maneja su propia lógica y error handling.
+                response_text, intent = await self._generate_response(
+                    transcribed_text, chat_id_hash
                 )
+                llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
+
+                if intent == "resumen":
+                    logger.info(
+                        "Resumen generado — message_id=%s chars=%d llm_ms=%d request_id=%s",
+                        message_id,
+                        len(response_text),
+                        llm_ms_ref[0],
+                        request_id,
+                    )
+                else:
+                    logger.info(
+                        "Respuesta LLM generada — message_id=%s intent=%s chars=%d llm_ms=%d request_id=%s",
+                        message_id,
+                        intent,
+                        len(response_text),
+                        llm_ms_ref[0],
+                        request_id,
+                    )
 
         # ── Etapa 3: Sintesis TTS ────────────────────────────────────
         response_ogg_path: str = ""
@@ -646,39 +783,42 @@ class AgroVozPipeline:
         # bloquear el event loop con session.commit() sincrono). Se guarda
         # al FINAL del pipeline para persistir el desglose por etapa completo
         # (whisper/llm/tts). Fire-and-forget: si falla, loguea y continua.
-        # Se persiste SIEMPRE: incluso si Whisper fallo, se guarda un stub
-        # con query_text="" para que _is_first_contact() no retorne True
-        # en el siguiente audio (evita bienvenida repetida, fix #105).
-        # Determinar si esta consulta requiere revision humana (issue #99);
-        # una transcripcion fallida tambien queda marcada para revision.
-        mark_review = self._should_mark_for_review(
-            response_text=response_text,
-            intent=intent,
-            whisper_ms=whisper_ms_ref[0],
-            llm_ms=llm_ms_ref[0],
-            transcribed_text=transcribed_text or "",
-        )
-        try:
-            await asyncio.to_thread(
-                self._save_consultation,
-                phone_hash=chat_id_hash,
-                intent=intent,
-                query_text=transcribed_text.strip() if transcribed_text else "",
+        # Se persiste SIEMPRE salvo feedback: incluso si Whisper fallo, se
+        # guarda un stub con query_text="" para que _is_first_contact() no
+        # retorne True en el siguiente audio (evita bienvenida repetida, #105).
+        # El feedback NO crea consulta nueva: actualiza la anterior (#97), y
+        # como siempre tiene transcripcion valida no necesita el stub.
+        if intent != "feedback":
+            # Determinar si esta consulta requiere revision humana (issue #99);
+            # una transcripcion fallida tambien queda marcada para revision.
+            mark_review = self._should_mark_for_review(
                 response_text=response_text,
-                audio_duration_ms=audio_duration_ms,
-                start_time=pipeline_start,
+                intent=intent,
                 whisper_ms=whisper_ms_ref[0],
                 llm_ms=llm_ms_ref[0],
-                tts_ms=tts_ms_ref[0],
-                producto=producto,
-                requires_review=mark_review,
+                transcribed_text=transcribed_text or "",
             )
-        except (RuntimeError, OSError, SQLAlchemyError, TypeError, AttributeError, KeyError):
-            logger.exception(
-                "Error guardando consulta — continuando pipeline: phone_hash=%s intent=%s",
-                chat_id_hash[:8],
-                intent,
-            )
+            try:
+                await asyncio.to_thread(
+                    self._save_consultation,
+                    phone_hash=chat_id_hash,
+                    intent=intent,
+                    query_text=transcribed_text.strip() if transcribed_text else "",
+                    response_text=response_text,
+                    audio_duration_ms=audio_duration_ms,
+                    start_time=pipeline_start,
+                    whisper_ms=whisper_ms_ref[0],
+                    llm_ms=llm_ms_ref[0],
+                    tts_ms=tts_ms_ref[0],
+                    producto=producto,
+                    requires_review=mark_review,
+                )
+            except (RuntimeError, OSError, SQLAlchemyError, TypeError, AttributeError, KeyError):
+                logger.exception(
+                    "Error guardando consulta — continuando pipeline: phone_hash=%s intent=%s",
+                    chat_id_hash[:8],
+                    intent,
+                )
 
         # Log de benchmark agregado: latencia total + breakdown por etapa.
         logger.info(
