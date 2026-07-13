@@ -93,6 +93,17 @@ def set_comuna(
                 phone_hash[:8],
                 comuna,
             )
+
+        # Consentimiento para dataset de voz rural (#96). Opt-in explicito:
+        # solo se actualiza si el body lo envia explicitamente.
+        if body.dataset_consent is not None:
+            prefs.dataset_consent = body.dataset_consent
+            logger.info(
+                "dataset_consent actualizado — phone_hash=%s consent=%s",
+                phone_hash[:8],
+                prefs.dataset_consent,
+            )
+
         db.commit()
         db.refresh(prefs)
     except IntegrityError:
@@ -106,6 +117,8 @@ def set_comuna(
                 detail="Conflicto al crear user_prefs.",
             ) from None
         prefs.comuna = comuna
+        if body.dataset_consent is not None:
+            prefs.dataset_consent = body.dataset_consent
         db.commit()
         db.refresh(prefs)
     except SQLAlchemyError:
@@ -119,6 +132,7 @@ def set_comuna(
     return UserPrefsResponse(
         phone_hash=prefs.phone_hash,
         comuna=prefs.comuna,
+        dataset_consent=prefs.dataset_consent,
         created_at=prefs.created_at,
     )
 
@@ -146,5 +160,6 @@ def get_user_prefs(
     return UserPrefsResponse(
         phone_hash=prefs.phone_hash,
         comuna=prefs.comuna,
+        dataset_consent=prefs.dataset_consent,
         created_at=prefs.created_at,
     )
