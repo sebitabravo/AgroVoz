@@ -19,7 +19,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models.odepa_price import OdepaPrice
+from app.models.user_prefs import UserPrefs
 from app.services.odepa_service import (
+    COMUNA_TO_MERCADO,
     calculate_sale_value_for_llm,
     format_price_text,
     get_price_for_llm,
@@ -56,6 +58,18 @@ def _insertar_precio(
     db.add(registro)
     db.commit()
     return registro
+
+
+def _insertar_user_prefs(
+    db: Session,
+    phone_hash: str = "abc123",
+    comuna: str | None = "Traiguén",
+) -> UserPrefs:
+    """Inserta un registro UserPrefs de prueba."""
+    prefs = UserPrefs(phone_hash=phone_hash, comuna=comuna)
+    db.add(prefs)
+    db.commit()
+    return prefs
 
 
 def _session_test_db(tmp_path: Path) -> Generator[Session, None, None]:
@@ -254,8 +268,21 @@ class TestFormatPriceText:
         )
         texto = format_price_text(registro)
         assert texto == (
-            "Tomate está a 850 pesos el kilo en Vega Central, precio del 19/06/2026."
+            "Tomate está a 850 pesos el kilo en Vega Central, según ODEPA, "
+            "precio del 19/06/2026."
         )
+
+    def test_texto_incluye_cita_fuente_odepa(self, db: Session) -> None:
+        """Issue #95: el texto de precio cita ODEPA como fuente del dato.
+
+        Sin la mención explícita, el agricultor no distingue un dato oficial
+        de un rumor. La cita convierte el precio en dato OFICIAL.
+        """
+        registro = _insertar_precio(db, producto="papa", precio_kg=Decimal("1200"))
+        texto = format_price_text(registro)
+        assert "según ODEPA" in texto
+        # La cita aparece antes de la fecha, no al final suelto.
+        assert "según ODEPA, precio del" in texto
 
 
 class TestFormatPriceTextUnidades:
@@ -275,7 +302,7 @@ class TestFormatPriceTextUnidades:
         texto = format_price_text(registro)
         assert texto == (
             "Papa está a 8.833 coma 33 pesos por saco de 25 kilos en Lo Valledor, "
-            "unos 353 pesos el kilo, precio del 03/07/2026."
+            "unos 353 pesos el kilo, según ODEPA, precio del 03/07/2026."
         )
 
     def test_bandeja_con_sufijo_granel_es_convertible(self, db: Session) -> None:
@@ -571,6 +598,121 @@ class TestCalculateSaleValueForLlm:
         texto = calculate_sale_value_for_llm(db, "papa", "30")
         assert "según ODEPA" in texto
         assert "referencia mayorista" in texto
+
+
+class TestMercadoCercano:
+    """Issue #89: mercado más cercano según comuna registrada.
+
+    Cuando el agricultor no nombra mercado y tiene comuna registrada,
+    se usa el mercado ODEPA más cercano en vez de Lo Valledor.
+    """
+
+    def test_comuna_traiguen_devuelve_vega_modelo_temuco(self, db: Session) -> None:
+        """Traiguén → Vega Modelo de Temuco (mercado regional)."""
+        _insertar_user_prefs(db, phone_hash="hash_traiguen", comuna="Traiguén")
+        _insertar_precio(
+            db, mercado="Vega Modelo de Temuco",
+            precio_kg=Decimal("900"), fecha=datetime.date(2026, 7, 10),
+        )
+        _insertar_precio(
+            db, mercado="Mercado Mayorista Lo Valledor de Santiago",
+            precio_kg=Decimal("1200"), fecha=datetime.date(2026, 7, 10),
+        )
+        texto = get_price_for_llm(db, "papa", "", phone_hash="hash_traiguen")
+        assert "Temuco" in texto
+        assert "900" in texto
+
+    def test_comuna_traiguen_menciona_ambos_mercados(self, db: Session) -> None:
+        """Cuando el mercado cercano NO es Lo Valledor, menciona ambos."""
+        _insertar_user_prefs(db, phone_hash="hash_traiguen", comuna="Traiguén")
+        _insertar_precio(
+            db, mercado="Vega Modelo de Temuco",
+            precio_kg=Decimal("900"), fecha=datetime.date(2026, 7, 10),
+        )
+        _insertar_precio(
+            db, mercado="Mercado Mayorista Lo Valledor de Santiago",
+            precio_kg=Decimal("1200"), fecha=datetime.date(2026, 7, 10),
+        )
+        texto = get_price_for_llm(db, "papa", "", phone_hash="hash_traiguen")
+        assert "Temuco" in texto
+        assert "Lo Valledor" in texto
+        assert "referencia nacional" in texto.lower()
+
+    def test_sin_comuna_devuelve_lo_valledor(self, db: Session) -> None:
+        """Sin comuna registrada → Lo Valledor (regresión #83)."""
+        _insertar_user_prefs(db, phone_hash="hash_sin_comuna", comuna=None)
+        _insertar_precio(
+            db, mercado="Mercado Mayorista Lo Valledor de Santiago",
+            precio_kg=Decimal("1200"), fecha=datetime.date(2026, 7, 10),
+        )
+        _insertar_precio(
+            db, mercado="Vega Modelo de Temuco",
+            precio_kg=Decimal("900"), fecha=datetime.date(2026, 7, 10),
+        )
+        texto = get_price_for_llm(db, "papa", "", phone_hash="hash_sin_comuna")
+        assert "Lo Valledor" in texto
+
+    def test_sin_phone_hash_devuelve_lo_valledor(self, db: Session) -> None:
+        """Sin phone_hash → Lo Valledor (regresión #83)."""
+        _insertar_precio(
+            db, mercado="Mercado Mayorista Lo Valledor de Santiago",
+            precio_kg=Decimal("1200"), fecha=datetime.date(2026, 7, 10),
+        )
+        texto = get_price_for_llm(db, "papa", "")
+        assert "Lo Valledor" in texto
+
+    def test_comuna_no_en_mapeo_devuelve_lo_valledor(self, db: Session) -> None:
+        """Comuna que no está en COMUNA_TO_MERCADO → Lo Valledor."""
+        _insertar_user_prefs(db, phone_hash="hash_random", comuna="Puerto Williams")
+        _insertar_precio(
+            db, mercado="Mercado Mayorista Lo Valledor de Santiago",
+            precio_kg=Decimal("1200"), fecha=datetime.date(2026, 7, 10),
+        )
+        texto = get_price_for_llm(db, "papa", "", phone_hash="hash_random")
+        assert "Lo Valledor" in texto
+
+    def test_mercado_cercano_sin_datos_usa_lo_valledor(self, db: Session) -> None:
+        """Si el mercado cercano no tiene datos para el producto, usa Lo Valledor."""
+        _insertar_user_prefs(db, phone_hash="hash_traiguen", comuna="Traiguén")
+        # Solo Lo Valledor tiene datos, no Temuco.
+        _insertar_precio(
+            db, mercado="Mercado Mayorista Lo Valledor de Santiago",
+            precio_kg=Decimal("1200"), fecha=datetime.date(2026, 7, 10),
+        )
+        texto = get_price_for_llm(db, "papa", "", phone_hash="hash_traiguen")
+        assert "Lo Valledor" in texto
+
+    def test_mercado_especificado_ignora_comuna(self, db: Session) -> None:
+        """Si el LLM especifica mercado, no se usa la comuna."""
+        _insertar_user_prefs(db, phone_hash="hash_traiguen", comuna="Traiguén")
+        _insertar_precio(
+            db, mercado="Mercado Mayorista Lo Valledor de Santiago",
+            precio_kg=Decimal("1200"), fecha=datetime.date(2026, 7, 10),
+        )
+        texto = get_price_for_llm(
+            db, "papa", "Lo Valledor", phone_hash="hash_traiguen"
+        )
+        assert "Lo Valledor" in texto
+        assert "Temuco" not in texto
+
+    def test_phone_hash_inexistente_devuelve_lo_valledor(self, db: Session) -> None:
+        """Phone hash que no existe en user_prefs → Lo Valledor."""
+        _insertar_precio(
+            db, mercado="Mercado Mayorista Lo Valledor de Santiago",
+            precio_kg=Decimal("1200"), fecha=datetime.date(2026, 7, 10),
+        )
+        texto = get_price_for_llm(db, "papa", "", phone_hash="hash_inexistente")
+        assert "Lo Valledor" in texto
+
+    def test_mapeo_traiguen_es_vega_modelo(self) -> None:
+        """Sanity check: Traiguén está en el mapeo y apunta a Vega Modelo."""
+        assert "traiguén" in COMUNA_TO_MERCADO
+        assert COMUNA_TO_MERCADO["traiguén"] == "Vega Modelo de Temuco"
+
+    def test_mapeo_traiguen_sin_acento(self) -> None:
+        """Traiguen (sin acento) también matchea."""
+        assert "traiguen" in COMUNA_TO_MERCADO
+        assert COMUNA_TO_MERCADO["traiguen"] == "Vega Modelo de Temuco"
 
 
 class TestGetPriceHistoryForLlm:

@@ -51,6 +51,19 @@ class TestConstantes:
         assert "español chileno" in SYSTEM_PROMPT
         assert "pesos chilenos" in SYSTEM_PROMPT
 
+    def test_system_prompt_instruye_conservar_cita_fuente(self) -> None:
+        """Issue #95: el system prompt debe instruir al LLM conservar la
+        mención de la fuente (ODEPA / OpenMeteo) al reformular respuestas.
+
+        Sin esta regla, el LLM tiende a resumir omitiendo la fuente, perdiendo
+        el respaldo institucional del dato.
+        """
+        assert "CONSERVA SIEMPRE" in SYSTEM_PROMPT
+        assert "ODEPA" in SYSTEM_PROMPT
+        assert "OpenMeteo" in SYSTEM_PROMPT
+        assert "según ODEPA" in SYSTEM_PROMPT
+        assert "según OpenMeteo" in SYSTEM_PROMPT
+
     def test_fallback_text_no_vacio(self) -> None:
         """El texto de fallback es un mensaje informativo no vacio."""
         assert len(FALLBACK_TEXT) > 20
@@ -96,7 +109,15 @@ class TestConstantes:
 
 
 class TestParseToolCalls:
-    """_parse_tool_calls extrae tool calls de respuestas del LLM."""
+    """_parse_tool_calls extrae tool calls de respuestas del LLM.
+
+    Nota: estos tests verifican que la instrucción sobre conservar citas
+    (ODEPA/OpenMeteo) existe en el SYSTEM_PROMPT, no el comportamiento E2E
+    del LLM con modelo real. La garantía determinista de la cita viene del
+    hardcode en format_price_text() y _format_weather() (ver test_prices_api
+    línea 260 y test_weather_service línea 153). El system prompt es defensa
+    en profundidad: refuerza que el LLM no borre la cita si reformula.
+    """
 
     def test_respuesta_con_tool_calls(self) -> None:
         """Extrae tool calls cuando la respuesta las incluye."""
@@ -609,7 +630,7 @@ class TestForceKeywordToolDbError:
 
         monkeypatch.setattr(db_module, "SessionLocal", lambda: _FakeSession())
 
-        def _raise_db_error(session, producto):
+        def _raise_db_error(session, producto, phone_hash=None):
             raise SQLAlchemyError("database is locked")
 
         monkeypatch.setattr(odepa_service, "get_price_for_llm", _raise_db_error)

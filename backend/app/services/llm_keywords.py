@@ -158,7 +158,9 @@ async def _force_sale_value_tool(query_text: str) -> str | None:
     return None
 
 
-async def _force_keyword_tool(query_text: str) -> str | None:
+async def _force_keyword_tool(
+    query_text: str, phone_hash: str | None = None
+) -> str | None:
     """Orquestador de fallback por keywords: venta → precio → clima.
 
     Cuando el LLM no genera <tool_call>, detectamos keywords en la consulta
@@ -171,6 +173,7 @@ async def _force_keyword_tool(query_text: str) -> str | None:
 
     Args:
         query_text: Texto de la consulta del agricultor.
+        phone_hash: Hash del teléfono para resolver mercado cercano (Issue #89).
 
     Returns:
         Resultado textual de la tool, o None si no se detecta keyword.
@@ -212,7 +215,7 @@ async def _force_keyword_tool(query_text: str) -> str | None:
                 )
             else:
                 result = await asyncio.to_thread(
-                    get_price_for_llm, session, producto=product
+                    get_price_for_llm, session, producto=product, phone_hash=phone_hash
                 )
             # Solo retornar si encontró datos reales (no "No tengo datos...").
             if not result.startswith(FALLBACK_SALE_MESSAGES["no_data"]):

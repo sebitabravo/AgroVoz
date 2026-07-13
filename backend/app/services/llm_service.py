@@ -74,6 +74,9 @@ SYSTEM_PROMPT = (
     "5. NUNCA inventas precios ni clima. Si no tienes el dato, lo dices.\n"
     "6. Respondes en español chileno, con frases cortas y claras (máximo 3 oraciones).\n"
     "7. Los precios se dan en pesos chilenos, con la unidad de medida.\n"
+    "8. Cuando reformules la respuesta de una herramienta, CONSERVA SIEMPRE la\n"
+    "   mención de la fuente (ODEPA para precios, OpenMeteo para clima).\n"
+    "   Nunca omitas \"según ODEPA\" o \"según OpenMeteo\" al resumir.\n"
 )
 
 # Texto de fallback cuando el LLM intenta una tool fuera del whitelist.
@@ -403,12 +406,15 @@ def _filter_handler_args(
     return {k: v for k, v in arguments.items() if k in params}
 
 
-async def _execute_tool(name: str, arguments: dict[str, object]) -> str:
+async def _execute_tool(
+    name: str, arguments: dict[str, object], phone_hash: str | None = None
+) -> str:
     """Ejecuta una tool del whitelist y retorna el resultado como texto.
 
     Args:
         name: Nombre de la función (debe estar en WHITELIST_TOOLS).
         arguments: Diccionario con los argumentos parseados del JSON.
+        phone_hash: Hash del teléfono para resolver mercado cercano (Issue #89).
 
     Returns:
         Resultado textual de la tool, o mensaje de error si falla.
@@ -422,6 +428,9 @@ async def _execute_tool(name: str, arguments: dict[str, object]) -> str:
 
     # Filtrar argumentos alucinados por el LLM contra la firma real del handler.
     # Evita TypeError cuando el LLM inventa params que el handler no acepta.
+    # Inyectar phone_hash para tools de precio (Issue #89: mercado cercano).
+    if name in ("get_price", "get_price_history") and phone_hash:
+        arguments = {**arguments, "phone_hash": phone_hash}
     valid_args = _filter_handler_args(handler, arguments)
 
     try:
@@ -637,6 +646,7 @@ def _build_messages(user_query: str, history: list[dict[str, object]]) -> list[d
 async def answer(
     query_text: str,
     history: list[dict[str, object]] | None = None,
+    phone_hash: str | None = None,
 ) -> str:
     """Genera una respuesta textual usando el LLM con Tool Calling.
 
@@ -644,14 +654,15 @@ async def answer(
     1. Construir mensajes (system prompt con tools en formato Qwen2.5 nativo).
     2. Llamar al LLM SIN tools parameter (usa <tool_call> en texto plano).
     3. Si el texto contiene <tool_call> -> parsear -> ejecutar (whitelist)
-       -> devolver resultado como <tool_response> -> generar respuesta final.
-    4. Si no hay <tool_call> -> retornar contenido como respuesta final.
+       -> devolver resultado como tool_response -> generar respuesta final.
+    4. Si no hay tool_call -> retornar contenido como respuesta final.
     5. Si no hay modelo -> fallback mock para desarrollo.
 
     Args:
         query_text: Texto transcrito de la consulta del agricultor.
         history: Mensajes previos del diálogo (opcional). Formato
                  [{"role": "...", "content": "..."}, ...].
+        phone_hash: Hash del teléfono para resolver mercado cercano (Issue #89).
 
     Returns:
         Texto de respuesta en español chileno, listo para TTS.
@@ -700,7 +711,7 @@ async def answer(
                     # ("no tengo datos", "reformula") sin llamar tools,
                     # forzar tool call por keyword detection.
                     if _iteration == 0 and _is_generic_response(cleaned):
-                        forced = await _force_keyword_tool(query_text)
+                        forced = await _force_keyword_tool(query_text, phone_hash=phone_hash)
                         if forced:
                             # Inyectar el tool call + respuesta para que
                             # el LLM lo formatee en la siguiente iteracion.
@@ -751,7 +762,7 @@ async def answer(
                     fn_args = {}
 
                 # Ejecutar tool.
-                tool_result = await _execute_tool(fn_name, fn_args)
+                tool_result = await _execute_tool(fn_name, fn_args, phone_hash=phone_hash)
 
                 # Envolver resultado en <tool_response> (formato nativo Qwen2.5).
                 messages.append({

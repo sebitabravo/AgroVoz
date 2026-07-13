@@ -639,3 +639,164 @@ def get_odepa_status(db: Session) -> OdepaStatus:
         productos=int(productos or 0),
         mercados=int(mercados or 0),
     )
+
+
+# ── Métricas de piloto (Issue #97) ─────────────────────────────────
+
+
+@dataclass(frozen=True)
+class PilotoMetrics:
+    """Métricas del piloto para Crea INACAP (sección 7.3 del paper).
+
+    Criterios de éxito:
+    - productores_activos: COUNT(DISTINCT phone_hash) con 3+ consultas
+    - consultas_por_productor: AVG(COUNT consultas por phone_hash)
+    - pct_utiles: COUNT(feedback="util") / COUNT(feedback IS NOT NULL) * 100
+    - latencia_promedio_ms: AVG(latency_ms) vs target 15000ms
+    - decisiones_productivas: COUNT(decision_productiva=True)
+    """
+
+    productores_activos: int
+    consultas_por_productor: float
+    pct_utiles: float
+    latencia_promedio_ms: float
+    latencia_target_ms: int = 15_000
+    decisiones_productivas: int = 0
+    total_consultas: int = 0
+    total_feedback_util: int = 0
+    total_feedback_no_util: int = 0
+    total_con_feedback: int = 0
+
+
+def get_piloto_metrics(db: Session) -> PilotoMetrics:
+    """Calcula las 5 métricas del piloto para Crea INACAP.
+
+    Ejecuta queries optimizadas sobre la tabla Consultation.
+    """
+    # 1. Productores activos: DISTINCT phone_hash con 3+ consultas.
+    # Necesitamos contar los grupos, no los distinct. Usar subquery.
+    subq = (
+        select(Consultation.phone_hash)
+        .group_by(Consultation.phone_hash)
+        .having(func.count(Consultation.id) >= 3)
+    ).subquery()
+    productores_activos = db.scalar(
+        select(func.count()).select_from(subq)
+    ) or 0
+
+    # 2. Consultas por productor: AVG de consultas por phone_hash.
+    stmt_por_productor = (
+        select(func.count(Consultation.id))
+        .group_by(Consultation.phone_hash)
+    )
+    conteos = [int(c) for c in db.execute(stmt_por_productor).scalars().all()]
+    consultas_por_productor = round(sum(conteos) / len(conteos), 1) if conteos else 0.0
+
+    # 3. % útiles: feedback="util" / feedback IS NOT NULL * 100.
+    total_con_feedback = db.scalar(
+        select(func.count(Consultation.id)).where(
+            Consultation.feedback.is_not(None)
+        )
+    ) or 0
+    total_feedback_util = db.scalar(
+        select(func.count(Consultation.id)).where(
+            Consultation.feedback == "util"
+        )
+    ) or 0
+    total_feedback_no_util = db.scalar(
+        select(func.count(Consultation.id)).where(
+            Consultation.feedback == "no_util"
+        )
+    ) or 0
+    pct_utiles = (
+        round(total_feedback_util / total_con_feedback * 100, 1)
+        if total_con_feedback > 0
+        else 0.0
+    )
+
+    # 4. Latencia promedio.
+    latencia_promedio = db.scalar(
+        select(func.avg(Consultation.latency_ms))
+    ) or 0.0
+
+    # 5. Decisiones productivas.
+    decisiones = db.scalar(
+        select(func.count(Consultation.id)).where(
+            Consultation.decision_productiva == True  # noqa: E712
+        )
+    ) or 0
+
+    # Total de consultas.
+    total = db.scalar(select(func.count(Consultation.id))) or 0
+
+    return PilotoMetrics(
+        productores_activos=int(productores_activos),
+        consultas_por_productor=consultas_por_productor,
+        pct_utiles=pct_utiles,
+        latencia_promedio_ms=round(float(latencia_promedio), 1),
+        decisiones_productivas=int(decisiones),
+        total_consultas=int(total),
+        total_feedback_util=int(total_feedback_util),
+        total_feedback_no_util=int(total_feedback_no_util),
+        total_con_feedback=int(total_con_feedback),
+    )
+
+
+def get_piloto_export_data(db: Session) -> list[dict[str, object]]:
+    """Datos para export CSV del piloto.
+
+    Retorna lista de dicts con las métricas calculadas.
+    """
+    metrics = get_piloto_metrics(db)
+    return [
+        {"metrica": "Productores activos (3+ consultas)", "valor": metrics.productores_activos},
+        {"metrica": "Consultas por productor (promedio)", "valor": metrics.consultas_por_productor},
+        {"metrica": "% respuestas útiles", "valor": f"{metrics.pct_utiles}%"},
+        {"metrica": "Latencia promedio (ms)", "valor": metrics.latencia_promedio_ms},
+        {"metrica": "Latencia target (ms)", "valor": metrics.latencia_target_ms},
+        {"metrica": "Casos de decisión productiva", "valor": metrics.decisiones_productivas},
+        {"metrica": "Total consultas", "valor": metrics.total_consultas},
+        {"metrica": "Feedback útil", "valor": metrics.total_feedback_util},
+        {"metrica": "Feedback no útil", "valor": metrics.total_feedback_no_util},
+        {"metrica": "Total con feedback", "valor": metrics.total_con_feedback},
+    ]
+
+
+def get_piloto_consultations_with_feedback(db: Session, limit: int = 50) -> list[Consultation]:
+    """Obtiene consultas recientes con feedback para la tabla del piloto.
+
+    Args:
+        db: Sesión de SQLAlchemy.
+        limit: Número máximo de consultas a retornar.
+
+    Returns:
+        Lista de Consultation con feedback, ordenadas por created_at descendente.
+    """
+    consultas = db.scalars(
+        select(Consultation)
+        .where(Consultation.feedback.is_not(None))
+        .order_by(Consultation.created_at.desc())
+        .limit(limit)
+    ).all()
+    return list(consultas)
+
+
+def toggle_decision_productiva(db: Session, consultation_id: int) -> bool | None:
+    """Toggle del campo decision_productiva de una consulta.
+
+    Retorna el nuevo valor de decision_productiva si se encontró y actualizó,
+    None si no se encontró la consulta.
+    """
+    consulta = db.scalars(
+        select(Consultation).where(Consultation.id == consultation_id)
+    ).first()
+    if consulta is None:
+        return None
+    consulta.decision_productiva = not consulta.decision_productiva
+    db.commit()
+    logger.info(
+        "Decision productiva toggled — consultation_id=%d nuevo_valor=%s",
+        consultation_id,
+        consulta.decision_productiva,
+    )
+    return consulta.decision_productiva
