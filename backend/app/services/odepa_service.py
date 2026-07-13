@@ -159,9 +159,7 @@ async def download_csv(url: str, timeout: float = _TIMEOUT_SEGUNDOS) -> str:
             response = await client.get(url, follow_redirects=True)
             response.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        raise OdepaSyncError(
-            f"ODEPA respondió HTTP {exc.response.status_code} para {url}"
-        ) from exc
+        raise OdepaSyncError(f"ODEPA respondió HTTP {exc.response.status_code} para {url}") from exc
     except httpx.RequestError as exc:
         raise OdepaSyncError(f"Error de red al descargar CSV ODEPA: {exc}") from exc
 
@@ -181,13 +179,8 @@ async def download_csv(url: str, timeout: float = _TIMEOUT_SEGUNDOS) -> str:
     # evita que el parser intente interpretar HTML como CSV y tire
     # errores confusos como "sin columnas requeridas".
     _prefix = texto.lstrip()[:256].lower()
-    if any(
-        marcador in _prefix
-        for marcador in ("<!doctype", "<html", "<head", "<body", "<meta", "<title")
-    ):
-        raise OdepaSyncError(
-            f"ODEPA devolvió HTML en vez de CSV. ¿Cambió la URL? ({url})"
-        )
+    if any(marcador in _prefix for marcador in ("<!doctype", "<html", "<head", "<body", "<meta", "<title")):
+        raise OdepaSyncError(f"ODEPA devolvió HTML en vez de CSV. ¿Cambió la URL? ({url})")
 
     return texto
 
@@ -306,9 +299,7 @@ def parse_csv(
         if col is None
     ]
     if faltantes:
-        raise OdepaSyncError(
-            f"CSV ODEPA sin columnas requeridas: {faltantes}. Headers: {headers}"
-        )
+        raise OdepaSyncError(f"CSV ODEPA sin columnas requeridas: {faltantes}. Headers: {headers}")
 
     # mypy: tras el guard de faltantes, todas las columnas requeridas son str.
     assert col_producto is not None
@@ -374,9 +365,7 @@ def parse_csv(
     return registros
 
 
-def upsert_prices(
-    session: Session, registros: Sequence[OdepaCsvRecord]
-) -> tuple[int, int]:
+def upsert_prices(session: Session, registros: Sequence[OdepaCsvRecord]) -> tuple[int, int]:
     """Hace upsert de registros en odepa_prices. Devuelve (insertados, actualizados).
 
     Usa INSERT ... ON CONFLICT DO UPDATE sobre (producto, mercado, fecha).
@@ -415,12 +404,8 @@ def upsert_prices(
 
         # Detecta tuplas existentes para diferenciar inserts de updates.
         claves = [(r.producto, r.mercado, r.fecha) for r in chunk]
-        q = select(
-            OdepaPrice.producto, OdepaPrice.mercado, OdepaPrice.fecha
-        ).where(
-            sa_tuple(
-                OdepaPrice.producto, OdepaPrice.mercado, OdepaPrice.fecha
-            ).in_(claves)
+        q = select(OdepaPrice.producto, OdepaPrice.mercado, OdepaPrice.fecha).where(
+            sa_tuple(OdepaPrice.producto, OdepaPrice.mercado, OdepaPrice.fecha).in_(claves)
         )
         existentes = {tuple(row) for row in session.execute(q).all()}
 
@@ -445,9 +430,7 @@ def upsert_prices(
         )
         session.execute(stmt)
 
-        actualizados = sum(
-            1 for r in chunk if (r.producto, r.mercado, r.fecha) in existentes
-        )
+        actualizados = sum(1 for r in chunk if (r.producto, r.mercado, r.fecha) in existentes)
         insertados = len(chunk) - actualizados
         total_insertados += insertados
         total_actualizados += actualizados
@@ -491,6 +474,19 @@ async def sync_odepa(session: Session | None = None) -> SyncResult:
             settings.odepa_productos_list,
         )
         _ok = True
+        # Evaluar alertas de precio configuradas por voz (issue #88).
+        # Import local para evitar ciclo con app.services.alert_service.
+        try:
+            from app.services.alert_service import evaluar_alertas_precio
+
+            enviados = await evaluar_alertas_precio(session, settings)
+            if enviados:
+                logger.info(
+                    "Alertas de precio enviadas tras sync ODEPA: %d",
+                    len(enviados),
+                )
+        except Exception:
+            logger.exception("Error evaluando alertas de precio tras sync ODEPA")
         return SyncResult(insertados=insertados, actualizados=actualizados)
     finally:
         if cerrar:
@@ -502,9 +498,7 @@ async def sync_odepa(session: Session | None = None) -> SyncResult:
 # ── Funciones de consulta para Tool Calling (Issue #16) ──────────
 
 
-def query_latest_price(
-    session: Session, producto: str, mercado: str
-) -> OdepaPrice | None:
+def query_latest_price(session: Session, producto: str, mercado: str) -> OdepaPrice | None:
     """Busca el precio más reciente para un producto en un mercado.
 
     Normaliza producto (lower, strip) y mercado (lower, strip).
@@ -533,9 +527,7 @@ def query_latest_price(
     return session.scalars(q).first()
 
 
-def query_latest_by_product(
-    session: Session, producto: str
-) -> dict[str, OdepaPrice]:
+def query_latest_by_product(session: Session, producto: str) -> dict[str, OdepaPrice]:
     """Precio más reciente por mercado para un producto. Una sola query.
 
     Alternativa a llamar query_latest_price por cada mercado (N+1).
@@ -663,18 +655,13 @@ def format_price_text(record: OdepaPrice) -> str:
     producto_str = f"{record.producto[0].upper()}{record.producto[1:]}"
 
     if _es_unidad_kilo(record.unidad):
-        return (
-            f"{producto_str} está a {precio_str} el kilo en {record.mercado}, "
-            f"según ODEPA, precio del {fecha_str}."
-        )
+        return f"{producto_str} está a {precio_str} el kilo en {record.mercado}, según ODEPA, precio del {fecha_str}."
 
     unidad_str = _unidad_hablada(record.unidad)
     kilos = _kilos_por_unidad(record.unidad)
     equivalencia = ""
     if kilos is not None and kilos != 1:
-        por_kilo = (record.precio_kg / kilos).quantize(
-            Decimal("1"), rounding=ROUND_HALF_UP
-        )
+        por_kilo = (record.precio_kg / kilos).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
         equivalencia = f", unos {_formatear_pesos(por_kilo)} el kilo"
 
     return (
@@ -709,12 +696,15 @@ def _resolve_mercado_cercano(session: Session, phone_hash: str) -> str | None:
     if mercado:
         logger.info(
             "Comuna '%s' → mercado cercano '%s' (phone_hash=%s)",
-            user.comuna, mercado, phone_hash[:8],
+            user.comuna,
+            mercado,
+            phone_hash[:8],
         )
     else:
         logger.info(
             "Comuna '%s' no está en el mapeo — usando default (phone_hash=%s)",
-            user.comuna, phone_hash[:8],
+            user.comuna,
+            phone_hash[:8],
         )
     return mercado
 
@@ -732,18 +722,14 @@ def _select_registro_referencia(
     el orden alfabético sesgaba a "Agrícola del Norte S.A. de Arica".
     """
     candidatos = [
-        registro
-        for mercado_nombre, registro in precios_por_mercado.items()
-        if "lo valledor" in mercado_nombre.lower()
+        registro for mercado_nombre, registro in precios_por_mercado.items() if "lo valledor" in mercado_nombre.lower()
     ]
     if not candidatos:
         candidatos = list(precios_por_mercado.values())
     return max(candidatos, key=lambda registro: registro.fecha)
 
 
-def _find_market_record(
-    precios_por_mercado: dict[str, OdepaPrice], substring: str
-) -> OdepaPrice | None:
+def _find_market_record(precios_por_mercado: dict[str, OdepaPrice], substring: str) -> OdepaPrice | None:
     """Busca registro de mercado por substring case-insensitive."""
     for nombre, registro in precios_por_mercado.items():
         if substring.lower() in nombre.lower():
@@ -777,10 +763,7 @@ def get_price_for_llm(
             return "No entendí el producto. ¿Podrías repetirlo?"
 
         if not precios_por_mercado:
-            return (
-                f"No tengo datos de precio para {producto.strip()}. "
-                "¿Podrias probar con otro producto?"
-            )
+            return f"No tengo datos de precio para {producto.strip()}. ¿Podrias probar con otro producto?"
 
         # Issue #89: buscar mercado cercano según comuna registrada.
         mercado_cercano = _resolve_mercado_cercano(session, phone_hash or "")
@@ -790,9 +773,7 @@ def get_price_for_llm(
 
             if registro_local:
                 # Buscar también el precio en Lo Valledor para comparar.
-                registro_valledor = _find_market_record(
-                    precios_por_mercado, "lo valledor"
-                )
+                registro_valledor = _find_market_record(precios_por_mercado, "lo valledor")
 
                 if registro_valledor:
                     return (
@@ -812,16 +793,11 @@ def get_price_for_llm(
         return "No entendí el producto o mercado. ¿Podrías repetirlo?"
 
     if record is None:
-        return (
-            f"No tengo datos de precio para {producto.strip()} "
-            f"en {mercado.strip()}."
-        )
+        return f"No tengo datos de precio para {producto.strip()} en {mercado.strip()}."
     return format_price_text(record)
 
 
-def _obtener_registro_referencia(
-    session: Session, producto: str, mercado: str = ""
-) -> OdepaPrice | None:
+def _obtener_registro_referencia(session: Session, producto: str, mercado: str = "") -> OdepaPrice | None:
     """Obtiene el registro de referencia para una tool de precio.
 
     Encapsula el lookup compartido por las tools de precio: si mercado
@@ -842,9 +818,7 @@ def _obtener_registro_referencia(
     return query_latest_price(session, producto, mercado)
 
 
-def calculate_sale_value_for_llm(
-    session: Session, producto: str, cantidad_kg: str, mercado: str = ""
-) -> str:
+def calculate_sale_value_for_llm(session: Session, producto: str, cantidad_kg: str, mercado: str = "") -> str:
     """Tool function para el LLM: calcula el valor total de venta.
 
     Responde "voy a vender 30 kilos de papa" con el monto total referencial
@@ -873,14 +847,9 @@ def calculate_sale_value_for_llm(
     try:
         cantidad = Decimal(str(cantidad_kg).strip().replace(",", "."))
     except InvalidOperation:
-        return (
-            "No entendí la cantidad. ¿Podrías repetir cuántos kilos vas a vender?"
-        )
+        return "No entendí la cantidad. ¿Podrías repetir cuántos kilos vas a vender?"
     if cantidad <= 0:
-        return (
-            "La cantidad tiene que ser mayor a cero. "
-            "¿Podrías repetir cuántos kilos vas a vender?"
-        )
+        return "La cantidad tiene que ser mayor a cero. ¿Podrías repetir cuántos kilos vas a vender?"
 
     # 2. Obtener registro de referencia.
     try:
@@ -890,14 +859,8 @@ def calculate_sale_value_for_llm(
 
     if record is None:
         if not mercado or not mercado.strip():
-            return (
-                f"No tengo datos de precio para {producto.strip()}. "
-                "¿Podrias probar con otro producto?"
-            )
-        return (
-            f"No tengo datos de precio para {producto.strip()} "
-            f"en {mercado.strip()}."
-        )
+            return f"No tengo datos de precio para {producto.strip()}. ¿Podrias probar con otro producto?"
+        return f"No tengo datos de precio para {producto.strip()} en {mercado.strip()}."
 
     producto_str = f"{record.producto[0].upper()}{record.producto[1:]}"
 
@@ -920,9 +883,7 @@ def calculate_sale_value_for_llm(
     # Redondear precio por kilo a entero (peso chileno no usa centavos en
     # referencia mayorista) antes de multiplicar, para que el monto cuadre.
     precio_por_kilo = precio_por_kilo.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-    monto_total = (precio_por_kilo * cantidad).quantize(
-        Decimal("1"), rounding=ROUND_HALF_UP
-    )
+    monto_total = (precio_por_kilo * cantidad).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
     # 4. Formatear cantidad para TTS: entero "30", decimal "30 coma 5".
     if cantidad == cantidad.to_integral_value():
@@ -957,9 +918,7 @@ def _formatear_variacion(actual: Decimal, antiguo: Decimal) -> str:
     return f"ha {direccion} un {pct_str} por ciento"
 
 
-def get_price_history_for_llm(
-    session: Session, producto: str, dias: int = 7
-) -> str:
+def get_price_history_for_llm(session: Session, producto: str, dias: int = 7) -> str:
     """Tool function para el LLM: compara el precio actual con el histórico.
 
     Responde "¿a cuánto estaba la papa la semana pasada?" comparando el
@@ -983,10 +942,7 @@ def get_price_history_for_llm(
         return "No entendí el producto. ¿Podrías repetirlo?"
 
     if not precios_por_mercado:
-        return (
-            f"No tengo datos de precio para {producto.strip()}. "
-            "¿Podrias probar con otro producto?"
-        )
+        return f"No tengo datos de precio para {producto.strip()}. ¿Podrias probar con otro producto?"
 
     actual = _select_registro_referencia(precios_por_mercado)
     fecha_limite = actual.fecha - datetime.timedelta(days=dias_norm)
@@ -1007,10 +963,7 @@ def get_price_history_for_llm(
     antiguo = session.scalars(q).first()
 
     if antiguo is None:
-        return (
-            f"{format_price_text(actual)} "
-            f"No tengo datos comparables de hace {dias_norm} días para ese mercado."
-        )
+        return f"{format_price_text(actual)} No tengo datos comparables de hace {dias_norm} días para ese mercado."
 
     dias_reales = (actual.fecha - antiguo.fecha).days
     return (
@@ -1026,11 +979,7 @@ def list_products(session: Session) -> list[str]:
     Útil para que el LLM sepa qué productos puede consultar y para
     autocompletar en el dashboard admin.
     """
-    q = (
-        select(func.lower(OdepaPrice.producto).label("producto"))
-        .distinct()
-        .order_by(func.lower(OdepaPrice.producto))
-    )
+    q = select(func.lower(OdepaPrice.producto).label("producto")).distinct().order_by(func.lower(OdepaPrice.producto))
     return list(session.scalars(q).all())
 
 
