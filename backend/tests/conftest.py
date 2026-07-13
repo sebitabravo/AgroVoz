@@ -29,7 +29,7 @@ def db(tmp_path: Path, monkeypatch) -> Generator[Session, None, None]:
     (como _update_previous_feedback) usen la misma DB temporal.
     """
     from app.core.database import Base
-    from app.models import Consultation, OdepaPrice  # noqa: F401 — registra modelos en Base.metadata
+    from app.models import Consultation, OdepaPrice, UserPrefs  # noqa: F401 — registra modelos en Base.metadata
 
     db_path = tmp_path / "test.db"
     engine = create_engine(
@@ -72,7 +72,7 @@ async def client(tmp_path: Path) -> AsyncGenerator[AsyncClient, None]:
 
     # Crear tablas para que los endpoints que tocan DB funcionen en tests.
     from app.core.database import Base
-    from app.models import Consultation, OdepaPrice  # noqa: F401
+    from app.models import Consultation, OdepaPrice, UserPrefs  # noqa: F401
 
     Base.metadata.create_all(test_engine)
 

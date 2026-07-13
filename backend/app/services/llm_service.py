@@ -438,12 +438,15 @@ def _filter_handler_args(
     return {k: v for k, v in arguments.items() if k in params}
 
 
-async def _execute_tool(name: str, arguments: dict[str, object]) -> str:
+async def _execute_tool(
+    name: str, arguments: dict[str, object], phone_hash: str | None = None
+) -> str:
     """Ejecuta una tool del whitelist y retorna el resultado como texto.
 
     Args:
         name: Nombre de la función (debe estar en WHITELIST_TOOLS).
         arguments: Diccionario con los argumentos parseados del JSON.
+        phone_hash: Hash del teléfono para resolver mercado cercano (Issue #89).
 
     Returns:
         Resultado textual de la tool, o mensaje de error si falla.
@@ -457,6 +460,9 @@ async def _execute_tool(name: str, arguments: dict[str, object]) -> str:
 
     # Filtrar argumentos alucinados por el LLM contra la firma real del handler.
     # Evita TypeError cuando el LLM inventa params que el handler no acepta.
+    # Inyectar phone_hash para tools de precio (Issue #89: mercado cercano).
+    if name in ("get_price", "get_price_history") and phone_hash:
+        arguments = {**arguments, "phone_hash": phone_hash}
     valid_args = _filter_handler_args(handler, arguments)
 
     try:
@@ -694,7 +700,9 @@ def _extract_product_from_query(query: str) -> str | None:
     return None
 
 
-async def _force_keyword_tool(query_text: str) -> str | None:
+async def _force_keyword_tool(
+    query_text: str, phone_hash: str | None = None
+) -> str | None:
     """Forza tool call por keyword detection cuando el LLM no llama tools.
 
     Detecta si la consulta menciona un producto agricola o el clima,
@@ -733,7 +741,7 @@ async def _force_keyword_tool(query_text: str) -> str | None:
                 )
             else:
                 result = await asyncio.to_thread(
-                    get_price_for_llm, session, producto=product
+                    get_price_for_llm, session, producto=product, phone_hash=phone_hash
                 )
             # Solo retornar si encontro datos reales (no "No tengo datos...").
             if not result.startswith("No tengo datos"):
@@ -796,6 +804,7 @@ def _build_messages(user_query: str, history: list[dict[str, object]]) -> list[d
 async def answer(
     query_text: str,
     history: list[dict[str, object]] | None = None,
+    phone_hash: str | None = None,
 ) -> str:
     """Genera una respuesta textual usando el LLM con Tool Calling.
 
@@ -803,14 +812,15 @@ async def answer(
     1. Construir mensajes (system prompt con tools en formato Qwen2.5 nativo).
     2. Llamar al LLM SIN tools parameter (usa <tool_call> en texto plano).
     3. Si el texto contiene <tool_call> -> parsear -> ejecutar (whitelist)
-       -> devolver resultado como <tool_response> -> generar respuesta final.
-    4. Si no hay <tool_call> -> retornar contenido como respuesta final.
+       -> devolver resultado como tool_response -> generar respuesta final.
+    4. Si no hay tool_call -> retornar contenido como respuesta final.
     5. Si no hay modelo -> fallback mock para desarrollo.
 
     Args:
         query_text: Texto transcrito de la consulta del agricultor.
         history: Mensajes previos del diálogo (opcional). Formato
                  [{"role": "...", "content": "..."}, ...].
+        phone_hash: Hash del teléfono para resolver mercado cercano (Issue #89).
 
     Returns:
         Texto de respuesta en español chileno, listo para TTS.
@@ -859,7 +869,7 @@ async def answer(
                     # ("no tengo datos", "reformula") sin llamar tools,
                     # forzar tool call por keyword detection.
                     if _iteration == 0 and _is_generic_response(cleaned):
-                        forced = await _force_keyword_tool(query_text)
+                        forced = await _force_keyword_tool(query_text, phone_hash=phone_hash)
                         if forced:
                             # Inyectar el tool call + respuesta para que
                             # el LLM lo formatee en la siguiente iteracion.
@@ -910,7 +920,7 @@ async def answer(
                     fn_args = {}
 
                 # Ejecutar tool.
-                tool_result = await _execute_tool(fn_name, fn_args)
+                tool_result = await _execute_tool(fn_name, fn_args, phone_hash=phone_hash)
 
                 # Envolver resultado en <tool_response> (formato nativo Qwen2.5).
                 messages.append({
