@@ -761,7 +761,7 @@ class TestForceKeywordToolVenta:
             sale_calls.append({"producto": producto, "cantidad_kg": cantidad_kg})
             return "No tengo datos de precio para papa."
 
-        def _price_ok(session, producto, mercado=""):
+        def _price_ok(session, producto, mercado="", phone_hash=None):
             price_calls.append({"producto": producto, "mercado": mercado})
             return "Papa está a 850 pesos el kilo en Lo Valledor."
 
@@ -792,7 +792,7 @@ class TestForceKeywordToolVenta:
 
         price_calls: list[dict[str, str]] = []
 
-        def _price_ok(session, producto, mercado=""):
+        def _price_ok(session, producto, mercado="", phone_hash=None):
             price_calls.append({"producto": producto})
             return "Papa está a 850 pesos el kilo en Lo Valledor."
 

@@ -20,7 +20,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.schemas.pipeline import AudioResponse
-from app.services.llm_service import _COMMON_PRODUCTS, FALLBACK_TEXT, NO_RESPONSE_TEXT
+from app.services.llm_keywords import _COMMON_PRODUCTS
+from app.services.llm_service import FALLBACK_TEXT, NO_RESPONSE_TEXT
 from app.services.tts_service import PiperModelNotFoundError, TTSService
 from app.services.whisper_service import WhisperService
 
