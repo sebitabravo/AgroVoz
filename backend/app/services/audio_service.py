@@ -308,6 +308,7 @@ class AudioService:
                 message_id=message_id,
                 chat_id_hash=chat_id_hash,
                 request_id=request_id,
+                chat_id=chat_id,
             )
 
             response_ogg_path: str | None = pipeline_result.audio_path if pipeline_result.audio_path else None
