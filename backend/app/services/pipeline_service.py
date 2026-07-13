@@ -21,6 +21,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.schemas.pipeline import AudioResponse
 from app.services.alert_pipeline import detect_and_handle_alert_command
+from app.services.dataset_service import retain_audio
 from app.services.llm_keywords import _COMMON_PRODUCTS
 from app.services.llm_service import FALLBACK_TEXT, NO_RESPONSE_TEXT
 from app.services.tts_service import PiperModelNotFoundError, TTSService
@@ -725,6 +726,28 @@ class AgroVozPipeline:
                     "Whisper fallo — continuando sin transcripcion: message_id=%s error=%s request_id=%s",
                     message_id,
                     exc,
+                    request_id,
+                )
+
+        # ── Etapa 1.5: Retención selectiva para dataset de voz rural (#96) ─
+        # Solo si Whisper produjo transcripcion y el chat no es anonimo.
+        # La retencion es opt-in (dataset_consent=True en user_prefs).
+        # El cleanup posterior de audio_temp/ NO toca data/dataset/.
+        if transcribed_text and transcribed_text.strip() and chat_id_hash and chat_id_hash != "sin_chat":
+            try:
+                await asyncio.to_thread(
+                    retain_audio,
+                    wav_path,
+                    chat_id_hash,
+                    transcribed_text,
+                    audio_duration_ms,
+                )
+            except (RuntimeError, OSError, ValueError, TypeError, AttributeError):
+                logger.exception(
+                    "Error reteniendo audio para dataset — continuando pipeline: "
+                    "message_id=%s phone_hash=%s request_id=%s",
+                    message_id,
+                    chat_id_hash[:8],
                     request_id,
                 )
 

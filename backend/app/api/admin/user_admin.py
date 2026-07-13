@@ -49,6 +49,22 @@ def _validate_phone_hash_param(phone_hash: str) -> None:
         )
 
 
+def _apply_prefs_fields(prefs: UserPrefs, comuna: str, dataset_consent: bool | None) -> None:
+    """Aplica comuna y, si viene explícito, dataset_consent (#96).
+
+    Punto único de asignación para el upsert y su retry por race condition.
+    El cambio de consentimiento se loguea siempre (auditoría Ley 21.719).
+    """
+    prefs.comuna = comuna
+    if dataset_consent is not None:
+        prefs.dataset_consent = dataset_consent
+        logger.info(
+            "dataset_consent actualizado — phone_hash=%s consent=%s",
+            prefs.phone_hash[:8],
+            prefs.dataset_consent,
+        )
+
+
 @router.put("/{phone_hash}/comuna", response_model=UserPrefsResponse)
 def set_comuna(
     phone_hash: str = Path(
@@ -79,7 +95,7 @@ def set_comuna(
     try:
         prefs = db.scalar(select(UserPrefs).where(UserPrefs.phone_hash == phone_hash))
         if prefs is None:
-            prefs = UserPrefs(phone_hash=phone_hash, comuna=comuna)
+            prefs = UserPrefs(phone_hash=phone_hash)
             db.add(prefs)
             logger.info(
                 "UserPrefs creada — phone_hash=%s comuna=%s",
@@ -87,12 +103,13 @@ def set_comuna(
                 comuna,
             )
         else:
-            prefs.comuna = comuna
             logger.info(
                 "UserPrefs actualizada — phone_hash=%s comuna=%s",
                 phone_hash[:8],
                 comuna,
             )
+        _apply_prefs_fields(prefs, comuna, body.dataset_consent)
+
         db.commit()
         db.refresh(prefs)
     except IntegrityError:
@@ -105,7 +122,7 @@ def set_comuna(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Conflicto al crear user_prefs.",
             ) from None
-        prefs.comuna = comuna
+        _apply_prefs_fields(prefs, comuna, body.dataset_consent)
         db.commit()
         db.refresh(prefs)
     except SQLAlchemyError:
@@ -119,6 +136,7 @@ def set_comuna(
     return UserPrefsResponse(
         phone_hash=prefs.phone_hash,
         comuna=prefs.comuna,
+        dataset_consent=prefs.dataset_consent,
         created_at=prefs.created_at,
     )
 
@@ -146,5 +164,6 @@ def get_user_prefs(
     return UserPrefsResponse(
         phone_hash=prefs.phone_hash,
         comuna=prefs.comuna,
+        dataset_consent=prefs.dataset_consent,
         created_at=prefs.created_at,
     )

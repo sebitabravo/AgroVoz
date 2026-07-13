@@ -30,6 +30,7 @@ class TestUserPrefsModel:
         result = db.scalar(select(UserPrefs).where(UserPrefs.phone_hash == "a" * 64))
         assert result is not None
         assert result.comuna == "Traiguén"
+        assert result.dataset_consent is False
 
     def test_crear_user_prefs_sin_comuna(self, db) -> None:  # type: ignore[no-untyped-def]
         """comuna es nullable: se puede crear sin comuna (onboarding pendiente)."""
@@ -73,12 +74,23 @@ class TestUserPrefsModel:
         # Verificar que es un datetime (no string, no None).
         assert isinstance(prefs.created_at, datetime.datetime)
 
+    def test_dataset_consent_default_false(self, db) -> None:  # type: ignore[no-untyped-def]
+        """dataset_consent default False (privacidad por defecto, #96)."""
+        prefs = UserPrefs(phone_hash="g" * 64, dataset_consent=True)
+        db.add(prefs)
+        db.commit()
+
+        result = db.scalar(select(UserPrefs).where(UserPrefs.phone_hash == "g" * 64))
+        assert result is not None
+        assert result.dataset_consent is True
+
     def test_repr_muestra_phone_hash_truncado_y_comuna(self) -> None:
         """__repr__ no leakea el phone_hash completo y muestra la comuna."""
         prefs = UserPrefs(phone_hash="0123456789abcdef" * 4, comuna="Traiguén")
         repr_str = repr(prefs)
         assert "phone_hash='01234567..." in repr_str
         assert "comuna='Traiguén'" in repr_str
+        assert "dataset_consent=False" in repr_str
 
     def test_repr_sin_comuna(self) -> None:
         """__repr__ muestra 'sin_comuna' cuando comuna es None."""
