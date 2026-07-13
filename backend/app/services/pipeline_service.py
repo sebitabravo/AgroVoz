@@ -18,7 +18,7 @@ from pathlib import Path
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.schemas.pipeline import AudioResponse
-from app.services.llm_service import FALLBACK_TEXT, NO_RESPONSE_TEXT
+from app.services.llm_service import _COMMON_PRODUCTS, FALLBACK_TEXT, NO_RESPONSE_TEXT
 from app.services.tts_service import PiperModelNotFoundError, TTSService
 from app.services.whisper_service import WhisperService
 
@@ -139,7 +139,7 @@ class AgroVozPipeline:
             llm_response: Respuesta generada por el LLM.
 
         Returns:
-            "precio", "clima", o "desconocido".
+            "precio", "clima", "resumen", o "desconocido".
         """
         # Priorizar respuesta del LLM: si ejecuto tools, la respuesta
         # contiene datos concretos (precios, grados, etc).
@@ -213,28 +213,99 @@ class AgroVozPipeline:
         return "desconocido"
 
     @staticmethod
+    def _is_resumen_query(query_text: str) -> bool:
+        """Detecta si la consulta es un pedido de resumen por keyword.
+
+        Keywords: "resumen", "mi resumen", "como va el mes",
+        "como va mi mes", "resumen del mes".
+
+        Args:
+            query_text: Texto transcrito por Whisper.
+
+        Returns:
+            True si la consulta pide un resumen de actividad.
+        """
+        q = query_text.strip().lower()
+        resumen_keywords = [
+            "resumen", "mi resumen", "como va el mes",
+            "como va mi mes", "resumen del mes",
+        ]
+        return any(kw in q for kw in resumen_keywords)
+
+    @staticmethod
+    def _extract_producto(query_text: str) -> str | None:
+        """Extrae el nombre de un producto agrícola de la consulta.
+
+        Busca nombres de productos comunes en el texto transcrito.
+        Retorna None si no detecta ningún producto.
+
+        Args:
+            query_text: Texto transcrito por Whisper.
+
+        Returns:
+            Nombre del producto en minúscula, o None.
+        """
+        q = query_text.strip().lower()
+        # Ordenar por largo descendente para que "pimentón" matchee antes
+        # que "pimenton" y "sandía" antes que "sandia".
+        for product in sorted(_COMMON_PRODUCTS, key=len, reverse=True):
+            if product in q:
+                return product
+        return None
+
+    @staticmethod
     async def _generate_response(
-        transcribed_text: str, phone_hash: str | None = None
+        transcribed_text: str, chat_id_hash: str
     ) -> tuple[str, str]:
-        """Genera respuesta textual usando el LLM con Tool Calling.
+        """Genera respuesta textual: resumen o LLM con Tool Calling.
+
+        Detecta si la consulta pide un resumen (por keyword). Si es así,
+        consulta la DB para generar estadísticas del agricultor. Si no,
+        ejecuta el LLM con Tool Calling normal. El hash tambien se usa
+        para resolver el mercado mas cercano segun comuna (Issue #89).
 
         Args:
             transcribed_text: Texto transcrito por Whisper.
-            phone_hash: Hash del teléfono para resolver mercado cercano (Issue #89).
+            chat_id_hash: Hash anonimizado del chat (resumen y mercado cercano).
 
         Returns:
             Tupla (texto_respuesta, intent).
         """
-        from app.services.llm_service import answer
-
         if not transcribed_text or not transcribed_text.strip():
             return (
                 "No entendi tu mensaje. ¿Podrias enviar un audio mas claro?",
                 "desconocido",
             )
 
+        # Detectar "resumen" por keyword ANTES del LLM: es mas rapido y determinista.
+        if AgroVozPipeline._is_resumen_query(transcribed_text):
+            try:
+                # Import local para evitar ciclo con summary_service
+                from app.core.database import SessionLocal
+                from app.services.summary_service import get_consultation_summary
+
+                session = SessionLocal()
+                try:
+                    response_text = await asyncio.to_thread(
+                        get_consultation_summary, session, chat_id_hash
+                    )
+                finally:
+                    session.close()
+                return response_text, "resumen"
+            except (TimeoutError, RuntimeError, OSError, ValueError):
+                logger.exception("Error generando resumen")
+                return (
+                    "Tuve un problema al generar tu resumen. "
+                    "¿Podrias intentar de nuevo?",
+                    "resumen",
+                )
+
+        # Pipeline normal: LLM con tool calling.
+        # Import local para permitir mocking en tests
+        from app.services.llm_service import answer
+
         try:
-            response_text = await answer(transcribed_text.strip(), phone_hash=phone_hash)
+            response_text = await answer(transcribed_text.strip(), phone_hash=chat_id_hash)
         except (TimeoutError, RuntimeError, OSError, ValueError):
             logger.exception("Error en generacion LLM — usando fallback")
             response_text = "Tuve un problema al procesar tu consulta. ¿Podrias intentar de nuevo?"
@@ -253,6 +324,7 @@ class AgroVozPipeline:
         whisper_ms: int = 0,
         llm_ms: int = 0,
         tts_ms: int = 0,
+        producto: str | None = None,
         requires_review: bool = False,
     ) -> None:
         """Guarda la consulta en SQLite para metricas anonimizadas.
@@ -262,14 +334,15 @@ class AgroVozPipeline:
 
         Args:
             phone_hash: Hash del numero de telefono.
-            intent: "precio", "clima", o "desconocido".
+            intent: "precio", "clima", "resumen", o "desconocido".
             query_text: Texto transcrito por Whisper.
             response_text: Texto de respuesta del LLM.
             audio_duration_ms: Duracion del audio en ms.
             start_time: time.monotonic() del inicio del pipeline.
             whisper_ms: Latencia de Whisper en ms.
             llm_ms: Latencia del LLM en ms.
-            tts_ms: Latencia de TTS en ms.
+            tts_ms: Latencia del TTS en ms.
+            producto: Producto detectado en la consulta (opcional).
             requires_review: Si la consulta debe marcarse para revisión humana.
         """
         import time as _time
@@ -284,6 +357,7 @@ class AgroVozPipeline:
                 consulta = Consultation(
                     phone_hash=phone_hash,
                     intent=intent,
+                    producto=producto,
                     query_text=query_text,
                     response_text=response_text,
                     audio_duration_ms=audio_duration_ms,
@@ -296,9 +370,10 @@ class AgroVozPipeline:
                 session.add(consulta)
                 session.commit()
                 logger.debug(
-                    "Consulta guardada — phone_hash=%s intent=%s latency_ms=%d",
+                    "Consulta guardada — phone_hash=%s intent=%s producto=%s latency_ms=%d",
                     phone_hash[:8],
                     intent,
+                    producto,
                     latency_ms,
                 )
             except SQLAlchemyError:
@@ -507,17 +582,32 @@ class AgroVozPipeline:
                     request_id,
                 )
 
-        # ── Etapa 2: Generacion LLM + guardar consulta ───────────────
+        # ── Etapa 2: Generacion de respuesta (resumen o LLM) ─────────────
         response_text = ""
         intent = "desconocido"
+        producto: str | None = None
         t_llm_start = time.monotonic()
 
         if transcribed_text and transcribed_text.strip():
-            try:
-                response_text, intent = await self._generate_response(
-                    transcribed_text, phone_hash=chat_id_hash
+            # Extraer producto antes de generar respuesta (para guardar en consulta).
+            producto = self._extract_producto(transcribed_text)
+
+            # _generate_response detecta internally si es resumen o LLM,
+            # maneja su propia lógica y error handling.
+            response_text, intent = await self._generate_response(
+                transcribed_text, chat_id_hash
+            )
+            llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
+
+            if intent == "resumen":
+                logger.info(
+                    "Resumen generado — message_id=%s chars=%d llm_ms=%d request_id=%s",
+                    message_id,
+                    len(response_text),
+                    llm_ms_ref[0],
+                    request_id,
                 )
-                llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
+            else:
                 logger.info(
                     "Respuesta LLM generada — message_id=%s intent=%s chars=%d llm_ms=%d request_id=%s",
                     message_id,
@@ -526,13 +616,6 @@ class AgroVozPipeline:
                     llm_ms_ref[0],
                     request_id,
                 )
-            except (TimeoutError, RuntimeError, OSError, ValueError):
-                logger.exception(
-                    "Error generando respuesta LLM — message_id=%s request_id=%s",
-                    message_id,
-                    request_id,
-                )
-                response_text = "Tuve un problema al procesar tu consulta. ¿Podrias intentar de nuevo?"
 
         # ── Etapa 3: Sintesis TTS ────────────────────────────────────
         response_ogg_path: str = ""
@@ -587,6 +670,7 @@ class AgroVozPipeline:
                 whisper_ms=whisper_ms_ref[0],
                 llm_ms=llm_ms_ref[0],
                 tts_ms=tts_ms_ref[0],
+                producto=producto,
                 requires_review=mark_review,
             )
         except (RuntimeError, OSError, SQLAlchemyError, TypeError, AttributeError, KeyError):

@@ -99,6 +99,7 @@ def _mock_db_save(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
         whisper_ms: int = 0,
         llm_ms: int = 0,
         tts_ms: int = 0,
+        producto: str | None = None,
         requires_review: bool = False,
     ) -> None:
         calls.append(
@@ -111,6 +112,7 @@ def _mock_db_save(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
                 "whisper_ms": whisper_ms,
                 "llm_ms": llm_ms,
                 "tts_ms": tts_ms,
+                "producto": producto,
                 "requires_review": requires_review,
             }
         )
@@ -180,6 +182,74 @@ class TestDetectIntent:
         assert intent == "precio"
 
 
+# ── _is_resumen_query ──────────────────────────────────────────────
+
+
+class TestIsResumenQuery:
+    """Deteccion de keyword 'resumen' para saltear el LLM."""
+
+    def test_resumen_keyword(self) -> None:
+        assert AgroVozPipeline._is_resumen_query("resumen") is True
+
+    def test_mi_resumen(self) -> None:
+        assert AgroVozPipeline._is_resumen_query("mi resumen") is True
+
+    def test_como_va_el_mes(self) -> None:
+        assert AgroVozPipeline._is_resumen_query("como va el mes") is True
+
+    def test_como_va_mi_mes(self) -> None:
+        assert AgroVozPipeline._is_resumen_query("como va mi mes") is True
+
+    def test_resumen_del_mes(self) -> None:
+        assert AgroVozPipeline._is_resumen_query("resumen del mes") is True
+
+    def test_no_resumen_precio(self) -> None:
+        assert AgroVozPipeline._is_resumen_query("precio de la papa") is False
+
+    def test_no_resumen_clima(self) -> None:
+        assert AgroVozPipeline._is_resumen_query("clima en traiguen") is False
+
+    def test_no_resumen_vacio(self) -> None:
+        assert AgroVozPipeline._is_resumen_query("") is False
+
+    def test_resumen_mayusculas(self) -> None:
+        assert AgroVozPipeline._is_resumen_query("RESUMEN") is True
+
+    def test_resumen_en_oracion(self) -> None:
+        assert AgroVozPipeline._is_resumen_query("dame mi resumen por favor") is True
+
+
+# ── _extract_producto ──────────────────────────────────────────────
+
+
+class TestExtractProducto:
+    """Extraccion de producto agricola del texto transcrito."""
+
+    def test_papa(self) -> None:
+        assert AgroVozPipeline._extract_producto("precio de la papa") == "papa"
+
+    def test_tomate(self) -> None:
+        assert AgroVozPipeline._extract_producto("a cuanto esta el tomate") == "tomate"
+
+    def test_cebolla(self) -> None:
+        assert AgroVozPipeline._extract_producto("cebolla en lo valledor") == "cebolla"
+
+    def test_sin_producto(self) -> None:
+        assert AgroVozPipeline._extract_producto("clima en traiguen") is None
+
+    def test_vacio(self) -> None:
+        assert AgroVozPipeline._extract_producto("") is None
+
+    def test_producto_en_oracion_larga(self) -> None:
+        assert AgroVozPipeline._extract_producto(
+            "cuanto esta el kilo de papa en la vega"
+        ) == "papa"
+
+    def test_producto_con_acento(self) -> None:
+        """Productos con acento matchean (limón, brócoli)."""
+        assert AgroVozPipeline._extract_producto("precio del limón") == "limón"
+
+
 # ── _generate_response ─────────────────────────────────────────────
 
 
@@ -192,21 +262,23 @@ class TestGenerateResponse:
             monkeypatch,
             "La papa cuesta 450 pesos el kilo en Lo Valledor",
         )
-        text, intent = await AgroVozPipeline._generate_response("precio de la papa en lo valledor")
+        text, intent = await AgroVozPipeline._generate_response(
+            "precio de la papa en lo valledor", "test-chat-hash"
+        )
         assert "450" in text
         assert intent == "precio"
 
     async def test_query_vacia(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Si el texto transcrito esta vacio, retorna mensaje de error y desconocido."""
         _mock_llm_answer(monkeypatch, "no deberia llamarse")
-        text, intent = await AgroVozPipeline._generate_response("")
+        text, intent = await AgroVozPipeline._generate_response("", "test-chat-hash")
         assert "entendi" in text.lower() or "entendí" in text.lower()
         assert intent == "desconocido"
 
     async def test_query_solo_espacios(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Si el texto transcrito son solo espacios, retorna mensaje de error."""
         _mock_llm_answer(monkeypatch, "no deberia llamarse")
-        text, intent = await AgroVozPipeline._generate_response("   ")
+        text, intent = await AgroVozPipeline._generate_response("   ", "test-chat-hash")
         assert "entendi" in text.lower() or "entendí" in text.lower()
         assert intent == "desconocido"
 
@@ -218,7 +290,7 @@ class TestGenerateResponse:
 
         monkeypatch.setattr("app.services.llm_service.answer", fake_answer_error)
         # Query SIN keywords de precio ni clima → intent debe ser "desconocido"
-        text, intent = await AgroVozPipeline._generate_response("hola como estas")
+        text, intent = await AgroVozPipeline._generate_response("hola como estas", "test-chat-hash")
         assert "problema" in text.lower() or "intentar" in text.lower()
         assert intent == "desconocido"
 
@@ -280,6 +352,140 @@ class TestProcess:
         assert len(save_calls) == 1
         assert save_calls[0]["intent"] == "precio"
         assert save_calls[0]["phone_hash"] == "abc123def456"
+
+    async def test_producto_se_guarda_en_consulta(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        wav_path: Path,
+        tts_ogg: str,
+    ) -> None:
+        """El campo producto se guarda correctamente en la consulta."""
+        # Mock Whisper que transcribe texto con producto.
+        def fake_transcribe_papa(_self: object, audio_path: str) -> dict[str, object]:
+            return {
+                "text": "precio de la papa en lo valledor",
+                "language": "es",
+                "segments": [],
+                "duration_ms": 1200,
+            }
+
+        monkeypatch.setattr(
+            "app.services.pipeline_service.WhisperService.transcribe",
+            fake_transcribe_papa,
+        )
+        _mock_llm_answer(monkeypatch, "La papa esta a 450 pesos el kilo")
+        _mock_tts_synthesize(monkeypatch, tts_ogg)
+        save_calls = _mock_db_save(monkeypatch)
+
+        pipeline = AgroVozPipeline()
+        result = await pipeline.process(
+            wav_path=wav_path,
+            audio_duration_ms=3000,
+            message_id="test-producto",
+            chat_id_hash="hash-producto",
+            request_id="req-producto",
+        )
+
+        assert result.intent == "precio"
+        assert len(save_calls) == 1
+        assert save_calls[0]["producto"] == "papa"
+
+    async def test_producto_none_sin_producto_detectado(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        wav_path: Path,
+        tts_ogg: str,
+    ) -> None:
+        """Si no se detecta producto, se guarda None."""
+        def fake_transcribe_clima(_self: object, audio_path: str) -> dict[str, object]:
+            return {
+                "text": "clima en traiguen",
+                "language": "es",
+                "segments": [],
+                "duration_ms": 1200,
+            }
+
+        monkeypatch.setattr(
+            "app.services.pipeline_service.WhisperService.transcribe",
+            fake_transcribe_clima,
+        )
+        _mock_llm_answer(monkeypatch, "En Traiguen hay 8 grados con lluvia")
+        _mock_tts_synthesize(monkeypatch, tts_ogg)
+        save_calls = _mock_db_save(monkeypatch)
+
+        pipeline = AgroVozPipeline()
+        await pipeline.process(
+            wav_path=wav_path,
+            audio_duration_ms=2500,
+            message_id="test-no-producto",
+            chat_id_hash="hash-no-producto",
+            request_id="req-no-producto",
+        )
+
+        assert len(save_calls) == 1
+        assert save_calls[0]["producto"] is None
+
+    # ── Comando resumen ──────────────────────────────────────────
+
+    async def test_resumen_keyword_llama_summary(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        wav_path: Path,
+        tts_ogg: str,
+    ) -> None:
+        """Keyword 'resumen' llama a summary_service y saltea el LLM."""
+        # Mock Whisper que transcribe "resumen".
+        def fake_transcribe_resumen(_self: object, audio_path: str) -> dict[str, object]:
+            return {
+                "text": "resumen",
+                "language": "es",
+                "segments": [],
+                "duration_ms": 800,
+            }
+
+        monkeypatch.setattr(
+            "app.services.pipeline_service.WhisperService.transcribe",
+            fake_transcribe_resumen,
+        )
+        _mock_tts_synthesize(monkeypatch, tts_ogg)
+        save_calls = _mock_db_save(monkeypatch)
+
+        # Mock summary_service.get_consultation_summary (funcion sincrona).
+        def fake_summary_text(session: object, phone_hash: str) -> str:
+            return "Este mes consultaste 5 veces. Tu producto mas consultado fue papa."
+
+        monkeypatch.setattr(
+            "app.services.summary_service.get_consultation_summary",
+            fake_summary_text,
+        )
+
+        # LLM NO deberia llamarse.
+        llm_called = False
+
+        async def fake_answer_check(_query: str) -> str:
+            nonlocal llm_called
+            llm_called = True
+            return "no deberia llamarse"
+
+        monkeypatch.setattr("app.services.llm_service.answer", fake_answer_check)
+
+        pipeline = AgroVozPipeline()
+        result = await pipeline.process(
+            wav_path=wav_path,
+            audio_duration_ms=1000,
+            message_id="test-resumen",
+            chat_id_hash="hash-resumen",
+            request_id="req-resumen",
+        )
+
+        assert not llm_called  # LLM NO se llamo
+        assert result.intent == "resumen"
+        assert "5 veces" in result.text_response
+        assert result.audio_path == tts_ogg
+
+        # Verificar que se guardo la consulta con intent "resumen".
+        assert len(save_calls) == 1
+        assert save_calls[0]["intent"] == "resumen"
 
     async def test_happy_path_clima(
         self,
@@ -578,6 +784,44 @@ class TestSaveConsultation:
                 audio_duration_ms=2000,
                 start_time=start,
             )
+
+    def test_save_con_producto(self) -> None:
+        """_save_consultation guarda el campo producto correctamente."""
+        with patch("app.core.database.SessionLocal") as mock_factory:
+            mock_session = mock_factory.return_value
+            start = time.monotonic()
+            AgroVozPipeline._save_consultation(
+                phone_hash="test_hash_prod",
+                intent="precio",
+                query_text="precio de la papa",
+                response_text="450 pesos",
+                audio_duration_ms=3500,
+                start_time=start,
+                producto="papa",
+            )
+            # Verifica que la consulta se persistio con producto.
+            mock_session.add.assert_called_once()
+            consulta = mock_session.add.call_args[0][0]
+            assert consulta.producto == "papa"
+            mock_session.commit.assert_called_once()
+
+    def test_save_sin_producto(self) -> None:
+        """_save_consultation guarda producto=None si no se detecta."""
+        with patch("app.core.database.SessionLocal") as mock_factory:
+            mock_session = mock_factory.return_value
+            start = time.monotonic()
+            AgroVozPipeline._save_consultation(
+                phone_hash="test_hash_no_prod",
+                intent="clima",
+                query_text="clima en traiguen",
+                response_text="8 grados",
+                audio_duration_ms=2000,
+                start_time=start,
+                producto=None,
+            )
+            mock_session.add.assert_called_once()
+            consulta = mock_session.add.call_args[0][0]
+            assert consulta.producto is None
 
 
 # ── Timeout constante ──────────────────────────────────────────────

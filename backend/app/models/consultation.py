@@ -35,6 +35,10 @@ class Consultation(Base):
     # String(50) permite intents compuestos post-MVP sin migración
     # (ej: "precio_historico", "clima_semanal").
     intent: Mapped[str] = mapped_column(String(50), nullable=False, default="desconocido")
+    # Producto detectado en la consulta (ej: "papa", "tomate"). Nullable
+    # porque no toda consulta tiene producto (clima, resumen, desconocido).
+    # Se usa para estadisticas del agricultor (comando "resumen").
+    producto: Mapped[str | None] = mapped_column(String(100), nullable=True, default=None)
     # Transcripción literal del audio. ATENCIÓN: puede contener PII
     # incidental (nombre, ubicación). Ver docstring del módulo para
     # política de retención y plan de encriptación pre-producción.
