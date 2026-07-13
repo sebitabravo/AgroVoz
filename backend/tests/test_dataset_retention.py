@@ -147,6 +147,42 @@ class TestRetainAudio:
         assert not dataset_dir.exists() or not any(dataset_dir.iterdir())
         assert load_manifest_entries(dataset_dir) == []
 
+    def test_manifest_falla_borra_audio_copiado(
+        self,
+        db: Any,
+        dataset_dir: Path,
+        sample_wav: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Si el manifest no se puede escribir, no queda audio huérfano (atomicidad)."""
+        _create_user_prefs(db, _VALID_HASH, consent=True)
+
+        import builtins
+
+        original_open = builtins.open
+
+        def fake_open(file: Any, *args: Any, **kwargs: Any) -> Any:
+            if "manifest.jsonl" in str(file):
+                raise OSError("disco lleno")
+            return original_open(file, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", fake_open)
+
+        retained = retain_audio(
+            sample_wav,
+            _VALID_HASH,
+            "precio de la papa",
+            2500,
+            dataset_dir=dataset_dir,
+            db=db,
+        )
+
+        assert retained is None
+        # La copia del wav se revierte: sin entrada en manifest no debe
+        # quedar muestra en disco (quedaría invisible para eval_wer/export).
+        sample_subdir = dataset_dir / _VALID_HASH
+        assert not sample_subdir.exists() or not any(sample_subdir.glob("*.wav"))
+
     def test_no_retiene_sin_user_prefs(
         self,
         db: Any,
@@ -230,7 +266,7 @@ class TestPipelineDatasetRetention:
                 "duration_ms": 1200,
             }
 
-        async def fake_answer(_query: str) -> str:
+        async def fake_answer(_query: str, phone_hash: str | None = None) -> str:
             return "La papa está a 450 pesos el kilo."
 
         def fake_synthesize(_self: object, _text: str) -> str:

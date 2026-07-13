@@ -49,6 +49,22 @@ def _validate_phone_hash_param(phone_hash: str) -> None:
         )
 
 
+def _apply_prefs_fields(prefs: UserPrefs, comuna: str, dataset_consent: bool | None) -> None:
+    """Aplica comuna y, si viene explícito, dataset_consent (#96).
+
+    Punto único de asignación para el upsert y su retry por race condition.
+    El cambio de consentimiento se loguea siempre (auditoría Ley 21.719).
+    """
+    prefs.comuna = comuna
+    if dataset_consent is not None:
+        prefs.dataset_consent = dataset_consent
+        logger.info(
+            "dataset_consent actualizado — phone_hash=%s consent=%s",
+            prefs.phone_hash[:8],
+            prefs.dataset_consent,
+        )
+
+
 @router.put("/{phone_hash}/comuna", response_model=UserPrefsResponse)
 def set_comuna(
     phone_hash: str = Path(
@@ -79,7 +95,7 @@ def set_comuna(
     try:
         prefs = db.scalar(select(UserPrefs).where(UserPrefs.phone_hash == phone_hash))
         if prefs is None:
-            prefs = UserPrefs(phone_hash=phone_hash, comuna=comuna)
+            prefs = UserPrefs(phone_hash=phone_hash)
             db.add(prefs)
             logger.info(
                 "UserPrefs creada — phone_hash=%s comuna=%s",
@@ -87,22 +103,12 @@ def set_comuna(
                 comuna,
             )
         else:
-            prefs.comuna = comuna
             logger.info(
                 "UserPrefs actualizada — phone_hash=%s comuna=%s",
                 phone_hash[:8],
                 comuna,
             )
-
-        # Consentimiento para dataset de voz rural (#96). Opt-in explicito:
-        # solo se actualiza si el body lo envia explicitamente.
-        if body.dataset_consent is not None:
-            prefs.dataset_consent = body.dataset_consent
-            logger.info(
-                "dataset_consent actualizado — phone_hash=%s consent=%s",
-                phone_hash[:8],
-                prefs.dataset_consent,
-            )
+        _apply_prefs_fields(prefs, comuna, body.dataset_consent)
 
         db.commit()
         db.refresh(prefs)
@@ -116,9 +122,7 @@ def set_comuna(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Conflicto al crear user_prefs.",
             ) from None
-        prefs.comuna = comuna
-        if body.dataset_consent is not None:
-            prefs.dataset_consent = body.dataset_consent
+        _apply_prefs_fields(prefs, comuna, body.dataset_consent)
         db.commit()
         db.refresh(prefs)
     except SQLAlchemyError:

@@ -22,6 +22,8 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.core.phone_hash import validate_phone_hash
 
 if TYPE_CHECKING:
@@ -76,7 +78,9 @@ def has_dataset_consent(phone_hash: str, db: Session | None = None) -> bool:
     try:
         prefs = session.scalar(select(UserPrefs).where(UserPrefs.phone_hash == phone_hash))
         return bool(prefs is not None and prefs.dataset_consent)
-    except Exception:
+    except SQLAlchemyError:
+        # Fail-closed: ante error de DB se asume sin consentimiento (privacidad
+        # por defecto). Otros errores son bugs y deben propagarse.
         logger.exception("Error consultando dataset_consent — phone_hash=%s", phone_hash[:8])
         return False
     finally:
@@ -108,6 +112,12 @@ def retain_audio(
     Returns:
         Path al archivo retenido en el dataset, o None si no se retuvo.
     """
+    # Defensa en profundidad: phone_hash forma parte de la ruta en disco.
+    # has_dataset_consent tambien valida, pero este guard es independiente.
+    if not validate_phone_hash(phone_hash):
+        logger.warning("phone_hash invalido en retain_audio — no se retiene: %s", phone_hash[:8])
+        return None
+
     if not has_dataset_consent(phone_hash, db=db):
         logger.debug("Sin consentimiento — no se retiene audio: phone_hash=%s", phone_hash[:8])
         return None
@@ -135,6 +145,9 @@ def retain_audio(
         "phone_hash": phone_hash,
     }
 
+    # Atomicidad audio+manifest: una muestra sin entrada en el manifest es
+    # invisible para eval_wer.py y el export. Si el manifest falla, se borra
+    # la copia para no dejar audio huérfano en disco.
     manifest_path = _get_manifest_path(directory)
     with _manifest_lock:
         try:
@@ -142,6 +155,8 @@ def retain_audio(
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
         except OSError:
             logger.exception("Error escribiendo manifest.jsonl — phone_hash=%s", phone_hash[:8])
+            dest_path.unlink(missing_ok=True)
+            return None
 
     logger.info(
         "Audio retenido en dataset — phone_hash=%s sample=%s",
