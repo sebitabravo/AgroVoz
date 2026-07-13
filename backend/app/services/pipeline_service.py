@@ -12,9 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import time
-from decimal import InvalidOperation
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.schemas.pipeline import AudioResponse
+from app.services.alert_pipeline import detect_and_handle_alert_command
 from app.services.llm_keywords import _COMMON_PRODUCTS
 from app.services.llm_service import FALLBACK_TEXT, NO_RESPONSE_TEXT
 from app.services.tts_service import PiperModelNotFoundError, TTSService
@@ -95,44 +94,6 @@ _WELCOME_TEXT = (
     "Solo mandame un audio con tu pregunta y te respondere."
 )
 
-# Regex para comandos de alerta proactiva (issue #88).
-# Ejemplos:
-#   "avisame cuando la papa pase de 10000 pesos"
-#   "avisame si viene helada"
-#   "avisame si viene lluvia"
-#   "cancelar alertas"
-_ALERTA_PRECIO_RE = re.compile(
-    r"avis[aá]me\s+(?:cuando|si)\s+(?:la|el|los|las)?\s*(\w+)\s+"
-    r"(pase\s+de|suba\s+a|suba\s+de|baje\s+a|baje\s+de|"
-    r"est[eé]\s+sobre|est[eé]\s+encima\s+de|est[eé]\s+bajo|est[eé]\s+debajo\s+de)"
-    r"\s+(\d[\d.]*)\s*(?:pesos)?",
-    re.IGNORECASE,
-)
-_ALERTA_CLIMA_RE = re.compile(
-    r"avis[aá]me\s+si\s+viene\s+(helada|lluvia)",
-    re.IGNORECASE,
-)
-_ALERTA_CANCELAR_RE = re.compile(
-    r"cancelar\s+(?:mis\s+)?alertas?",
-    re.IGNORECASE,
-)
-
-# Palabras de accion del agricultor a condicion de comparacion.
-_CONDICION_POR_ACCION: dict[str, str] = {
-    "pase de": ">",
-    "suba a": ">",
-    "suba de": ">",
-    "baje a": "<",
-    "baje de": "<",
-    "esté sobre": ">",
-    "este sobre": ">",
-    "esté encima de": ">",
-    "este encima de": ">",
-    "esté bajo": "<",
-    "este bajo": "<",
-    "esté debajo de": "<",
-    "este debajo de": "<",
-}
 
 
 def _get_tts_service() -> TTSService:
@@ -361,96 +322,17 @@ class AgroVozPipeline:
         return None
 
     @staticmethod
+    @staticmethod
     async def _handle_alert_commands(
         transcribed_text: str,
         phone_hash: str,
         wa_chat_id: str | None,
     ) -> tuple[str | None, str | None]:
-        """Detecta comandos de alerta proactiva y ejecuta la accion.
+        """Delegador a la pipeline de comandos de alerta (issue #88).
 
-        Soporta:
-        - "avisame cuando la papa pase de 10000 pesos" -> alerta precio > 10000.
-        - "avisame si viene helada" -> alerta clima helada.
-        - "avisame si viene lluvia" -> alerta clima lluvia extrema.
-        - "cancelar alertas" -> desactiva alertas activas.
-
-        Args:
-            transcribed_text: Texto transcrito por Whisper.
-            phone_hash: Hash anonimizado del numero.
-            wa_chat_id: Chat ID real de WhatsApp para enviar avisos.
-
-        Returns:
-            Tupla (texto_respuesta, intent). Si no es comando de alerta,
-            retorna (None, None).
+        Ver app.services.alert_pipeline.detect_and_handle_alert_command.
         """
-        if not transcribed_text or not transcribed_text.strip():
-            return None, None
-
-        q = transcribed_text.strip().lower()
-
-        # Cancelar alertas.
-        if _ALERTA_CANCELAR_RE.search(q):
-            from app.core.database import SessionLocal
-            from app.services.alert_service import cancelar_alertas
-
-            session = SessionLocal()
-            try:
-                count = await cancelar_alertas(session, phone_hash)
-                return ("He cancelado tus alertas." if count else "No tienes alertas activas."), "alerta"
-            finally:
-                session.close()
-
-        # Alerta climatica.
-        clima_match = _ALERTA_CLIMA_RE.search(q)
-        if clima_match:
-            tipo_umbral = clima_match.group(1).lower()
-            umbral_clima = "helada" if tipo_umbral == "helada" else "lluvia_extrema"
-            from app.core.database import SessionLocal
-            from app.services.alert_service import AlertServiceError, create_clima_alert
-
-            session = SessionLocal()
-            try:
-                mensaje = await create_clima_alert(session, phone_hash, wa_chat_id, umbral_clima)
-                return mensaje, "alerta"
-            except AlertServiceError as exc:
-                return str(exc), "alerta"
-            finally:
-                session.close()
-
-        # Alerta de precio.
-        precio_match = _ALERTA_PRECIO_RE.search(q)
-        if precio_match:
-            producto_raw = precio_match.group(1).lower()
-            accion = precio_match.group(2).lower()
-            umbral_str = precio_match.group(3)
-            condicion = _CONDICION_POR_ACCION.get(accion)
-            if not condicion:
-                return None, None
-
-            producto = AgroVozPipeline._extract_producto(transcribed_text)
-            if not producto:
-                producto = producto_raw
-
-            try:
-                from decimal import Decimal
-
-                umbral = Decimal(umbral_str)
-            except InvalidOperation:
-                return "No entendi el precio. Repite el numero.", "alerta"
-
-            from app.core.database import SessionLocal
-            from app.services.alert_service import AlertServiceError, create_price_alert
-
-            session = SessionLocal()
-            try:
-                mensaje = await create_price_alert(session, phone_hash, wa_chat_id, producto, condicion, umbral)
-                return mensaje, "alerta"
-            except AlertServiceError as exc:
-                return str(exc), "alerta"
-            finally:
-                session.close()
-
-        return None, None
+        return await detect_and_handle_alert_command(transcribed_text, phone_hash, wa_chat_id)
 
     @staticmethod
     async def _generate_response(transcribed_text: str, chat_id_hash: str) -> tuple[str, str]:
