@@ -31,6 +31,7 @@ from app.admin.auth import (
 )
 from app.core.config import settings
 from app.core.database import get_db
+from app.models.alert import Alert
 from app.services import export_service, metrics_service, monitor_service
 
 logger = logging.getLogger(__name__)
@@ -294,6 +295,47 @@ async def piloto_page(
     )
 
 
+# ── Alertas proactivas (issue #88) ────────────────────────────────
+
+
+@router.get("/alerts")
+async def alerts_page(
+    request: Request,
+    db: Session = Depends(get_db),  # noqa: B008
+) -> HTMLResponse:
+    """Lista alertas proactivas de precio y clima."""
+    from sqlalchemy import func
+
+    alertas = list(db.scalars(select(Alert).order_by(Alert.activa.desc(), Alert.created_at.desc()).limit(200)).all())
+    activas_count = db.scalar(select(func.count()).select_from(Alert).where(Alert.activa.is_(True)))
+    total = db.scalar(select(func.count()).select_from(Alert))
+    return templates.TemplateResponse(
+        request,
+        "alerts.html",
+        {
+            "alertas": alertas,
+            "activas_count": activas_count or 0,
+            "total": total or 0,
+            "active_tab": "alerts",
+        },
+    )
+
+
+@router.post("/alerts/{alert_id}/cancel")
+async def cancel_alert(
+    alert_id: int,
+    request: Request,
+    db: Session = Depends(get_db),  # noqa: B008
+) -> RedirectResponse:
+    """Desactiva una alerta manualmente desde el admin."""
+    alerta = db.get(Alert, alert_id)
+    if alerta is not None:
+        alerta.activa = False
+        db.commit()
+        logger.info("Alerta cancelada desde admin — alert_id=%d", alert_id)
+    return RedirectResponse("/admin/alerts", status_code=303)
+
+
 # ── Cola de revisión humana (issue #99) ────────────────────────────
 
 
@@ -368,12 +410,8 @@ async def toggle_decision(
             status_code=404,
         )
     if nuevo_valor:
-        return HTMLResponse(
-            '<span style="font-size:11px;font-weight:700;color:#4f7d5a">✓ productiva</span>'
-        )
-    return HTMLResponse(
-        '<span style="font-size:11px;color:#7e827a">marcar</span>'
-    )
+        return HTMLResponse('<span style="font-size:11px;font-weight:700;color:#4f7d5a">✓ productiva</span>')
+    return HTMLResponse('<span style="font-size:11px;color:#7e827a">marcar</span>')
 
 
 @router.get("/piloto/export")
@@ -397,9 +435,7 @@ async def piloto_export(
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
-        headers={
-            "Content-Disposition": "attachment; filename=agrovoz_piloto_metricas.csv"
-        },
+        headers={"Content-Disposition": "attachment; filename=agrovoz_piloto_metricas.csv"},
     )
 
 

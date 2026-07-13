@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.schemas.pipeline import AudioResponse
+from app.services.alert_pipeline import detect_and_handle_alert_command
 from app.services.llm_keywords import _COMMON_PRODUCTS
 from app.services.llm_service import FALLBACK_TEXT, NO_RESPONSE_TEXT
 from app.services.tts_service import PiperModelNotFoundError, TTSService
@@ -49,14 +50,38 @@ _tts_service: TTSService | None = None
 # Keywords de feedback del agricultor. Se detectan como intent especial
 # y actualizan la consulta ANTERIOR (no generan nueva consulta).
 _FEEDBACK_UTIL = [
-    "me sirvió", "me sirve", "me sirvio", "util", "útil",
-    "gracias", "eso era", "eso es", "perfecto", "bacán", "bakan",
-    "buena", "buenísimo", "buenisimo", "ok", "dale",
+    "me sirvió",
+    "me sirve",
+    "me sirvio",
+    "util",
+    "útil",
+    "gracias",
+    "eso era",
+    "eso es",
+    "perfecto",
+    "bacán",
+    "bakan",
+    "buena",
+    "buenísimo",
+    "buenisimo",
+    "ok",
+    "dale",
 ]
 _FEEDBACK_NO_UTIL = [
-    "no me sirvió", "no me sirve", "no me sirvio", "no útil", "no util",
-    "no entendi", "no entendí", "no cache", "no cacho",
-    "mal", "malo", "pesimo", "pésimo", "no es eso",
+    "no me sirvió",
+    "no me sirve",
+    "no me sirvio",
+    "no útil",
+    "no util",
+    "no entendi",
+    "no entendí",
+    "no cache",
+    "no cacho",
+    "mal",
+    "malo",
+    "pesimo",
+    "pésimo",
+    "no es eso",
 ]
 
 # Texto fijo de bienvenida para primer contacto (issue #86).
@@ -68,6 +93,7 @@ _WELCOME_TEXT = (
     "precios de productos agricolas y el clima. "
     "Solo mandame un audio con tu pregunta y te respondere."
 )
+
 
 
 def _get_tts_service() -> TTSService:
@@ -266,8 +292,11 @@ class AgroVozPipeline:
         """
         q = query_text.strip().lower()
         resumen_keywords = [
-            "resumen", "mi resumen", "como va el mes",
-            "como va mi mes", "resumen del mes",
+            "resumen",
+            "mi resumen",
+            "como va el mes",
+            "como va mi mes",
+            "resumen del mes",
         ]
         return any(kw in q for kw in resumen_keywords)
 
@@ -293,9 +322,20 @@ class AgroVozPipeline:
         return None
 
     @staticmethod
-    async def _generate_response(
-        transcribed_text: str, chat_id_hash: str
-    ) -> tuple[str, str]:
+    @staticmethod
+    async def _handle_alert_commands(
+        transcribed_text: str,
+        phone_hash: str,
+        wa_chat_id: str | None,
+    ) -> tuple[str | None, str | None]:
+        """Delegador a la pipeline de comandos de alerta (issue #88).
+
+        Ver app.services.alert_pipeline.detect_and_handle_alert_command.
+        """
+        return await detect_and_handle_alert_command(transcribed_text, phone_hash, wa_chat_id)
+
+    @staticmethod
+    async def _generate_response(transcribed_text: str, chat_id_hash: str) -> tuple[str, str]:
         """Genera respuesta textual: resumen o LLM con Tool Calling.
 
         Detecta si la consulta pide un resumen (por keyword). Si es así,
@@ -325,17 +365,14 @@ class AgroVozPipeline:
 
                 session = SessionLocal()
                 try:
-                    response_text = await asyncio.to_thread(
-                        get_consultation_summary, session, chat_id_hash
-                    )
+                    response_text = await asyncio.to_thread(get_consultation_summary, session, chat_id_hash)
                 finally:
                     session.close()
                 return response_text, "resumen"
             except (TimeoutError, RuntimeError, OSError, ValueError):
                 logger.exception("Error generando resumen")
                 return (
-                    "Tuve un problema al generar tu resumen. "
-                    "¿Podrias intentar de nuevo?",
+                    "Tuve un problema al generar tu resumen. ¿Podrias intentar de nuevo?",
                     "resumen",
                 )
 
@@ -534,6 +571,7 @@ class AgroVozPipeline:
         message_id: str,
         chat_id_hash: str,
         request_id: str,
+        chat_id: str | None = None,
     ) -> AudioResponse:
         """Ejecuta el pipeline completo: Whisper → LLM → TTS.
 
@@ -546,6 +584,7 @@ class AgroVozPipeline:
             message_id: ID del mensaje para trazabilidad en logs.
             chat_id_hash: Hash anonimizado del chat para guardar consulta.
             request_id: ID del request para trazabilidad.
+            chat_id: Chat ID real de WhatsApp (opcional, para alertas proactivas).
 
         Returns:
             AudioResponse con ruta del audio TTS, texto, latencia e intent.
@@ -565,6 +604,7 @@ class AgroVozPipeline:
                     message_id=message_id,
                     chat_id_hash=chat_id_hash,
                     request_id=request_id,
+                    chat_id=chat_id,
                     pipeline_start=pipeline_start,
                     whisper_ms_ref=whisper_ms_ref,
                     llm_ms_ref=llm_ms_ref,
@@ -603,6 +643,7 @@ class AgroVozPipeline:
         message_id: str,
         chat_id_hash: str,
         request_id: str,
+        chat_id: str | None,
         pipeline_start: float,
         whisper_ms_ref: list[int],
         llm_ms_ref: list[int],
@@ -694,66 +735,78 @@ class AgroVozPipeline:
         t_llm_start = time.monotonic()
 
         if transcribed_text and transcribed_text.strip():
-            # Detectar si el mensaje es feedback del agricultor. El feedback
-            # actualiza la consulta ANTERIOR (no crea una nueva) y responde
-            # con un TTS corto sin pasar por el LLM.
-            feedback = _detect_feedback(transcribed_text)
-            if feedback is not None:
-                intent = "feedback"
-                updated = await asyncio.to_thread(
-                    self._update_previous_feedback,
-                    phone_hash=chat_id_hash,
-                    feedback=feedback,
-                )
-                if updated:
-                    response_text = (
-                        "Me alegra haberte ayudado."
-                        if feedback == "util"
-                        else "Gracias, lo tendré en cuenta."
-                    )
-                    logger.info(
-                        "Feedback procesado — message_id=%s feedback=%s request_id=%s",
-                        message_id,
-                        feedback,
-                        request_id,
-                    )
-                else:
-                    response_text = "Gracias por tu respuesta."
-                    logger.warning(
-                        "Feedback sin consulta previa — message_id=%s feedback=%s request_id=%s",
-                        message_id,
-                        feedback,
-                        request_id,
-                    )
+            # Comandos de alerta proactiva (issue #88). Se evaluan antes
+            # del feedback y del LLM para ser deterministas y rapidos.
+            alert_response, alert_intent = await self._handle_alert_commands(transcribed_text, chat_id_hash, chat_id)
+            if alert_response is not None:
+                response_text = alert_response
+                intent = alert_intent or "alerta"
                 llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
-            else:
-                # Extraer producto antes de generar respuesta (para guardar en consulta).
+                # Extraer producto para metricas si es alerta de precio.
                 producto = self._extract_producto(transcribed_text)
-
-                # _generate_response detecta internally si es resumen o LLM,
-                # maneja su propia lógica y error handling.
-                response_text, intent = await self._generate_response(
-                    transcribed_text, chat_id_hash
+                logger.info(
+                    "Comando de alerta procesado — message_id=%s intent=%s request_id=%s",
+                    message_id,
+                    intent,
+                    request_id,
                 )
-                llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
-
-                if intent == "resumen":
-                    logger.info(
-                        "Resumen generado — message_id=%s chars=%d llm_ms=%d request_id=%s",
-                        message_id,
-                        len(response_text),
-                        llm_ms_ref[0],
-                        request_id,
+            else:
+                # Detectar si el mensaje es feedback del agricultor. El feedback
+                # actualiza la consulta ANTERIOR (no crea una nueva) y responde
+                # con un TTS corto sin pasar por el LLM.
+                feedback = _detect_feedback(transcribed_text)
+                if feedback is not None:
+                    intent = "feedback"
+                    updated = await asyncio.to_thread(
+                        self._update_previous_feedback,
+                        phone_hash=chat_id_hash,
+                        feedback=feedback,
                     )
+                    if updated:
+                        response_text = (
+                            "Me alegra haberte ayudado." if feedback == "util" else "Gracias, lo tendré en cuenta."
+                        )
+                        logger.info(
+                            "Feedback procesado — message_id=%s feedback=%s request_id=%s",
+                            message_id,
+                            feedback,
+                            request_id,
+                        )
+                    else:
+                        response_text = "Gracias por tu respuesta."
+                        logger.warning(
+                            "Feedback sin consulta previa — message_id=%s feedback=%s request_id=%s",
+                            message_id,
+                            feedback,
+                            request_id,
+                        )
+                    llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
                 else:
-                    logger.info(
-                        "Respuesta LLM generada — message_id=%s intent=%s chars=%d llm_ms=%d request_id=%s",
-                        message_id,
-                        intent,
-                        len(response_text),
-                        llm_ms_ref[0],
-                        request_id,
-                    )
+                    # Extraer producto antes de generar respuesta (para guardar en consulta).
+                    producto = self._extract_producto(transcribed_text)
+
+                    # _generate_response detecta internally si es resumen o LLM,
+                    # maneja su propia lógica y error handling.
+                    response_text, intent = await self._generate_response(transcribed_text, chat_id_hash)
+                    llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
+
+                    if intent == "resumen":
+                        logger.info(
+                            "Resumen generado — message_id=%s chars=%d llm_ms=%d request_id=%s",
+                            message_id,
+                            len(response_text),
+                            llm_ms_ref[0],
+                            request_id,
+                        )
+                    else:
+                        logger.info(
+                            "Respuesta LLM generada — message_id=%s intent=%s chars=%d llm_ms=%d request_id=%s",
+                            message_id,
+                            intent,
+                            len(response_text),
+                            llm_ms_ref[0],
+                            request_id,
+                        )
 
         # ── Etapa 3: Sintesis TTS ────────────────────────────────────
         response_ogg_path: str = ""
