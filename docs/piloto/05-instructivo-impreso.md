@@ -67,11 +67,13 @@ Pregunte como si hablara con una persona. No necesita palabras especiales.
 
 > “Dame el pronóstico del tiempo.”
 
-### Resumen
+### Resumen de su actividad
 
-> “Dame un resumen de precios y clima.”
+> “Dame mi resumen del mes.”
 
-> “¿Qué información tienes hoy?”
+> “¿Cómo va mi mes?”
+
+AgroVoz le responde con un resumen de las consultas que usted ha hecho durante el mes.
 
 ### Alertas de precio (#88)
 
