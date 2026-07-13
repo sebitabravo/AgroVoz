@@ -12,7 +12,7 @@ Ver ``app_core/phone_hash.py`` para la función de hashing.
 
 import datetime
 
-from sqlalchemy import Integer, String, func
+from sqlalchemy import Boolean, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -24,6 +24,11 @@ class UserPrefs(Base):
     La comuna permite resolver el mercado más cercano (#89) y
     personalizar respuestas. En el piloto se registra via admin
     (onboarding presencial); por voz es stretch goal post-MVP.
+
+    El flag ``dataset_consent`` controla la retención selectiva de audio
+    para construir el dataset de voz rural chilena (issue #96). Es opt-in
+    explicito: default ``False``; solo se retiene audio cuando el productor
+    firmó el Acuerdo de Uso y Consentimiento.
     """
 
     __tablename__ = "user_prefs"
@@ -35,8 +40,17 @@ class UserPrefs(Base):
     # Comuna del productor (ej: "Traiguén"). Nullable: el onboarding por voz
     # es stretch; en el piloto se setea via admin despues del primer contacto.
     comuna: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Consentimiento explicito para retener audio en el dataset de voz rural.
+    # Default False: privacidad por defecto (#96).
+    dataset_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
 
     def __repr__(self) -> str:
         comuna_str = self.comuna or "sin_comuna"
-        return f"<UserPrefs(phone_hash='{self.phone_hash[:8]}...', comuna='{comuna_str}')>"
+        # En instancias transient (sin flush) el valor puede ser None;
+        # mostramos False para no leakear que el campo esta sin setear.
+        consent = self.dataset_consent if self.dataset_consent is not None else False
+        return (
+            f"<UserPrefs(phone_hash='{self.phone_hash[:8]}...', "
+            f"comuna='{comuna_str}', dataset_consent={consent})>"
+        )
