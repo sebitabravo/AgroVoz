@@ -48,6 +48,9 @@ audio/
 # Excepción: og-image.png es requerido por Open Graph/Twitter (los
 # scrapers de redes sociales no soportan SVG). Fuente: landing/src/assets/og-image.svg.
 !landing/public/og-image.png
+# Excepción: iconos PWA del admin dashboard (manifest requiere PNG).
+!/backend/app/static/icon-192.png
+!/backend/app/static/icon-512.png
 
 # ── Debug artifacts ─────────────────
 openwa-login
@@ -87,3 +90,5 @@ logs/
 
 # Playwright MCP - screenshots temporales
 .playwright-mcp/
+# Local Pi runtime state
+.atl/

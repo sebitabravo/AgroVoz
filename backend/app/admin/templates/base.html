@@ -4,7 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#4f7d5a">
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
+  <link rel="manifest" href="/admin/manifest.json">
   <title>{% block title %}Admin · AgroVoz{% endblock %}</title>
   {# HTMX: bundle local (sin CDN, supply chain hardening). #}
   {% block head_scripts %}
@@ -254,5 +257,6 @@
     </main>
   </div>
   {% block scripts %}{% endblock %}
+  <script src="/static/admin-pwa-register.js"></script>
 </body>
 </html>
