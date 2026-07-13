@@ -26,11 +26,84 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.odepa_price import OdepaPrice
+from app.models.user_prefs import UserPrefs
 
 logger = logging.getLogger(__name__)
 
 # Timeout de descarga. ODEPA publica CSVs pequeños (<1MB), 30s sobra.
 _TIMEOUT_SEGUNDOS = 30
+
+# ── Mapeo comuna → mercado ODEPA más cercano (Issue #89) ──────────
+# Diccionario estático: 15 mercados ODEPA, dataset chico, sin dependencia externa.
+# Normalizado a lowercase para matching case-insensitive.
+# Cobertura: comunas del piloto Traiguén + regiones principales.
+COMUNA_TO_MERCADO: dict[str, str] = {
+    # Región de La Araucanía
+    "traiguén": "Vega Modelo de Temuco",
+    "traiguen": "Vega Modelo de Temuco",
+    "temuco": "Vega Modelo de Temuco",
+    "padre las casas": "Vega Modelo de Temuco",
+    "nueva imperial": "Vega Modelo de Temuco",
+    "lautaro": "Vega Modelo de Temuco",
+    "villarrica": "Vega Modelo de Temuco",
+    "pucón": "Vega Modelo de Temuco",
+    "pucon": "Vega Modelo de Temuco",
+    "angol": "Vega Modelo de Temuco",
+    "collipulli": "Vega Modelo de Temuco",
+    "pitrufquén": "Vega Modelo de Temuco",
+    "pitrufquen": "Vega Modelo de Temuco",
+    # Región del Biobío
+    "concepción": "Vega Monumental de Concepción",
+    "concepcion": "Vega Monumental de Concepción",
+    "talcahuano": "Vega Monumental de Concepción",
+    "los ángeles": "Vega Monumental de Concepción",
+    "los angeles": "Vega Monumental de Concepción",
+    "chillán": "Vega Chillán",
+    "chillan": "Vega Chillán",
+    # Región de Los Lagos
+    "puerto montt": "Vega de Puerto Montt",
+    "osorno": "Vega de Osorno",
+    "castro": "Vega de Puerto Montt",
+    # Región de Valparaíso
+    "valparaíso": "Vega de Valparaíso",
+    "valparaiso": "Vega de Valparaíso",
+    "viña del mar": "Vega de Valparaíso",
+    "vina del mar": "Vega de Valparaíso",
+    "quillota": "Vega de Valparaíso",
+    "san antonio": "Vega de Valparaíso",
+    # Región Metropolitana
+    "santiago": "Mercado Mayorista Lo Valledor de Santiago",
+    "maipú": "Mercado Mayorista Lo Valledor de Santiago",
+    "maipu": "Mercado Mayorista Lo Valledor de Santiago",
+    "puente alto": "Mercado Mayorista Lo Valledor de Santiago",
+    "san bernardo": "Mercado Mayorista Lo Valledor de Santiago",
+    "la florida": "Mercado Mayorista Lo Valledor de Santiago",
+    # Región de O'Higgins
+    "rancagua": "Vega de Rancagua",
+    "san fernando": "Vega de San Fernando",
+    "santa cruz": "Vega de San Fernando",
+    # Región del Maule
+    "talca": "Vega de Talca",
+    "curicó": "Vega de Curicó",
+    "curico": "Vega de Curicó",
+    "linares": "Vega de Talca",
+    # Región de Ñuble
+    "quirihue": "Vega Chillán",
+    "yungay": "Vega Chillán",
+    # Región de Atacama
+    "copiapó": "Vega de Copiapó",
+    "copiapo": "Vega de Copiapó",
+    # Región de Coquimbo
+    "la serena": "Vega de La Serena",
+    "coquimbo": "Vega de La Serena",
+    # Región de Arica y Parinacota
+    "arica": "Agrícola del Norte S.A. de Arica",
+    # Región de Tarapacá
+    "iquique": "Vega de Iquique",
+}
+
+# Mercado de referencia nacional (Issue #83).
+_MERCADO_DEFAULT = "Mercado Mayorista Lo Valledor de Santiago"
 
 # Substrings a buscar en cada header normalizado (strip + lower).
 # COLS: cada tupla es un grupo de substrings a buscar en los headers (case-insensitive).
@@ -610,6 +683,42 @@ def format_price_text(record: OdepaPrice) -> str:
     )
 
 
+def _resolve_mercado_cercano(session: Session, phone_hash: str) -> str | None:
+    """Resuelve el mercado ODEPA más cercano según la comuna registrada.
+
+    Busca la comuna del productor en user_prefs y la mapea al mercado
+    ODEPA más cercano via COMUNA_TO_MERCADO. Retorna None si:
+    - phone_hash vacío o None
+    - El productor no tiene comuna registrada
+    - La comuna no está en el mapeo
+    """
+    if not phone_hash or not phone_hash.strip():
+        return None
+
+    try:
+        user = session.query(UserPrefs).filter_by(phone_hash=phone_hash.strip()).first()
+    except Exception:
+        logger.warning("Error consultando UserPrefs para phone_hash=%s", phone_hash[:8])
+        return None
+
+    if not user or not user.comuna or not user.comuna.strip():
+        return None
+
+    comuna_lower = user.comuna.strip().lower()
+    mercado = COMUNA_TO_MERCADO.get(comuna_lower)
+    if mercado:
+        logger.info(
+            "Comuna '%s' → mercado cercano '%s' (phone_hash=%s)",
+            user.comuna, mercado, phone_hash[:8],
+        )
+    else:
+        logger.info(
+            "Comuna '%s' no está en el mapeo — usando default (phone_hash=%s)",
+            user.comuna, phone_hash[:8],
+        )
+    return mercado
+
+
 def _select_registro_referencia(
     precios_por_mercado: dict[str, OdepaPrice],
 ) -> OdepaPrice:
@@ -632,12 +741,30 @@ def _select_registro_referencia(
     return max(candidatos, key=lambda registro: registro.fecha)
 
 
-def get_price_for_llm(session: Session, producto: str, mercado: str = "") -> str:
+def _find_market_record(
+    precios_por_mercado: dict[str, OdepaPrice], substring: str
+) -> OdepaPrice | None:
+    """Busca registro de mercado por substring case-insensitive."""
+    for nombre, registro in precios_por_mercado.items():
+        if substring.lower() in nombre.lower():
+            return registro
+    return None
+
+
+def get_price_for_llm(
+    session: Session,
+    producto: str,
+    mercado: str = "",
+    phone_hash: str | None = None,
+) -> str:
     """Tool function para el LLM: consulta el precio más reciente.
 
-    Si mercado está vacío, consulta todos los mercados y retorna el precio
-    más relevante (el de Lo Valledor si existe, o el primer mercado disponible).
-    Así el agricultor no necesita saber nombres de mercados.
+    Si mercado está vacío, busca el mercado más cercano según la comuna
+    registrada del productor (Issue #89). Si no hay comuna o el mercado
+    cercano no tiene datos, usa Lo Valledor como referencia nacional.
+
+    Cuando el mercado elegido NO es Lo Valledor, menciona ambos:
+    "En Temuco está a X; la referencia nacional (Lo Valledor) es Y".
 
     Retorna texto natural en español chileno listo para TTS.
     Si no hay datos, retorna un mensaje informativo en vez de fallar.
@@ -655,6 +782,28 @@ def get_price_for_llm(session: Session, producto: str, mercado: str = "") -> str
                 "¿Podrias probar con otro producto?"
             )
 
+        # Issue #89: buscar mercado cercano según comuna registrada.
+        mercado_cercano = _resolve_mercado_cercano(session, phone_hash or "")
+
+        if mercado_cercano and mercado_cercano.lower() != "lo valledor":
+            registro_local = _find_market_record(precios_por_mercado, mercado_cercano)
+
+            if registro_local:
+                # Buscar también el precio en Lo Valledor para comparar.
+                registro_valledor = _find_market_record(
+                    precios_por_mercado, "lo valledor"
+                )
+
+                if registro_valledor:
+                    return (
+                        f"En {registro_local.mercado}, "
+                        f"{format_price_text(registro_local)} "
+                        f"La referencia nacional (Lo Valledor) es "
+                        f"{_formatear_pesos(registro_valledor.precio_kg)}."
+                    )
+                return format_price_text(registro_local)
+
+        # Fallback: Lo Valledor (comportamiento original, Issue #83).
         return format_price_text(_select_registro_referencia(precios_por_mercado))
 
     try:

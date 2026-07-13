@@ -6,5 +6,6 @@ automáticamente para migraciones con Alembic (autogenerate).
 
 from app.models.consultation import Consultation
 from app.models.odepa_price import OdepaPrice
+from app.models.user_prefs import UserPrefs
 
-__all__ = ["Consultation", "OdepaPrice"]
+__all__ = ["Consultation", "OdepaPrice", "UserPrefs"]

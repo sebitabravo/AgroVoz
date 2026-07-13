@@ -621,7 +621,7 @@ class TestForceKeywordToolDbError:
 
         monkeypatch.setattr(db_module, "SessionLocal", lambda: _FakeSession())
 
-        def _raise_db_error(session, producto):
+        def _raise_db_error(session, producto, phone_hash=None):
             raise SQLAlchemyError("database is locked")
 
         monkeypatch.setattr(odepa_service, "get_price_for_llm", _raise_db_error)

@@ -771,7 +771,7 @@ def _mock_llm_answer(monkeypatch: pytest.MonkeyPatch, text: str = "Respuesta moc
     sin importar el contenido de la respuesta del LLM.
     """
 
-    async def fake_answer(query: str) -> str:
+    async def fake_answer(query: str, phone_hash: str | None = None) -> str:
         return text
 
     monkeypatch.setattr(

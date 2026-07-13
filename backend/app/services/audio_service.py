@@ -212,7 +212,6 @@ class AudioService:
         """
         self._audio_temp_dir = audio_temp_dir or _get_audio_temp_dir()
 
-
     async def process_audio(
         self,
         audio_bytes: bytes,
@@ -311,9 +310,7 @@ class AudioService:
                 request_id=request_id,
             )
 
-            response_ogg_path: str | None = (
-                pipeline_result.audio_path if pipeline_result.audio_path else None
-            )
+            response_ogg_path: str | None = pipeline_result.audio_path if pipeline_result.audio_path else None
 
             # Fallback a hello.ogg si TTS no genero audio
             if response_ogg_path is None:
@@ -326,9 +323,31 @@ class AudioService:
                         _HELLO_OGG_PATH,
                     )
 
+            # Onboarding (#86): si es primer contacto, enviar bienvenida PRIMERO.
+            # El pipeline ya sintetizo el audio de bienvenida via TTS (sin LLM).
+            # Se envia antes de la respuesta normal y se limpia el archivo despues.
+            openwa = OpenWAService()
+            if pipeline_result.welcome_audio_path:
+                try:
+                    await openwa.send_audio(chat_id, pipeline_result.welcome_audio_path)
+                    logger.info(
+                        "Bienvenida enviada — message_id=%s chat_id_hash=%s request_id=%s",
+                        message_id,
+                        chat_id_hash,
+                        request_id,
+                    )
+                except (httpx.HTTPError, OSError, RuntimeError):
+                    logger.warning(
+                        "Envio de bienvenida fallo (no critico) — message_id=%s request_id=%s",
+                        message_id,
+                        request_id,
+                    )
+                finally:
+                    # Limpiar archivo de bienvenida siempre (exito o fallo).
+                    Path(pipeline_result.welcome_audio_path).unlink(missing_ok=True)
+
             # Enviar respuesta de audio
             if response_ogg_path:
-                openwa = OpenWAService()
                 try:
                     await openwa.send_audio(chat_id, response_ogg_path)
                     e2e_ms = int((time.monotonic() - start_time) * 1000)
@@ -341,12 +360,18 @@ class AudioService:
                         request_id,
                     )
                 finally:
-                    # Limpiar indicador "grabando..." de WhatsApp (no critico si falla)
-                    await OpenWAService().send_typing_indicator(chat_id, "paused")
                     # Limpiar archivo TTS generado incluso si send_audio falla
                     # (P2: cleanup garantizado, no solo en path exitoso)
                     if response_ogg_path != str(_HELLO_OGG_PATH):
                         Path(response_ogg_path).unlink(missing_ok=True)
+
+            # Limpiar indicador "grabando..." SIEMPRE (fix #105: evita que
+            # quede activo cuando response_ogg_path es None — ej: hello.ogg
+            # no existe y TTS no genero audio).
+            try:
+                await OpenWAService().send_typing_indicator(chat_id, "paused")
+            except (httpx.HTTPError, OSError, RuntimeError):
+                logger.debug("No se pudo limpiar indicador recording al final")
 
         except (
             httpx.HTTPError,
