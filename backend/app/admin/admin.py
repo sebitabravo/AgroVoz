@@ -18,7 +18,7 @@ import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
@@ -39,11 +39,33 @@ logger = logging.getLogger(__name__)
 # Directorio de templates: app/admin/templates/. Path absoluto desde __file__
 # para no depender del CWD desde donde se lance uvicorn.
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+_STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 # versión visible en el footer del sidebar (base.html).
 templates.env.globals["version"] = __version__
 
 router = APIRouter(prefix="/admin", include_in_schema=False)
+
+# ── PWA (Issue #92) ─────────────────────────────────────────────────
+
+# El manifest vive en app/static/ (lo sirve el mount /static de main.py).
+# El Service Worker NO puede ir ahi: la spec limita su scope al path del
+# script y necesita scope /admin/ — por eso se sirve desde este router.
+_SW_JS_PATH = _STATIC_DIR / "admin-sw.js"
+
+
+@router.get("/sw.js")
+async def admin_service_worker() -> FileResponse:
+    """Service Worker del admin: cachea solo assets estaticos del shell.
+
+    no-cache: el navegador revalida el SW en cada visita, asi los cambios
+    de estrategia de cache llegan sin esperar expiracion de TTL.
+    """
+    return FileResponse(
+        _SW_JS_PATH,
+        media_type="text/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 # ── Login / Logout ──────────────────────────────────────────────────
