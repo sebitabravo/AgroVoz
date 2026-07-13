@@ -22,3 +22,11 @@ class AudioResponse(BaseModel):
     whisper_ms: int = Field(default=0, description="Latencia de transcripción Whisper en ms")
     llm_ms: int = Field(default=0, description="Latencia de generación LLM (incluye Tool Calling) en ms")
     tts_ms: int = Field(default=0, description="Latencia de síntesis Piper TTS en ms")
+
+    # Onboarding (#86): audio de bienvenida para primer contacto.
+    # Si no es None, AudioService lo envía ANTES de la respuesta normal.
+    # None = no es primer contacto (o la detección/bienvenida falló).
+    welcome_audio_path: str | None = Field(
+        default=None,
+        description="Audio de bienvenida para primer contacto. None si no aplica.",
+    )
