@@ -14,6 +14,7 @@ Reglas de negocio:
 
 import asyncio
 import datetime
+import hashlib
 import logging
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -329,7 +330,10 @@ async def evaluar_alertas_clima(
 
 
 async def enviar_alerta(wa_chat_id: str, mensaje: str) -> None:
-    """Genera TTS del mensaje y lo envia como audio por Open-WA.
+    """Genera TTS del mensaje y lo envia como audio por Open-WA con retry.
+
+    Reintenta 3 veces (1s, 2s, 4s backoff) solo en el envío.
+    Si tras 3 intentos falla, loguea ERROR y continúa sin interrumpir.
 
     Args:
         wa_chat_id: Chat ID de WhatsApp destino.
@@ -338,14 +342,42 @@ async def enviar_alerta(wa_chat_id: str, mensaje: str) -> None:
     tts = TTSService()
     audio_path = ""
     try:
+        # Síntesis TTS (sin reintentos).
         audio_path = await asyncio.to_thread(tts.synthesize, mensaje)
+
+        # Envío con reintentos (backoff exponencial).
         openwa = OpenWAService()
-        await openwa.send_audio(wa_chat_id, audio_path)
-        logger.info(
-            "Alerta enviada — chat_id_hash=%s mensaje=%.80s...",
-            _hash_chat_id(wa_chat_id),
-            mensaje,
-        )
+        max_intentos = 3
+        for intento in range(1, max_intentos + 1):
+            try:
+                await openwa.send_audio(wa_chat_id, audio_path)
+                logger.info(
+                    "Alerta enviada — chat_id_hash=%s mensaje=%.80s...",
+                    _hash_chat_id(wa_chat_id),
+                    mensaje,
+                )
+                return
+            except (ConnectionError, OSError, RuntimeError) as exc:
+                if intento < max_intentos:
+                    espera_s = 2 ** (intento - 1)  # 1s, 2s, 4s
+                    logger.warning(
+                        "Reintento %d/%d envio alerta (esperando %ds): %s",
+                        intento,
+                        max_intentos,
+                        espera_s,
+                        exc,
+                    )
+                    await asyncio.sleep(espera_s)
+                else:
+                    # Tras 3 intentos, loguear ERROR pero no abortar.
+                    logger.error(
+                        "Error enviando alerta tras %d intentos — chat_id_hash=%s: %s",
+                        max_intentos,
+                        _hash_chat_id(wa_chat_id),
+                        exc,
+                    )
+    except Exception:
+        logger.exception("Error inesperado en envio de alerta — chat_id_hash=%s", _hash_chat_id(wa_chat_id))
     finally:
         if audio_path:
             Path(audio_path).unlink(missing_ok=True)
@@ -462,6 +494,4 @@ def _formatear_pesos(valor: Decimal) -> str:
 
 def _hash_chat_id(chat_id: str) -> str:
     """Hash corto del chat_id para logs, sin exponer el numero completo."""
-    import hashlib
-
     return hashlib.sha256(chat_id.encode()).hexdigest()[:8]

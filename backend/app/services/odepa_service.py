@@ -474,19 +474,6 @@ async def sync_odepa(session: Session | None = None) -> SyncResult:
             settings.odepa_productos_list,
         )
         _ok = True
-        # Evaluar alertas de precio configuradas por voz (issue #88).
-        # Import local para evitar ciclo con app.services.alert_service.
-        try:
-            from app.services.alert_service import evaluar_alertas_precio
-
-            enviados = await evaluar_alertas_precio(session, settings)
-            if enviados:
-                logger.info(
-                    "Alertas de precio enviadas tras sync ODEPA: %d",
-                    len(enviados),
-                )
-        except Exception:
-            logger.exception("Error evaluando alertas de precio tras sync ODEPA")
         return SyncResult(insertados=insertados, actualizados=actualizados)
     finally:
         if cerrar:
