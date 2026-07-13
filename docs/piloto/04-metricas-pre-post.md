@@ -141,13 +141,13 @@ ________________________________________________________________________________
 
 Las respuestas del productor se contrastan con las métricas automáticas del sistema. Esto permite validar si lo que dice el productor se refleja en el uso real.
 
-| Métrica del dashboard | ¿Qué mide? | Pregunta del cuestionario que valida |
+| Métrica del dashboard | ¿Qué mide? | Cómo se valida con el piloto |
 |---|---|---|
-| **Consultas por día** | Uso real del sistema. | Frecuencia de consultas reportada en la bitácora. |
-| **Latencia promedio** | Tiempo entre audio enviado y respuesta recibida. | ¿Tardó mucho? (check-in semanal). |
-| **Productos top** | Producto más consultado. | ¿Qué preguntó? (bitácora + registro automático). |
-| **Intents detectados** | Cuántas consultas fueron de precio, clima u otro intent. | ¿Usó los datos para decisiones concretas? (post-piloto). |
-| **Tasa de error de transcripción (WER)** | Qué tan bien entiende el sistema el español rural chileno. | ¿Qué quiso preguntar y no pudo? (check-in semanal). |
+| **Productores activos** | COUNT(DISTINCT phone_hash) con 3+ consultas en 4 semanas. Mide adopción real. | Está automático en el sistema. Se reporta al cierre (cuestionario post #2). |
+| **Consultas promedio por productor** | AVG(consultas por phone_hash). Mide intensidad de uso. | Se compara con lo reportado en bitácora (02-bitacora: 4 semanas de registros). |
+| **% consultas útiles** | COUNT(feedback="útil") / COUNT(feedback) * 100. Mide valor percibido. | Se recoge en 02-bitacora cada semana (escala 1-5 de utilidad) y en 04-metricas post #3. |
+| **Latencia promedio** | AVG(tiempo respuesta) vs target <15 segundos. Mide velocidad del sistema. | Se valida en 03-checkin semanal ("¿Tardó mucho?") y en 02-bitacora (notas de problemas técnicos). |
+| **Decisiones productivas** | COUNT(feedback="usé para negociar/vender/planificar"). Mide impacto real. | Se recoge en 04-metricas cuestionario post #2 ("¿Utilizó los datos?") y en 03-checkin semanal #4. |
 
 ---
 

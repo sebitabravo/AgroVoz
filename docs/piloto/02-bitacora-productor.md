@@ -109,9 +109,10 @@ ________________________________________________________________________________
 
 ## Para uso del equipo AgroVoz
 
-Esta bitácora se revisa en el check-in semanal (`docs/piloto/03-checkin-semanal.md`) y se contrasta con las métricas automáticas del dashboard admin (#97):
+Esta bitácora se revisa en el check-in semanal (`docs/piloto/03-checkin-semanal.md`) y se contrasta con las métricas automáticas del dashboard admin (#97).
 
-- Cantidad de consultas registradas automáticamente vs. las anotadas.
-- Intents detectados (`price`, `weather`, `unknown`).
-- Latencia promedio de respuesta.
-- Producto más consultado.
+**Automático (dashboard):** El sistema registra automáticamente cada consulta, latencia, intents detectados, productos consultados y feedback inicial.
+
+**Manual (esta bitácora):** El productor completa a mano su experiencia: frases exactas, si le sirvió, problemas encontrados, y su nota de utilidad percibida (1-5). Esta información NO la recoge el sistema automáticamente.
+
+**Cómo se usan juntas:** En el check-in semanal, comparamos la bitácora del productor (qué dice que preguntó) con los datos automáticos (qué dice que preguntó realmente) para validar consistencia y detectar donde el sistema no está entendiéndolo bien.

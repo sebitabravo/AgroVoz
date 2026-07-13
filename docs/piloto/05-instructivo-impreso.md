@@ -73,13 +73,29 @@ Pregunte como si hablara con una persona. No necesita palabras especiales.
 
 > “¿Qué información tienes hoy?”
 
-### Alertas (#88)
+### Alertas de precio (#88)
 
-> “Actívame alertas de precios de la papa.”
+Si quiere que AgroVoz le avise cuando el precio de la papa suba o baje, envíe un audio que diga:
 
-> “Avísame si cambia el precio de la papa.”
+> “Avísame cuando la papa pase de 8000 pesos.”
 
-> “Mándame el clima todas las mañanas.”
+> “Avísame cuando la papa suba a 9000.”
+
+> “Avísame cuando baje de 7000.”
+
+Puede poner cualquier precio. AgroVoz le mandará un aviso si el precio llega a ese nivel.
+
+**Límite:** Puede tener hasta 5 alertas activas. Si crea más de 5, debe cancelar una primero.
+
+### Alertas de clima (#88)
+
+Si quiere que AgroVoz le avise de cambios importantes en el clima, envíe un audio que diga:
+
+> “Avísame si viene helada.”
+
+> “Avísame si viene lluvia.”
+
+AgroVoz le alertará cuando el pronóstico prediga helada o lluvia extrema en Traiguén.
 
 ---
 
