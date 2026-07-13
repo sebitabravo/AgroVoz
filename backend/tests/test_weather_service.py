@@ -150,6 +150,29 @@ class TestFormatWeather:
         assert "nublado" not in texto
         assert "soleado" not in texto
 
+    def test_texto_incluye_cita_fuente_openmeteo(self) -> None:
+        """Issue #95: el texto de clima cita OpenMeteo como fuente del dato.
+
+        La mención explícita de la fuente refuerza la confianza del agricultor
+        en el dato de clima y permite a PRODESAL/INDAP validar el origen.
+        Aparece al final, antes del punto, en todos los formatos de respuesta.
+        """
+        # Respuesta completa (con viento y lluvia).
+        texto_completo = _format_weather(
+            temp=18.5, humidity=65, description="nublado",
+            wind_speed=3.6, rain_mm=0.5, location="Traiguén",
+        )
+        assert "según OpenMeteo" in texto_completo
+        assert texto_completo.endswith("según OpenMeteo.")
+
+        # Respuesta degradada (sin viento ni lluvia).
+        texto_minimo = _format_weather(
+            temp=22.0, humidity=40, description="cielo claro",
+            location="Traiguén",
+        )
+        assert "según OpenMeteo" in texto_minimo
+        assert texto_minimo.endswith("según OpenMeteo.")
+
 
 # ── Tests: _wmo_description ──────────────────────────────────
 

@@ -441,7 +441,8 @@ def _format_weather(
         location: Nombre de la ubicación.
 
     Returns:
-        Texto natural listo para Piper TTS.
+        Texto natural listo para Piper TTS. Termina con "según OpenMeteo"
+        para citar la fuente del dato (Issue #95).
     """
     temp_str = f"{temp:.0f}°C" if temp is not None else "temperatura no disponible"
 
@@ -466,7 +467,13 @@ def _format_weather(
     if rain_mm is not None and rain_mm > 0:
         partes.append(f", lluvia {rain_mm:.1f} mm")
 
-    return "".join(partes) + "."
+    # Cita "según OpenMeteo" incluida SIEMPRE en el dato retornado (capa determinista).
+    # El system prompt refuerza que el LLM la conserve si reformula.
+    # Diseño deliberado de defensa en profundidad (Issue #95):
+    # - Capa 1 (determinista): hardcode en esta función garantiza la presencia.
+    # - Capa 2 (LLM): instrucción del prompt previene que sea borrada.
+    # Sin ambas, el LLM 3B podría descartar la fuente buscando ser "conciso".
+    return "".join(partes) + ", según OpenMeteo."
 
 
 async def get_weather(
@@ -486,7 +493,8 @@ async def get_weather(
 
     Returns:
         Texto natural listo para TTS. Ejemplo:
-        "En Traiguén ahora: 18°C, cielo nublado, humedad 65%, viento 3.6 m/s."
+        "En Traiguén ahora: 18°C, cielo nublado, humedad 65%, viento 3.6 m/s,
+         según OpenMeteo."
 
         Si hay error, retorna un mensaje informativo en vez de lanzar
         excepción, para que el LLM pueda comunicarlo al agricultor.

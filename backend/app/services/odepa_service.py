@@ -642,11 +642,19 @@ def format_price_text(record: OdepaPrice) -> str:
     El texto respeta esa unidad y, cuando la conversión es segura, agrega
     la equivalencia aproximada por kilo.
 
-    Por kilo:      "Papa está a 850 pesos el kilo en Vega Central, precio del 19/06/2026."
+    Por kilo:      "Papa está a 850 pesos el kilo en Vega Central, según ODEPA,
+                    precio del 19/06/2026."
     Convertible:   "Papa está a 8.833 pesos por saco de 25 kilos en Lo Valledor,
-                    unos 353 pesos el kilo, precio del 03/07/2026."
+                    unos 353 pesos el kilo, según ODEPA, precio del 03/07/2026."
     No convertible: "Lechuga está a 1.200 pesos por docena de atados en Lo Valledor,
-                    precio del 03/07/2026."
+                    según ODEPA, precio del 03/07/2026."
+
+    La cita "según ODEPA" se incluye SIEMPRE en el dato retornado por esta función
+    (capa determinista). El system prompt refuerza que el LLM la conserve si reformula.
+    Diseño deliberado de defensa en profundidad (Issue #95):
+    - Capa 1 (determinista): el hardcode en formato_price_text() garantiza la presencia.
+    - Capa 2 (LLM): la instrucción del prompt previene que sea borrada en reformulaciones.
+    Sin ambas capas, el LLM 3B podría descartar la fuente buscando ser "conciso".
 
     Sin artículo para evitar errores de género (el tomate, la papa).
     """
@@ -657,7 +665,7 @@ def format_price_text(record: OdepaPrice) -> str:
     if _es_unidad_kilo(record.unidad):
         return (
             f"{producto_str} está a {precio_str} el kilo en {record.mercado}, "
-            f"precio del {fecha_str}."
+            f"según ODEPA, precio del {fecha_str}."
         )
 
     unidad_str = _unidad_hablada(record.unidad)
@@ -671,7 +679,7 @@ def format_price_text(record: OdepaPrice) -> str:
 
     return (
         f"{producto_str} está a {precio_str} por {unidad_str} en {record.mercado}"
-        f"{equivalencia}, precio del {fecha_str}."
+        f"{equivalencia}, según ODEPA, precio del {fecha_str}."
     )
 
 
