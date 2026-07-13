@@ -52,7 +52,7 @@ jobs:
 
       - name: Setup uv
         if: steps.gate.outputs.skip != 'true'
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@v8.3.0
         with:
           enable-cache: true
 
@@ -94,7 +94,7 @@ jobs:
 
       - name: Setup uv
         if: steps.gate.outputs.skip != 'true'
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@v8.3.0
         with:
           enable-cache: true
 
