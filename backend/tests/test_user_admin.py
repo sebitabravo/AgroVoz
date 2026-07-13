@@ -153,6 +153,58 @@ class TestSetComuna:
         assert resp.status_code == 422
 
 
+# ── dataset_consent (#96) ──────────────────────────────────────────
+
+
+class TestDatasetConsent:
+    """Upsert del flag dataset_consent para retención de voz rural."""
+
+    async def test_set_consent_en_creacion(self, client: AsyncClient) -> None:
+        """Se puede crear UserPrefs con comuna y consentimiento."""
+        resp = await client.put(
+            f"/api/v1/admin/users/{_VALID_HASH}/comuna",
+            json={"comuna": "Traiguén", "dataset_consent": True},
+            headers=_ADMIN_HEADERS,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["dataset_consent"] is True
+
+    async def test_set_consent_actualiza_existente(
+        self, client: AsyncClient, tmp_path: Path
+    ) -> None:
+        """Se puede actualizar solo el consentimiento de un UserPrefs existente."""
+        with next(_session_test_db(tmp_path)) as db:
+            db.add(UserPrefs(phone_hash=_VALID_HASH, comuna="Traiguén", dataset_consent=False))
+            db.commit()
+
+        resp = await client.put(
+            f"/api/v1/admin/users/{_VALID_HASH}/comuna",
+            json={"comuna": "Traiguén", "dataset_consent": True},
+            headers=_ADMIN_HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["dataset_consent"] is True
+
+    async def test_omite_consent_si_no_se_envia(
+        self, client: AsyncClient, tmp_path: Path
+    ) -> None:
+        """Si no se envia dataset_consent, no se modifica el valor actual."""
+        with next(_session_test_db(tmp_path)) as db:
+            db.add(UserPrefs(phone_hash=_VALID_HASH, comuna="Traiguén", dataset_consent=True))
+            db.commit()
+
+        resp = await client.put(
+            f"/api/v1/admin/users/{_VALID_HASH}/comuna",
+            json={"comuna": "Temuco"},
+            headers=_ADMIN_HEADERS,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["comuna"] == "Temuco"
+        assert data["dataset_consent"] is True
+
+
 # ── GET /admin/users/{phone_hash} ───────────────────────────────────
 
 
@@ -197,8 +249,8 @@ class TestPrivacidad:
         )
         assert resp.status_code == 200
         data = resp.json()
-        # Solo phone_hash (64 hex), created_at, comuna. Sin campos extra.
-        assert set(data.keys()) == {"phone_hash", "comuna", "created_at"}
+        # Solo phone_hash (64 hex), created_at, comuna, dataset_consent. Sin campos extra.
+        assert set(data.keys()) == {"phone_hash", "comuna", "dataset_consent", "created_at"}
         # phone_hash es exactamente 64 chars hex.
         assert len(data["phone_hash"]) == 64
         assert all(c in "0123456789abcdef" for c in data["phone_hash"])
