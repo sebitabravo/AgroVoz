@@ -17,7 +17,7 @@ import datetime
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import case, func, select
@@ -31,7 +31,7 @@ from app.admin.auth import (
 )
 from app.core.config import settings
 from app.core.database import get_db
-from app.services import metrics_service, monitor_service
+from app.services import export_service, metrics_service, monitor_service
 
 logger = logging.getLogger(__name__)
 
@@ -55,9 +55,7 @@ async def login_form(request: Request) -> HTMLResponse:
     # validate_admin_keys_not_default() bloquea el arranque con key default,
     # y en staging/testing solo hace warning, asi que restringirlo a dev evita
     # filtrar la credencial si staging mantiene la key default.
-    return templates.TemplateResponse(
-        request, "login.html", {"is_dev": settings.app_env == "development"}
-    )
+    return templates.TemplateResponse(request, "login.html", {"is_dev": settings.app_env == "development"})
 
 
 @router.post("/login")
@@ -207,6 +205,53 @@ async def activity_page(
         request,
         "activity.html",
         {"recientes": recientes, "active_tab": "activity"},
+    )
+
+
+# ── Export CSV ──────────────────────────────────────────────────────
+
+
+@router.get("/prices/export")
+async def export_prices_csv(
+    producto: str | None = None,
+    mercado: str | None = None,
+    desde: str | None = None,
+    hasta: str | None = None,
+    db: Session = Depends(get_db),  # noqa: B008 — FastAPI DI pattern
+) -> StreamingResponse:
+    """Exporta el historial de precios ODEPA como CSV descargable.
+
+    Filtros opcionales (todos match exacto contra lo almacenado):
+    - ``producto``: nombre del producto (ej: "papa").
+    - ``mercado``: nombre del mercado (ej: "Lo Valledor").
+    - ``desde``/``hasta``: fechas ISO YYYY-MM-DD (inclusivas).
+
+    Sin filtros = todos los registros, ordenados por fecha descendente.
+
+    Protegido por ``AdminAuthMiddleware`` (cookie de sesión, path="/admin"),
+    igual que el resto del dashboard. Un ``<a href="/admin/prices/export">``
+    en el template dispara la descarga: el navegador envía la cookie
+    automáticamente (el path de la cookie cubre esta ruta). Un <a> simple
+    no puede mandar headers custom, por eso el endpoint vive bajo /admin/
+    y no bajo /api/v1/admin/ (que usa header X-Admin-Key).
+
+    El CSV lleva BOM UTF-8 al inicio para que Excel en español reconozca
+    el encoding. Fecha como YYYY-MM-DD, precio_kg como número crudo.
+    """
+    fecha_desde = _parse_iso_date(desde, "desde")
+    fecha_hasta = _parse_iso_date(hasta, "hasta")
+
+    rows = export_service.get_prices_for_export(
+        db, producto=producto, mercado=mercado, desde=fecha_desde, hasta=fecha_hasta
+    )
+    contenido = export_service.build_prices_csv(rows)
+    hoy = datetime.date.today().strftime("%Y%m%d")
+    return StreamingResponse(
+        iter([contenido]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="odepa_prices_{hoy}.csv"',
+        },
     )
 
 
@@ -561,3 +606,20 @@ def _odepa_status_dict(db: Session) -> dict[str, object]:
         "ultima_fecha_iso": status.ultima_fecha.isoformat() if status.ultima_fecha else None,
         "ahora": datetime.datetime.now(),
     }
+
+
+def _parse_iso_date(valor: str | None, campo: str) -> datetime.date | None:
+    """Parsea una fecha ISO (YYYY-MM-DD). None pasa sin validar.
+
+    Lanza 400 si el string no es una fecha ISO válida, para no dejar
+    pasar filtros mal formados que devolverían DB vacía silenciosamente.
+    """
+    if valor is None:
+        return None
+    try:
+        return datetime.date.fromisoformat(valor)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Formato de '{campo}' inválido. Usar YYYY-MM-DD.",
+        ) from None
