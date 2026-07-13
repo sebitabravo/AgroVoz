@@ -1,0 +1,4 @@
+# Endurecimiento supply-chain: no instalar versiones con menos de 3 dias
+# de publicadas (npm-security: cooldown contra paquetes comprometidos).
+[install]
+minimumReleaseAge = 259200
