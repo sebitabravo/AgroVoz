@@ -104,7 +104,6 @@ Proyecto estudiantil para Desafío Crea INACAP 2026. Etapa actual: IDEA con arqu
 - Multi-idioma (solo español chileno)
 - App nativa iOS/Android
 - Dashboard para agricultores
-- Alertas proactivas de precio/clima
 - Pagos integrados
 
 ## Architecture overview
