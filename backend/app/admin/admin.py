@@ -18,7 +18,7 @@ import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
@@ -39,11 +39,53 @@ logger = logging.getLogger(__name__)
 # Directorio de templates: app/admin/templates/. Path absoluto desde __file__
 # para no depender del CWD desde donde se lance uvicorn.
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+_STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 # versión visible en el footer del sidebar (base.html).
 templates.env.globals["version"] = __version__
 
 router = APIRouter(prefix="/admin", include_in_schema=False)
+
+# Service Worker del admin: se lee una vez al importar el módulo. Es estatico.
+_SW_JS_PATH = _STATIC_DIR / "admin-sw.js"
+_SW_JS_CONTENT: str = _SW_JS_PATH.read_text(encoding="utf-8")
+
+
+# ── PWA (Issue #92) ─────────────────────────────────────────────────
+
+
+@router.get("/manifest.json", response_class=JSONResponse)
+async def admin_manifest() -> dict[str, object]:
+    """Manifest JSON para instalar el admin como PWA.
+
+    Exponer name, short_name, start_url, display, icons y colores del tema.
+    No contiene informacion sensible del sistema.
+    """
+    return {
+        "name": "AgroVoz Admin",
+        "short_name": "AgroVoz",
+        "start_url": "/admin/",
+        "display": "standalone",
+        "background_color": "#FBFAF7",
+        "theme_color": "#4f7d5a",
+        "icons": [
+            {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png"},
+        ],
+    }
+
+
+@router.get("/sw.js", response_class=Response)
+async def admin_service_worker() -> Response:
+    """Service Worker del admin: cachea solo el shell estatico.
+
+    No expone logica de negocio ni cachea datos sensibles.
+    """
+    return Response(
+        content=_SW_JS_CONTENT,
+        media_type="text/javascript",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 # ── Login / Logout ──────────────────────────────────────────────────

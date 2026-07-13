@@ -31,7 +31,13 @@ COOKIE_NAME = "agrovoz_admin"
 _SALT = "admin-session-v1"
 
 # Paths que NO requieren cookie válida (login se autentica con el formulario).
-_PUBLIC_PATHS = {"/admin/login", "/admin/static"}
+# El manifest y el service worker de la PWA deben ser publicos para que el
+# navegador pueda evaluar la instalabilidad incluso antes del login.
+_PUBLIC_PATHS = {
+    "/admin/login",
+    "/admin/manifest.json",
+    "/admin/sw.js",
+}
 
 
 def _serializer() -> URLSafeTimedSerializer:
