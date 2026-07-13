@@ -5,9 +5,10 @@ Singleton con lazy loading: el modelo se carga en la primera llamada,
 no al importar el modulo.
 
 Tools disponibles (whitelist):
-  - get_price(producto, mercado)       -> odepa_service.get_price_for_llm()
-  - get_price_history(producto, dias)  -> odepa_service.get_price_history_for_llm()
-  - get_weather(lat, lon)              -> weather_service.get_weather()
+  - get_price(producto, mercado)              -> odepa_service.get_price_for_llm()
+  - get_price_history(producto, dias)         -> odepa_service.get_price_history_for_llm()
+  - calculate_sale_value(producto, kg, mercado) -> odepa_service.calculate_sale_value_for_llm()
+  - get_weather(lat, lon)                      -> weather_service.get_weather()
 
 Si el LLM intenta usar cualquier otra tool, se responde con texto
 de fallback. Si no entiende la query, pide reformular.
@@ -22,6 +23,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING
@@ -29,6 +31,10 @@ from typing import TYPE_CHECKING
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
+from app.services.llm_keywords import (
+    _force_keyword_tool,
+    _is_generic_response,
+)
 
 if TYPE_CHECKING:
     from llama_cpp import Llama
@@ -40,18 +46,24 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = (
     "Eres AgroVoz, un asistente de voz para pequeños agricultores chilenos.\n"
     "REGLAS ESTRICTAS:\n"
-    "1. Tienes TRES herramientas. USA LA CORRECTA:\n"
+    "1. Tienes CUATRO herramientas. USA LA CORRECTA:\n"
     "   - get_price(producto, mercado): para consultar PRECIOS ACTUALES de productos agrícolas ODEPA.\n"
     "   - get_price_history(producto, dias): para PRECIOS PASADOS y cómo ha variado el precio.\n"
+    "   - calculate_sale_value(producto, cantidad_kg, mercado): para calcular CUÁNTO RECIBIRÁ\n"
+    "     el agricultor por una venta, cuando menciona una cantidad de kilos (\"voy a vender 30\n"
+    "     kilos de papa\"). El cálculo lo hace la herramienta, NO tú.\n"
     "   - get_weather(lat, lon): para consultar CLIMA (temperatura, lluvia, viento).\n"
     "2. La consulta PUEDE ser de precio, clima, o AMBAS. Determina cual es segun:\n"
     "   - PRECIO: si menciona precio, cuánto, cuesta, vale, kilo, saco, malla, pesos,\n"
     "     luca, o cualquier producto agrícola (papa, tomate, cebolla, lechuga, etc.)\n"
+    "   - VALOR DE VENTA: si menciona una cantidad de kilos a vender (\"voy a vender 30\n"
+    "     kilos de papa\", \"a cuánto recibo por 50 kilos\") -> calculate_sale_value\n"
     "   - PRECIO PASADO: si pregunta cuánto ESTABA, la semana pasada, ayer, hace días,\n"
     "     si subió o bajó -> get_price_history\n"
     "   - CLIMA: si menciona clima, tiempo, temperatura, lluvia, lloviendo, pronóstico,\n"
     "     frío, calor, humedad, viento\n"
     "   Ejemplos: \"a cuánto está la papa\" -> get_price\n"
+    "             \"voy a vender 30 kilos de papa\" -> calculate_sale_value\n"
     "             \"a cuánto estaba la papa la semana pasada\" -> get_price_history\n"
     "             \"cómo está el tiempo mañana\" -> get_weather\n"
     "             \"a cuánto la papa y cómo viene el clima\" -> AMBAS tools\n"
@@ -76,7 +88,9 @@ FALLBACK_TEXT = (
 NO_RESPONSE_TEXT = "No entendí tu consulta. ¿Podrías reformularla?"
 
 # Tool names permitidas. Cualquier otra -> fallback.
-WHITELIST_TOOLS = frozenset({"get_price", "get_price_history", "get_weather"})
+WHITELIST_TOOLS = frozenset(
+    {"get_price", "get_price_history", "calculate_sale_value", "get_weather"}
+)
 
 # Máximo de iteraciones del Tool Calling loop (previene loops infinitos).
 MAX_TOOL_ITERATIONS = 3
@@ -104,126 +118,8 @@ _N_CTX = 2048
 # respuestas <tool_call> del texto generado.
 # ────────────────────────────────────────────────────────────────────
 
-# Tools como string JSON por tool para inyectar en el system prompt
-# (formato nativo Qwen2.5: cada tool como JSON individual en <tools>).
-_TOOLS_LINES = "\n".join([
-    json.dumps(tool_def, ensure_ascii=False)
-    for tool_def in [
-        {
-            "type": "function",
-            "function": {
-                "name": "get_price",
-                "description": (
-                    "USAR para PREGUNTAS DE PRECIO. "
-                    "Cuando el agricultor pregunte por el valor de un producto agricola, "
-                    "por cuanto cuesta, cuanto vale, a como esta, o mencione un producto "
-                    "(papa, tomate, cebolla, lechuga, zanahoria, etc). "
-                    "Ej: 'a cuanto esta la papa', 'cuanto cuesta el kilo de tomate', "
-                    "'precio de la cebolla en Lo Valledor'."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "producto": {
-                            "type": "string",
-                            "description": "Nombre del producto en singular (ej: papa, tomate, lechuga, cebolla)",
-                        },
-                        "mercado": {
-                            "type": "string",
-                            "description": "Nombre del mercado mayorista (ej: Lo Valledor, La Vega, Talca)",
-                        },
-                    },
-                    "required": ["producto"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_price_history",
-                "description": (
-                    "USAR para PRECIOS PASADOS o VARIACION de precio. "
-                    "Cuando el agricultor pregunte cuanto ESTABA un producto, "
-                    "el precio de la semana pasada, de ayer, de hace unos dias, "
-                    "o si el precio subio o bajo. "
-                    "Ej: 'a cuanto estaba la papa la semana pasada', "
-                    "'cuanto valia el tomate ayer', 'ha subido la cebolla?'."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "producto": {
-                            "type": "string",
-                            "description": "Nombre del producto en singular (ej: papa, tomate, lechuga, cebolla)",
-                        },
-                        "dias": {
-                            "type": "integer",
-                            "description": (
-                                "Cuantos dias hacia atras comparar "
-                                "(7 = semana pasada, 1 = ayer, 30 = mes pasado). Default: 7."
-                            ),
-                        },
-                    },
-                    "required": ["producto"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_weather",
-                "description": (
-                    "USAR para PREGUNTAS DE CLIMA. "
-                    "Cuando el agricultor pregunte por el clima, la temperatura, si va a "
-                    "llover, el pronostico del tiempo, etc. "
-                    "Usa coordenadas de Traiguen (-38.23, -72.68) si no especifica ubicacion. "
-                    "Ej: 'como esta el clima', 'va a llover hoy', 'temperatura en Traiguen'."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "lat": {
-                            "type": "number",
-                            "description": "Latitud en grados decimales (-90 a 90). Default: -38.23 para Traiguen.",
-                        },
-                        "lon": {
-                            "type": "number",
-                            "description": "Longitud en grados decimales (-180 a 180). Default: -72.68 para Traiguen.",
-                        },
-                    },
-                    "required": ["lat", "lon"],
-                },
-            },
-        },
-    ]
-])
-
-# Seccion de tools en formato nativo Qwen2.5 para inyectar en system prompt.
-# El modelo espera las definiciones dentro de <tools></tools>:
-#   <tools>
-#   {"type": "function", "function": {...}}
-#   {"type": "function", "function": {...}}
-#   </tools>
-# Y las llamadas como <tool_call>{"name": "...", "arguments": {...}}</tool_call>.
-_TOOLS_SECTION = f"""
-
-# Tools
-
-You may call one or more functions to assist with the user query.
-
-You are provided with function signatures within <tools></tools> XML tags:
-<tools>
-{_TOOLS_LINES}
-</tools>
-
-For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
-<tool_call>
-{{"name": <function-name>, "arguments": <args-json-object>}}
-</tool_call>
-
-When you receive a <tool_response>, use that data to answer the user in natural language."""
-
-# Mantener TOOLS como lista de tool definitions para tests y compatibilidad.
+# Mantener TOOLS como lista de tool definitions (fuente única de verdad).
+# _TOOLS_SECTION se genera desde esta lista para inyectar en system prompt.
 TOOLS = [
     {
         "type": "function",
@@ -311,7 +207,74 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_sale_value",
+            "description": (
+                "USAR para CALCULAR CUANTO RECIBIRA el agricultor por una venta. "
+                "Cuando el agricultor mencione una cantidad de kilos a vender "
+                "(voy a vender 30 kilos de papa, a cuanto recibo por 50 kilos, "
+                "cuanto me pagan por 100 kilos de tomate). "
+                "EL CALCULO LO HACE LA HERRAMIENTA: nunca lo hagas tu. "
+                "Ej: 'voy a vender 30 kilos de papa', 'a cuanto recibo por 50 kilos de tomate'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "producto": {
+                        "type": "string",
+                        "description": "Nombre del producto en singular (ej: papa, tomate, lechuga, cebolla)",
+                    },
+                    "cantidad_kg": {
+                        "type": "string",
+                        "description": (
+                            "Cantidad de kilos a vender como string (ej: '30', '50', '100.5'). "
+                            "La herramienta valida y convierte a Decimal."
+                        ),
+                    },
+                    "mercado": {
+                        "type": "string",
+                        "description": "Nombre del mercado mayorista (ej: Lo Valledor, La Vega, Talca). Opcional.",
+                    },
+                },
+                "required": ["producto", "cantidad_kg"],
+            },
+        },
+    },
 ]
+
+# Generar _TOOLS_LINES desde TOOLS (una fuente de verdad).
+# Formato nativo Qwen2.5: cada tool como JSON individual para <tools>.
+_TOOLS_LINES = "\n".join([
+    json.dumps(tool_def, ensure_ascii=False)
+    for tool_def in TOOLS
+])
+
+# Sección de tools en formato nativo Qwen2.5 para inyectar en system prompt.
+# El modelo espera las definiciones dentro de <tools></tools>:
+#   <tools>
+#   {"type": "function", "function": {...}}
+#   {"type": "function", "function": {...}}
+#   </tools>
+# Y las llamadas como <tool_call>{"name": "...", "arguments": {...}}</tool_call>.
+_TOOLS_SECTION = f"""
+
+# Tools
+
+You may call one or more functions to assist with the user query.
+
+You are provided with function signatures within <tools></tools> XML tags:
+<tools>
+{_TOOLS_LINES}
+</tools>
+
+For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
+<tool_call>
+{{"name": <function-name>, "arguments": <args-json-object>}}
+</tool_call>
+
+When you receive a <tool_response>, use that data to answer the user in natural language."""
 
 # ── Singleton del modelo ───────────────────────────────────────────
 
@@ -410,6 +373,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
     que el modulo llm_service.py sea importable sin DB ni servicios.
     """
     from app.services.odepa_service import (
+        calculate_sale_value_for_llm,
         get_price_for_llm,
         get_price_history_for_llm,
     )
@@ -418,6 +382,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
     return {
         "get_price": get_price_for_llm,
         "get_price_history": get_price_history_for_llm,
+        "calculate_sale_value": calculate_sale_value_for_llm,
         "get_weather": get_weather,
     }
 
@@ -470,7 +435,7 @@ async def _execute_tool(
 
     try:
         # Las tools de precio necesitan session de DB. Se la pasamos como kwarg.
-        if name in ("get_price", "get_price_history"):
+        if name in ("get_price", "get_price_history", "calculate_sale_value"):
             from app.core.database import SessionLocal
 
             # Completar defaults para argumentos vacios que el LLM no especifico.
@@ -479,6 +444,14 @@ async def _execute_tool(
                 return (
                     "No entendi que producto queres consultar. "
                     "¿Podrias repetir el nombre del producto?"
+                )
+            # calculate_sale_value requiere cantidad_kg; sin ella no hay calculo.
+            if name == "calculate_sale_value" and not str(
+                valid_args.get("cantidad_kg", "")
+            ).strip():
+                return (
+                    "No entendi cuantos kilos vas a vender. "
+                    "¿Podrias repetir la cantidad?"
                 )
             # Mercado/dias son opcionales: cada handler aplica su default.
 
@@ -581,8 +554,6 @@ def _parse_text_tool_calls(content: str) -> list[dict[str, object]]:
         Lista de dicts con keys "function" -> {"name": ..., "arguments": ...}.
         Vacia si no hay tool calls en el texto.
     """
-    import re
-
     if not content:
         return []
 
@@ -632,8 +603,6 @@ def _strip_tool_tags(text: str) -> str:
     Returns:
         Texto limpio, o cadena vacia si solo habia tags.
     """
-    import re
-
     cleaned = text.strip()
     # Eliminar bloques <tool_call>...</tool_call>
     cleaned = re.sub(r"<tool_call>.*?</tool_call>", "", cleaned, flags=re.DOTALL)
@@ -650,138 +619,8 @@ def _strip_tool_tags(text: str) -> str:
     return cleaned
 
 
-# ── Fallback keyword detection (Fix #4) ──────────────────────────────
-# Cuando el LLM no genera <tool_call>, detectamos keywords en la consulta
-# para forzar la tool correcta. Esto cubre el ~30% de consultas donde el
-# modelo Qwen2.5-3B Q4 no obedece la instruccion de "SIEMPRE usa una tool".
-
-# Patrones que indican que el LLM respondio sin usar herramientas.
-_GENERIC_RESPONSE_PATTERNS = [
-    "no tengo", "no entiendo", "no conozco", "no sé", "no se",
-    "reformul", "podrías repetir", "no dispongo", "sin información",
-    "sin datos", "no cuento con", "no puedo responder",
-    "lo siento", "disculpa", "no estoy seguro",
-]
-
-# Productos agricolas chilenos mas comunes (ODEPA). Para fallback de
-# keyword detection cuando el LLM no llama get_price.
-_COMMON_PRODUCTS = [
-    "papa", "tomate", "cebolla", "lechuga", "zanahoria", "ajo",
-    "palta", "naranja", "limón", "limon", "manzana", "pera",
-    "kiwi", "uva", "durazno", "ciruela", "frutilla", "sandía",
-    "sandia", "melón", "melon", "repollo", "acelga", "espinaca",
-    "brocoli", "brócoli", "coliflor", "zapallo", "camote",
-    "betarraga", "rabanito", "rúcula", "rucula", "cilantro",
-    "perejil", "apio", "puerro", "choclo", "poroto", "arveja",
-    "haba", "pepino", "pimentón", "pimenton", "ají", "aji",
-    "maíz", "maiz", "trigo", "arroz",
-]
 
 
-def _is_generic_response(text: str) -> bool:
-    """Detecta si la respuesta del LLM es generica (no uso herramientas).
-
-    Si el LLM responde con "no tengo informacion", "no entiendo",
-    "reformula", etc., es señal de que no intento usar tools.
-    """
-    lower = text.lower()
-    return any(p in lower for p in _GENERIC_RESPONSE_PATTERNS)
-
-
-def _extract_product_from_query(query: str) -> str | None:
-    """Extrae el nombre de un producto agricola de la consulta por keyword.
-
-    Busca nombres de productos en el texto. Si el agricultor dice
-    "a cuanto esta el kilo de tomate", detecta "tomate".
-    """
-    query_lower = query.lower()
-    # Ordenar por largo descendente para que "pimentón" matchee antes que "pimenton"
-    # y "sandía" antes que "sandia".
-    for product in sorted(_COMMON_PRODUCTS, key=len, reverse=True):
-        if product in query_lower:
-            return product
-    return None
-
-
-async def _force_keyword_tool(
-    query_text: str, phone_hash: str | None = None
-) -> str | None:
-    """Forza tool call por keyword detection cuando el LLM no llama tools.
-
-    Detecta si la consulta menciona un producto agricola o el clima,
-    y ejecuta la tool correspondiente directamente sin pasar por el LLM.
-
-    Returns:
-        Resultado textual de la tool, o None si no se detecta keyword.
-    """
-    from app.core.database import SessionLocal
-    from app.services.odepa_service import (
-        get_price_for_llm,
-        get_price_history_for_llm,
-    )
-
-    q = query_text.strip().lower()
-
-    # 1. Detectar productos agricolas en la consulta.
-    product = _extract_product_from_query(q)
-    if product:
-        # Keywords de precio pasado: "estaba", "semana pasada", "ayer", etc.
-        # -> historial en vez de precio actual.
-        historia_kw = [
-            "estaba", "semana pasada", "ayer", "hace ", "valia", "valía",
-            "ha subido", "ha bajado", "subio", "subió", "bajo el precio",
-            "bajó", "antes",
-        ]
-        es_historia = any(kw in q for kw in historia_kw)
-
-        session = SessionLocal()
-        try:
-            # Llamada en thread pool: las tools de precio son sincronas
-            # (query SQLite) y no deben bloquear el event loop.
-            if es_historia:
-                result = await asyncio.to_thread(
-                    get_price_history_for_llm, session, producto=product
-                )
-            else:
-                result = await asyncio.to_thread(
-                    get_price_for_llm, session, producto=product, phone_hash=phone_hash
-                )
-            # Solo retornar si encontro datos reales (no "No tengo datos...").
-            if not result.startswith("No tengo datos"):
-                logger.info(
-                    "Fallback tool forzado: %s(producto=%s) — query=%.100s",
-                    "get_price_history" if es_historia else "get_price",
-                    product, query_text,
-                )
-                return result
-        except SQLAlchemyError as exc:
-            # Fire-and-forget: un error de DB (database is locked, disk I/O)
-            # no debe romper el pipeline. Se loguea y se cae al bloque de clima.
-            logger.warning("Error DB en fallback precio: %s", exc)
-        finally:
-            session.close()
-
-    # 2. Detectar keywords de clima.
-    clima_kw = [
-        "clima", "tiempo", "temperatura", "lluvia", "lloviendo",
-        "frio", "calor", "humedad", "viento", "pronóstico", "pronostico",
-        "nublado", "despejado",
-    ]
-    if any(kw in q for kw in clima_kw):
-        from app.services.weather_service import get_weather
-        try:
-            # Traiguen como default si no hay coordenadas en la consulta.
-            result = await get_weather(lat=-38.23, lon=-72.68)
-            if result:
-                logger.info(
-                    "Fallback tool forzado: get_weather(lat=-38.23, lon=-72.68) — query=%.100s",
-                    query_text,
-                )
-                return str(result)
-        except (RuntimeError, ValueError, OSError) as exc:
-            logger.warning("Error en fallback clima: %s", exc)
-
-    return None
 
 
 # ── Construccion de mensajes ─────────────────────────────────────────

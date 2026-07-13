@@ -11,6 +11,7 @@ Sin modelo real: todos los tests corren en CI sin llama-cpp-python ni GGUF.
 
 import pytest
 
+from app.services.llm_keywords import _VENTA_KILOS_RE, _force_keyword_tool
 from app.services.llm_service import (
     _TOOLS_SECTION,
     FALLBACK_TEXT,
@@ -22,7 +23,6 @@ from app.services.llm_service import (
     _build_messages,
     _execute_tool,
     _filter_handler_args,
-    _force_keyword_tool,
     _mock_answer,
     _parse_content,
     _parse_text_tool_calls,
@@ -43,8 +43,9 @@ class TestConstantes:
     def test_system_prompt_contiene_reglas_estrictas(self) -> None:
         """El system prompt debe contener las 6 reglas del issue #18."""
         assert "REGLAS ESTRICTAS" in SYSTEM_PROMPT
-        assert "Tienes TRES herramientas" in SYSTEM_PROMPT
+        assert "Tienes CUATRO herramientas" in SYSTEM_PROMPT
         assert "get_price_history" in SYSTEM_PROMPT
+        assert "calculate_sale_value" in SYSTEM_PROMPT
         assert "NUNCA das recomendaciones" in SYSTEM_PROMPT
         assert "NUNCA inventas precios" in SYSTEM_PROMPT
         assert "español chileno" in SYSTEM_PROMPT
@@ -74,16 +75,23 @@ class TestConstantes:
         assert len(NO_RESPONSE_TEXT) > 10
         assert "reformular" in NO_RESPONSE_TEXT.lower()
 
-    def test_whitelist_solo_tres_tools(self) -> None:
-        """La whitelist solo permite get_price, get_price_history y get_weather."""
+    def test_whitelist_cuatro_tools(self) -> None:
+        """La whitelist permite las cuatro tools de precio, venta y clima."""
         assert (
-            frozenset({"get_price", "get_price_history", "get_weather"})
+            frozenset(
+                {
+                    "get_price",
+                    "get_price_history",
+                    "calculate_sale_value",
+                    "get_weather",
+                }
+            )
             == WHITELIST_TOOLS
         )
 
     def test_tools_definition_formato_openai(self) -> None:
         """Las tool definitions siguen el formato OpenAI function-calling."""
-        assert len(TOOLS) == 3
+        assert len(TOOLS) == 4
         for tool in TOOLS:
             assert tool["type"] == "function"
             fn = tool["function"]
@@ -372,6 +380,7 @@ class TestToolsSection:
         assert "</tools>" in _TOOLS_SECTION
         assert "get_price" in _TOOLS_SECTION
         assert "get_weather" in _TOOLS_SECTION
+        assert "calculate_sale_value" in _TOOLS_SECTION
 
     def test_tools_section_tiene_tool_call_example(self) -> None:
         """Incluye ejemplo de como hacer tool_call."""
@@ -630,3 +639,169 @@ class TestForceKeywordToolDbError:
         # asi que cae al None final sin tocar el bloque de clima.
         result = await _force_keyword_tool("a cuanto esta la papa")
         assert result is None
+
+
+class TestVentaKilosRegex:
+    """Regex determinista para deteccion de venta (Issue #104).
+
+    El regex _VENTA_KILOS_RE captura "N kilos de <producto>" sin depender
+    del LLM. El bloque va antes que el de precio en _force_keyword_tool.
+    """
+
+    def test_regex_captura_cantidad_kilos(self) -> None:
+        match = _VENTA_KILOS_RE.search("voy a vender 30 kilos de papa")
+        assert match is not None
+        assert match.group(1) == "30"
+
+    def test_regex_captura_kg_abreviatura(self) -> None:
+        match = _VENTA_KILOS_RE.search("30 kg de tomate")
+        assert match is not None
+        assert match.group(1) == "30"
+
+    def test_regex_captura_kilo_singular(self) -> None:
+        match = _VENTA_KILOS_RE.search("1 kilo de papa")
+        assert match is not None
+        assert match.group(1) == "1"
+
+    def test_regex_no_matchea_sin_cantidad(self) -> None:
+        """'kilos de papa' sin numero no dispara el calculo de venta."""
+        assert _VENTA_KILOS_RE.search("kilos de papa") is None
+
+    def test_regex_no_matchea_sin_de(self) -> None:
+        """'tengo 30 kilos' (sin 'de') no dispara venta (reduce falsos positivos)."""
+        assert _VENTA_KILOS_RE.search("tengo 30 kilos") is None
+
+    def test_regex_case_insensitive(self) -> None:
+        assert _VENTA_KILOS_RE.search("VOY A VENDER 30 KILOS DE PAPA") is not None
+
+
+class TestForceKeywordToolVenta:
+    """_force_keyword_tool enruta 'N kilos de producto' a calculate_sale_value.
+
+    Verifica que el fallback deterministico llame a la tool correcta con
+    los argumentos correctos, sin depender del LLM.
+    """
+
+    async def test_venta_llama_calculate_sale_value(self, monkeypatch) -> None:
+        """'voy a vender 30 kilos de papa' -> calculate_sale_value(papa, 30)."""
+        from app.core import database as db_module
+        from app.services import odepa_service
+
+        calls: list[dict[str, str]] = []
+
+        class _FakeSession:
+            def close(self) -> None:
+                pass
+
+        def _capture_sale(session, producto, cantidad_kg, mercado=""):
+            calls.append(
+                {
+                    "producto": producto,
+                    "cantidad_kg": cantidad_kg,
+                    "mercado": mercado,
+                }
+            )
+            return (
+                "Papa está a unos 850 pesos el kilo según ODEPA. "
+                "Por 30 kilos recibirás unos 25.500 pesos como referencia mayorista."
+            )
+
+        monkeypatch.setattr(db_module, "SessionLocal", lambda: _FakeSession())
+        monkeypatch.setattr(
+            odepa_service, "calculate_sale_value_for_llm", _capture_sale
+        )
+
+        result = await _force_keyword_tool("voy a vender 30 kilos de papa")
+        assert result is not None
+        assert "25.500 pesos" in result
+        assert calls == [
+            {"producto": "papa", "cantidad_kg": "30", "mercado": ""}
+        ]
+
+    async def test_venta_kg_abreviatura(self, monkeypatch) -> None:
+        """'30 kg de tomate' tambien enruta a calculate_sale_value."""
+        from app.core import database as db_module
+        from app.services import odepa_service
+
+        calls: list[dict[str, str]] = []
+
+        class _FakeSession:
+            def close(self) -> None:
+                pass
+
+        def _capture_sale(session, producto, cantidad_kg, mercado=""):
+            calls.append({"producto": producto, "cantidad_kg": cantidad_kg})
+            return (
+                "Tomate está a unos 1.000 pesos el kilo según ODEPA. "
+                "Por 30 kilos recibirás unos 30.000 pesos como referencia mayorista."
+            )
+
+        monkeypatch.setattr(db_module, "SessionLocal", lambda: _FakeSession())
+        monkeypatch.setattr(
+            odepa_service, "calculate_sale_value_for_llm", _capture_sale
+        )
+
+        result = await _force_keyword_tool("30 kg de tomate")
+        assert result is not None
+        assert calls == [{"producto": "tomate", "cantidad_kg": "30"}]
+
+    async def test_venta_sin_datos_caea_precio(self, monkeypatch) -> None:
+        """Si calculate_sale_value dice 'no hay datos', cae al bloque de precio."""
+        from app.core import database as db_module
+        from app.services import odepa_service
+
+        sale_calls: list[dict[str, str]] = []
+        price_calls: list[dict[str, str]] = []
+
+        class _FakeSession:
+            def close(self) -> None:
+                pass
+
+        def _sale_no_data(session, producto, cantidad_kg, mercado=""):
+            sale_calls.append({"producto": producto, "cantidad_kg": cantidad_kg})
+            return "No tengo datos de precio para papa."
+
+        def _price_ok(session, producto, mercado="", phone_hash=None):
+            price_calls.append({"producto": producto, "mercado": mercado})
+            return "Papa está a 850 pesos el kilo en Lo Valledor."
+
+        monkeypatch.setattr(db_module, "SessionLocal", lambda: _FakeSession())
+        monkeypatch.setattr(odepa_service, "calculate_sale_value_for_llm", _sale_no_data)
+        monkeypatch.setattr(odepa_service, "get_price_for_llm", _price_ok)
+
+        result = await _force_keyword_tool("30 kilos de papa")
+        # Cae al bloque de precio: get_price_for_llm fue llamado.
+        assert len(sale_calls) == 1
+        assert len(price_calls) == 1
+        assert result is not None
+        assert "850 pesos" in result
+
+    async def test_venta_db_error_no_propaga(self, monkeypatch) -> None:
+        """SQLAlchemyError en calculate_sale_value se captura y cae a precio."""
+        from sqlalchemy.exc import SQLAlchemyError
+
+        from app.core import database as db_module
+        from app.services import odepa_service
+
+        class _FakeSession:
+            def close(self) -> None:
+                pass
+
+        def _raise_db_error(session, producto, cantidad_kg, mercado=""):
+            raise SQLAlchemyError("database is locked")
+
+        price_calls: list[dict[str, str]] = []
+
+        def _price_ok(session, producto, mercado="", phone_hash=None):
+            price_calls.append({"producto": producto})
+            return "Papa está a 850 pesos el kilo en Lo Valledor."
+
+        monkeypatch.setattr(db_module, "SessionLocal", lambda: _FakeSession())
+        monkeypatch.setattr(odepa_service, "calculate_sale_value_for_llm", _raise_db_error)
+        monkeypatch.setattr(odepa_service, "get_price_for_llm", _price_ok)
+
+        result = await _force_keyword_tool("30 kilos de papa")
+        # Error en venta -> cae a precio, no propaga la excepción.
+        assert len(price_calls) == 1
+        assert result is not None
+        assert "850 pesos" in result

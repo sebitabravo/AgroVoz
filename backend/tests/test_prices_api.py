@@ -22,6 +22,7 @@ from app.models.odepa_price import OdepaPrice
 from app.models.user_prefs import UserPrefs
 from app.services.odepa_service import (
     COMUNA_TO_MERCADO,
+    calculate_sale_value_for_llm,
     format_price_text,
     get_price_for_llm,
     get_price_history_for_llm,
@@ -464,6 +465,139 @@ class TestGetPriceForLlmSeleccionMercado:
         texto = get_price_for_llm(db, "papa", "")
         assert "Temuco" in texto
         assert "Arica" not in texto
+
+
+class TestCalculateSaleValueForLlm:
+    """Tool calculate_sale_value (Issue #104): valor total de venta por voz.
+
+    El cálculo lo hace Python con Decimal (nunca el LLM). Deriva el precio
+    por kilo según la unidad ODEPA y lo dice honesto cuando no es convertible.
+    """
+
+    def test_unidad_kilo_calculo_directo(self, db: Session) -> None:
+        """Papa a 850 el kilo, 30 kilos -> 25.500 pesos."""
+        _insertar_precio(db, precio_kg=Decimal("850"))
+        texto = calculate_sale_value_for_llm(db, "papa", "30")
+        assert texto == (
+            "Papa está a unos 850 pesos el kilo según ODEPA. "
+            "Por 30 kilos recibirás unos 25.500 pesos como referencia mayorista."
+        )
+
+    def test_unidad_convertible_saco_25kg(self, db: Session) -> None:
+        """Regresión #81: saco de 25 kg a 8.833,33 -> 353 el kilo -> 10.590 por 30 kg.
+
+        ODEPA reporta por saco, no por kilo. El precio por kilo se deriva
+        dividiendo por el peso del contenedor y se redondea a entero ANTES
+        de multiplicar, para que el monto cuadre con lo que se dice.
+        """
+        _insertar_precio(
+            db,
+            mercado="Mercado Mayorista Lo Valledor de Santiago",
+            precio_kg=Decimal("8833.33"),
+            unidad="$/saco 25 kilos",
+            fecha=datetime.date(2026, 7, 3),
+        )
+        texto = calculate_sale_value_for_llm(db, "papa", "30")
+        assert texto == (
+            "Papa está a unos 353 pesos el kilo según ODEPA. "
+            "Por 30 kilos recibirás unos 10.590 pesos como referencia mayorista."
+        )
+
+    def test_unidad_no_convertible_aviso_honesto_sin_monto(self, db: Session) -> None:
+        """Docena de atados no es convertible a kilo: precio por unidad + aviso.
+
+        Criterio: no se inventa el cálculo por kilo. El texto contiene el
+        precio por unidad de venta y dice que no puede calcular el total.
+        """
+        _insertar_precio(
+            db, producto="cilantro", precio_kg=Decimal("1200"),
+            unidad="$/docena de atados",
+        )
+        texto = calculate_sale_value_for_llm(db, "cilantro", "30")
+        # Reusa format_price_text -> contiene el precio por unidad real.
+        assert "por docena de atados" in texto
+        assert "1.200 pesos" in texto
+        # Aviso honesto: no inventa el monto.
+        assert "No puedo calcular el total por kilo" in texto
+        assert "recibirás" not in texto
+        assert "referencia mayorista" not in texto
+
+    def test_cantidad_cero_pide_reformular(self, db: Session) -> None:
+        _insertar_precio(db, precio_kg=Decimal("850"))
+        texto = calculate_sale_value_for_llm(db, "papa", "0")
+        assert "mayor a cero" in texto
+        assert "recibirás" not in texto
+
+    def test_cantidad_negativa_pide_reformular(self, db: Session) -> None:
+        _insertar_precio(db, precio_kg=Decimal("850"))
+        texto = calculate_sale_value_for_llm(db, "papa", "-30")
+        assert "mayor a cero" in texto
+        assert "recibirás" not in texto
+
+    def test_cantidad_no_numerica_pide_reformular(self, db: Session) -> None:
+        _insertar_precio(db, precio_kg=Decimal("850"))
+        texto = calculate_sale_value_for_llm(db, "papa", "abc")
+        assert "No entendí la cantidad" in texto
+        assert "recibirás" not in texto
+
+    def test_mercado_especifico_vs_default_valledor(self, db: Session) -> None:
+        """Mercado explícito usa ese dato; vacío usa Lo Valledor (referencia)."""
+        _insertar_precio(
+            db, mercado="Vega Central", precio_kg=Decimal("800"), unidad="kg",
+            fecha=datetime.date(2026, 7, 3),
+        )
+        _insertar_precio(
+            db, mercado="Mercado Mayorista Lo Valledor de Santiago",
+            precio_kg=Decimal("8833.33"), unidad="$/saco 25 kilos",
+            fecha=datetime.date(2026, 7, 3),
+        )
+        # Mercado explícito: Vega Central a 800 el kilo -> 24.000.
+        texto_vega = calculate_sale_value_for_llm(db, "papa", "30", "Vega Central")
+        assert "800 pesos el kilo" in texto_vega
+        assert "24.000 pesos" in texto_vega
+        # Sin mercado: Lo Valledor (saco 25kg) -> 353 el kilo -> 10.590.
+        texto_default = calculate_sale_value_for_llm(db, "papa", "30")
+        assert "353 pesos el kilo" in texto_default
+        assert "10.590 pesos" in texto_default
+
+    def test_producto_sin_datos(self, db: Session) -> None:
+        texto = calculate_sale_value_for_llm(db, "zanahoria", "30")
+        assert "No tengo datos de precio" in texto
+        assert "zanahoria" in texto
+
+    def test_producto_vacio_pide_reformular(self, db: Session) -> None:
+        texto = calculate_sale_value_for_llm(db, "", "30")
+        assert "No entendí el producto" in texto
+
+    def test_mercado_inexistente(self, db: Session) -> None:
+        _insertar_precio(db, mercado="Lo Valledor")
+        texto = calculate_sale_value_for_llm(db, "papa", "30", "Mercado Falso")
+        assert "No tengo datos de precio" in texto
+        assert "Mercado Falso" in texto
+
+    def test_cantidad_decimal_se_formatea_con_coma(self, db: Session) -> None:
+        """30.5 kilos a 800 el kilo -> 24.400; cantidad se lee '30 coma 5'."""
+        _insertar_precio(db, precio_kg=Decimal("800"))
+        texto = calculate_sale_value_for_llm(db, "papa", "30.5")
+        assert "30 coma 5 kilos" in texto
+        assert "24.400 pesos" in texto
+
+    def test_cantidad_con_coma_decimal_chileno(self, db: Session) -> None:
+        """'30,5' (coma decimal chilena) se parsea como 30.5."""
+        _insertar_precio(db, precio_kg=Decimal("800"))
+        texto = calculate_sale_value_for_llm(db, "papa", "30,5")
+        assert "30 coma 5 kilos" in texto
+
+    def test_texto_dice_referencia_mayorista_segun_odepa(self, db: Session) -> None:
+        """Criterio: el texto menciona 'referencia mayorista' y 'según ODEPA'.
+
+        El precio de predio (lo que recibe el agricultor) es distinto y menor;
+        el texto lo aclara para no generar expectativas falsas.
+        """
+        _insertar_precio(db, precio_kg=Decimal("850"))
+        texto = calculate_sale_value_for_llm(db, "papa", "30")
+        assert "según ODEPA" in texto
+        assert "referencia mayorista" in texto
 
 
 class TestMercadoCercano:
