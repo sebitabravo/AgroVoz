@@ -99,7 +99,7 @@ _N_CTX = 1024
 
 # Hilos para inferencia. Usar todos los nucleos disponibles del VPS CX43
 # (8 vCPU). cpu_count retorna None en entornos restringidos -> fallback 4.
-_N_THREADS: int = os.cpu_count() or 4
+_N_THREADS: int = max(os.cpu_count() or 4, 4)
 
 # ── Tool definitions (Qwen2.5 native XML format) ──────────────────
 #
