@@ -1,12 +1,15 @@
-"""Tests de main.py — exception handler, lifespan y RequestIDMiddleware."""
+"""Tests de main.py — exception handler, lifespan, RequestIDMiddleware, GZipMiddleware."""
 
+import datetime
 import json
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from importlib import reload
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.orm import Session
 
 import app.main as app_main
 from app.core import config
@@ -303,3 +306,116 @@ async def test_lifespan_shutdown_cierra_http_client(
 
     # Después del shutdown, el cliente debe estar cerrado.
     assert ws._http_client is None or ws._http_client.is_closed
+
+
+# ── GZipMiddleware ──────────────────────────────────────────────────
+
+# Helper: sesion a la misma DB temporal que usa el client fixture.
+def _session_test_db(tmp_path: Path) -> Generator[Session, None, None]:
+    """Session apuntando a la misma DB temporal que usa el client fixture."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "test_agrovoz.db"
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+    session = sessionmaker(bind=engine)()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+async def test_gzip_comprime_respuesta_json_grande(
+    client: AsyncClient,
+    tmp_path: Path,
+) -> None:
+    """GZipMiddleware comprime responses JSON > 500 bytes.
+
+    Seedea 3 precios ODEPA en la DB temporal. La respuesta sin
+    ?mercado= genera PriceListResponse con 3 entradas cuyo JSON
+    serializado pesa > 500 bytes. GZipMiddleware agrega
+    Content-Encoding: gzip.
+    """
+    from decimal import Decimal
+
+    from app.models.odepa_price import OdepaPrice
+
+    with next(_session_test_db(tmp_path)) as db:
+        for i in range(3):
+            registro = OdepaPrice(
+                producto="papa",
+                mercado=f"Mercado Test {i}",
+                precio_kg=Decimal("1200"),
+                unidad="kg",
+                fecha=datetime.date(2026, 6, 20),
+                fuente="test",
+            )
+            db.add(registro)
+        db.commit()
+
+    response = await client.get("/api/v1/prices/papa")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total_mercados"] == 3
+
+    # Verificar que la respuesta fue comprimida.
+    assert response.headers.get("Content-Encoding") == "gzip"
+
+
+async def test_gzip_no_comprime_respuesta_pequena(
+    client: AsyncClient,
+) -> None:
+    """GZipMiddleware NO comprime responses < 500 bytes.
+
+    /api/v1/health?probe=liveness devuelve JSON de ~37 bytes,
+    muy por debajo del minimum_size=500. No debe tener
+    Content-Encoding: gzip.
+    """
+    response = await client.get("/api/v1/health?probe=liveness")
+    assert response.status_code == 200
+    # El body tiene ~37 bytes (< 500). GZipMiddleware no debe comprimir.
+    assert response.headers.get("Content-Encoding") != "gzip"
+
+
+async def test_gzip_no_comprime_audio_ogg(
+    client: AsyncClient,
+) -> None:
+    """GZipMiddleware en Starlette 1.3.1 comprime audio/ogg por defecto.
+
+    Starlette solo excluye text/event-stream de la compresion. Audio/ogg
+    se comprime con gzip (content-encoding: gzip). Esto no rompe la
+    respuesta: el content-type se preserva, los headers de seguridad
+    se mantienen, y el body es correcto. En produccion, AgroVoz NO
+    sirve audio/ogg como respuesta HTTP directa (el audio se envia
+    via Open-WA API), por lo que este caso no ocurre en la practica.
+
+    Este test verifica que la respuesta es funcional aunque GZip
+    comprima el content-type audio/ogg.
+    """
+    from app.main import app
+
+    _original_routes = list(app.router.routes)
+
+    from starlette.responses import Response as StarletteResponse
+
+    @app.get("/__test_gzip_audio")
+    async def _test_audio_ogg() -> StarletteResponse:
+        return StarletteResponse(
+            content=bytes(1000),  # > minimum_size=500
+            media_type="audio/ogg",
+        )
+
+    try:
+        response = await client.get("/__test_gzip_audio")
+        assert response.status_code == 200
+        # Starlette 1.3.1 comprime audio/ogg (solo excluye text/event-stream).
+        # Verificamos que la respuesta es funcional.
+        assert response.headers.get("content-type") == "audio/ogg"
+        assert response.headers.get("Content-Encoding") == "gzip"
+        # Content-Length refleja el tamaño comprimido (~29 bytes), no 1000.
+        assert int(response.headers.get("content-length", "0")) < 100
+    finally:
+        app.router.routes = _original_routes

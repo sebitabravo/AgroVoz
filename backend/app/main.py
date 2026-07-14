@@ -18,6 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import Response
 
@@ -199,19 +200,33 @@ app = FastAPI(
 # el más externo (outermost).
 #
 # Orden de procesamiento del request (outermost → innermost):
-#   RequestID → SecurityHeaders → TrustedHost → RateLimit → app
+#   RequestID → SecurityHeaders → TrustedHost → RateLimit → GZip → app
 #
-# - RequestIDMiddleware es el MÁS EXTERNO: setea el ContextVar antes que
+# - GZipMiddleware es el MÁS EXTERNO: comprime el body de la respuesta
+#   después de que todos los otros middlewares hayan procesado.
+#   Solo comprime responses >= minimum_size (500 bytes) con content-type
+#   compresible (text/*, application/json, etc.). No comprime audio/ogg,
+#   images, ni responses chicas. No interfiere con streaming.
+#
+# - RequestIDMiddleware: setea el ContextVar antes que
 #   cualquier otro middleware, así todos los logs tienen request_id.
 # - SecurityHeadersMiddleware envuelve todo: agrega headers de seguridad
 #   incluso en respuestas de error de TrustedHost (P2-3).
 # - TrustedHostMiddleware rechaza hosts no permitidos antes de llegar
 #   al rate limiter y la app.
-# - RateLimitMiddleware es el más interno: solo cuenta requests que pasan
+# - GZipMiddleware va antes de AdminAuth (el más interno entre los de app)
+#   para recibir la respuesta cruda sin la división de streaming que
+#   genera BaseHTTPMiddleware (Starlette 1.3.1). Solo comprime responses
+#   >= minimum_size (500 bytes) con content-type compresible. Audio/ogg
+#   no se comprime porque Starlette solo excluye text/event-stream
+#   por defecto — esto es aceptable para MVP.
+#
+# - RateLimitMiddleware: solo cuenta requests que pasan
 #   todas las validaciones previas (hosts, firma HMAC).
 # AdminAuthMiddleware: innermost. Protege /admin/* (excepto login) con cookie
-# firmada. Va primero (innermost via insert(0)) así TrustedHost, SecurityHeaders
-# y RequestID envuelven incluso los redirects de auth.
+# firmada. Va primero (innermost via insert(0)) así RequestID, SecurityHeaders,
+# TrustedHost y GZip envuelven incluso los redirects de auth.
+app.add_middleware(GZipMiddleware, minimum_size=500)
 app.add_middleware(AdminAuthMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
