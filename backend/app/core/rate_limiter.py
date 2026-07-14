@@ -1,10 +1,10 @@
 """Rate limiting específico para endpoints con cuotas restrictivas.
 
-Incluye:
-  - WeatherSlidingWindow: defensa contra agotamiento del plan gratuito de
-    OpenWeatherMap (60 req/min) para /api/v1/weather.
-  - DemoSlidingWindow: rate limiting para /api/v1/demo/preguntar, que expone
-    LLM y TTS a visitantes de la landing page.
+Provee SlidingWindowRateLimiter: una ventana deslizante por IP, thread-safe,
+reutilizada para /api/v1/weather (protege la cuota de OpenMeteo) y
+/api/v1/demo/preguntar (protege LLM/TTS de abuso). Cada instancia recibe un
+getter del límite para leerlo desde settings en cada check(), así un cambio
+de configuración (o un monkeypatch en tests) aplica sin recrear el limiter.
 
 A diferencia de RateLimitMiddleware (global, 60/min/IP), estos rate limiters
 son específicos por recurso y usan ventanas más restrictivas.
@@ -15,6 +15,7 @@ Thread-safe con threading.Lock() para requests concurrentes.
 import logging
 import threading
 import time
+from collections.abc import Callable
 
 from fastapi import HTTPException, Request
 
@@ -22,25 +23,25 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Ventana de rate limiting en segundos (1 minuto). Configurable via settings.
-# Usar un valor más bajo que el default de 60 para dar margen de seguridad
-# frente a otros consumidores de la API key (ej: otro entorno de dev).
+# Ventana de rate limiting en segundos (1 minuto).
 _DEFAULT_WINDOW_SECONDS = 60
 
 
-class WeatherSlidingWindow:
-    """Rate limiter con sliding window por IP para el endpoint de clima.
+class SlidingWindowRateLimiter:
+    """Rate limiter con sliding window por IP, reutilizable por recurso.
 
-    Ventana deslizante de 60s. Si una IP acumula >= weather_rate_limit_per_minute
-    requests dentro de la ventana, el request N+1 recibe HTTP 429.
+    Ventana deslizante de 60s. Si una IP acumula >= limit requests dentro de
+    la ventana, el request N+1 recibe HTTP 429. El límite se lee vía
+    limit_getter en cada check(), así un cambio en settings (o un monkeypatch
+    en tests) aplica sin recrear el limiter.
 
-    La limpieza periódica de IPs inactivas evita crecimiento no acotado
-    del diccionario en memoria.
-
-    Usa time.monotonic() para ser inmune a ajustes de reloj del sistema.
+    La limpieza periódica de IPs inactivas evita crecimiento no acotado del
+    diccionario en memoria. Usa time.monotonic() para ser inmune a ajustes
+    de reloj del sistema.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, limit_getter: Callable[[], int]) -> None:
+        self._limit_getter = limit_getter
         self._requests: dict[str, list[float]] = {}
         self._lock = threading.Lock()
         self._last_cleanup: float = 0.0
@@ -60,7 +61,7 @@ class WeatherSlidingWindow:
         if now is None:
             now = time.monotonic()
 
-        limit = settings.weather_rate_limit_per_minute
+        limit = self._limit_getter()
         window = _DEFAULT_WINDOW_SECONDS
 
         with self._lock:
@@ -85,77 +86,8 @@ class WeatherSlidingWindow:
             # Rate-limit check: si ya alcanzó el límite, rechazar.
             current_count = len(self._requests.get(ip, []))
             if current_count >= limit:
-                # Calcular cuánto falta para que el timestamp más antiguo
-                # salga de la ventana (para Retry-After).
-                oldest = min(self._requests[ip])
-                retry_after = window - (now - oldest)
-                return max(retry_after, 1.0)
-
-            # Request permitido: registrar timestamp.
-            self._requests.setdefault(ip, []).append(now)
-
-        return None
-
-    def reset(self) -> None:
-        """Limpia todos los contadores. Para tests."""
-        with self._lock:
-            self._requests.clear()
-            self._last_cleanup = 0.0
-
-
-class DemoSlidingWindow:
-    """Rate limiter con sliding window por IP para el endpoint de demo.
-
-    Mismo comportamiento que WeatherSlidingWindow pero usa su propio límite
-    configurable (settings.demo_rate_limit_per_minute). Mantiene el estado
-    separado del limiter de clima para no interferir con cuotas.
-    """
-
-    def __init__(self) -> None:
-        self._requests: dict[str, list[float]] = {}
-        self._lock = threading.Lock()
-        self._last_cleanup: float = 0.0
-
-    def check(self, ip: str, now: float | None = None) -> float | None:
-        """Verifica si la IP excede el límite del endpoint de demo.
-
-        Args:
-            ip: Dirección IP del cliente.
-            now: Timestamp monotónico (inyectable para tests determinísticos).
-
-        Returns:
-            None si el request está permitido.
-            float con segundos restantes hasta que la IP pueda volver a
-            consultar (para header Retry-After) si el límite fue excedido.
-        """
-        if now is None:
-            now = time.monotonic()
-
-        limit = settings.demo_rate_limit_per_minute
-        window = _DEFAULT_WINDOW_SECONDS
-
-        with self._lock:
-            # Limpieza periódica de IPs inactivas (cada 60s).
-            if now - self._last_cleanup >= 60:
-                dead_ips = [
-                    ip_key for ip_key, timestamps in self._requests.items()
-                    if not any(now - t < window for t in timestamps)
-                ]
-                for ip_key in dead_ips:
-                    del self._requests[ip_key]
-                self._last_cleanup = now
-
-            # Limpiar timestamps fuera de la ventana para esta IP.
-            self._requests.setdefault(ip, [])
-            self._requests[ip] = [t for t in self._requests[ip] if now - t < window]
-
-            # Poda si quedó vacía.
-            if not self._requests[ip]:
-                del self._requests[ip]
-
-            # Rate-limit check: si ya alcanzó el límite, rechazar.
-            current_count = len(self._requests.get(ip, []))
-            if current_count >= limit:
+                # Cuánto falta para que el timestamp más antiguo salga de la
+                # ventana (para Retry-After).
                 oldest = min(self._requests[ip])
                 retry_after = window - (now - oldest)
                 return max(retry_after, 1.0)
@@ -173,9 +105,10 @@ class DemoSlidingWindow:
 
 
 # Instancias globales compartidas entre requests.
+# El límite se lee vía lambda en cada check() -> respeta cambios de settings.
 # No usa slowapi/redis para mantener MVP sin dependencias externas.
-_weather_limiter = WeatherSlidingWindow()
-_demo_limiter = DemoSlidingWindow()
+_weather_limiter = SlidingWindowRateLimiter(lambda: settings.weather_rate_limit_per_minute)
+_demo_limiter = SlidingWindowRateLimiter(lambda: settings.demo_rate_limit_per_minute)
 
 
 async def check_weather_rate_limit(request: Request) -> None:
