@@ -30,6 +30,17 @@ class ComunaRequest(BaseModel):
                     "None = no modificar el valor actual.",
     )
 
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "comuna": "Traiguén",
+                    "dataset_consent": True,
+                }
+            ]
+        },
+    }
+
 
 class UserPrefsResponse(BaseModel):
     """Respuesta de GET /admin/users/{phone_hash}.
@@ -41,3 +52,16 @@ class UserPrefsResponse(BaseModel):
     comuna: str | None = Field(default=None, description="Comuna registrada o None")
     dataset_consent: bool = Field(description="Consentimiento para retener audio en dataset (#96)")
     created_at: datetime.datetime = Field(description="Timestamp de creación (ISO 8601)")
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "phone_hash": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
+                    "comuna": "Traiguén",
+                    "dataset_consent": True,
+                    "created_at": "2026-06-15T10:30:00",
+                }
+            ]
+        },
+    }
