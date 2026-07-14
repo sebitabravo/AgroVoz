@@ -914,3 +914,39 @@ class TestToolResultCache:
         assert _tool_cache.get("get_price", producto="cebolla") == "850 pesos"
         _tool_cache.clear()
         assert _tool_cache.get("get_price", producto="cebolla") is None
+
+    @pytest.mark.asyncio
+    async def test_execute_tool_cache_hit_skips_handler(self, monkeypatch) -> None:
+        """Segundo llamado a _execute_tool con mismos params usa cache, no handler.
+
+        Regression: si alguien rompe la integracion del cache en
+        _execute_tool, el handler se llamaria dos veces.
+        """
+        from app.services.llm_service import _execute_tool, _tool_cache
+
+        call_count = 0
+
+        def fake_handler(**kwargs: object) -> str:
+            nonlocal call_count
+            call_count += 1
+            return f"precio={kwargs.get('producto')}"
+
+        # Reemplazar el handler en el dict de tools
+        handlers = {"get_price": fake_handler}
+        monkeypatch.setattr(
+            "app.services.llm_service._get_tool_handlers",
+            lambda: handlers,
+        )
+
+        # Limpiar cache antes del test
+        _tool_cache.clear()
+
+        # Primer llamado: debe ejecutar el handler (cache miss)
+        r1 = await _execute_tool("get_price", {"producto": "papa"})
+        assert call_count == 1
+        assert "precio=papa" in r1
+
+        # Segundo llamado mismos params: debe usar cache (NO llama handler)
+        r2 = await _execute_tool("get_price", {"producto": "papa"})
+        assert call_count == 1  # no incrementó
+        assert r2 == r1
