@@ -200,32 +200,27 @@ app = FastAPI(
 # el más externo (outermost).
 #
 # Orden de procesamiento del request (outermost → innermost):
-#   RequestID → SecurityHeaders → TrustedHost → RateLimit → GZip → app
+#   RequestID → SecurityHeaders → TrustedHost → RateLimit → AdminAuth → GZip → app
 #
-# - GZipMiddleware es el MÁS EXTERNO: comprime el body de la respuesta
-#   después de que todos los otros middlewares hayan procesado.
-#   Solo comprime responses >= minimum_size (500 bytes) con content-type
-#   compresible (text/*, application/json, etc.). No comprime audio/ogg,
-#   images, ni responses chicas. No interfiere con streaming.
-#
-# - RequestIDMiddleware: setea el ContextVar antes que
+# - RequestIDMiddleware es el MÁS EXTERNO: setea el ContextVar antes que
 #   cualquier otro middleware, así todos los logs tienen request_id.
 # - SecurityHeadersMiddleware envuelve todo: agrega headers de seguridad
 #   incluso en respuestas de error de TrustedHost (P2-3).
 # - TrustedHostMiddleware rechaza hosts no permitidos antes de llegar
 #   al rate limiter y la app.
-# - GZipMiddleware va antes de AdminAuth (el más interno entre los de app)
-#   para recibir la respuesta cruda sin la división de streaming que
-#   genera BaseHTTPMiddleware (Starlette 1.3.1). Solo comprime responses
-#   >= minimum_size (500 bytes) con content-type compresible. Audio/ogg
-#   no se comprime porque Starlette solo excluye text/event-stream
-#   por defecto — esto es aceptable para MVP.
-#
 # - RateLimitMiddleware: solo cuenta requests que pasan
 #   todas las validaciones previas (hosts, firma HMAC).
-# AdminAuthMiddleware: innermost. Protege /admin/* (excepto login) con cookie
-# firmada. Va primero (innermost via insert(0)) así RequestID, SecurityHeaders,
-# TrustedHost y GZip envuelven incluso los redirects de auth.
+# - AdminAuthMiddleware protege /admin/* (excepto login) con cookie firmada.
+#   RequestID, SecurityHeaders, TrustedHost y RateLimit lo envuelven, así que
+#   cubren incluso los redirects de auth.
+# - GZipMiddleware es el MÁS INTERNO: se agrega primero (insert(0)), recibe la
+#   respuesta cruda de la app y la comprime antes que la envuelvan los
+#   middlewares externos. Se ubica adentro para recibir el body sin la división
+#   de streaming que genera BaseHTTPMiddleware (Starlette 1.3.1). Solo comprime
+#   responses >= minimum_size (500 bytes) con content-type compresible. OJO:
+#   Starlette solo excluye text/event-stream, así que audio/ogg TAMBIÉN se
+#   comprime; es inofensivo para el MVP porque el audio se responde vía Open-WA,
+#   no como response HTTP directa.
 app.add_middleware(GZipMiddleware, minimum_size=500)
 app.add_middleware(AdminAuthMiddleware)
 app.add_middleware(RateLimitMiddleware)

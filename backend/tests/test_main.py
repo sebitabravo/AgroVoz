@@ -380,7 +380,7 @@ async def test_gzip_no_comprime_respuesta_pequena(
     assert response.headers.get("Content-Encoding") != "gzip"
 
 
-async def test_gzip_no_comprime_audio_ogg(
+async def test_gzip_comprime_audio_ogg_por_defecto(
     client: AsyncClient,
 ) -> None:
     """GZipMiddleware en Starlette 1.3.1 comprime audio/ogg por defecto.
