@@ -18,7 +18,28 @@ from app.services.demo_service import process_demo_request
 router = APIRouter(tags=["demo"])
 logger = logging.getLogger(__name__)
 
+# Límite máximo de body para el endpoint demo (7 MB). Defensa en profundidad
+# contra DoS por RAM bombing, en conjunto con max_length en schemas/demo.py.
+_MAX_DEMO_BODY_BYTES = 7 * 1024 * 1024
+
 _demo_rate_limit_dep = Depends(check_demo_rate_limit)
+
+
+def _check_body_size(request: Request) -> None:
+    """Rechaza payloads gigantes antes de parsear el body (DoS por RAM).
+
+    Nota: Content-Length puede faltar en transfer chunked; el max_length
+    del schema cubre ese caso como segunda barrera.
+    """
+    content_length = request.headers.get("content-length")
+    if content_length is not None and int(content_length) > _MAX_DEMO_BODY_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="Payload demasiado grande",
+        )
+
+
+_body_size_dep = Depends(_check_body_size)
 
 
 def _require_demo_enabled() -> None:
@@ -39,6 +60,7 @@ async def demo_preguntar(
     payload: DemoPreguntaRequest,
     _enabled: None = _demo_enabled_dep,
     _rate_limit: None = _demo_rate_limit_dep,
+    _body_size: None = _body_size_dep,
 ) -> DemoRespuestaResponse:
     """Recibe una pregunta de texto/audio y retorna respuesta de voz/texto."""
     request_id: str = getattr(request.state, "request_id", "-")

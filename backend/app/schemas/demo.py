@@ -21,6 +21,7 @@ class DemoPreguntaRequest(BaseModel):
     )
     audio_base64: str | None = Field(
         default=None,
+        max_length=7_000_000,
         description="Audio en base64 (OGG/Opus) opcional",
     )
 
