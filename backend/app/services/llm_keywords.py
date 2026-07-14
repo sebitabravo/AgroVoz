@@ -3,11 +3,15 @@
 Cuando el LLM no genera <tool_call>, detectamos keywords en la consulta
 para forzar la tool correcta. Esto cubre el ~30% de consultas donde el
 modelo Qwen2.5-3B Q4 no obedece la instrucción de "SIEMPRE usa una tool".
+
+Incluye detección fast-path de saludos simples (sin pregunta real) y
+fuzzy matching para tolerancia a typos en nombres de productos.
 """
 
 from __future__ import annotations
 
 import asyncio
+import difflib
 import logging
 import re
 from typing import TYPE_CHECKING
@@ -59,6 +63,73 @@ FALLBACK_SALE_MESSAGES = {
 }
 
 
+def _detect_greeting(query: str) -> bool:
+    """Detecta si la consulta es un saludo puro (sin pregunta real).
+
+    Identifica saludos chilenos simples que NO contienen pregunta sobre
+    precios o clima. Ej: "hola", "buenos días", "aló" → True.
+    Ej: "hola a cómo está la papa" → False (tiene pregunta).
+
+    Verifica:
+    1. Que la consulta NO contenga keywords de pregunta (precio, clima, etc).
+    2. Que la consulta contenga un saludo conocido (palabra o frase).
+
+    Args:
+        query: Texto de la consulta.
+
+    Returns:
+        True si es un saludo puro (solo el saludo, sin pregunta).
+    """
+    # Saludos multi-palabra (frases completas).
+    saludos_frases = [
+        "buenos días", "buenos dias",
+        "buenas tardes",
+        "buenas noches",
+        "buen día", "buen dia",
+        "qué tal", "que tal",
+    ]
+
+    # Saludos de una palabra.
+    saludos_palabras = {
+        "hola", "hi", "ola", "aló", "alo", "hey", "holaa",
+    }
+
+    # Palabras que indican una pregunta real (no es solo saludo).
+    pregunta_keywords = [
+        "precio", "cuánto", "cuanto", "cuesta", "vale",
+        "a cómo", "a como", "kilo", "saco", "malla", "caja",
+        "clima", "tiempo", "temperatura", "lluvia", "pronóstico", "pronostico",
+        "frio", "calor", "viento", "humedad",
+        "vendo", "vender", "venta", "kilos", "kg",
+        "semana pasada", "ayer", "hace",
+    ]
+
+    q = query.strip().lower()
+
+    # Paso 1: Si contiene keywords de pregunta, NO es saludo puro.
+    for kw in pregunta_keywords:
+        if kw in q:
+            return False
+
+    # Paso 2: Si contiene una frase de saludo (2+ palabras), es saludo.
+    for frase in saludos_frases:
+        if frase in q:
+            return True
+
+    # Paso 3: Tokenizar y buscar palabras de saludo simples.
+    # Dividir por espacios, comas, puntos, etc.
+    tokens = re.split(r'[\s,;.!?]+', q)
+    tokens = [t for t in tokens if t]  # Filtrar vacíos.
+
+    # Si hay solo 1-2 tokens y alguno es un saludo, es saludo puro.
+    if len(tokens) <= 2:
+        for token in tokens:
+            if token in saludos_palabras:
+                return True
+
+    return False
+
+
 def _is_generic_response(text: str) -> bool:
     """Detecta si la respuesta del LLM es genérica (no usó herramientas).
 
@@ -78,8 +149,12 @@ def _is_generic_response(text: str) -> bool:
 def _extract_product_from_query(query: str) -> str | None:
     """Extrae el nombre de un producto agrícola de la consulta por keyword.
 
-    Busca nombres de productos en el texto. Si el agricultor dice
-    "a cuanto está el kilo de tomate", detecta "tomate".
+    Busca nombres de productos en el texto usando:
+    1. Substring exacto (primero, más rápido y confiable).
+    2. Fuzzy match como fallback para tolerar typos ("celga" → "acelga").
+
+    Si el agricultor dice "a cuanto está el kilo de tomate", detecta "tomate".
+    Si dice "celga" (typo), fuzzy match detecta "acelga" con cutoff 0.75.
 
     Args:
         query: Texto de la consulta del agricultor.
@@ -88,11 +163,36 @@ def _extract_product_from_query(query: str) -> str | None:
         Nombre del producto en minúsculas, o None si no se detecta.
     """
     query_lower = query.lower()
-    # Ordenar por largo descendente para que "pimentón" matchee antes que "pimenton"
-    # y "sandía" antes que "sandia".
+
+    # 1. Substring exacto: ordenar por largo descendente para que "pimentón"
+    # matchee antes que "pimenton" y "sandía" antes que "sandia".
     for product in sorted(_COMMON_PRODUCTS, key=len, reverse=True):
         if product in query_lower:
             return product
+
+    # 2. Fuzzy match como fallback: detectar typos sin strict substring match.
+    # Tokenizar la consulta en palabras y comparar cada una contra productos.
+    # Cutoff 0.75 evita falsos positivos en palabras cortas.
+    tokens = re.split(r'[\s,;.!?]+', query_lower)
+    tokens = [t for t in tokens if t and len(t) > 2]  # Ignorar palabras muy cortas.
+
+    for token in tokens:
+        # Buscar el producto más similar usando difflib.
+        matches = difflib.get_close_matches(
+            token,
+            _COMMON_PRODUCTS,
+            n=1,  # Solo el mejor match.
+            cutoff=0.75,  # Umbral para evitar falsos positivos.
+        )
+        if matches:
+            logger.debug(
+                "Fuzzy match detectado — token=%s → producto=%s query=%.100s",
+                token,
+                matches[0],
+                query,
+            )
+            return matches[0]
+
     return None
 
 
