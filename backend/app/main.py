@@ -18,6 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import Response
 
@@ -199,7 +200,7 @@ app = FastAPI(
 # el más externo (outermost).
 #
 # Orden de procesamiento del request (outermost → innermost):
-#   RequestID → SecurityHeaders → TrustedHost → RateLimit → app
+#   RequestID → SecurityHeaders → TrustedHost → RateLimit → AdminAuth → GZip → app
 #
 # - RequestIDMiddleware es el MÁS EXTERNO: setea el ContextVar antes que
 #   cualquier otro middleware, así todos los logs tienen request_id.
@@ -207,11 +208,20 @@ app = FastAPI(
 #   incluso en respuestas de error de TrustedHost (P2-3).
 # - TrustedHostMiddleware rechaza hosts no permitidos antes de llegar
 #   al rate limiter y la app.
-# - RateLimitMiddleware es el más interno: solo cuenta requests que pasan
+# - RateLimitMiddleware: solo cuenta requests que pasan
 #   todas las validaciones previas (hosts, firma HMAC).
-# AdminAuthMiddleware: innermost. Protege /admin/* (excepto login) con cookie
-# firmada. Va primero (innermost via insert(0)) así TrustedHost, SecurityHeaders
-# y RequestID envuelven incluso los redirects de auth.
+# - AdminAuthMiddleware protege /admin/* (excepto login) con cookie firmada.
+#   RequestID, SecurityHeaders, TrustedHost y RateLimit lo envuelven, así que
+#   cubren incluso los redirects de auth.
+# - GZipMiddleware es el MÁS INTERNO: se agrega primero (insert(0)), recibe la
+#   respuesta cruda de la app y la comprime antes que la envuelvan los
+#   middlewares externos. Se ubica adentro para recibir el body sin la división
+#   de streaming que genera BaseHTTPMiddleware (Starlette 1.3.1). Solo comprime
+#   responses >= minimum_size (500 bytes) con content-type compresible. OJO:
+#   Starlette solo excluye text/event-stream, así que audio/ogg TAMBIÉN se
+#   comprime; es inofensivo para el MVP porque el audio se responde vía Open-WA,
+#   no como response HTTP directa.
+app.add_middleware(GZipMiddleware, minimum_size=500)
 app.add_middleware(AdminAuthMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
