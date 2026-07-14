@@ -13,7 +13,7 @@ from urllib.parse import quote
 import httpx
 
 from app.core.config import settings
-from app.core.phone_hash import hash_phone
+from app.core.phone_hash import hash_phone, normalizar_e164
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,11 @@ def phone_to_chat_id(target: str) -> str:
     Si ya viene como chatId valido (@c.us o @lid), lo retorna sin cambios.
     Si es un numero E.164 (ej: +56912345678), agrega el sufijo @c.us.
 
+    La normalizacion E.164 se delega en normalizar_e164() que:
+    - Limpia espacios, guiones, parentesis, puntos
+    - Prefija '+' si falta
+    - Valida que el largo este entre 10 y 15 digitos
+
     Para @lid que requieren resolucion de numero real, usar
     resolve_contact_phone() ANTES de llamar a esta funcion.
     """
@@ -41,7 +46,8 @@ def phone_to_chat_id(target: str) -> str:
     if stripped.endswith("@c.us") or stripped.endswith("@lid"):
         return stripped
 
-    digits = stripped.removeprefix("+").replace(" ", "")
+    e164 = normalizar_e164(stripped)
+    digits = e164.removeprefix("+")
     return f"{digits}@c.us"
 
 
