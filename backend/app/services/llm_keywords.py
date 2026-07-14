@@ -70,7 +70,8 @@ def _detect_greeting(query: str) -> bool:
     precios o clima. Ej: "hola", "buenos días", "aló" → True.
     Ej: "hola a cómo está la papa" → False (tiene pregunta).
 
-    Verifica:
+    Verifica (en orden):
+    0. Que la consulta NO contenga un producto reconocible (exacto o fuzzy).
     1. Que la consulta NO contenga keywords de pregunta (precio, clima, etc).
     2. Que la consulta contenga un saludo conocido (palabra o frase).
 
@@ -105,6 +106,11 @@ def _detect_greeting(query: str) -> bool:
     ]
 
     q = query.strip().lower()
+
+    # Paso 0: Si la consulta contiene un producto reconocible (exacto o fuzzy),
+    # NO es un saludo puro. Esto previene la regresión "hola papa" → precio.
+    if _extract_product_from_query(q) is not None:
+        return False
 
     # Paso 1: Si contiene keywords de pregunta, NO es saludo puro.
     for kw in pregunta_keywords:

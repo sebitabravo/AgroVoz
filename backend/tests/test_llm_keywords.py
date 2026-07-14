@@ -87,6 +87,16 @@ class TestDetectGreeting:
         """Detecta múltiples saludos repetidos como saludo puro."""
         assert _detect_greeting("hola hola") is True
 
+    def test_greeting_with_product_name_regression(self) -> None:
+        """Regresión: 'hola papa' NO es saludo puro (contiene producto).
+
+        Antes del fix, esto retornaba True y cortaba el pipeline.
+        Ahora debe retornar False para que el LLM/fallback extraiga el precio.
+        """
+        assert _detect_greeting("hola papa") is False
+        assert _detect_greeting("buenos días tomate") is False
+        assert _detect_greeting("hola lechuga") is False
+
 
 class TestExtractProductFromQuery:
     """Tests para extracción de productos (substring exacto y fuzzy match)."""
