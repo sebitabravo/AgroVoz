@@ -13,6 +13,8 @@ from app.core.database import get_db
 from app.models.odepa_price import OdepaPrice
 from app.schemas.prices import PriceListResponse, PriceResponse
 from app.services.odepa_service import (
+    _es_unidad_kilo,
+    _kilos_por_unidad,
     format_price_text,
     list_mercados,
     list_products,
@@ -26,12 +28,29 @@ router = APIRouter(tags=["prices"])
 
 
 def _record_to_response(record: OdepaPrice) -> PriceResponse:
-    """Convierte un registro OdepaPrice en un schema PriceResponse para la API."""
+    """Convierte un registro OdepaPrice en un schema PriceResponse para la API.
+
+    Calcula el precio por kilo real si la unidad de venta es convertible
+    (ej: malla de 25kg), o retorna None si no es convertible (ej: docena de atados).
+    """
+    # Calcular precio por kilo si la unidad no es directamente kilo.
+    precio_por_kilo: float | None = None
+    if _es_unidad_kilo(record.unidad):
+        # La unidad YA es kilo, no hay conversión necesaria.
+        precio_por_kilo = float(record.precio_kg)
+    else:
+        # Intentar convertir según los kilos que contiene la unidad de venta.
+        kilos = _kilos_por_unidad(record.unidad)
+        if kilos is not None:
+            # Unidad convertible: calcular precio por kilo.
+            precio_por_kilo = float(record.precio_kg / kilos)
+
     return PriceResponse(
         producto=record.producto,
         mercado=record.mercado,
         precio_kg=float(record.precio_kg),
         unidad=record.unidad,
+        precio_por_kilo=precio_por_kilo,
         fecha=record.fecha.isoformat(),
         texto=format_price_text(record),
     )

@@ -9,14 +9,24 @@ from pydantic import BaseModel, Field
 class PriceResponse(BaseModel):
     """Respuesta de precio para un producto+mercado específico.
 
-    Incluye el precio numérico y una versión en texto natural
-    lista para ser leída por Piper TTS en la respuesta de voz.
+    Incluye el precio numérico en la unidad de venta ODEPA (precio_kg),
+    el precio calculado por kilo (precio_por_kilo) si es convertible,
+    y una versión en texto natural lista para TTS.
+
+    precio_kg: precio crudo en la unidad de venta ODEPA (puede no ser kilo).
+    precio_por_kilo: precio calculado por kilo real, o None si no es convertible
+                     (ej: docena de atados no se puede convertir a kilo).
+    texto: versión hablada del precio, ya contiene la conversión si aplica.
     """
 
     producto: str
     mercado: str
     precio_kg: float
     unidad: str
+    precio_por_kilo: float | None = Field(
+        None,
+        description="Precio calculado por kilo. None si la unidad no es convertible (ej: docena de atados)."
+    )
     fecha: str = Field(description="Fecha del precio en formato YYYY-MM-DD")
     texto: str = Field(description="Texto natural en español chileno para TTS")
 
