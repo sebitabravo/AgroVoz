@@ -16,7 +16,7 @@ class AudioResponse(BaseModel):
     audio_path: str = Field(description="Ruta al archivo .ogg generado por TTS")
     text_response: str = Field(description="Texto de respuesta generado por LLM, listo para TTS")
     latency_ms: int = Field(description="Latencia total end-to-end en milisegundos")
-    intent: str = Field(description="Intención detectada: 'precio', 'clima', o 'desconocido'")
+    intent: str = Field(description="Intención detectada. Valores definidos en app.core.constants.Intent.")
 
     # Métricas por etapa para benchmark
     whisper_ms: int = Field(default=0, description="Latencia de transcripción Whisper en ms")

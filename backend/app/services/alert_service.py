@@ -18,11 +18,20 @@ import hashlib
 import logging
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.constants import (
+    CONDICIONES_VALIDAS,
+    HELADA_UMBRAL_C,
+    LLUVIA_EXTREMA_UMBRAL_MM,
+    UMBRALES_CLIMA_VALIDOS,
+    CondicionPrecio,
+    TipoAlerta,
+    UmbralClima,
+)
 from app.models.alert import Alert
 from app.models.odepa_price import OdepaPrice
 from app.services.odepa_service import (
@@ -46,16 +55,9 @@ logger = logging.getLogger(__name__)
 # Tope de alertas activas por productor (anti-spam y control de superficie).
 MAX_ALERTAS_ACTIVAS = 5
 
-# Condiciones de comparacion validas para alertas de precio.
-CONDICIONES_VALIDAS = {">", "<", ">=", "<="}
 
-# Umbrales climaticos fijos soportados.
-CLIMA_UMBRALES = {"helada", "lluvia_extrema"}
-
-# Helada: temperatura minima inferior a 2 C.
-HELADA_UMBRAL_C = Decimal("2.0")
-# Lluvia extrema: mas de 50 mm de precipitacion en 24 horas.
-LLUVIA_EXTREMA_UMBRAL_MM = Decimal("50.0")
+# (CONDICIONES_VALIDAS, UMBRALES_CLIMA_VALIDOS, HELADA_UMBRAL_C, LLUVIA_EXTREMA_UMBRAL_MM
+# importados de app.core.constants — fuente unica de verdad.)
 
 
 class AlertServiceError(ValueError):
@@ -67,7 +69,7 @@ async def create_price_alert(
     phone_hash: str,
     wa_chat_id: str | None,
     producto: str,
-    condicion: str,
+    condicion: CondicionPrecio,
     umbral: Decimal,
 ) -> str:
     """Crea una alerta de precio.
@@ -89,7 +91,7 @@ async def create_price_alert(
     Raises:
         AlertServiceError: Si falla alguna validacion.
     """
-    condicion = condicion.strip()
+    condicion = cast(CondicionPrecio, condicion.strip())
     if condicion not in CONDICIONES_VALIDAS:
         raise AlertServiceError(f"Condicion invalida: {condicion}")
     if umbral <= 0:
@@ -124,7 +126,7 @@ async def create_clima_alert(
     session: Session,
     phone_hash: str,
     wa_chat_id: str | None,
-    umbral_clima: str,
+    umbral_clima: str,  # str intencional: borde no confiable, acepta alias "lluvia" antes de normalizar/validar
 ) -> str:
     """Crea una alerta climatica fija.
 
@@ -144,7 +146,7 @@ async def create_clima_alert(
     # "lluvia" es alias hablado para el umbral fijo "lluvia_extrema".
     if umbral_norm == "lluvia":
         umbral_norm = "lluvia_extrema"
-    if umbral_norm not in CLIMA_UMBRALES:
+    if umbral_norm not in UMBRALES_CLIMA_VALIDOS:
         raise AlertServiceError(f"Umbral climatico invalido: {umbral_clima}")
 
     _validar_tope_alertas(session, phone_hash)
@@ -170,14 +172,14 @@ async def create_clima_alert(
 async def cancelar_alertas(
     session: Session,
     phone_hash: str,
-    tipo: str | None = None,
+    tipo: TipoAlerta | None = None,
 ) -> int:
     """Desactiva las alertas activas de un phone_hash.
 
     Args:
         session: Sesion de SQLAlchemy.
         phone_hash: Hash del numero.
-        tipo: Filtro opcional "precio" o "clima".
+        tipo: Filtro opcional ('precio' o 'clima').
 
     Returns:
         Cantidad de alertas desactivadas.
@@ -254,7 +256,7 @@ async def evaluar_alertas_precio(
             continue
 
         umbral = alerta.umbral or Decimal(0)
-        if _cumple_condicion(precio_por_kg, alerta.condicion or ">", umbral):
+        if _cumple_condicion(precio_por_kg, cast(CondicionPrecio, alerta.condicion or ">"), umbral):
             mensaje = _mensaje_alerta_precio(alerta, registro, precio_por_kg)
             if alerta.wa_chat_id:
                 await enviar_alerta(alerta.wa_chat_id, mensaje)
@@ -312,10 +314,10 @@ async def evaluar_alertas_clima(
     for alerta in alertas:
         if _ya_disparada_hoy(alerta, hoy):
             continue
-        dia = _dia_cumple_umbral_clima(alerta.umbral_clima, forecast)
+        dia = _dia_cumple_umbral_clima(cast(UmbralClima | None, alerta.umbral_clima), forecast)
         if dia is None:
             continue
-        mensaje = _mensaje_alerta_clima(alerta.umbral_clima, dia)
+        mensaje = _mensaje_alerta_clima(cast(UmbralClima | None, alerta.umbral_clima), dia)
         if alerta.wa_chat_id:
             await enviar_alerta(alerta.wa_chat_id, mensaje)
             alerta.last_triggered_at = datetime.datetime.now()
@@ -421,7 +423,7 @@ def _calcular_precio_por_kg(registro: OdepaPrice) -> Decimal | None:
 
 def _cumple_condicion(
     valor: Decimal,
-    condicion: str,
+    condicion: CondicionPrecio,
     umbral: Decimal,
 ) -> bool:
     """Evalua valor condicion umbral."""
@@ -452,7 +454,7 @@ def _mensaje_alerta_precio(
 
 
 def _dia_cumple_umbral_clima(
-    umbral_clima: str | None,
+    umbral_clima: UmbralClima | None,
     forecast: list[ForecastDay],
 ) -> ForecastDay | None:
     """Retorna el primer dia del pronostico que cumple el umbral climatico."""
@@ -467,7 +469,7 @@ def _dia_cumple_umbral_clima(
     return None
 
 
-def _mensaje_alerta_clima(umbral_clima: str | None, dia: ForecastDay) -> str:
+def _mensaje_alerta_clima(umbral_clima: UmbralClima | None, dia: ForecastDay) -> str:
     """Arma el texto hablado de una alerta climatica.
 
     Solo informa el pronostico; no recomienda practicas agronomicas.

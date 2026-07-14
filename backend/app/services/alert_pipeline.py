@@ -14,7 +14,9 @@ from __future__ import annotations
 import logging
 import re
 from decimal import InvalidOperation
+from typing import cast
 
+from app.core.constants import CondicionPrecio, UmbralClima
 from app.core.database import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -96,7 +98,7 @@ async def detect_and_handle_alert_command(
     clima_match = _ALERTA_CLIMA_RE.search(q)
     if clima_match:
         tipo_umbral = clima_match.group(1).lower()
-        umbral_clima = "helada" if tipo_umbral == "helada" else "lluvia_extrema"
+        umbral_clima: UmbralClima = "helada" if tipo_umbral == "helada" else "lluvia_extrema"
         return await _handle_clima(phone_hash, wa_chat_id, umbral_clima)
 
     # Alerta de precio.
@@ -123,7 +125,7 @@ async def _handle_cancel(phone_hash: str) -> tuple[str, str]:
 async def _handle_clima(
     phone_hash: str,
     wa_chat_id: str | None,
-    umbral_clima: str,
+    umbral_clima: UmbralClima,
 ) -> tuple[str, str]:
     """Maneja alerta climatica."""
     from app.services.alert_service import AlertServiceError, create_clima_alert
@@ -169,7 +171,10 @@ async def _handle_precio(
 
     session = SessionLocal()
     try:
-        mensaje = await create_price_alert(session, phone_hash, wa_chat_id, producto, condicion, umbral)
+        mensaje = await create_price_alert(
+            session, phone_hash, wa_chat_id, producto,
+            cast(CondicionPrecio, condicion), umbral,
+        )
         return mensaje, "alerta"
     except AlertServiceError as exc:
         return str(exc), "alerta"

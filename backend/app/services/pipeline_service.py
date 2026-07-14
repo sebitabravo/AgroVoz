@@ -14,11 +14,12 @@ import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.constants import FeedbackAgricultor, Intent
 from app.schemas.pipeline import AudioResponse
 from app.services.alert_pipeline import detect_and_handle_alert_command
 from app.services.dataset_service import retain_audio
@@ -111,7 +112,7 @@ def _get_tts_service() -> TTSService:
     return _tts_service
 
 
-def _detect_feedback(text: str) -> str | None:
+def _detect_feedback(text: str) -> FeedbackAgricultor | None:
     """Detecta si el texto es feedback del agricultor sobre la consulta anterior.
 
     Args:
@@ -160,7 +161,7 @@ class AgroVozPipeline:
     @staticmethod
     def _should_mark_for_review(
         response_text: str,
-        intent: str,
+        intent: Intent,
         whisper_ms: int,
         llm_ms: int,
         transcribed_text: str,
@@ -199,7 +200,7 @@ class AgroVozPipeline:
         return bool(llm_ms == 0 and transcribed_text.strip())
 
     @staticmethod
-    def _detect_intent(query_text: str, llm_response: str) -> str:
+    def _detect_intent(query_text: str, llm_response: str) -> Intent:
         """Detecta la intencion de la consulta para metrica.
 
         Derivada principalmente de la respuesta del LLM (que contiene
@@ -342,7 +343,7 @@ class AgroVozPipeline:
         return await detect_and_handle_alert_command(transcribed_text, phone_hash, wa_chat_id)
 
     @staticmethod
-    async def _generate_response(transcribed_text: str, chat_id_hash: str) -> tuple[str, str]:
+    async def _generate_response(transcribed_text: str, chat_id_hash: str) -> tuple[str, Intent]:
         """Genera respuesta textual: saludo rápido, resumen o LLM con Tool Calling.
 
         Detecta en orden (por eficiencia):
@@ -417,7 +418,7 @@ class AgroVozPipeline:
     @staticmethod
     def _save_consultation(
         phone_hash: str,
-        intent: str,
+        intent: Intent,
         query_text: str,
         response_text: str,
         audio_duration_ms: int,
@@ -509,7 +510,7 @@ class AgroVozPipeline:
     @staticmethod
     def _update_previous_feedback(
         phone_hash: str,
-        feedback: str,
+        feedback: FeedbackAgricultor,
         session: Session | None = None,
     ) -> bool:
         """Actualiza el feedback de la ultima consulta del phone_hash.
@@ -794,7 +795,7 @@ class AgroVozPipeline:
 
         # ── Etapa 2: Generacion de respuesta (feedback, resumen o LLM) ───
         response_text = ""
-        intent = "desconocido"
+        intent: Intent = "desconocido"
         producto: str | None = None
         t_llm_start = time.monotonic()
 
@@ -804,7 +805,7 @@ class AgroVozPipeline:
             alert_response, alert_intent = await self._handle_alert_commands(transcribed_text, chat_id_hash, chat_id)
             if alert_response is not None:
                 response_text = alert_response
-                intent = alert_intent or "alerta"
+                intent = cast(Intent, alert_intent or "alerta")
                 llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
                 # Extraer producto para metricas si es alerta de precio.
                 producto = self._extract_producto(transcribed_text)
