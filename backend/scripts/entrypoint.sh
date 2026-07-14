@@ -85,7 +85,27 @@ else
     exit 1
 fi
 
-# ─── 4. Arrancar la aplicación ───────────────────────────────────────────────
+# ─── 4. Reindexar SQLite (preventivo) ──────────────────────────────────────────
+# REINDEX reconstruye indices y libera espacio fragmentado. Best-effort:
+# si falla (DB no existe aun, permisos), loguea warning y continua.
+header "Reindexando SQLite (REINDEX)"
+if python -c "
+import sqlite3, os
+db_path = os.path.join('data', 'agrovoz.db')
+if os.path.exists(db_path):
+    conn = sqlite3.connect(db_path)
+    conn.execute('REINDEX')
+    conn.close()
+    print('REINDEX ok')
+else:
+    print('DB no existe aun — skip')
+" 2>&1; then
+    info "REINDEX completado"
+else
+    warn "REINDEX falló (no critico — continuando)"
+fi
+
+# ─── 5. Arrancar la aplicación ───────────────────────────────────────────────
 # exec reemplaza el shell con uvicorn (PID 1), para que las señales de Docker
 # (SIGTERM, SIGINT) lleguen directo a uvicorn para graceful shutdown.
 header "Iniciando AgroVoz backend"
