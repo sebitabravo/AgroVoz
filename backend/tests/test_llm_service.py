@@ -13,6 +13,8 @@ import pytest
 
 from app.services.llm_keywords import _VENTA_KILOS_RE, _force_keyword_tool
 from app.services.llm_service import (
+    _N_CTX,
+    _N_THREADS,
     _TOOLS_SECTION,
     FALLBACK_TEXT,
     MAX_TOOL_ITERATIONS,
@@ -41,28 +43,28 @@ class TestConstantes:
     """Verifica que las constantes del modulo no se modifiquen accidentalmente."""
 
     def test_system_prompt_contiene_reglas_estrictas(self) -> None:
-        """El system prompt debe contener las 6 reglas del issue #18."""
+        """El system prompt comprimido conserva las 6 reglas del issue #18."""
         assert "REGLAS ESTRICTAS" in SYSTEM_PROMPT
         assert "Tienes CUATRO herramientas" in SYSTEM_PROMPT
         assert "get_price_history" in SYSTEM_PROMPT
         assert "calculate_sale_value" in SYSTEM_PROMPT
-        assert "NUNCA das recomendaciones" in SYSTEM_PROMPT
-        assert "NUNCA inventas precios" in SYSTEM_PROMPT
-        assert "español chileno" in SYSTEM_PROMPT
+        assert "NUNCA recomendaciones agronomicas" in SYSTEM_PROMPT
+        assert "NUNCA inventes precios" in SYSTEM_PROMPT
+        assert "espanol chileno" in SYSTEM_PROMPT
         assert "pesos chilenos" in SYSTEM_PROMPT
 
     def test_system_prompt_instruye_conservar_cita_fuente(self) -> None:
-        """Issue #95: el system prompt debe instruir al LLM conservar la
-        mención de la fuente (ODEPA / OpenMeteo) al reformular respuestas.
+        """Issue #95: el system prompt comprimido debe instruir conservar la
+        mencion de la fuente (ODEPA / OpenMeteo) al reformular respuestas.
 
         Sin esta regla, el LLM tiende a resumir omitiendo la fuente, perdiendo
         el respaldo institucional del dato.
         """
-        assert "CONSERVA SIEMPRE" in SYSTEM_PROMPT
+        assert "CONSERVA" in SYSTEM_PROMPT
         assert "ODEPA" in SYSTEM_PROMPT
         assert "OpenMeteo" in SYSTEM_PROMPT
-        assert "según ODEPA" in SYSTEM_PROMPT
-        assert "según OpenMeteo" in SYSTEM_PROMPT
+        assert "segun ODEPA" in SYSTEM_PROMPT
+        assert "segun OpenMeteo" in SYSTEM_PROMPT
 
     def test_fallback_text_no_vacio(self) -> None:
         """El texto de fallback es un mensaje informativo no vacio."""
@@ -103,6 +105,78 @@ class TestConstantes:
     def test_max_tool_iterations_razonable(self) -> None:
         """El maximo de iteraciones del loop debe ser >= 1 y <= 10."""
         assert 1 <= MAX_TOOL_ITERATIONS <= 10
+
+
+# ── Configuracion de latencia ──────────────────────────────────────
+
+
+class TestLlmConfig:
+    """Regresion: constantes de configuracion para latencia <15s (Issue B-14).
+
+    Valores hardcodeados que impactan directamente el tiempo de inferencia
+    en CPU (VPS CX43, 8 vCPU, sin GPU). Si alguien los modifica sin medir
+    el impacto, estos tests fallan.
+    """
+
+    def test_n_ctx_leq_1024(self) -> None:
+        """n_ctx no debe exceder 1024 para mantener latencia en CPU.
+
+        Cada token de contexto suma al prefill. A 2048, el decode en CPU
+        toma ~77s. A 1024 con prompt comprimido, el target es <15s E2E.
+        """
+        assert _N_CTX <= 1024, (
+            f"_N_CTX={_N_CTX} excede el limite de 1024. "
+            "Aumentar sin medir impacto degrada latencia a >60s en CPU."
+        )
+
+    def test_n_threads_minimo_4(self) -> None:
+        """n_threads debe usar al menos 4 hilos para CPU moderna.
+
+        En VPS CX43 (8 vCPU), usar menos de 4 hilos desperdicia capacidad
+        de computo paralelo. cpu_count() puede retornar None en entornos
+        restringidos (Docker sin --cpuset-cpus), cayendo a fallback 4.
+        """
+        assert _N_THREADS >= 4, (
+            f"_N_THREADS={_N_THREADS} es menor a 4. "
+            "Pocos hilos incrementan latencia de decode en CPU."
+        )
+
+    def test_n_threads_no_excede_16(self) -> None:
+        """Limite superior para evitar oversubscription.
+
+        Mas hilos que nucleos fisicos causa contention y degrada
+        rendimiento. 16 es el doble de los 8 vCPU del CX43, margen
+        para hyperthreading.
+        """
+        assert _N_THREADS <= 16, (
+            f"_N_THREADS={_N_THREADS} muy alto. "
+            "Oversubscription de hilos degrada inferencia."
+        )
+
+    def test_system_prompt_char_count_razonable(self) -> None:
+        """El system prompt comprimido debe ser compacto (Issue B-14).
+
+        Cada char sumado al system prompt incrementa el prefill del LLM.
+        Original era ~2000 chars, comprimido debe ser menos.
+        Limite: 1400 chars. Justificar aumento con datos de latencia.
+        """
+        assert len(SYSTEM_PROMPT) <= 1400, (
+            f"SYSTEM_PROMPT={len(SYSTEM_PROMPT)} chars excede el limite "
+            "de 1400. Comprime o justifica con datos de latencia."
+        )
+
+    def test_total_prompt_chars_under_limit(self) -> None:
+        """El prompt total (system + tools) no debe exceder un limite.
+
+        Para n_ctx=1024 con Qwen2.5 (3-5 chars/token), el prompt total
+        deberia estar bajo ~5000 chars. Es un guard suave contra
+        regresiones que inflan el contexto sin ajustar n_ctx.
+        """
+        total_chars = len(SYSTEM_PROMPT) + len(_TOOLS_SECTION)
+        assert total_chars <= 5500, (
+            f"Prompt total={total_chars} chars demasiado grande "
+            f"para n_ctx={_N_CTX}. Reduce o aumenta n_ctx."
+        )
 
 
 # ── Parseo de respuestas ────────────────────────────────────────
