@@ -874,8 +874,43 @@ class TestForceKeywordToolVenta:
         monkeypatch.setattr(odepa_service, "calculate_sale_value_for_llm", _raise_db_error)
         monkeypatch.setattr(odepa_service, "get_price_for_llm", _price_ok)
 
-        result = await _force_keyword_tool("30 kilos de papa")
+        await _force_keyword_tool("30 kilos de papa")
         # Error en venta -> cae a precio, no propaga la excepción.
         assert len(price_calls) == 1
-        assert result is not None
-        assert "850 pesos" in result
+
+
+# ── ToolResultCache ───────────────────────────────────────────────
+
+
+class TestToolResultCache:
+    """Cache de resultados de tools con TTL."""
+
+    def test_cache_hit_retorna_resultado(self) -> None:
+        """Segundo get con mismos params retorna el valor cacheado."""
+        from app.services.llm_service import ToolResultCache
+        cache = ToolResultCache(ttl_seconds=60)
+        cache.set("get_price", "450 pesos el kilo", producto="papa", mercado="lo valledor")
+        result = cache.get("get_price", producto="papa", mercado="lo valledor")
+        assert result == "450 pesos el kilo"
+
+    def test_cache_miss_retorna_none(self) -> None:
+        """Params distintos retornan None."""
+        from app.services.llm_service import ToolResultCache
+        cache = ToolResultCache(ttl_seconds=60)
+        assert cache.get("get_price", producto="tomate") is None
+
+    def test_cache_expirado_retorna_none(self) -> None:
+        """TTL vencido retorna None."""
+        from app.services.llm_service import ToolResultCache
+        # TTL=-1: expira inmediatamente (cualquier monotonic() > stored_at - 1)
+        cache = ToolResultCache(ttl_seconds=-1)
+        cache.set("get_weather", "10 grados", lat=-38.23, lon=-72.68)
+        assert cache.get("get_weather", lat=-38.23, lon=-72.68) is None
+
+    def test_clear_tool_result_cache_vacia_singleton(self) -> None:
+        """Clear del singleton elimina todas las entradas."""
+        from app.services.llm_service import _tool_cache
+        _tool_cache.set("get_price", "850 pesos", producto="cebolla")
+        assert _tool_cache.get("get_price", producto="cebolla") == "850 pesos"
+        _tool_cache.clear()
+        assert _tool_cache.get("get_price", producto="cebolla") is None

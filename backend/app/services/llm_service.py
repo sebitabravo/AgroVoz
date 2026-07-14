@@ -101,6 +101,62 @@ _N_CTX = 1024
 # (8 vCPU). cpu_count retorna None en entornos restringidos -> fallback 4.
 _N_THREADS: int = max(os.cpu_count() or 4, 4)
 
+# ── Cache de resultados de tools ──────────────────────────────────
+# Los precios ODEPA se actualizan una vez al dia (cron 06:00 AM).
+# Cachear resultados de get_price/get_price_history/get_weather evita
+# llamadas redundantes al LLM para la misma consulta repetida.
+# TTL corto (30 min) como safety net; el sync de ODEPA limpia el cache.
+# Clave: hash de (tool_name, frozenset(params.items())).
+
+
+class ToolResultCache:
+    """Cache en memoria de resultados de tool calls con TTL.
+
+    Evita llamadas redundantes al LLM cuando el mismo producto+mercado
+    se consulta repetidamente. Los precios ODEPA se actualizan una vez
+    al dia, asi que cachear por 30 min es seguro.
+    """
+
+    def __init__(self, ttl_seconds: int = 1800) -> None:
+        self._cache: dict[int, tuple[float, str]] = {}
+        self._ttl = ttl_seconds
+
+    def _key(self, tool_name: str, params: dict[str, object]) -> int:
+        return hash((tool_name, frozenset(params.items())))
+
+    def get(self, tool_name: str, **params: object) -> str | None:
+        """Retorna resultado cacheado si existe y no expiro."""
+        import time as _t
+        entry = self._cache.get(self._key(tool_name, params))
+        if entry is None:
+            return None
+        stored_at, result = entry
+        if _t.monotonic() - stored_at > self._ttl:
+            del self._cache[self._key(tool_name, params)]
+            return None
+        logger.debug("Cache hit — tool=%s params=%s", tool_name, params)
+        return result
+
+    def set(self, tool_name: str, result: str, **params: object) -> None:
+        """Guarda resultado en cache con timestamp."""
+        import time as _t
+        self._cache[self._key(tool_name, params)] = (_t.monotonic(), result)
+
+    def clear(self) -> None:
+        """Limpia todo el cache (llamado tras sync de ODEPA)."""
+        self._cache.clear()
+        logger.info("ToolResultCache limpiado — sync ODEPA")
+
+
+# Singleton del cache, compartido entre requests.
+_tool_cache = ToolResultCache()
+
+
+def clear_tool_result_cache() -> None:
+    """Limpia el cache de resultados de tools. Llamado tras sync de ODEPA."""
+    _tool_cache.clear()
+
+
 # ── Tool definitions (Qwen2.5 native XML format) ──────────────────
 #
 # Qwen2.5-3B-Instruct usa un formato nativo con tags XML para tool calling.
@@ -428,6 +484,14 @@ async def _execute_tool(
         arguments = {**arguments, "phone_hash": phone_hash}
     valid_args = _filter_handler_args(handler, arguments)
 
+    # Cache de resultados: evita llamadas redundantes al LLM + DB para
+    # la misma consulta repetida (precios ODEPA solo cambian 1 vez al dia).
+    cacheable = frozenset({"get_price", "get_price_history", "get_weather"})
+    if name in cacheable:
+        cached = _tool_cache.get(name, **valid_args)
+        if cached is not None:
+            return cached
+
     try:
         # Las tools de precio necesitan session de DB. Se la pasamos como kwarg.
         if name in ("get_price", "get_price_history", "calculate_sale_value"):
@@ -468,6 +532,9 @@ async def _execute_tool(
                 result = await asyncio.to_thread(handler, **valid_args)
 
         logger.info("Tool %s ejecutada — args=%s", name, valid_args)
+        # Cachear resultado para evitar futuras llamadas al LLM.
+        if name in cacheable:
+            _tool_cache.set(name, str(result), **valid_args)
         return str(result)
     except (RuntimeError, ValueError, OSError, SQLAlchemyError) as exc:
         logger.exception("Error ejecutando tool %s: %s", name, exc)

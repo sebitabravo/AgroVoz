@@ -473,6 +473,9 @@ async def sync_odepa(session: Session | None = None) -> SyncResult:
             actualizados,
             settings.odepa_productos_list,
         )
+        # Invalidar cache de resultados de tools: los precios cambiaron.
+        from app.services.llm_service import clear_tool_result_cache
+        clear_tool_result_cache()
         _ok = True
         return SyncResult(insertados=insertados, actualizados=actualizados)
     finally:
