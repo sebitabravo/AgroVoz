@@ -11,9 +11,8 @@ Fecha: 2026-07-13 20:21:11.172835
 """
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # Identificadores de revisión usados por Alembic.
 revision: str = '639a5eff9407'

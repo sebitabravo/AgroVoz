@@ -21,7 +21,6 @@ from app.models.alert import Alert
 from app.services.alert_service import evaluar_alertas_clima
 from app.services.weather_service import ForecastDay
 
-
 # ── Helpers ────────────────────────────────────────────────────────
 
 

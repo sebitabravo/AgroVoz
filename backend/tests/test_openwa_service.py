@@ -10,6 +10,7 @@ httpx.AsyncClient se mockea para no tocar la red ni el gateway real.
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
 import httpx
@@ -410,6 +411,6 @@ async def test_send_audio_con_lid_resuelto(
 
     assert result == {"status": "sent"}
     # POST debe usar @c.us, no @lid
-    post_calls = [c for c in client.post.call_args_list]
+    post_calls = list(client.post.call_args_list)
     assert len(post_calls) == 1
     assert post_calls[0][1]["json"]["chatId"] == "56912345678@c.us"

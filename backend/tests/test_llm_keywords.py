@@ -8,7 +8,6 @@ Cobertura:
 Sin dependencias externas (DB, LLM, red).
 """
 
-import pytest
 
 from app.services.llm_keywords import _detect_greeting, _extract_product_from_query
 

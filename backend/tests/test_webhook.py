@@ -412,7 +412,7 @@ async def test_openwa_send_audio_resuelve_lid_a_telefono(
 
     assert result == {"status": "sent"}
     # Verificar que la llamada POST usa el numero resuelto (@c.us, no @lid)
-    post_calls = [c for c in mock_client.post.call_args_list]
+    post_calls = list(mock_client.post.call_args_list)
     assert len(post_calls) == 1
     sent_payload = post_calls[0][1]["json"]
     assert sent_payload["chatId"] == "56912345678@c.us"
