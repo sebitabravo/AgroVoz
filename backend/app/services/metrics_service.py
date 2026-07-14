@@ -251,7 +251,7 @@ def get_daily_counts(db: Session, days: int = _DEFAULT_WINDOW_DAYS) -> list[Dail
             func.date(Consultation.created_at).label("dia"),
             func.count(Consultation.id).label("total"),
         )
-        .where(Consultation.created_at >= cutoff)
+        .where(Consultation.created_at >= cutoff, Consultation.is_test.is_(False))
         .group_by(func.date(Consultation.created_at))
         .order_by(func.date(Consultation.created_at))
     )
@@ -271,7 +271,7 @@ def get_latency_stats(db: Session, days: int = _DEFAULT_WINDOW_DAYS) -> LatencyS
     cutoff = _days_ago(days)
     stmt = (
         select(Consultation.latency_ms)
-        .where(Consultation.created_at >= cutoff)
+        .where(Consultation.created_at >= cutoff, Consultation.is_test.is_(False))
         .order_by(Consultation.latency_ms)
     )
     valores = [int(v) for v in db.execute(stmt).scalars().all()]
@@ -301,7 +301,7 @@ def get_stage_stats(db: Session, days: int = _DEFAULT_WINDOW_DAYS) -> StageStats
             func.avg(Consultation.tts_ms),
             func.count(Consultation.id),
         )
-        .where(Consultation.created_at >= cutoff)
+        .where(Consultation.created_at >= cutoff, Consultation.is_test.is_(False))
         .where(
             (Consultation.whisper_ms > 0)
             | (Consultation.llm_ms > 0)
@@ -328,7 +328,7 @@ def get_intent_distribution(db: Session, days: int = _DEFAULT_WINDOW_DAYS) -> In
     cutoff = _days_ago(days)
     stmt = (
         select(Consultation.intent, func.count(Consultation.id))
-        .where(Consultation.created_at >= cutoff)
+        .where(Consultation.created_at >= cutoff, Consultation.is_test.is_(False))
         .group_by(Consultation.intent)
     )
     conteos: dict[str, int] = {intent: int(total) for intent, total in db.execute(stmt).all()}
@@ -379,6 +379,7 @@ def get_top_products(
     stmt = select(Consultation.query_text).where(
         Consultation.created_at >= cutoff,
         Consultation.intent == "precio",
+        Consultation.is_test.is_(False),
     )
     textos = [t.lower() for (t,) in db.execute(stmt).all()]
     productos = list_products(db)
@@ -417,12 +418,15 @@ def get_error_stats(db: Session, days: int = _DEFAULT_WINDOW_DAYS, limit: int = 
     """Tasa de error (intent desconocido) + últimos errores."""
     cutoff = _days_ago(days)
     total = db.scalar(
-        select(func.count(Consultation.id)).where(Consultation.created_at >= cutoff)
+        select(func.count(Consultation.id)).where(
+            Consultation.created_at >= cutoff, Consultation.is_test.is_(False)
+        )
     ) or 0
     errores = db.scalar(
         select(func.count(Consultation.id)).where(
             Consultation.created_at >= cutoff,
             Consultation.intent == "desconocido",
+            Consultation.is_test.is_(False),
         )
     ) or 0
     rate = errores / total if total else 0.0
@@ -432,6 +436,7 @@ def get_error_stats(db: Session, days: int = _DEFAULT_WINDOW_DAYS, limit: int = 
         .where(
             Consultation.created_at >= cutoff,
             Consultation.intent == "desconocido",
+            Consultation.is_test.is_(False),
         )
         .order_by(Consultation.created_at.desc())
         .limit(limit)
@@ -458,7 +463,7 @@ def get_recent_queries(db: Session, hours: int = 24, limit: int = 20) -> list[Re
     cutoff = datetime.datetime.now() - datetime.timedelta(hours=hours)
     stmt = (
         select(Consultation)
-        .where(Consultation.created_at >= cutoff)
+        .where(Consultation.created_at >= cutoff, Consultation.is_test.is_(False))
         .order_by(Consultation.created_at.desc())
         .limit(limit)
     )
@@ -486,12 +491,15 @@ def get_dashboard_kpis(db: Session) -> DashboardKpis:
     ayer_inicio = hoy_inicio - datetime.timedelta(days=1)
 
     today = db.scalar(
-        select(func.count(Consultation.id)).where(Consultation.created_at >= hoy_inicio)
+        select(func.count(Consultation.id)).where(
+            Consultation.created_at >= hoy_inicio, Consultation.is_test.is_(False)
+        )
     ) or 0
     yesterday = db.scalar(
         select(func.count(Consultation.id)).where(
             Consultation.created_at >= ayer_inicio,
             Consultation.created_at < hoy_inicio,
+            Consultation.is_test.is_(False),
         )
     ) or 0
 
@@ -509,12 +517,13 @@ def get_dashboard_kpis(db: Session) -> DashboardKpis:
 
     active_7d = db.scalar(
         select(func.count(func.distinct(Consultation.phone_hash))).where(
-            Consultation.created_at >= hoy_inicio - datetime.timedelta(days=6)
+            Consultation.created_at >= hoy_inicio - datetime.timedelta(days=6),
+            Consultation.is_test.is_(False),
         )
     ) or 0
     farmers_today = db.scalar(
         select(func.count(func.distinct(Consultation.phone_hash))).where(
-            Consultation.created_at >= hoy_inicio
+            Consultation.created_at >= hoy_inicio, Consultation.is_test.is_(False)
         )
     ) or 0
 
@@ -552,14 +561,20 @@ def get_dashboard_kpis(db: Session) -> DashboardKpis:
 def get_total_30d(db: Session) -> int:
     """Total de consultas procesadas en los últimos 30 días."""
     cutoff = datetime.datetime.now() - datetime.timedelta(days=30)
-    return db.scalar(select(func.count(Consultation.id)).where(Consultation.created_at >= cutoff)) or 0
+    return db.scalar(
+        select(func.count(Consultation.id)).where(
+            Consultation.created_at >= cutoff, Consultation.is_test.is_(False)
+        )
+    ) or 0
 
 
 def get_audio_avg(db: Session, days: int = 30) -> float:
     """Promedio de duración de audio de entrada en segundos (ventana N días)."""
     cutoff = datetime.datetime.now() - datetime.timedelta(days=days)
     avg_ms = db.scalar(
-        select(func.avg(Consultation.audio_duration_ms)).where(Consultation.created_at >= cutoff)
+        select(func.avg(Consultation.audio_duration_ms)).where(
+            Consultation.created_at >= cutoff, Consultation.is_test.is_(False)
+        )
     )
     return round(avg_ms / 1000, 1) if avg_ms else 0.0
 
@@ -575,6 +590,7 @@ def get_all_odepa_products(db: Session, days: int = 30) -> list[ProductStat]:
     stmt = select(Consultation.query_text).where(
         Consultation.created_at >= cutoff,
         Consultation.intent == "precio",
+        Consultation.is_test.is_(False),
     )
     textos = [t.lower() for (t,) in db.execute(stmt).all()]
 
@@ -677,6 +693,7 @@ def get_piloto_metrics(db: Session) -> PilotoMetrics:
     # Necesitamos contar los grupos, no los distinct. Usar subquery.
     subq = (
         select(Consultation.phone_hash)
+        .where(Consultation.is_test.is_(False))
         .group_by(Consultation.phone_hash)
         .having(func.count(Consultation.id) >= 3)
     ).subquery()
@@ -687,6 +704,7 @@ def get_piloto_metrics(db: Session) -> PilotoMetrics:
     # 2. Consultas por productor: AVG de consultas por phone_hash.
     stmt_por_productor = (
         select(func.count(Consultation.id))
+        .where(Consultation.is_test.is_(False))
         .group_by(Consultation.phone_hash)
     )
     conteos = [int(c) for c in db.execute(stmt_por_productor).scalars().all()]
@@ -695,17 +713,17 @@ def get_piloto_metrics(db: Session) -> PilotoMetrics:
     # 3. % útiles: feedback="util" / feedback IS NOT NULL * 100.
     total_con_feedback = db.scalar(
         select(func.count(Consultation.id)).where(
-            Consultation.feedback.is_not(None)
+            Consultation.feedback.is_not(None), Consultation.is_test.is_(False)
         )
     ) or 0
     total_feedback_util = db.scalar(
         select(func.count(Consultation.id)).where(
-            Consultation.feedback == "util"
+            Consultation.feedback == "util", Consultation.is_test.is_(False)
         )
     ) or 0
     total_feedback_no_util = db.scalar(
         select(func.count(Consultation.id)).where(
-            Consultation.feedback == "no_util"
+            Consultation.feedback == "no_util", Consultation.is_test.is_(False)
         )
     ) or 0
     pct_utiles = (
@@ -716,18 +734,21 @@ def get_piloto_metrics(db: Session) -> PilotoMetrics:
 
     # 4. Latencia promedio.
     latencia_promedio = db.scalar(
-        select(func.avg(Consultation.latency_ms))
+        select(func.avg(Consultation.latency_ms)).where(Consultation.is_test.is_(False))
     ) or 0.0
 
     # 5. Decisiones productivas.
     decisiones = db.scalar(
         select(func.count(Consultation.id)).where(
-            Consultation.decision_productiva == True  # noqa: E712
+            Consultation.decision_productiva == True,  # noqa: E712
+            Consultation.is_test.is_(False),
         )
     ) or 0
 
     # Total de consultas.
-    total = db.scalar(select(func.count(Consultation.id))) or 0
+    total = db.scalar(
+        select(func.count(Consultation.id)).where(Consultation.is_test.is_(False))
+    ) or 0
 
     return PilotoMetrics(
         productores_activos=int(productores_activos),
@@ -774,7 +795,7 @@ def get_piloto_consultations_with_feedback(db: Session, limit: int = 50) -> list
     """
     consultas = db.scalars(
         select(Consultation)
-        .where(Consultation.feedback.is_not(None))
+        .where(Consultation.feedback.is_not(None), Consultation.is_test.is_(False))
         .order_by(Consultation.created_at.desc())
         .limit(limit)
     ).all()
