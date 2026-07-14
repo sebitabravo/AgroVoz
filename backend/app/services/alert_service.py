@@ -91,7 +91,7 @@ async def create_price_alert(
     Raises:
         AlertServiceError: Si falla alguna validacion.
     """
-    condicion = condicion.strip()  # type: ignore[assignment]  # .strip() en CondicionPrecio no cambia el valor
+    condicion = cast(CondicionPrecio, condicion.strip())
     if condicion not in CONDICIONES_VALIDAS:
         raise AlertServiceError(f"Condicion invalida: {condicion}")
     if umbral <= 0:
@@ -126,7 +126,7 @@ async def create_clima_alert(
     session: Session,
     phone_hash: str,
     wa_chat_id: str | None,
-    umbral_clima: str,  # str en vez de UmbralClima: acepta alias "lluvia"
+    umbral_clima: str,  # str intencional: borde no confiable, acepta alias "lluvia" antes de normalizar/validar
 ) -> str:
     """Crea una alerta climatica fija.
 
