@@ -33,6 +33,9 @@ def phone_to_chat_id(target: str) -> str:
     Open-WA espera `chatId` con formato `<numero>@c.us` o `<lid>@lid`.
     Si ya viene como chatId valido (@c.us o @lid), lo retorna sin cambios.
     Si es un numero E.164 (ej: +56912345678), agrega el sufijo @c.us.
+
+    Para @lid que requieren resolucion de numero real, usar
+    resolve_contact_phone() ANTES de llamar a esta funcion.
     """
     stripped = target.strip()
     if stripped.endswith("@c.us") or stripped.endswith("@lid"):
@@ -147,6 +150,60 @@ class OpenWAService:
 
         raise RuntimeError("No hay sesiones listas en Open-WA. Escanee el QR para iniciar sesion.")
 
+    async def resolve_contact_phone(self, contact_id: str) -> str | None:
+        """Resuelve un identificador de contacto (@lid) a su numero de telefono real.
+
+        Open-WA expone un endpoint REST que mapea LID (identificador de privacidad
+        de WhatsApp) a numero MSISDN real llamando a los servidores de WhatsApp.
+        Este metodo es best-effort: puede retornar None si el engine no puede
+        resolver el LID (contacto no validado aun, sesion incompleta, etc).
+
+        No lanza excepcion: los errores de red o API se loguean como warning y
+        se retorna None. El caller debe manejar el fallback (ej: intentar enviar
+        al @lid original, o log de error).
+
+        Args:
+            contact_id: Identificador del contacto, tipicamente en formato @lid
+                       (ej: "248069442560050@lid"). El @lid se preserva en la URL.
+
+        Returns:
+            String con los digitos del numero telefonico (ej: "56912345678"),
+            o None si no se pudo resolver. Nunca retorna el numero con sufijo.
+        """
+        try:
+            session_id = await self._resolve_session_id()
+            safe_id = quote(contact_id, safe="")
+            url = f"{self._base_url}/api/sessions/{session_id}/contacts/{safe_id}/phone"
+
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.get(url, headers=self._headers())
+                response.raise_for_status()
+                data: dict[str, object] = response.json()
+
+            phone = data.get("phone")
+            if phone:
+                phone_str = str(phone)
+                logger.info(
+                    "LID resuelto a telefono — contact_id_hash=%s phone_hash=%s",
+                    _hash_phone_for_log(contact_id),
+                    _hash_phone_for_log(phone_str),
+                )
+                return phone_str
+            else:
+                logger.warning(
+                    "LID no pudo resolverse (retorno null) — contact_id_hash=%s",
+                    _hash_phone_for_log(contact_id),
+                )
+                return None
+
+        except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+            logger.warning(
+                "Error resolviendo LID (fallback al @lid original) — contact_id_hash=%s error=%s",
+                _hash_phone_for_log(contact_id),
+                exc,
+            )
+            return None
+
     async def download_media(self, message_id: str) -> bytes:
         """Descarga el archivo de audio de un mensaje vía la API de Open-WA.
 
@@ -212,8 +269,11 @@ class OpenWAService:
     async def send_text(self, target: str, message: str) -> dict[str, object]:
         """Envia un mensaje de texto a un numero de WhatsApp via Open-WA.
 
+        Si target es @lid (Linked ID), intenta resolver el numero real ANTES de enviar.
+        Si la resolucion falla, intenta enviar al @lid original como fallback.
+
         Args:
-            target: Numero E.164 ("+56912345678") o chatId ("569@c.us", "lid@lid").
+            target: Numero E.164 ("+56912345678") o chatId ("569@c.us", "248069442560050@lid").
             message: Texto del mensaje a enviar.
 
         Returns:
@@ -222,9 +282,21 @@ class OpenWAService:
         Raises:
             httpx.HTTPError: Si la API de Open-WA falla.
         """
+        # Resolver LID a telefono real si es necesario (best-effort)
+        final_target = target
+        if target.endswith("@lid"):
+            resolved_phone = await self.resolve_contact_phone(target)
+            if resolved_phone:
+                final_target = f"{resolved_phone}@c.us"
+            else:
+                logger.warning(
+                    "No se pudo resolver LID; intentando con @lid original — target_hash=%s",
+                    _hash_phone_for_log(target),
+                )
+
         session_id = await self._resolve_session_id()
         url = f"{self._base_url}/api/sessions/{session_id}/messages/send-text"
-        payload = {"chatId": phone_to_chat_id(target), "text": message}
+        payload = {"chatId": phone_to_chat_id(final_target), "text": message}
 
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.post(url, headers=self._headers(), json=payload)
@@ -239,8 +311,11 @@ class OpenWAService:
     async def send_audio(self, target: str, audio_path: str, caption: str | None = None) -> dict[str, object]:
         """Envia un mensaje de audio a un numero de WhatsApp via Open-WA.
 
+        Si target es @lid (Linked ID), intenta resolver el numero real ANTES de enviar.
+        Si la resolucion falla, intenta enviar al @lid original como fallback.
+
         Args:
-            target: Numero E.164 ("+56912345678") o chatId ("569@c.us", "lid@lid").
+            target: Numero E.164 ("+56912345678") o chatId ("569@c.us", "248069442560050@lid").
             audio_path: Ruta local al archivo .ogg a enviar.
             caption: Texto opcional que acompaña al audio.
 
@@ -250,13 +325,26 @@ class OpenWAService:
         Raises:
             httpx.HTTPError: Si la API de Open-WA falla.
         """
+        # Resolver LID a telefono real si es necesario (best-effort)
+        final_target = target
+        if target.endswith("@lid"):
+            resolved_phone = await self.resolve_contact_phone(target)
+            if resolved_phone:
+                final_target = f"{resolved_phone}@c.us"
+            else:
+                logger.warning(
+                    "No se pudo resolver LID; intentando con @lid original — target_hash=%s",
+                    _hash_phone_for_log(target),
+                )
+                # Fallback: intentar con el @lid original, aunque es probable que falle
+
         session_id = await self._resolve_session_id()
         url = f"{self._base_url}/api/sessions/{session_id}/messages/send-audio"
         # Open-WA espera los campos base64 + mimetype al TOP LEVEL, no anidados.
         # No soporta el campo `ptt` para notas de voz con este endpoint.
         audio_fields = _audio_file_to_base64_payload(audio_path)
         payload: dict[str, object] = {
-            "chatId": phone_to_chat_id(target),
+            "chatId": phone_to_chat_id(final_target),
             "base64": audio_fields["base64"],
             "mimetype": audio_fields["mimetype"],
         }

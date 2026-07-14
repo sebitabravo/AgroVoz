@@ -301,3 +301,115 @@ def test_base_url_sin_trailing_slash(monkeypatch: pytest.MonkeyPatch) -> None:
 
     service = OpenWAService()
     assert service._base_url == "http://openwa:2785"
+
+
+# ── resolve_contact_phone (fix P0: LID resolution) ─────────────────
+
+@pytest.mark.asyncio
+async def test_resolve_contact_phone_exitoso(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """resolve_contact_phone retorna el numero MSISDN resuelto."""
+    monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
+    monkeypatch.setattr(settings, "openwa_api_key", "k")
+
+    client = AsyncMock()
+    client.get.return_value = _mock_response({"phone": "56912345678"})
+    _patch_async_client(monkeypatch, client)
+    OpenWAService._cached_session_id = "sess-1"
+
+    service = OpenWAService()
+    phone = await service.resolve_contact_phone("248069442560050@lid")
+
+    assert phone == "56912345678"
+    # Verificar que se llamo GET a /contacts/{id}/phone
+    client.get.assert_called_once()
+    called_url = client.get.call_args[0][0]
+    assert "/contacts/" in called_url
+    assert "/phone" in called_url
+
+
+@pytest.mark.asyncio
+async def test_resolve_contact_phone_retorna_null_best_effort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """resolve_contact_phone retorna None si el servidor devuelve phone=null."""
+    monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
+    monkeypatch.setattr(settings, "openwa_api_key", "k")
+
+    client = AsyncMock()
+    client.get.return_value = _mock_response({"phone": None})
+    _patch_async_client(monkeypatch, client)
+    OpenWAService._cached_session_id = "sess-1"
+
+    service = OpenWAService()
+    phone = await service.resolve_contact_phone("248069442560050@lid")
+
+    assert phone is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_contact_phone_http_error_no_lanza(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """resolve_contact_phone no lanza excepcion en error de red (best-effort)."""
+    monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
+    monkeypatch.setattr(settings, "openwa_api_key", "k")
+
+    client = AsyncMock()
+    resp = Mock()
+    resp.raise_for_status = Mock(
+        side_effect=httpx.ConnectError("gateway down")
+    )
+    client.get.return_value = resp
+    _patch_async_client(monkeypatch, client)
+    OpenWAService._cached_session_id = "sess-1"
+
+    service = OpenWAService()
+    # No debe lanzar excepcion
+    phone = await service.resolve_contact_phone("248069442560050@lid")
+
+    assert phone is None
+
+
+@pytest.mark.asyncio
+async def test_send_audio_con_lid_resuelto(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """send_audio con @lid resuelve a numero @c.us antes de enviar."""
+    monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
+    monkeypatch.setattr(settings, "openwa_api_key", "k")
+
+    audio_file = tmp_path / "hello.ogg"
+    audio_file.write_bytes(b"FAKE_OGG")
+
+    client = AsyncMock()
+
+    # Mock dos respuestas: GET /contacts/{id}/phone y POST /messages/send-audio
+    async def mock_get_or_post(url, **kwargs):
+        resp = Mock()
+        resp.raise_for_status = Mock()
+        if "/contacts/" in url and "/phone" in url:
+            resp.json = Mock(return_value={"phone": "56912345678"})
+        else:
+            resp.json = Mock(return_value={"status": "sent"})
+        return resp
+
+    client.get.side_effect = mock_get_or_post
+    client.post.side_effect = mock_get_or_post
+
+    mock_ctx = AsyncMock()
+    mock_ctx.__aenter__.return_value = client
+    mock_ctx.__aexit__.return_value = None
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: mock_ctx)
+
+    OpenWAService._cached_session_id = "sess-1"
+    service = OpenWAService()
+    result = await service.send_audio("248069442560050@lid", str(audio_file))
+
+    assert result == {"status": "sent"}
+    # POST debe usar @c.us, no @lid
+    post_calls = [c for c in client.post.call_args_list]
+    assert len(post_calls) == 1
+    assert post_calls[0][1]["json"]["chatId"] == "56912345678@c.us"
