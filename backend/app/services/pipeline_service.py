@@ -104,6 +104,22 @@ _WELCOME_TEXT = (
 
 
 
+def _sanitize_for_log(text: str, max_len: int = 80) -> str:
+    """Neutraliza saltos de línea y caracteres de control para evitar log injection.
+
+    Anonimiza el contenido acotando longitud. Cumple con Ley 21.719 (transcripciones anonimizadas).
+
+    Args:
+        text: Texto a sanitizar (ej: transcripción del usuario).
+        max_len: Largo máximo en caracteres (default 80).
+
+    Returns:
+        Texto con caracteres de control escapados y acotado a max_len.
+    """
+    cleaned = text.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+    return cleaned[:max_len]
+
+
 def _get_tts_service() -> TTSService:
     """Retorna la instancia singleton de TTSService."""
     global _tts_service
@@ -409,8 +425,33 @@ class AgroVozPipeline:
         try:
             response_text = await answer(transcribed_text.strip(), phone_hash=chat_id_hash)
         except (TimeoutError, RuntimeError, OSError, ValueError):
-            logger.exception("Error en generacion LLM — usando fallback")
-            response_text = "Tuve un problema al procesar tu consulta. ¿Podrias intentar de nuevo?"
+            logger.exception("Error en generacion LLM — activando fallback determinista")
+            # Fallback determinista: resolver sin LLM usando keywords.
+            # Precedencia: venta -> precio -> clima (misma que _force_keyword_tool).
+            # Issue #121: si el LLM cae, respondemos con datos reales de
+            # ODEPA/OpenMeteo en vez de un mensaje generico de disculpa.
+            from app.services.llm_keywords import _force_keyword_tool
+
+            try:
+                forced_result = await _force_keyword_tool(
+                    transcribed_text.strip(), phone_hash=chat_id_hash
+                )
+            except (TimeoutError, RuntimeError, OSError, ValueError, SQLAlchemyError):
+                logger.exception("Fallback determinista tambien fallo")
+                forced_result = None
+
+            if forced_result:
+                response_text = forced_result
+                logger.warning(
+                    "Respuesta DEGRADADA (sin LLM) — query=%s phone_hash=%s",
+                    _sanitize_for_log(transcribed_text),
+                    chat_id_hash[:8] if chat_id_hash else "sin_chat",
+                )
+            else:
+                response_text = (
+                    "Tuve un problema al procesar tu consulta. "
+                    "¿Podrias intentar de nuevo?"
+                )
 
         intent = AgroVozPipeline._detect_intent(transcribed_text, response_text)
         return response_text, intent
