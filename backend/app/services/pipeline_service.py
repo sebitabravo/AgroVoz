@@ -45,6 +45,12 @@ _PIPELINE_TIMEOUT = 120.0
 # Con RTF CPU ~2x, limitamos a 12s para evitar threads zombie.
 _MAX_WHISPER_AUDIO_MS = 12_000
 
+# Timeout para transcripcion Whisper (segundos).
+# 60s da margen al cold-load del modelo (~32s en CPU ARM64 en VPS CX43
+# para Whisper small 242M params). Solo el primer request paga cold-load;
+# requests posteriores completan en <5s.
+_WHISPER_TIMEOUT = 60.0
+
 # Cache singleton de TTSService: el modelo Piper se carga UNA vez.
 _tts_service: TTSService | None = None
 
@@ -727,7 +733,7 @@ class AgroVozPipeline:
                 whisper = WhisperService()
                 transcription: dict[str, object] = await asyncio.wait_for(
                     asyncio.to_thread(whisper.transcribe, str(wav_path)),
-                    timeout=30.0,
+                    timeout=_WHISPER_TIMEOUT,
                 )
                 transcribed_text = str(transcription.get("text", ""))
                 whisper_ms_ref[0] = int((time.monotonic() - t_whisper_start) * 1000)

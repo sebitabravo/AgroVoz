@@ -20,6 +20,7 @@ from app.schemas.pipeline import AudioResponse
 from app.services.pipeline_service import (
     _MAX_WHISPER_AUDIO_MS,
     _PIPELINE_TIMEOUT,
+    _WHISPER_TIMEOUT,
     AgroVozPipeline,
 )
 
@@ -716,6 +717,60 @@ class TestProcess:
         assert result.intent == "precio"  # Intent detectado de la respuesta
         assert result.tts_ms == 0
 
+    # ── Whisper cold-load timeout ──────────────────────────────
+
+    async def test_whisper_timeout_no_rompe_pipeline(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        wav_path: Path,
+    ) -> None:
+        """Si Whisper excede el timeout, pipeline continua sin transcripcion.
+
+        Regression test: el timeout aumento de 30s a 60s para cubrir
+        cold-load del modelo (~32s en CPU). Si el timeout se supera
+        igual, el pipeline debe continuar elegantemente (no crashear).
+        """
+        # Reducir WHISPER_TIMEOUT a un valor tiny para el test
+        monkeypatch.setattr(
+            "app.services.pipeline_service._WHISPER_TIMEOUT",
+            0.05,
+        )
+
+        # Mock Whisper que se demora mas que el timeout reducido
+        def fake_transcribe_slow(_self: object, audio_path: str) -> dict[str, object]:
+            import time
+            time.sleep(0.1)  # > 0.05s timeout
+            return _fake_whisper_output()
+
+        monkeypatch.setattr(
+            "app.services.pipeline_service.WhisperService.transcribe",
+            fake_transcribe_slow,
+        )
+
+        # LLM NO deberia llamarse porque no hay texto transcrito
+        llm_called = False
+
+        async def fake_answer_check(_query: str, phone_hash: str | None = None) -> str:
+            nonlocal llm_called
+            llm_called = True
+            return "no deberia generarse"
+
+        monkeypatch.setattr("app.services.llm_service.answer", fake_answer_check)
+        _mock_db_save(monkeypatch)
+
+        pipeline = AgroVozPipeline()
+        result = await pipeline.process(
+            wav_path=wav_path,
+            audio_duration_ms=3000,
+            message_id="test-whisper-slow",
+            chat_id_hash="hash-whisper-slow",
+            request_id="req-whisper-slow",
+        )
+
+        assert not llm_called, "LLM no debe llamarse si Whisper fallo"
+        assert result.audio_path == ""
+        assert result.intent == "desconocido"
+
     # ── Benchmark ───────────────────────────────────────────────
 
     async def test_benchmark_tiene_metricas_por_etapa(
@@ -841,6 +896,10 @@ class TestTimeout:
 
     def test_max_whisper_audio_ms_es_12_segundos(self) -> None:
         assert _MAX_WHISPER_AUDIO_MS == 12_000
+
+    def test_whisper_timeout_es_60_segundos(self) -> None:
+        """Whisper timeout debe ser 60s para margen de cold-load (~32s en CPU)."""
+        assert _WHISPER_TIMEOUT == 60.0
 
 
 # ── Onboarding: primer contacto y bienvenida (#86) ──────────────────
