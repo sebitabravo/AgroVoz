@@ -108,7 +108,7 @@ def test_optimize_sqlite_aplica_busy_timeout_y_cache() -> None:
         busy_timeout = conn.execute(text("PRAGMA busy_timeout")).scalar()
         cache_size = conn.execute(text("PRAGMA cache_size")).scalar()
 
-    assert busy_timeout == 5000
+    assert busy_timeout == 10000
     assert cache_size == -8000
 
 

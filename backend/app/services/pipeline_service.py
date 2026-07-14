@@ -432,6 +432,9 @@ class AgroVozPipeline:
 
         Fire-and-forget: si falla, loguea el error pero no interrumpe
         el pipeline. La consulta se pierde, pero el audio se responde igual.
+        Reintenta una vez si el primer intento falla por error transitorio
+        de SQLite (WAL corruption, conexion en estado inconsistente tras
+        llamadas largas a to_thread, bug B-11).
 
         Args:
             phone_hash: Hash del numero de telefono.
@@ -452,42 +455,56 @@ class AgroVozPipeline:
         from app.models.consultation import Consultation
 
         latency_ms = int((_time.monotonic() - start_time) * 1000)
-        try:
-            session = SessionLocal()
+
+        # Retry una vez si el primer intento falla por error transitorio.
+        # Cada intento usa una sesion NUEVA (conexion fresca via NullPool)
+        # para evitar reutilizar una conexion sqlite3 en estado inconsistente
+        # tras llamadas largas a asyncio.to_thread (bug B-11).
+        for _attempt in range(2):
             try:
-                consulta = Consultation(
-                    phone_hash=phone_hash,
-                    intent=intent,
-                    producto=producto,
-                    query_text=query_text,
-                    response_text=response_text,
-                    audio_duration_ms=audio_duration_ms,
-                    latency_ms=latency_ms,
-                    whisper_ms=whisper_ms,
-                    llm_ms=llm_ms,
-                    tts_ms=tts_ms,
-                    requires_review=requires_review,
-                )
-                session.add(consulta)
-                session.commit()
-                logger.debug(
-                    "Consulta guardada — phone_hash=%s intent=%s producto=%s latency_ms=%d",
-                    phone_hash[:8],
-                    intent,
-                    producto,
-                    latency_ms,
-                )
+                session = SessionLocal()
+                try:
+                    consulta = Consultation(
+                        phone_hash=phone_hash,
+                        intent=intent,
+                        producto=producto,
+                        query_text=query_text,
+                        response_text=response_text,
+                        audio_duration_ms=audio_duration_ms,
+                        latency_ms=latency_ms,
+                        whisper_ms=whisper_ms,
+                        llm_ms=llm_ms,
+                        tts_ms=tts_ms,
+                        requires_review=requires_review,
+                    )
+                    session.add(consulta)
+                    session.commit()
+                    logger.debug(
+                        "Consulta guardada — phone_hash=%s intent=%s producto=%s latency_ms=%d",
+                        phone_hash[:8],
+                        intent,
+                        producto,
+                        latency_ms,
+                    )
+                    return
+                except SQLAlchemyError:
+                    session.rollback()
+                    raise
+                finally:
+                    session.close()
             except SQLAlchemyError:
-                session.rollback()
-                raise
-            finally:
-                session.close()
-        except SQLAlchemyError:
-            logger.exception(
-                "Error guardando consulta en DB — phone_hash=%s intent=%s",
-                phone_hash[:8],
-                intent,
-            )
+                if _attempt == 0:
+                    logger.warning(
+                        "Error guardando consulta (reintento) — phone_hash=%s intent=%s",
+                        phone_hash[:8],
+                        intent,
+                    )
+                else:
+                    logger.exception(
+                        "Error guardando consulta en DB — phone_hash=%s intent=%s",
+                        phone_hash[:8],
+                        intent,
+                    )
 
     @staticmethod
     def _update_previous_feedback(

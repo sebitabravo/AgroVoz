@@ -18,6 +18,7 @@ from collections.abc import Generator
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 
@@ -33,9 +34,13 @@ class Base(DeclarativeBase):
 # Motor SQLite con WAL mode para acceso concurrente.
 # Sin WAL mode, lecturas y escrituras simultáneas causan SQLITE_BUSY.
 # check_same_thread=False necesario porque FastAPI corre en múltiples hilos.
+# NullPool explícito: cada sesión abre una conexión fresca y la cierra al
+# terminar. Evita conexiones recicladas en estado inconsistente después de
+# llamadas largas a asyncio.to_thread() (bug B-11).
 engine = create_engine(
     settings.database_url,
     echo=False,
+    poolclass=NullPool,
     connect_args={"check_same_thread": False},
 )
 
@@ -47,7 +52,7 @@ def _optimize_sqlite(dbapi_connection: object, connection_record: object) -> Non
     PRAGMAs aplicados:
     - journal_mode=WAL: escritura concurrente sin bloquear lectores
     - synchronous=NORMAL: seguro con WAL, duplica throughput de escritura
-    - busy_timeout=5000: espera 5s en vez de fallar con SQLITE_BUSY
+    - busy_timeout=10000: espera 10s en vez de fallar con SQLITE_BUSY
     - cache_size=-8000: 8 MB de cache de páginas (-8k * 1024 bytes)
     - temp_store=MEMORY: tablas temporales en RAM (~10x más rápido)
     - foreign_keys=ON: integridad referencial
@@ -60,7 +65,7 @@ def _optimize_sqlite(dbapi_connection: object, connection_record: object) -> Non
     cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA synchronous=NORMAL")
-    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.execute("PRAGMA busy_timeout=10000")
     cursor.execute("PRAGMA cache_size=-8000")
     cursor.execute("PRAGMA temp_store=MEMORY")
     cursor.execute("PRAGMA foreign_keys=ON")
