@@ -1,4 +1,4 @@
-"""Tests para WeatherSlidingWindow y check_weather_rate_limit.
+"""Tests para SlidingWindowRateLimiter y check_weather_rate_limit.
 
 Cobertura:
   - Unit: permite 30 req, bloquea 31, buckets independientes por IP,
@@ -10,9 +10,15 @@ from unittest.mock import AsyncMock, patch
 
 from httpx import ASGITransport, AsyncClient
 
-from app.core.rate_limiter import WeatherSlidingWindow
+from app.core.config import settings
+from app.core.rate_limiter import SlidingWindowRateLimiter
 from app.main import app
 from app.services.weather_service import WeatherData
+
+
+def _make_limiter() -> SlidingWindowRateLimiter:
+    """Limiter con el límite real de clima (settings.weather_rate_limit_per_minute)."""
+    return SlidingWindowRateLimiter(lambda: settings.weather_rate_limit_per_minute)
 
 # ── Fixtures ───────────────────────────────────────────────────────
 
@@ -33,7 +39,7 @@ def _weather_data_mock() -> WeatherData:
     )
 
 
-# ── Unit tests: WeatherSlidingWindow ───────────────────────────────
+# ── Unit tests: SlidingWindowRateLimiter (límite de clima) ─────────
 
 
 class TestWeatherSlidingWindow:
@@ -41,7 +47,7 @@ class TestWeatherSlidingWindow:
 
     def test_permite_primeros_30_requests(self) -> None:
         """30 requests desde la misma IP deben ser permitidos."""
-        limiter = WeatherSlidingWindow()
+        limiter = _make_limiter()
         now = 1000.0
         for i in range(30):
             retry = limiter.check("10.0.0.1", now=now + i * 0.1)
@@ -49,7 +55,7 @@ class TestWeatherSlidingWindow:
 
     def test_bloquea_request_31(self) -> None:
         """El 31er request desde la misma IP debe ser bloqueado con Retry-After."""
-        limiter = WeatherSlidingWindow()
+        limiter = _make_limiter()
         now = 1000.0
         for i in range(30):
             retry = limiter.check("10.0.0.2", now=now + i * 0.1)
@@ -61,7 +67,7 @@ class TestWeatherSlidingWindow:
 
     def test_ips_independientes(self) -> None:
         """Dos IPs distintas tienen buckets independientes."""
-        limiter = WeatherSlidingWindow()
+        limiter = _make_limiter()
         now = 1000.0
 
         # IP 1: 30 requests -> todos permitidos
@@ -77,7 +83,7 @@ class TestWeatherSlidingWindow:
 
     def test_ventana_deslizante_libera_slots(self) -> None:
         """Timestamps viejos salen de la ventana y liberan slots."""
-        limiter = WeatherSlidingWindow()
+        limiter = _make_limiter()
         # 30 requests en t=1000
         for i in range(30):
             assert limiter.check("10.0.0.1", now=1000.0 + i * 0.01) is None
@@ -90,7 +96,7 @@ class TestWeatherSlidingWindow:
 
     def test_retry_after_correcto(self) -> None:
         """Retry-After debe ser el tiempo hasta que el request mas antiguo expire."""
-        limiter = WeatherSlidingWindow()
+        limiter = _make_limiter()
         # 30 requests en t=1000, espaciados 0.5s -> ultimo en t=1014.5
         now = 1000.0
         for i in range(30):
@@ -105,7 +111,7 @@ class TestWeatherSlidingWindow:
 
     def test_limpieza_ips_inactivas(self) -> None:
         """IPs sin actividad en la ventana son eliminadas del diccionario."""
-        limiter = WeatherSlidingWindow()
+        limiter = _make_limiter()
         limiter.check("10.0.0.1", now=1000.0)
         limiter.check("10.0.0.2", now=1000.0)
 
@@ -121,7 +127,7 @@ class TestWeatherSlidingWindow:
 
     def test_reset_limpia_todo(self) -> None:
         """reset() debe vaciar contadores y timestamp de limpieza."""
-        limiter = WeatherSlidingWindow()
+        limiter = _make_limiter()
         for i in range(15):
             limiter.check("10.0.0.1", now=1000.0 + i)
         limiter._last_cleanup = 5000.0
@@ -133,7 +139,7 @@ class TestWeatherSlidingWindow:
 
     def test_usa_time_monotonic_por_defecto(self) -> None:
         """Si no se inyecta `now`, debe usar time.monotonic()."""
-        limiter = WeatherSlidingWindow()
+        limiter = _make_limiter()
         retry = limiter.check("10.0.0.99")
         assert retry is None
 

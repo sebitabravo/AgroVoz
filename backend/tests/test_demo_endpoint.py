@@ -8,11 +8,11 @@ import pytest
 from httpx import AsyncClient
 
 from app.core import config
-from app.core.rate_limiter import DemoSlidingWindow
+from app.core.rate_limiter import SlidingWindowRateLimiter
 
 
 @pytest.fixture
-def demo_limiter() -> DemoSlidingWindow:
+def demo_limiter() -> SlidingWindowRateLimiter:
     """Retorna el limiter de demo y lo limpia al finalizar."""
     from app.core.rate_limiter import _demo_limiter
 
@@ -48,7 +48,7 @@ async def test_demo_preguntar_retorna_respuesta_texto_y_audio(
     client: AsyncClient,
     enable_demo_endpoint: None,
     mock_demo_process: None,
-    demo_limiter: DemoSlidingWindow,
+    demo_limiter: SlidingWindowRateLimiter,
 ) -> None:
     """POST /demo/preguntar retorna texto, audio base64, intent y latencia."""
     response = await client.post(
@@ -69,7 +69,7 @@ async def test_demo_preguntar_acepta_texto_vacio_con_audio(
     client: AsyncClient,
     enable_demo_endpoint: None,
     monkeypatch: pytest.MonkeyPatch,
-    demo_limiter: DemoSlidingWindow,
+    demo_limiter: SlidingWindowRateLimiter,
 ) -> None:
     """El endpoint acepta audio base64 cuando el texto esta vacio."""
     from app.schemas.demo import DemoRespuestaResponse
@@ -98,7 +98,7 @@ async def test_demo_preguntar_acepta_texto_vacio_con_audio(
 async def test_demo_preguntar_rechaza_consulta_vacia(
     client: AsyncClient,
     enable_demo_endpoint: None,
-    demo_limiter: DemoSlidingWindow,
+    demo_limiter: SlidingWindowRateLimiter,
 ) -> None:
     """POST /demo/preguntar retorna 400 si faltan texto y audio."""
     response = await client.post(
@@ -115,7 +115,7 @@ async def test_demo_rate_limit_bloquea_requests_excedidas(
     enable_demo_endpoint: None,
     mock_demo_process: None,
     monkeypatch: pytest.MonkeyPatch,
-    demo_limiter: DemoSlidingWindow,
+    demo_limiter: SlidingWindowRateLimiter,
 ) -> None:
     """El endpoint bloquea con 429 cuando se excede demo_rate_limit_per_minute."""
     monkeypatch.setattr(config.settings, "demo_rate_limit_per_minute", 2)
@@ -140,7 +140,7 @@ async def test_demo_rate_limit_bloquea_requests_excedidas(
 async def test_demo_preguntar_rechaza_cuando_disabled(
     client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
-    demo_limiter: DemoSlidingWindow,
+    demo_limiter: SlidingWindowRateLimiter,
 ) -> None:
     """El endpoint retorna 503 cuando DEMO_ENDPOINT_ENABLED es False."""
     monkeypatch.setattr(config.settings, "demo_endpoint_enabled", False)
@@ -157,7 +157,7 @@ async def test_demo_preguntar_rechaza_cuando_disabled(
 async def test_demo_status_rechaza_cuando_disabled(
     client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
-    demo_limiter: DemoSlidingWindow,
+    demo_limiter: SlidingWindowRateLimiter,
 ) -> None:
     """GET /demo/status retorna 503 cuando DEMO_ENDPOINT_ENABLED es False."""
     monkeypatch.setattr(config.settings, "demo_endpoint_enabled", False)
