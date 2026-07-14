@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Precios ODEPA · AgroVoz Admin{% endblock %}
+{% block page_title %}Precios ODEPA — Tabla de referencia{% endblock %}
+{% block page_meta %}Últimos 100 precios con conversión a kilo{% endblock %}
+
+{% block content %}
+<div class="card">
+  <p style="font-size:15px;font-weight:700;letter-spacing:-.015em;margin-bottom:18px">Precios recientes ODEPA</p>
+  <p style="font-size:13px;color:#7e827a;margin-bottom:18px">Distingue entre el precio crudo en la unidad de venta ODEPA y el precio calculado por kilo.</p>
+
+  {% if precios %}
+  <div style="overflow-x:auto">
+    <table style="width:100%;font-size:13px">
+      <thead>
+        <tr style="border-bottom:1px solid #e8e7e0">
+          <th style="text-align:left;padding:10px 0;font-weight:700;color:#2d3d2f">Producto</th>
+          <th style="text-align:left;padding:10px 0;font-weight:700;color:#2d3d2f">Mercado</th>
+          <th style="text-align:left;padding:10px 0;font-weight:700;color:#2d3d2f">Unidad de venta</th>
+          <th style="text-align:right;padding:10px 0;font-weight:700;color:#2d3d2f">Precio ({{ "{{ unidad }}" }})</th>
+          <th style="text-align:right;padding:10px 0;font-weight:700;color:#2d3d2f">Precio por kilo</th>
+          <th style="text-align:left;padding:10px 0;font-weight:700;color:#2d3d2f">Fecha</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in precios %}
+        <tr style="border-bottom:1px solid #f5f4f0;padding:10px 0">
+          <td style="padding:10px 0;color:#2d3d2f">{{ p.producto }}</td>
+          <td style="padding:10px 0;color:#2d3d2f">{{ p.mercado }}</td>
+          <td style="padding:10px 0;color:#7e827a;font-size:12px">{{ p.unidad }}</td>
+          <td style="padding:10px 0;text-align:right;color:#2d3d2f;font-weight:500">${{ "{{ p.precio_kg|round(2) }}" }}</td>
+          <td style="padding:10px 0;text-align:right;color:#2d3d2f">
+            {% if p.precio_por_kilo is not none %}
+            <span style="font-weight:500">${{ "{{ (p.precio_por_kilo|round(2)) }}" }}</span>
+            {% else %}
+            <span style="color:#b8beb8;font-style:italic">No convertible</span>
+            {% endif %}
+          </td>
+          <td style="padding:10px 0;color:#7e827a;font-size:12px">{{ p.fecha[:10] }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="notice">Sin precios cargados aún.</p>
+  {% endif %}
+</div>
+{% endblock %}
