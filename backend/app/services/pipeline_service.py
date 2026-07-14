@@ -408,8 +408,33 @@ class AgroVozPipeline:
         try:
             response_text = await answer(transcribed_text.strip(), phone_hash=chat_id_hash)
         except (TimeoutError, RuntimeError, OSError, ValueError):
-            logger.exception("Error en generacion LLM — usando fallback")
-            response_text = "Tuve un problema al procesar tu consulta. ¿Podrias intentar de nuevo?"
+            logger.exception("Error en generacion LLM — activando fallback determinista")
+            # Fallback determinista: resolver sin LLM usando keywords.
+            # Precedencia: venta -> precio -> clima (misma que _force_keyword_tool).
+            # Issue #121: si el LLM cae, respondemos con datos reales de
+            # ODEPA/OpenMeteo en vez de un mensaje generico de disculpa.
+            from app.services.llm_keywords import _force_keyword_tool
+
+            try:
+                forced_result = await _force_keyword_tool(
+                    transcribed_text.strip(), phone_hash=chat_id_hash
+                )
+            except (TimeoutError, RuntimeError, OSError, ValueError, SQLAlchemyError):
+                logger.exception("Fallback determinista tambien fallo")
+                forced_result = None
+
+            if forced_result:
+                response_text = forced_result
+                logger.warning(
+                    "Respuesta DEGRADADA (sin LLM) — query=%.100s phone_hash=%s",
+                    transcribed_text,
+                    chat_id_hash[:8] if chat_id_hash else "sin_chat",
+                )
+            else:
+                response_text = (
+                    "Tuve un problema al procesar tu consulta. "
+                    "¿Podrias intentar de nuevo?"
+                )
 
         intent = AgroVozPipeline._detect_intent(transcribed_text, response_text)
         return response_text, intent

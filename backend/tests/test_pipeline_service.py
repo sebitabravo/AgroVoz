@@ -280,16 +280,123 @@ class TestGenerateResponse:
         assert intent == "desconocido"
 
     async def test_answer_lanza_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Si answer() lanza excepcion, retorna fallback pero no propaga."""
+        """Si answer() lanza excepcion y no hay keywords, retorna disculpa generica.
+
+        Path (d) del fallback determinista (Issue #121): sin producto, clima
+        ni venta en la query → mensaje generico + intent "desconocido".
+        """
 
         async def fake_answer_error(_query: str, phone_hash: str | None = None) -> str:
             raise RuntimeError("LLM colapso")
 
+        # Mockear _force_keyword_tool → None: sin keywords, no hay fallback real.
+        async def fake_force_none(_query: str, phone_hash: str | None = None) -> str | None:
+            return None
+
         monkeypatch.setattr("app.services.llm_service.answer", fake_answer_error)
+        monkeypatch.setattr(
+            "app.services.llm_keywords._force_keyword_tool",
+            fake_force_none,
+        )
         # Query SIN keywords de precio ni clima → intent debe ser "desconocido"
         text, intent = await AgroVozPipeline._generate_response("hola como estas", "test-chat-hash")
         assert "problema" in text.lower() or "intentar" in text.lower()
         assert intent == "desconocido"
+
+    async def test_answer_lanza_exception_fallback_precio(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Path (a): LLM cae, keyword de producto → fallback get_price real.
+
+        Issue #121: si el LLM falla pero la query contiene un producto
+        agricola, se llama get_price_for_llm via _force_keyword_tool
+        y se responde con datos reales de ODEPA.
+        """
+
+        async def fake_answer_error(_query: str, phone_hash: str | None = None) -> str:
+            raise RuntimeError("LLM colapso")
+
+        async def fake_force_precio(query: str, phone_hash: str | None = None) -> str:
+            return "Papa esta a $1.200 el kilo en Lo Valledor, precio del 14/07/2026 segun ODEPA."
+
+        monkeypatch.setattr("app.services.llm_service.answer", fake_answer_error)
+        monkeypatch.setattr(
+            "app.services.llm_keywords._force_keyword_tool",
+            fake_force_precio,
+        )
+
+        text, intent = await AgroVozPipeline._generate_response(
+            "a cuanto esta la papa en lo valledor", "test-chat-hash"
+        )
+        assert "$1.200" in text
+        assert "papa" in text.lower()
+        assert intent == "precio"
+
+    async def test_answer_lanza_exception_fallback_clima(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Path (b): LLM cae, keyword de clima → fallback get_weather real.
+
+        Issue #121: si el LLM falla pero la query contiene keywords
+        climaticos, se llama get_weather(lat=-38.23, lon=-72.68) via
+        _force_keyword_tool y se responde con datos de OpenMeteo.
+        """
+
+        async def fake_answer_error(_query: str, phone_hash: str | None = None) -> str:
+            raise RuntimeError("LLM colapso")
+
+        async def fake_force_clima(query: str, phone_hash: str | None = None) -> str:
+            return (
+                "En Traiguen ahora: 8 grados, nublado, humedad 80%, "
+                "viento 3.5 m/s, lluvia 0.8 mm, segun OpenMeteo."
+            )
+
+        monkeypatch.setattr("app.services.llm_service.answer", fake_answer_error)
+        monkeypatch.setattr(
+            "app.services.llm_keywords._force_keyword_tool",
+            fake_force_clima,
+        )
+
+        text, intent = await AgroVozPipeline._generate_response(
+            "como esta el clima en traiguen", "test-chat-hash"
+        )
+        assert "grados" in text.lower()
+        assert "traiguen" in text.lower()
+        assert intent == "clima"
+
+    async def test_answer_lanza_exception_fallback_venta(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Path (c): LLM cae, patron "N kilos de producto" → fallback venta.
+
+        Issue #121: si el LLM falla pero la query contiene un patron
+        de venta ("N kilos de producto"), se llama calculate_sale_value
+        via _force_keyword_tool.
+        """
+
+        async def fake_answer_error(_query: str, phone_hash: str | None = None) -> str:
+            raise RuntimeError("LLM colapso")
+
+        async def fake_force_venta(query: str, phone_hash: str | None = None) -> str:
+            return (
+                "Por 30 kilos de papa recibiras aproximadamente "
+                "$36.000 pesos chilenos a precio de $1.200 el kilo "
+                "en Lo Valledor, segun ODEPA."
+            )
+
+        monkeypatch.setattr("app.services.llm_service.answer", fake_answer_error)
+        monkeypatch.setattr(
+            "app.services.llm_keywords._force_keyword_tool",
+            fake_force_venta,
+        )
+
+        text, intent = await AgroVozPipeline._generate_response(
+            "voy a vender 30 kilos de papa", "test-chat-hash"
+        )
+        assert "kilos" in text.lower()
+        assert "papa" in text.lower()
+        assert "recibiras" in text.lower()
+        assert intent == "precio"
 
 
 # ── process() pipeline completo ────────────────────────────────────
