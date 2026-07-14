@@ -1,0 +1,528 @@
+---
+import Base from "../layouts/Base.astro";
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
+
+const pageTitle = "Demo Interactiva — AgroVoz";
+const pageDescription = "Proba AgroVoz desde el navegador. Escribi una pregunta sobre precios agricolas o clima y recibi la respuesta por voz.";
+---
+
+<Base title={pageTitle} description={pageDescription}>
+  <Header />
+  <main class="demo-page">
+    <section class="demo-hero">
+      <div class="demo-hero__inner">
+        <h1>Proba AgroVoz</h1>
+        <p>
+          Escribi una pregunta sobre precios de productos agricolas o el clima
+          en Traiguen. AgroVoz te responde con voz, como en WhatsApp.
+        </p>
+      </div>
+    </section>
+
+    <section class="demo-chat-section" aria-label="Chat de demostracion">
+      <div class="demo-chat-container">
+        <div class="chat-header">
+          <div class="chat-header__avatar" aria-hidden="true">A</div>
+          <div class="chat-header__info">
+            <span class="chat-header__name">AgroVoz</span>
+            <span class="chat-header__status" id="chat-status">en linea</span>
+          </div>
+        </div>
+
+        <div class="chat-messages" id="chat-messages" role="log" aria-live="polite" aria-label="Conversacion">
+          <div class="chat-date-divider"><span>Hoy</span></div>
+
+          <div class="chat-bubble chat-bubble--received">
+            <div class="chat-bubble__text">
+              Hola! Soy AgroVoz. Preguntame por el precio de la papa,
+              el tomate, la cebolla, o por el clima en Traiguen.
+            </div>
+            <span class="chat-bubble__time">Ahora</span>
+          </div>
+
+          <div class="chat-bubble chat-bubble--received">
+            <div class="chat-bubble__text">
+              Proba con:
+              <ul>
+                <li>A cuanto esta la papa?</li>
+                <li>Va a llover en Traiguen manana?</li>
+                <li>Cual es el precio del tomate?</li>
+              </ul>
+            </div>
+            <span class="chat-bubble__time">Ahora</span>
+          </div>
+        </div>
+
+        <div class="chat-input-bar">
+          <form id="chat-form" class="chat-form" autocomplete="off">
+            <input
+              type="text"
+              id="chat-input"
+              class="chat-input"
+              placeholder="Escribi tu pregunta..."
+              maxlength="500"
+              aria-label="Escribi tu consulta"
+              autofocus
+            />
+            <button
+              type="submit"
+              id="chat-send"
+              class="chat-send-btn"
+              aria-label="Enviar consulta"
+              disabled
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <div id="demo-state" class="demo-state" role="status" hidden>
+        <span id="demo-state-text"></span>
+      </div>
+    </section>
+  </main>
+  <Footer />
+</Base>
+
+<script>
+  const form = document.getElementById("chat-form") as HTMLFormElement;
+  const input = document.getElementById("chat-input") as HTMLInputElement;
+  const sendBtn = document.getElementById("chat-send") as HTMLButtonElement;
+  const messages = document.getElementById("chat-messages") as HTMLDivElement;
+  const statusEl = document.getElementById("chat-status") as HTMLSpanElement;
+  const stateEl = document.getElementById("demo-state") as HTMLDivElement;
+  const stateText = document.getElementById("demo-state-text") as HTMLSpanElement;
+
+  let loading = false;
+
+  input.addEventListener("input", () => {
+    sendBtn.disabled = input.value.trim().length === 0 || loading;
+  });
+
+  function setLoading(msg: string) {
+    loading = true;
+    sendBtn.disabled = true;
+    statusEl.textContent = "escribiendo...";
+    stateEl.hidden = false;
+    stateText.textContent = msg;
+  }
+
+  function clearLoading() {
+    loading = false;
+    sendBtn.disabled = input.value.trim().length === 0;
+    statusEl.textContent = "en linea";
+    stateEl.hidden = true;
+  }
+
+  function showError(msg: string) {
+    loading = false;
+    sendBtn.disabled = input.value.trim().length === 0;
+    statusEl.textContent = "en linea";
+    stateEl.hidden = false;
+    stateText.textContent = msg;
+    stateEl.classList.add("demo-state--error");
+    setTimeout(() => {
+      stateEl.hidden = true;
+      stateEl.classList.remove("demo-state--error");
+    }, 6000);
+  }
+
+  function addBubble(
+    text: string,
+    side: "sent" | "received",
+    time?: string,
+    audioB64?: string,
+  ) {
+    const bubble = document.createElement("div");
+    bubble.className = "chat-bubble chat-bubble--" + side;
+
+    const textDiv = document.createElement("div");
+    textDiv.className = "chat-bubble__text";
+    textDiv.textContent = text;
+
+    const timeSpan = document.createElement("span");
+    timeSpan.className = "chat-bubble__time";
+    timeSpan.textContent = time || new Date().toLocaleTimeString("es-CL", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    bubble.appendChild(textDiv);
+
+    if (audioB64 && side === "received") {
+      const audioContainer = document.createElement("div");
+      audioContainer.className = "chat-audio-player";
+
+      const playBtn = document.createElement("button");
+      playBtn.className = "chat-audio-btn";
+      playBtn.type = "button";
+      playBtn.setAttribute("aria-label", "Reproducir audio de respuesta");
+      playBtn.innerHTML =
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Escuchar';
+
+      let audio: HTMLAudioElement | null = null;
+      playBtn.addEventListener("click", () => {
+        if (audio) {
+          if (audio.paused) {
+            audio.play();
+            playBtn.innerHTML =
+              '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Pausar';
+          } else {
+            audio.pause();
+            playBtn.innerHTML =
+              '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Escuchar';
+          }
+          return;
+        }
+        const byteChars = atob(audioB64);
+        const byteNums = new Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) {
+          byteNums[i] = byteChars.charCodeAt(i);
+        }
+        const blob = new Blob([new Uint8Array(byteNums)], {
+          type: "audio/ogg; codecs=opus",
+        });
+        audio = new Audio(URL.createObjectURL(blob));
+        audio.play();
+        playBtn.innerHTML =
+          '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Pausar';
+        audio.addEventListener("ended", () => {
+          playBtn.innerHTML =
+            '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Escuchar';
+          audio = null;
+        });
+      });
+
+      audioContainer.appendChild(playBtn);
+      bubble.appendChild(audioContainer);
+    }
+
+    bubble.appendChild(timeSpan);
+    messages.appendChild(bubble);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  async function sendQuery(text: string) {
+    if (loading || !text.trim()) return;
+
+    addBubble(text, "sent");
+    setLoading("Consultando...");
+
+    try {
+      const apiUrl = window.location.origin + "/api/v1/demo/preguntar";
+      const resp = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ texto: text }),
+      });
+
+      if (!resp.ok) {
+        if (resp.status === 429) {
+          showError("Demasiadas consultas. Espera un minuto y volve a intentar.");
+        } else if (resp.status === 503) {
+          showError("La demo no esta disponible en este momento.");
+        } else {
+          const errData = await resp.json().catch(() => ({ detail: "Error inesperado" }));
+          showError(errData.detail || "Error al procesar tu consulta.");
+        }
+        return;
+      }
+
+      const data = await resp.json();
+      addBubble(data.texto, "received", undefined, data.audio_base64 || undefined);
+      clearLoading();
+    } catch {
+      showError("No se pudo conectar con AgroVoz. Esta corriendo el backend?");
+    }
+  }
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    sendBtn.disabled = true;
+    sendQuery(text);
+  });
+
+  messages.addEventListener("click", (e) => {
+    const target = e.target as HTMLElement;
+    if (target.tagName === "LI" && target.textContent) {
+      input.value = target.textContent.trim();
+      sendBtn.disabled = false;
+      form.dispatchEvent(new Event("submit"));
+    }
+  });
+</script>
+
+<style>
+  .demo-page { padding-top: 88px; }
+
+  .demo-hero {
+    padding: 3rem 1.5rem 2rem;
+    text-align: center;
+    max-width: 640px;
+    margin: 0 auto;
+  }
+
+  .demo-hero h1 {
+    font-size: clamp(1.75rem, 4vw, 2.5rem);
+    font-weight: 700;
+    color: var(--color-ink);
+    margin-bottom: 0.75rem;
+  }
+
+  .demo-hero p {
+    font-size: 1.05rem;
+    color: var(--color-muted);
+    line-height: 1.6;
+  }
+
+  .demo-chat-section {
+    max-width: 520px;
+    margin: 0 auto 4rem;
+    padding: 0 1rem;
+  }
+
+  .demo-chat-container {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+    display: flex;
+    flex-direction: column;
+    height: clamp(480px, 70vh, 640px);
+  }
+
+  .chat-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    background: var(--color-accent);
+    color: #fff;
+    flex-shrink: 0;
+  }
+
+  .chat-header__avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1.1rem;
+  }
+
+  .chat-header__name {
+    font-weight: 600;
+    font-size: 1rem;
+    display: block;
+  }
+
+  .chat-header__status {
+    font-size: 0.8rem;
+    opacity: 0.85;
+    display: block;
+  }
+
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+    background: #e8e1d9;
+    background-image:
+      radial-gradient(ellipse at 20% 50%, rgba(79, 125, 90, 0.04) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 20%, rgba(79, 125, 90, 0.03) 0%, transparent 50%);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .chat-date-divider {
+    text-align: center;
+    margin: 0.5rem 0;
+  }
+
+  .chat-date-divider span {
+    background: #e0d9ce;
+    color: #6b6b6b;
+    font-size: 0.75rem;
+    padding: 0.2rem 0.75rem;
+    border-radius: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .chat-bubble {
+    max-width: 85%;
+    padding: 0.6rem 0.75rem;
+    border-radius: 8px;
+    position: relative;
+    word-wrap: break-word;
+    animation: bubbleIn 0.25s ease-out;
+  }
+
+  @keyframes bubbleIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .chat-bubble--sent {
+    align-self: flex-end;
+    background: #d9fdd3;
+    border-top-right-radius: 2px;
+  }
+
+  .chat-bubble--received {
+    align-self: flex-start;
+    background: #fff;
+    border-top-left-radius: 2px;
+  }
+
+  .chat-bubble__text {
+    font-size: 0.925rem;
+    line-height: 1.45;
+    color: var(--color-ink);
+  }
+
+  .chat-bubble--received .chat-bubble__text ul {
+    margin-top: 0.4rem;
+    padding-left: 1.25rem;
+  }
+
+  .chat-bubble--received .chat-bubble__text li {
+    font-size: 0.85rem;
+    color: var(--color-muted);
+    cursor: pointer;
+    margin-bottom: 0.2rem;
+    transition: color 0.15s;
+  }
+
+  .chat-bubble--received .chat-bubble__text li:hover {
+    color: var(--color-accent);
+    text-decoration: underline;
+  }
+
+  .chat-bubble__time {
+    display: block;
+    text-align: right;
+    font-size: 0.7rem;
+    color: #8696a0;
+    margin-top: 0.25rem;
+  }
+
+  .chat-audio-player {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
+  }
+
+  .chat-audio-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: var(--color-accent-soft);
+    border: 1px solid var(--color-accent);
+    color: var(--color-accent-deep);
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 0.35rem 0.75rem;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .chat-audio-btn:hover {
+    background: var(--color-accent);
+    color: #fff;
+  }
+
+  .chat-input-bar {
+    padding: 0.6rem 0.75rem;
+    background: #f0f2f5;
+    border-top: 1px solid var(--color-line);
+    flex-shrink: 0;
+  }
+
+  .chat-form {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .chat-input {
+    flex: 1;
+    padding: 0.65rem 1rem;
+    border: none;
+    border-radius: 24px;
+    font-size: 0.925rem;
+    font-family: inherit;
+    background: #fff;
+    color: var(--color-ink);
+    outline: none;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  }
+
+  .chat-input::placeholder { color: #a0a8ae; }
+
+  .chat-input:focus {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 0 0 2px var(--color-accent);
+  }
+
+  .chat-send-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border: none;
+    border-radius: 50%;
+    background: var(--color-accent);
+    color: #fff;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: opacity 0.15s, transform 0.15s;
+  }
+
+  .chat-send-btn:hover:not(:disabled) { transform: scale(1.05); }
+
+  .chat-send-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .demo-state {
+    text-align: center;
+    margin-top: 0.75rem;
+    font-size: 0.875rem;
+    color: var(--color-muted);
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    background: var(--color-accent-soft);
+  }
+
+  .demo-state--error {
+    background: #fdecea;
+    color: #c0392b;
+  }
+
+  @media (max-width: 560px) {
+    .demo-hero { padding: 2rem 1rem 1.25rem; }
+    .demo-chat-section { padding: 0; }
+    .demo-chat-container {
+      border-radius: 0;
+      border-left: none;
+      border-right: none;
+      height: calc(100dvh - 88px - 100px);
+    }
+  }
+</style>
