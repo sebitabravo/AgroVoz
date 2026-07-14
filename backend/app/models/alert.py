@@ -32,15 +32,15 @@ class Alert(Base):
     # Se requiere porque el envio proactivo no puede derivarse del hash.
     # Nullable: una alerta creada por admin sin chat_id no se enviara.
     wa_chat_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    # Tipo de alerta: "precio" o "clima".
+    # Tipo de alerta. Valores definidos en app.core.constants.TipoAlerta.
     tipo: Mapped[str] = mapped_column(String(20), nullable=False)
     # Producto a monitorear (solo alertas de precio).
     producto: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    # Condicion de comparacion para precio: ">", "<", ">=", "<=".
+    # Condicion de comparacion para precio. Valores en app.core.constants.CondicionPrecio.
     condicion: Mapped[str | None] = mapped_column(String(2), nullable=True)
     # Umbral de precio por kilogramo (pesos chilenos), para alertas de precio.
     umbral: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
-    # Umbral climatico fijo: "helada" (minima < 2C) o "lluvia_extrema" (> 50 mm/24h).
+    # Umbral climatico fijo. Valores definidos en app.core.constants.UmbralClima.
     umbral_clima: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Estado de la alerta.
     activa: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

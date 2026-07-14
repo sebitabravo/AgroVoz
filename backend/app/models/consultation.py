@@ -31,9 +31,8 @@ class Consultation(Base):
     # Sin la pepper key, el hash no es reversible ni vulnerable a
     # rainbow tables de números chilenos (~10^8 combinaciones).
     phone_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    # Clasificación de la consulta: "precio", "clima", "desconocido".
-    # String(50) permite intents compuestos post-MVP sin migración
-    # (ej: "precio_historico", "clima_semanal").
+    # Clasificacion de la consulta. Valores definidos en app.core.constants.Intent.
+    # String(50) permite intents compuestos post-MVP sin migracion.
     intent: Mapped[str] = mapped_column(String(50), nullable=False, default="desconocido")
     # Producto detectado en la consulta (ej: "papa", "tomate"). Nullable
     # porque no toda consulta tiene producto (clima, resumen, desconocido).
@@ -67,10 +66,9 @@ class Consultation(Base):
         Boolean, nullable=False, default=False, server_default="0"
     )
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
-    # Feedback del agricultor tras la respuesta. Nullable para no romper
-    # registros existentes. Valores: "util", "no_util", None (sin feedback).
+    # Feedback del agricultor. Valores definidos en app.core.constants.FeedbackAgricultor.
     # Se detecta como intent especial en el pipeline: el agricultor responde
-    # "me sirvió" / "no me sirvió" y se asocia a la consulta ANTERIOR.
+    # "me sirvio" / "no me sirvio" y se asocia a la consulta ANTERIOR.
     feedback: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Marcado manual por el equipo como "caso de decisión productiva".
     # Criterio de éxito del piloto (sección 7.3 del paper).
