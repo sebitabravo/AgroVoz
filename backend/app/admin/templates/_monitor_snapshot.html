@@ -58,13 +58,16 @@
     </div>
     <div class="svc-grid">
       {% for svc in snapshot.services %}
+      {# lazy-load (Whisper/LLM/TTS sin cargar aún) no es una caída real — distinguirlo evita alarmar al equipo. #}
+      {% set svc_cls = 'warn' if (not svc.ok and 'lazy' in svc.detail) else ('ok' if svc.ok else 'fail') %}
+      {% set svc_label = 'En espera' if svc_cls == 'warn' else ('Operativo' if svc.ok else 'Caído') %}
       <div class="svc-card">
         <div class="svc-head">
           <span class="svc-name">{{ svc.name }}</span>
-          <span class="svc-dot {{ 'ok' if svc.ok else 'fail' }}"></span>
+          <span class="svc-dot {{ svc_cls }}"></span>
         </div>
         <p class="svc-meta">{{ svc.detail }}</p>
-        <p class="svc-status {{ 'ok' if svc.ok else 'fail' }}">{{ 'Operativo' if svc.ok else 'Caído' }}</p>
+        <p class="svc-status {{ svc_cls }}">{{ svc_label }}</p>
       </div>
       {% endfor %}
     </div>
