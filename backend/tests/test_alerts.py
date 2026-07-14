@@ -303,7 +303,7 @@ class TestEvaluarAlertasPrecio:
         seed_precio_papa: OdepaPrice,
         mock_enviar_alerta: AsyncMock,
     ) -> None:
-        seed_alerta_precio.last_triggered_at = datetime.now() - timedelta(hours=2)
+        seed_alerta_precio.last_triggered_at = datetime.now() - timedelta(minutes=30)
         db.commit()
 
         enviados = await evaluar_alertas_precio(db, settings)
