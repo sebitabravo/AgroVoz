@@ -950,3 +950,40 @@ class TestToolResultCache:
         r2 = await _execute_tool("get_price", {"producto": "papa"})
         assert call_count == 1  # no incrementó
         assert r2 == r1
+
+    @pytest.mark.asyncio
+    async def test_execute_tool_error_no_se_cachea(self, monkeypatch) -> None:
+        """Handler que lanza excepción: NO cachea el error, re-ejecuta handler.
+
+        Si un error se cacheara, la segunda llamada retornaria el mensaje
+        de error cacheado en vez de re-intentar la consulta real.
+        """
+        from app.services.llm_service import _execute_tool, _tool_cache
+
+        call_count = 0
+
+        def fake_handler_falla_primero(**kwargs: object) -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("DB caida transitoria")
+            return f"precio={kwargs.get('producto')}"
+
+        handlers = {"get_price": fake_handler_falla_primero}
+        monkeypatch.setattr(
+            "app.services.llm_service._get_tool_handlers",
+            lambda: handlers,
+        )
+
+        _tool_cache.clear()
+
+        # Primer llamado: handler lanza excepción
+        r1 = await _execute_tool("get_price", {"producto": "papa"})
+        assert call_count == 1
+        assert "error" in r1.lower()
+
+        # Segundo llamado mismos params: DEBE re-ejecutar handler
+        # (el error NO se cachea)
+        r2 = await _execute_tool("get_price", {"producto": "papa"})
+        assert call_count == 2  # se re-ejecutó
+        assert "precio=papa" in r2
