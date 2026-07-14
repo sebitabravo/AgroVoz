@@ -337,12 +337,15 @@ class AgroVozPipeline:
 
     @staticmethod
     async def _generate_response(transcribed_text: str, chat_id_hash: str) -> tuple[str, str]:
-        """Genera respuesta textual: resumen o LLM con Tool Calling.
+        """Genera respuesta textual: saludo rápido, resumen o LLM con Tool Calling.
 
-        Detecta si la consulta pide un resumen (por keyword). Si es así,
-        consulta la DB para generar estadísticas del agricultor. Si no,
-        ejecuta el LLM con Tool Calling normal. El hash tambien se usa
-        para resolver el mercado mas cercano segun comuna (Issue #89).
+        Detecta en orden (por eficiencia):
+        1. Saludos puros (sin pregunta) → respuesta rápida, sin LLM.
+        2. Resumen (por keyword) → estadísticas del agricultor.
+        3. Consulta normal → LLM con Tool Calling.
+
+        El hash también se usa para resolver el mercado más cercano según
+        comuna (Issue #89).
 
         Args:
             transcribed_text: Texto transcrito por Whisper.
@@ -357,7 +360,22 @@ class AgroVozPipeline:
                 "desconocido",
             )
 
-        # Detectar "resumen" por keyword ANTES del LLM: es mas rapido y determinista.
+        # 0. Detectar saludos puros ANTES del LLM: fast-path determinista sin latencia.
+        # Saludos simples ("hola", "buenos días") sin pregunta real no requieren LLM.
+        from app.services.llm_keywords import _detect_greeting
+
+        if _detect_greeting(transcribed_text):
+            logger.info(
+                "Saludo puro detectado — omitiendo LLM — query=%.100s chat_id_hash=%s",
+                transcribed_text,
+                chat_id_hash[:8] if chat_id_hash else "sin_chat",
+            )
+            return (
+                "¡Hola! Preguntame por el precio de algún producto o por el clima de Traiguén.",
+                "saludo",
+            )
+
+        # 1. Detectar "resumen" por keyword ANTES del LLM: es mas rapido y determinista.
         if AgroVozPipeline._is_resumen_query(transcribed_text):
             try:
                 # Import local para evitar ciclo con summary_service
@@ -377,7 +395,7 @@ class AgroVozPipeline:
                     "resumen",
                 )
 
-        # Pipeline normal: LLM con tool calling.
+        # 2. Pipeline normal: LLM con tool calling.
         # Import local para permitir mocking en tests
         from app.services.llm_service import answer
 

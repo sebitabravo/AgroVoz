@@ -185,3 +185,20 @@ CREATE INDEX idx_consultations_created ON consultations(created_at);
     Elimina 200+ líneas de config nginx manual. Traefik hace routing + SSL al vuelo.
     Dashboard UI para crear apps (Docker Compose, static). Zero-downtime deploys.
     Landing puede ser Dokploy static app o Cloudflare Pages (más simple para CDN).
+
+13. **Uvicorn workers=1 en producción (no 2).** Whisper y LLM son singletons de módulo
+    cargados en memoria. Con multiprocessing (workers>1), cada worker fork hereda
+    `_model_loaded=False` en su copia aislada de memoria, forzando recarga completa
+    del modelo en cada proceso (~2 GB RAM extra por worker, I/O contention en disco,
+    latencia LLM 25-60x peor). Un solo worker mantiene los modelos en memoria caliente
+    y cumple <15s target con throughput suficiente para el piloto (3-5 productores).
+    Escalar horizontalmente con load balancer + múltiples instancias post-MVP,
+    no con workers del mismo proceso.
+
+14. **Flag is_test en consultations para excluir datos sintéticos de métricas.**
+    Pytest y smoke tests insertan filas de prueba que sesgan success_rate,
+    percentiles de latencia y conteos del dashboard admin. En vez de borrar datos
+    (pérdida irreversible de histórico de tests), se agregó columna `is_test`
+    (default False) filtrando `is_test=False` en todas las queries de
+    metrics_service.py. Backfill manual para filas existentes con patrones
+    de prueba conocidos. Reversible: desmarcar is_test restaura la visibilidad.

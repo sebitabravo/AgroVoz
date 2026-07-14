@@ -354,21 +354,44 @@ async def test_webhook_secret_vacio_acepta_sin_validar(
 
 
 @pytest.mark.asyncio
-async def test_openwa_send_audio_usa_contrato_documentado(
+async def test_openwa_send_audio_resuelve_lid_a_telefono(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """send_audio debe enviar chatId + base64 + mimetype al top level, sin anidar."""
+    """send_audio resuelve @lid a telefono real antes de enviar (fix P0).
+
+    Cuando llega un @lid (contacto nuevo), resolve_contact_phone() lo mapea
+    a numero MSISDN real via OpenWA API. Si la resolucion es exitosa, se usa
+    f"{telefono}@c.us" como target final.
+    """
     from app.services.openwa_service import OpenWAService
 
     monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
     monkeypatch.setattr(settings, "openwa_api_key", "test-api-key")
 
     mock_client = AsyncMock()
-    mock_response = AsyncMock()
-    mock_response.raise_for_status = Mock()
-    mock_response.json = Mock(return_value={"status": "sent"})
-    mock_client.post.return_value = mock_response
+
+    # Mock TWO HTTP responses:
+    # 1. GET /contacts/{id}/phone (resolucion de LID) -> retorna numero real
+    # 2. POST /messages/send-audio (envio)
+    resolve_response = AsyncMock()
+    resolve_response.raise_for_status = Mock()
+    resolve_response.json = Mock(return_value={"phone": "56912345678"})
+
+    send_response = AsyncMock()
+    send_response.raise_for_status = Mock()
+    send_response.json = Mock(return_value={"status": "sent"})
+
+    # Alterna entre dos responses segun la URL
+    async def mock_post_or_get(url, **kwargs):
+        if "/contacts/" in url and "/phone" in url:
+            return resolve_response
+        elif "/messages/send-audio" in url:
+            return send_response
+        return send_response
+
+    mock_client.post.side_effect = mock_post_or_get
+    mock_client.get.side_effect = mock_post_or_get
 
     mock_ctx = AsyncMock()
     mock_ctx.__aenter__.return_value = mock_client
@@ -388,19 +411,21 @@ async def test_openwa_send_audio_usa_contrato_documentado(
         OpenWAService._cached_session_id = prev_cache
 
     assert result == {"status": "sent"}
-    mock_client.post.assert_called_once_with(
-        "http://openwa:2785/api/sessions/test-session-id/messages/send-audio",
-        headers={"X-API-Key": "test-api-key"},
-        json={
-            "chatId": "248069442560050@lid",  # @lid se pasa directo
-            "base64": "RkFLRV9IRUxMT19PR0c=",  # raw base64, sin data: prefix
-            "mimetype": "audio/ogg",
-        },
-    )
+    # Verificar que la llamada POST usa el numero resuelto (@c.us, no @lid)
+    post_calls = [c for c in mock_client.post.call_args_list]
+    assert len(post_calls) == 1
+    sent_payload = post_calls[0][1]["json"]
+    assert sent_payload["chatId"] == "56912345678@c.us"
+    assert sent_payload["base64"] == "RkFLRV9IRUxMT19PR0c="
+    assert sent_payload["mimetype"] == "audio/ogg"
 
 
 def test_openwa_phone_to_chat_id_normaliza() -> None:
-    """phone_to_chat_id soporta E.164, @c.us y @lid."""
+    """phone_to_chat_id soporta E.164, @c.us y @lid.
+
+    La resolucion de @lid a numero real se hace en send_audio/send_text
+    via resolve_contact_phone, no en phone_to_chat_id (que es un formatador simple).
+    """
     from app.services.openwa_service import phone_to_chat_id
 
     # E.164 -> @c.us
@@ -408,7 +433,7 @@ def test_openwa_phone_to_chat_id_normaliza() -> None:
     assert phone_to_chat_id("56912345678") == "56912345678@c.us"
     # @c.us -> directo
     assert phone_to_chat_id("56912345678@c.us") == "56912345678@c.us"
-    # @lid -> directo (nuevo formato WhatsApp LID)
+    # @lid -> directo (sin transformacion)
     assert phone_to_chat_id("248069442560050@lid") == "248069442560050@lid"
 
 

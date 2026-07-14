@@ -968,6 +968,60 @@ class TestPricesApiEndpoint:
         assert "está a" in data["texto"]
         assert "el kilo" in data["texto"]
 
+    async def test_precio_por_kilo_unidad_kilo_igual_precio_kg(
+        self, client: AsyncClient, tmp_path: Path
+    ) -> None:
+        """Regresión P1: para unidad kilo, precio_por_kilo == precio_kg."""
+        with next(_session_test_db(tmp_path)) as db:
+            _insertar_precio(
+                db, producto="papa", mercado="Lo Valledor",
+                precio_kg=Decimal("1200"), unidad="kg"
+            )
+
+        response = await client.get("/api/v1/prices/papa?mercado=Lo+Valledor")
+        assert response.status_code == 200
+        data = response.json()
+        assert "precio_por_kilo" in data
+        assert data["precio_por_kilo"] == 1200.0  # Igual al precio_kg
+        assert data["precio_kg"] == 1200.0
+
+    async def test_precio_por_kilo_malla_25kg_conversión_correcta(
+        self, client: AsyncClient, tmp_path: Path
+    ) -> None:
+        """Regresión P1: para malla 25kg, precio_por_kilo == precio_kg / 25."""
+        with next(_session_test_db(tmp_path)) as db:
+            _insertar_precio(
+                db, producto="papa", mercado="Lo Valledor",
+                precio_kg=Decimal("8833.33"), unidad="$/malla 25 kilos"
+            )
+
+        response = await client.get("/api/v1/prices/papa?mercado=Lo+Valledor")
+        assert response.status_code == 200
+        data = response.json()
+        assert "precio_por_kilo" in data
+        # 8833.33 / 25 = 353.33
+        assert abs(data["precio_por_kilo"] - 353.33) < 0.01
+        assert data["precio_kg"] == 8833.33
+        assert data["unidad"] == "$/malla 25 kilos"
+
+    async def test_precio_por_kilo_docena_atados_no_convertible(
+        self, client: AsyncClient, tmp_path: Path
+    ) -> None:
+        """Regresión P1: para unidad no convertible (docena), precio_por_kilo es None."""
+        with next(_session_test_db(tmp_path)) as db:
+            _insertar_precio(
+                db, producto="cilantro", mercado="Lo Valledor",
+                precio_kg=Decimal("1200"), unidad="$/docena de atados"
+            )
+
+        response = await client.get("/api/v1/prices/cilantro?mercado=Lo+Valledor")
+        assert response.status_code == 200
+        data = response.json()
+        assert "precio_por_kilo" in data
+        assert data["precio_por_kilo"] is None  # No convertible
+        assert data["precio_kg"] == 1200.0
+        assert data["unidad"] == "$/docena de atados"
+
 
 # ── Endpoints de descubrimiento ──────────────────────────────────────
 

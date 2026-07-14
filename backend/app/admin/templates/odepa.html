@@ -7,8 +7,12 @@
 {# ── Estado de sincronización ──────────────────────────── #}
 {% include "_odepa_status.html" %}
 
-{# ── Export CSV del historial de precios ────────────────── #}
-<div style="display:flex;justify-content:flex-end;margin-bottom:18px">
+{# ── Acciones de precios ────────────────────────────────── #}
+<div style="display:flex;justify-content:flex-end;gap:12px;margin-bottom:18px">
+  <a href="/admin/odepa/precios" class="btn">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18"/><path d="M3 6h18"/><path d="M3 18h18"/></svg>
+    Ver precios individuales
+  </a>
   <a href="/admin/prices/export" class="btn" download>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
     Exportar CSV

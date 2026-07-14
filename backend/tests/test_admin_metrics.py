@@ -54,8 +54,13 @@ def _consulta(
     whisper_ms: int = 0,
     llm_ms: int = 0,
     tts_ms: int = 0,
+    is_test: bool = False,
 ) -> Consultation:
-    """Inserta una Consultation de prueba."""
+    """Inserta una Consultation de prueba.
+
+    is_test=True simula una fila de datos sintéticos (seed/smoke test) para
+    verificar que las métricas del dashboard la excluyan.
+    """
     reg = Consultation(
         phone_hash=phone_hash,
         intent=intent,
@@ -67,6 +72,7 @@ def _consulta(
         llm_ms=llm_ms,
         tts_ms=tts_ms,
         created_at=created_at or datetime.datetime.now(),
+        is_test=is_test,
     )
     db.add(reg)
     db.commit()
@@ -171,6 +177,35 @@ class TestDashboard:
         # (2 - 1) / 1 * 100 = +100%.
         assert data["today_trend_pct"] == pytest.approx(100.0)
 
+    async def test_is_test_no_cuenta_en_kpis(
+        self, client: AsyncClient, tmp_path: Path
+    ) -> None:
+        """Regresión: filas is_test=True no deben sesgar los KPIs del dashboard.
+
+        148 filas de datos sintéticos ("Hola esta es una prueba") en la DB
+        real inflaban el conteo y distorsionaban success_rate/latencia.
+        """
+        with next(_session_test_db(tmp_path)) as db:
+            _consulta(db, intent="precio", phone_hash="h1" + "a" * 62)
+            _consulta(
+                db,
+                intent="desconocido",
+                phone_hash="h2" + "a" * 62,
+                query_text="Hola esta es una prueba",
+                response_text="Respuesta mock del LLM",
+                latency_ms=1,
+                is_test=True,
+            )
+        resp = await client.get(
+            "/api/v1/admin/metrics/dashboard", headers=_ADMIN_HEADERS
+        )
+        data = resp.json()
+        # Solo la consulta real cuenta; la de test queda afuera.
+        assert data["today"] == 1
+        assert data["success_rate"] == 1.0
+        assert data["error_count_24h"] == 0
+        assert data["active_farmers_7d"] == 1
+
 
 # ── /daily ─────────────────────────────────────────────────────────
 
@@ -250,6 +285,21 @@ class TestIntents:
         assert data["precio"] == 2
         assert data["clima"] == 1
         assert data["desconocido"] == 1
+
+    async def test_is_test_excluido_del_conteo(
+        self, client: AsyncClient, tmp_path: Path
+    ) -> None:
+        """Regresión: filas is_test=True no deben aparecer en la distribución."""
+        with next(_session_test_db(tmp_path)) as db:
+            _consulta(db, intent="precio")
+            _consulta(db, intent="desconocido", is_test=True)
+            _consulta(db, intent="desconocido", is_test=True)
+        resp = await client.get(
+            "/api/v1/admin/metrics/intents?days=1", headers=_ADMIN_HEADERS
+        )
+        data = resp.json()
+        assert data["precio"] == 1
+        assert data["desconocido"] == 0
 
 
 # ── /products ──────────────────────────────────────────────────────

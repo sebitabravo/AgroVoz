@@ -15,6 +15,8 @@ interface Props {
   i18nUnit?: string;
   i18nCta?: string;
   i18nFeatures?: string[];
+  i18nBadge?: string;
+  i18nPrice?: string;
 }
 
 const {
@@ -32,6 +34,8 @@ const {
   i18nUnit,
   i18nCta,
   i18nFeatures,
+  i18nBadge,
+  i18nPrice,
 } = Astro.props;
 
 const checkIcon =
@@ -39,12 +43,12 @@ const checkIcon =
 ---
 
 <div class={`plan-card${featured ? " plan-card--featured" : ""}`} data-reveal>
-  {featured && badge && <span class="plan-badge">{badge}</span>}
+  {featured && badge && <span class="plan-badge" {...(i18nBadge ? { "data-i18n": i18nBadge } : {})}>{badge}</span>}
   <div class="plan-name" {...(i18nName ? { "data-i18n": i18nName } : {})}>
     {name}
   </div>
   <div class="plan-sub" {...(i18nSub ? { "data-i18n": i18nSub } : {})}>{sub}</div>
-  <div class="plan-price">{price}</div>
+  <div class="plan-price" {...(i18nPrice ? { "data-i18n": i18nPrice } : {})}>{price}</div>
   <div class="plan-unit" {...(i18nUnit ? { "data-i18n": i18nUnit } : {})}>
     {unit}
   </div>

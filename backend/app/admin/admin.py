@@ -32,7 +32,12 @@ from app.admin.auth import (
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.alert import Alert
+from app.models.odepa_price import OdepaPrice
 from app.services import export_service, metrics_service, monitor_service
+from app.services.odepa_service import (
+    _es_unidad_kilo,
+    _kilos_por_unidad,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -274,6 +279,68 @@ async def export_prices_csv(
         media_type="text/csv",
         headers={
             "Content-Disposition": f'attachment; filename="odepa_prices_{hoy}.csv"',
+        },
+    )
+
+
+# ── Helpers para visualización de precios ────────────────────────
+
+
+def _calculate_precio_por_kilo(record: OdepaPrice) -> float | None:
+    """Calcula el precio real por kilo reusando helpers de odepa_service.
+
+    Retorna:
+    - float: precio_kg si unidad es kilo
+    - float: precio_kg / kilos si unidad es convertible
+    - None: si unidad no es convertible
+    """
+    if _es_unidad_kilo(record.unidad):
+        return float(record.precio_kg)
+
+    kilos = _kilos_por_unidad(record.unidad)
+    if kilos is not None:
+        return float(record.precio_kg / kilos)
+
+    return None
+
+
+# ── Listado de precios recientes (visualización en admin) ──────────
+
+
+@router.get("/odepa/precios")
+async def odepa_precios_page(
+    request: Request,
+    db: Session = Depends(get_db),  # noqa: B008
+) -> HTMLResponse:
+    """Muestra últimos precios ODEPA con precio_kg (crudo) y precio_por_kilo (calculado).
+
+    Sección interactiva del admin: tabla de precios recientes distinguiendo
+    claramente entre:
+    - Precio (unidad): el valor crudo de ODEPA en su unidad de venta.
+    - Precio por kilo: el valor calculado convertido a kilo (si es convertible).
+    """
+    q = select(OdepaPrice).order_by(OdepaPrice.fecha.desc(), OdepaPrice.id.desc()).limit(100)
+    precios_recientes = db.scalars(q).all()
+
+    # Enriquecer cada precio con el cálculo de precio_por_kilo
+    precios_data = []
+    for precio in precios_recientes:
+        precio_por_kilo = _calculate_precio_por_kilo(precio)
+        precios_data.append({
+            "producto": precio.producto,
+            "mercado": precio.mercado,
+            "precio_kg": float(precio.precio_kg),
+            "unidad": precio.unidad,
+            "precio_por_kilo": precio_por_kilo,
+            "fecha": precio.fecha.isoformat(),
+        })
+
+    return templates.TemplateResponse(
+        request,
+        "odepa_precios.html",
+        {
+            "precios": precios_data,
+            "active_tab": "odepa",
         },
     )
 

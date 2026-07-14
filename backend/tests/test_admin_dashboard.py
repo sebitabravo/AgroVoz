@@ -127,6 +127,48 @@ class TestPartialsHtmx:
         # El wrapper HTMX debe autopollear cada 30s.
         assert "every 30s" in resp.text
 
+    async def test_monitor_distingue_lazy_de_caido(
+        self, client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Un servicio lazy (sin cargar aún) no debe mostrarse como 'Caído'.
+
+        Regresión: Whisper/LLM/TTS con lazy loading devuelven ok=False antes
+        de la primera consulta, igual que un error real. El template debe
+        distinguirlos por el detail ('lazy (sin cargar)') para no alarmar
+        al equipo con un falso "Caído".
+        """
+        from app.services import monitor_service
+        from app.services.monitor_service import ServiceCheck
+
+        async def _fake_snapshot() -> SimpleNamespace:
+            return SimpleNamespace(
+                started_at=__import__("datetime").datetime.now(),
+                uptime_seconds=42.0,
+                system=SimpleNamespace(
+                    cpu_percent=10.0, ram_percent=50.0, ram_used_mb=8000, ram_total_mb=16000,
+                    disk_percent=60.0, disk_used_gb=80, disk_total_gb=160,
+                ),
+                services=[
+                    ServiceCheck("Whisper STT", False, "small · lazy (sin cargar)"),
+                    ServiceCheck("SQLite", True, "agrovoz.db · ok"),
+                    ServiceCheck("Open-WA", False, "error: connection refused"),
+                ],
+                queue_depth=0,
+            )
+
+        monkeypatch.setattr(monitor_service, "get_monitor_snapshot", _fake_snapshot)
+        _autenticar(client)
+        resp = await client.get("/admin/monitor/refresh", follow_redirects=False)
+        assert resp.status_code == 200
+        assert "En espera" in resp.text
+        assert "Operativo" in resp.text
+        assert "Caído" in resp.text
+        # El bloque de Whisper (lazy) debe decir "En espera", no "Caído".
+        inicio = resp.text.index("small · lazy (sin cargar)")
+        bloque_whisper = resp.text[inicio : inicio + 200]
+        assert "En espera" in bloque_whisper
+        assert "Caído" not in bloque_whisper
+
     async def test_odepa_sync_retorna_partial_con_flag(
         self, client: AsyncClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:

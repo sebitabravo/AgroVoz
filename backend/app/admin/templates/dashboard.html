@@ -111,8 +111,9 @@
     <p class="card-label" style="margin-bottom:16px">Salud de servicios</p>
     <div style="display:flex;flex-direction:column;gap:10px">
       {% for svc in snapshot.services %}
+      {% set svc_cls = 'warn' if (not svc.ok and 'lazy' in svc.detail) else ('ok' if svc.ok else 'fail') %}
       <div style="display:flex;align-items:center;gap:10px">
-        <span class="svc-dot {{ 'ok' if svc.ok else 'fail' }}"></span>
+        <span class="svc-dot {{ svc_cls }}"></span>
         <span style="font-size:13px;font-weight:600;flex:1">{{ svc.name }}</span>
         <span style="font-size:12px;color:var(--muted)">{{ svc.detail }}</span>
       </div>

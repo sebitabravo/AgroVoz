@@ -77,6 +77,12 @@ class Consultation(Base):
     decision_productiva: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
+    # Marca filas generadas por pytest/smoke tests (no productores reales).
+    # Se excluyen de las métricas del dashboard admin para no sesgar
+    # success_rate ni percentiles de latencia con datos sintéticos.
+    is_test: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0", index=True
+    )
 
     def __repr__(self) -> str:
         return (

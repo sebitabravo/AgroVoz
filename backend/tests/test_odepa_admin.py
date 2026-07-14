@@ -18,6 +18,7 @@ from httpx import AsyncClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.admin.admin import _calculate_precio_por_kilo
 from app.core.config import settings
 from app.models.odepa_price import OdepaPrice
 
@@ -145,3 +146,51 @@ class TestOdepaSync:
         assert data["insertados"] == 5
         assert data["actualizados"] == 2
         assert data["total"] == 7
+
+
+# ── Visualización de precios (P1: precio por kilo) ─────────────────
+
+
+class TestCalcularPrecioPorKilo:
+    """Tests para _calculate_precio_por_kilo() helper del admin."""
+
+    def test_unidad_kilo_retorna_precio_kg_sin_cambios(self) -> None:
+        """Regresión P1: para unidad kilo, precio_por_kilo == precio_kg."""
+        precio = OdepaPrice(
+            producto="papa",
+            mercado="Lo Valledor",
+            precio_kg=Decimal("1200"),
+            unidad="kg",
+            fecha=datetime.date.today(),
+            fuente="test",
+        )
+        resultado = _calculate_precio_por_kilo(precio)
+        assert resultado == 1200.0
+
+    def test_unidad_convertible_malla_25kg(self) -> None:
+        """Regresión P1: para malla 25kg, precio_por_kilo == precio_kg / 25."""
+        precio = OdepaPrice(
+            producto="papa",
+            mercado="Lo Valledor",
+            precio_kg=Decimal("8833.33"),
+            unidad="$/malla 25 kilos",
+            fecha=datetime.date.today(),
+            fuente="test",
+        )
+        resultado = _calculate_precio_por_kilo(precio)
+        # 8833.33 / 25 = 353.33
+        assert resultado is not None
+        assert abs(resultado - 353.33) < 0.01
+
+    def test_unidad_no_convertible_docena_retorna_none(self) -> None:
+        """Regresión P1: para docena, precio_por_kilo == None (no convertible)."""
+        precio = OdepaPrice(
+            producto="cilantro",
+            mercado="Lo Valledor",
+            precio_kg=Decimal("1200"),
+            unidad="$/docena de atados",
+            fecha=datetime.date.today(),
+            fuente="test",
+        )
+        resultado = _calculate_precio_por_kilo(precio)
+        assert resultado is None
