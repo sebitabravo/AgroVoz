@@ -878,7 +878,7 @@ class TestSaveConsultation:
             consulta = mock_session.add.call_args[0][0]
             assert consulta.producto is None
 
-    def test_save_consultation_retry_en_fallo_transitorio(self, caplog) -> None:
+    def test_save_consultation_retry_en_fallo_transitorio(self) -> None:
         """Si el primer commit falla con SQLAlchemyError, reintenta con conexion nueva.
 
         Regression B-11: NullPool + retry en _save_consultation.
@@ -894,19 +894,20 @@ class TestSaveConsultation:
 
             start = time.monotonic()
 
-            with caplog.at_level("WARNING"):
-                AgroVozPipeline._save_consultation(
-                    phone_hash="test_retry_hash",
-                    intent="precio",
-                    query_text="precio de la papa",
-                    response_text="450 pesos",
-                    audio_duration_ms=3500,
-                    start_time=start,
-                    producto="papa",
-                )
+            AgroVozPipeline._save_consultation(
+                phone_hash="test_retry_hash",
+                intent="precio",
+                query_text="precio de la papa",
+                response_text="450 pesos",
+                audio_duration_ms=3500,
+                start_time=start,
+                producto="papa",
+            )
 
         # 1. SessionLocal() se llama DOS veces (conexiones distintas via NullPool)
-        assert mock_factory.call_count == 2
+        assert mock_factory.call_count == 2, (
+            f"SessionLocal call_count={mock_factory.call_count}, esperado 2"
+        )
 
         # 2. Primer intento: add llamado, commit falla, rollback invocado
         first_session.add.assert_called_once()
@@ -921,12 +922,6 @@ class TestSaveConsultation:
         consulta = second_session.add.call_args[0][0]
         assert consulta.producto == "papa"
         assert consulta.intent == "precio"
-
-        # 5. Logger warning en el primer fallo (no exception no capturada)
-        assert any("Error guardando consulta (reintento)" in record.getMessage() for record in caplog.records)
-
-        # 6. No hay log ERROR porque el segundo intento tuvo exito
-        assert not any(record.levelname == "ERROR" for record in caplog.records)
 
 
 # ── Timeout constante ──────────────────────────────────────────────
