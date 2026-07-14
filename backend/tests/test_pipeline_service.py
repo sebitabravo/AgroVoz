@@ -11,7 +11,7 @@ ni Piper TTS.
 import asyncio
 import time
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
@@ -242,9 +242,7 @@ class TestExtractProducto:
         assert AgroVozPipeline._extract_producto("") is None
 
     def test_producto_en_oracion_larga(self) -> None:
-        assert AgroVozPipeline._extract_producto(
-            "cuanto esta el kilo de papa en la vega"
-        ) == "papa"
+        assert AgroVozPipeline._extract_producto("cuanto esta el kilo de papa en la vega") == "papa"
 
     def test_producto_con_acento(self) -> None:
         """Productos con acento matchean (limón, brócoli)."""
@@ -263,9 +261,7 @@ class TestGenerateResponse:
             monkeypatch,
             "La papa cuesta 450 pesos el kilo en Lo Valledor",
         )
-        text, intent = await AgroVozPipeline._generate_response(
-            "precio de la papa en lo valledor", "test-chat-hash"
-        )
+        text, intent = await AgroVozPipeline._generate_response("precio de la papa en lo valledor", "test-chat-hash")
         assert "450" in text
         assert intent == "precio"
 
@@ -361,6 +357,7 @@ class TestProcess:
         tts_ogg: str,
     ) -> None:
         """El campo producto se guarda correctamente en la consulta."""
+
         # Mock Whisper que transcribe texto con producto.
         def fake_transcribe_papa(_self: object, audio_path: str) -> dict[str, object]:
             return {
@@ -398,6 +395,7 @@ class TestProcess:
         tts_ogg: str,
     ) -> None:
         """Si no se detecta producto, se guarda None."""
+
         def fake_transcribe_clima(_self: object, audio_path: str) -> dict[str, object]:
             return {
                 "text": "clima en traiguen",
@@ -435,6 +433,7 @@ class TestProcess:
         tts_ogg: str,
     ) -> None:
         """Keyword 'resumen' llama a summary_service y saltea el LLM."""
+
         # Mock Whisper que transcribe "resumen".
         def fake_transcribe_resumen(_self: object, audio_path: str) -> dict[str, object]:
             return {
@@ -739,6 +738,7 @@ class TestProcess:
         # Mock Whisper que se demora mas que el timeout reducido
         def fake_transcribe_slow(_self: object, audio_path: str) -> dict[str, object]:
             import time
+
             time.sleep(0.1)  # > 0.05s timeout
             return _fake_whisper_output()
 
@@ -877,6 +877,56 @@ class TestSaveConsultation:
             mock_session.add.assert_called_once()
             consulta = mock_session.add.call_args[0][0]
             assert consulta.producto is None
+
+    def test_save_consultation_retry_en_fallo_transitorio(self, caplog) -> None:
+        """Si el primer commit falla con SQLAlchemyError, reintenta con conexion nueva.
+
+        Regression B-11: NullPool + retry en _save_consultation.
+        Verifica que el retry use una conexion fresca y persista en el segundo intento.
+        """
+        with patch("app.core.database.SessionLocal") as mock_factory:
+            first_session = Mock()
+            first_session.commit.side_effect = SQLAlchemyError("DB caida transitorio")
+            second_session = Mock()
+            second_session.commit.return_value = None
+
+            mock_factory.side_effect = [first_session, second_session]
+
+            start = time.monotonic()
+
+            with caplog.at_level("WARNING"):
+                AgroVozPipeline._save_consultation(
+                    phone_hash="test_retry_hash",
+                    intent="precio",
+                    query_text="precio de la papa",
+                    response_text="450 pesos",
+                    audio_duration_ms=3500,
+                    start_time=start,
+                    producto="papa",
+                )
+
+        # 1. SessionLocal() se llama DOS veces (conexiones distintas via NullPool)
+        assert mock_factory.call_count == 2
+
+        # 2. Primer intento: add llamado, commit falla, rollback invocado
+        first_session.add.assert_called_once()
+        first_session.commit.assert_called_once()
+        first_session.rollback.assert_called_once()
+
+        # 3. Segundo intento: add llamado, commit exitoso
+        second_session.add.assert_called_once()
+        second_session.commit.assert_called_once()
+
+        # 4. La consulta del segundo intento tiene los datos correctos
+        consulta = second_session.add.call_args[0][0]
+        assert consulta.producto == "papa"
+        assert consulta.intent == "precio"
+
+        # 5. Logger warning en el primer fallo (no exception no capturada)
+        assert any("Error guardando consulta (reintento)" in record.getMessage() for record in caplog.records)
+
+        # 6. No hay log ERROR porque el segundo intento tuvo exito
+        assert not any(record.levelname == "ERROR" for record in caplog.records)
 
 
 # ── Timeout constante ──────────────────────────────────────────────
