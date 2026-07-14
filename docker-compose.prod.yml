@@ -63,7 +63,7 @@ services:
         "--port",
         "8000",
         "--workers",
-        "2",
+        "1",
       ]
     volumes:
       - backend_models:/app/models    # Modelos IA (Piper + Qwen GGUF)
