@@ -39,10 +39,14 @@ class TestSessionCookie:
         assert verify_session_cookie("") is False
 
     def test_verify_tampered_retorna_false(self) -> None:
-        """Modificar un carácter del token invalida la firma."""
+        """Modificar un carácter de la firma invalida el token."""
         token = create_session_cookie()
-        # Cambiar el último carácter: si era alnum, alterarlo; si no, poner 'x'.
-        tampered = token[:-1] + ("x" if token[-1] != "x" else "y")
+        # Alterar el PRIMER carácter de la firma, no el último: en base64url el
+        # último carácter tiene bits no usados y cambiarlo no siempre altera los
+        # bytes decodificados (la firma seguiría válida -> test flaky en CI). El
+        # primer carácter siempre es significativo, así que el cambio invalida.
+        head, sep, sig = token.rpartition(".")
+        tampered = head + sep + ("x" if sig[0] != "x" else "y") + sig[1:]
         assert verify_session_cookie(tampered) is False
 
     def test_verify_token_de_otro_secret_retorna_false(self) -> None:

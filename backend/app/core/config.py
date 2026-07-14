@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     # Se mantiene por compatibilidad, pero no afecta el funcionamiento.
     openweathermap_api_key: str = ""
 
+    # ── OpenMeteo / clima ────────────────
+    # Tope de antigüedad del cache degradado cuando OpenMeteo falla.
+    # Si la API no responde, se entrega el último pronóstico cacheado
+    # siempre que tenga menos horas que este valor. Más viejo → error honesto.
+    weather_stale_cache_max_age_hours: int = 6
+
     # ── ODEPA ────────────────────────────
     odepa_sync_hour: int = 6
     odepa_sync_minute: int = 0

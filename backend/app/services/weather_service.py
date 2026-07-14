@@ -10,9 +10,11 @@ import asyncio
 import datetime
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import httpx
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +109,7 @@ class WeatherData:
     wind_speed_ms: float | None
     rain_1h_mm: float | None
     texto: str
+    stale_age_minutes: int | None = None
 
 
 # Cache en memoria: {cache_key: (timestamp_monotonic, WeatherData)}.
@@ -126,27 +129,69 @@ def _cache_key(lat: float, lon: float) -> str:
 
 
 def _cache_get(lat: float, lon: float) -> WeatherData | None:
-    """Devuelve WeatherData cacheado si la entrada existe y no expiró."""
+    """Devuelve WeatherData cacheado si la entrada existe y no expiró.
+
+    Si la entrada expiró, no la elimina: se conserva para el fallback
+    degradado cuando OpenMeteo falla (Issue #120).
+    """
     key = _cache_key(lat, lon)
     entry = _cache.get(key)
     if entry is None:
         return None
     ts, wd = entry
     if time.monotonic() - ts > _CACHE_TTL_SECONDS:
-        del _cache[key]
         return None
     logger.debug("Cache hit para %s", key)
     return wd
+
+
+def _cache_get_stale(
+    lat: float, lon: float, max_age_seconds: int
+) -> tuple[int, WeatherData] | None:
+    """Devuelve una entrada vencida si aún está dentro del tope de degradación.
+
+    Args:
+        lat: Latitud.
+        lon: Longitud.
+        max_age_seconds: Antigüedad máxima aceptable para fallback degradado.
+
+    Returns:
+        Tupla (age_seconds, WeatherData) si existe y no supera el tope.
+        None si no existe o es demasiado vieja.
+    """
+    key = _cache_key(lat, lon)
+    entry = _cache.get(key)
+    if entry is None:
+        return None
+    ts, wd = entry
+    age_seconds = int(time.monotonic() - ts)
+    if age_seconds > max_age_seconds:
+        return None
+    return age_seconds, wd
+
+
+def _prune_stale_cache(max_age_seconds: int) -> None:
+    """Elimina entradas más viejas que el tope de degradación.
+
+    Llamada tras cada escritura para evitar que el cache en memoria
+    acumule datos obsoletos indefinidamente.
+    """
+    now = time.monotonic()
+    expired_keys = [k for k, (ts, _) in _cache.items() if now - ts > max_age_seconds]
+    for key in expired_keys:
+        del _cache[key]
 
 
 def _cache_set(lat: float, lon: float, wd: WeatherData) -> None:
     """Guarda WeatherData en el cache con timestamp actual.
 
     Si el cache excede _CACHE_MAX_SIZE, evicta la entrada más antigua
-    para evitar crecimiento no acotado.
+    para evitar crecimiento no acotado. También limpia entradas más
+    viejas que el tope de degradación configurado.
     """
     key = _cache_key(lat, lon)
     _cache[key] = (time.monotonic(), wd)
+    _prune_stale_cache(settings.weather_stale_cache_max_age_hours * 3600)
     if len(_cache) > _CACHE_MAX_SIZE:
         oldest_key = min(_cache, key=lambda k: _cache[k][0])
         del _cache[oldest_key]
@@ -335,6 +380,10 @@ async def get_weather_full(
     con TTL de 30 minutos. La extracción de campos, defaults y
     decisiones de negocio están centralizadas en _parse_openmeteo_response().
 
+    Si OpenMeteo falla y existe un cache vencido dentro del tope de
+    degradación configurado (WEATHER_STALE_CACHE_MAX_AGE_HOURS), entrega
+    ese dato con una advertencia de antigüedad en el texto (Issue #120).
+
     No requiere API key — OpenMeteo es gratuito (10.000 req/día).
 
     Args:
@@ -345,14 +394,35 @@ async def get_weather_full(
         WeatherData con todos los campos tipados.
 
     Raises:
-        ConnectionError: Error de red.
-        RuntimeError: Error de API o respuesta malformada.
+        ConnectionError: Error de red y sin cache degradado disponible.
+        RuntimeError: Error de API o respuesta malformada y sin cache degradado.
     """
     cached = _cache_get(lat, lon)
     if cached is not None:
         return cached
 
-    data = await _fetch_weather_data(lat, lon)
+    try:
+        data = await _fetch_weather_data(lat, lon)
+    except (ConnectionError, RuntimeError):
+        stale = _cache_get_stale(
+            lat, lon, settings.weather_stale_cache_max_age_hours * 3600
+        )
+        if stale is not None:
+            age_seconds, wd = stale
+            age_minutes = age_seconds // 60
+            logger.warning("usando cache vencido por fallo de API, edad %dmin", age_minutes)
+            texto_degradado = _format_weather(
+                temp=wd.temperature_c,
+                humidity=wd.humidity,
+                description=wd.description,
+                wind_speed=wd.wind_speed_ms,
+                rain_mm=wd.rain_1h_mm,
+                location=wd.location,
+                stale_age_minutes=age_minutes,
+            )
+            return replace(wd, texto=texto_degradado, stale_age_minutes=age_minutes)
+        raise
+
     wd = _parse_openmeteo_response(data, lat, lon)
     _cache_set(lat, lon, wd)
     logger.info("Clima obtenido para (%.4f, %.4f): %s", lat, lon, wd.location)
@@ -411,6 +481,22 @@ async def _fetch_weather_data(lat: float, lon: float) -> dict[str, object]:
         raise RuntimeError(f"Respuesta de OpenMeteo malformada: {exc}") from exc
 
 
+def _stale_age_phrase(age_minutes: int) -> str:
+    """Convierte minutos de antigüedad a frase natural en español chileno.
+
+    Usado para advertir al agricultor cuando el pronóstico proviene de un
+    cache degradado por fallo de OpenMeteo.
+    """
+    if age_minutes < 60:
+        return f"de hace {age_minutes} minutos"
+    hours = age_minutes // 60
+    if hours == 1:
+        return "de hace 1 hora"
+    if hours < 24:
+        return f"de hace {hours} horas"
+    return "de hace más de 1 día"
+
+
 def _format_weather(
     temp: float | None = None,
     humidity: int | None = None,
@@ -418,6 +504,7 @@ def _format_weather(
     wind_speed: float | None = None,
     rain_mm: float | None = None,
     location: str = "la zona consultada",
+    stale_age_minutes: int | None = None,
 ) -> str:
     """Formatea datos de clima a texto natural en español chileno.
 
@@ -432,12 +519,18 @@ def _format_weather(
         wind_speed: Velocidad del viento en m/s. None → se omite.
         rain_mm: Lluvia última hora en mm. None o 0 → se omite.
         location: Nombre de la ubicación.
+        stale_age_minutes: Si se indica, se antepone una advertencia de
+            antigüedad al texto (cache degradado por fallo de API).
 
     Returns:
         Texto natural listo para Piper TTS. Termina con "según OpenMeteo"
         para citar la fuente del dato (Issue #95).
     """
     temp_str = f"{temp:.0f}°C" if temp is not None else "temperatura no disponible"
+
+    prefijo = ""
+    if stale_age_minutes is not None:
+        prefijo = f"Pronóstico {_stale_age_phrase(stale_age_minutes)}: "
 
     partes: list[str] = []
 
@@ -463,7 +556,7 @@ def _format_weather(
     # - Capa 1 (determinista): hardcode en esta función garantiza la presencia.
     # - Capa 2 (LLM): instrucción del prompt previene que sea borrada.
     # Sin ambas, el LLM 3B podría descartar la fuente buscando ser "conciso".
-    return "".join(partes) + ", según OpenMeteo."
+    return prefijo + "".join(partes) + ", según OpenMeteo."
 
 
 async def get_weather(
