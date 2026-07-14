@@ -56,7 +56,35 @@ class WebhookMessageData(BaseModel):
     contact: WebhookContact = Field(default_factory=WebhookContact)
     media: WebhookMedia | None = None
 
-    model_config = ConfigDict(extra="allow", populate_by_name=True)
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+        json_schema_extra={
+            "examples": [
+                {
+                    "id": "false_569111111111111@c.us_ABC123",
+                    "from": "569111111111@c.us",
+                    "to": "569222222222@c.us",
+                    "chatId": "569111111111@c.us",
+                    "body": "¿Cuál es el precio de la papa?",
+                    "type": "voice",
+                    "timestamp": 1720944000,
+                    "fromMe": False,
+                    "isGroup": False,
+                    "isStatusBroadcast": False,
+                    "isLidSender": False,
+                    "contact": {
+                        "name": "Juan Pérez",
+                        "pushName": "Juan",
+                    },
+                    "media": {
+                        "mimetype": "audio/ogg; codecs=opus",
+                        "data": "T2dnUwACAAAAAAAAAAB...",
+                    },
+                }
+            ]
+        },
+    )
 
 
 class WebhookPayload(BaseModel):
@@ -81,4 +109,36 @@ class WebhookPayload(BaseModel):
     delivery_id: str = Field(default="", alias="deliveryId")
     data: WebhookMessageData = Field(default_factory=WebhookMessageData)
 
-    model_config = ConfigDict(extra="allow", populate_by_name=True)
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+        json_schema_extra={
+            "examples": [
+                {
+                    "event": "message.received",
+                    "timestamp": "2026-07-14T15:30:45.000Z",
+                    "sessionId": "default",
+                    "idempotencyKey": "evt_a1b2c3d4e5f6",
+                    "deliveryId": "del_a1b2c3d4e5f6",
+                    "data": {
+                        "id": "false_569111111111111@c.us_ABC123",
+                        "from": "569111111111@c.us",
+                        "to": "569222222222@c.us",
+                        "chatId": "569111111111@c.us",
+                        "body": "¿Cuál es el precio de la papa?",
+                        "type": "voice",
+                        "timestamp": 1720944000,
+                        "fromMe": False,
+                        "isGroup": False,
+                        "isStatusBroadcast": False,
+                        "isLidSender": False,
+                        "contact": {"name": "Juan Pérez", "pushName": "Juan"},
+                        "media": {
+                            "mimetype": "audio/ogg; codecs=opus",
+                            "data": "T2dnUwACAAAAAAAAAAB...",
+                        },
+                    },
+                }
+            ]
+        },
+    )

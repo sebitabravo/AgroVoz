@@ -34,4 +34,22 @@ class WeatherResponse(BaseModel):
     )
     texto: str = Field(description="Texto natural en español chileno para TTS")
 
-    model_config = {"from_attributes": True}
+    model_config = {
+        "from_attributes": True,
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "lat": -38.23,
+                    "lon": -72.68,
+                    "location": "Traiguén, Araucanía",
+                    "temperature_c": 18.5,
+                    "feels_like_c": 17.2,
+                    "humidity": 75,
+                    "description": "parcialmente nublado",
+                    "wind_speed_ms": 3.6,
+                    "rain_1h_mm": 0.0,
+                    "texto": "En Traiguén hay 18 grados, parcialmente nublado, humedad 75%, viento 3.6 m/s.",
+                }
+            ]
+        },
+    }

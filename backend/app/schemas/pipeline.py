@@ -30,3 +30,20 @@ class AudioResponse(BaseModel):
         default=None,
         description="Audio de bienvenida para primer contacto. None si no aplica.",
     )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "audio_path": "/data/audio/respuesta_20260714_153045.ogg",
+                    "text_response": "Precio de papa en Lo Valledor: $1350 por kilo.",
+                    "latency_ms": 8500,
+                    "intent": "precio",
+                    "whisper_ms": 3200,
+                    "llm_ms": 4000,
+                    "tts_ms": 1300,
+                    "welcome_audio_path": None,
+                }
+            ]
+        },
+    }

@@ -30,7 +30,22 @@ class PriceResponse(BaseModel):
     fecha: str = Field(description="Fecha del precio en formato YYYY-MM-DD")
     texto: str = Field(description="Texto natural en español chileno para TTS")
 
-    model_config = {"from_attributes": True}
+    model_config = {
+        "from_attributes": True,
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "producto": "papa",
+                    "mercado": "Lo Valledor",
+                    "precio_kg": 1350.0,
+                    "unidad": "kg",
+                    "precio_por_kilo": 1350.0,
+                    "fecha": "2026-07-14",
+                    "texto": "El precio de la papa en Lo Valledor es de mil trescientos cincuenta pesos.",
+                }
+            ]
+        },
+    }
 
 
 class PriceListResponse(BaseModel):
@@ -42,3 +57,34 @@ class PriceListResponse(BaseModel):
     producto: str
     total_mercados: int
     precios: list[PriceResponse]
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "producto": "papa",
+                    "total_mercados": 2,
+                    "precios": [
+                        {
+                            "producto": "papa",
+                            "mercado": "Lo Valledor",
+                            "precio_kg": 1350,
+                            "unidad": "kg",
+                            "precio_por_kilo": 1350,
+                            "fecha": "2026-07-14",
+                            "texto": "El precio de la papa en Lo Valledor es de mil trescientos cincuenta pesos.",
+                        },
+                        {
+                            "producto": "papa",
+                            "mercado": "Temuco",
+                            "precio_kg": 1450,
+                            "unidad": "kg",
+                            "precio_por_kilo": 1450,
+                            "fecha": "2026-07-14",
+                            "texto": "El precio de la papa en Temuco es de mil cuatrocientos cincuenta pesos por kilo.",
+                        },
+                    ],
+                }
+            ]
+        },
+    }
