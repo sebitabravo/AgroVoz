@@ -140,6 +140,32 @@ class WeatherData:
 # Cache en memoria: {cache_key: (timestamp_monotonic, WeatherData)}.
 _cache: dict[str, tuple[float, WeatherData]] = {}
 
+def _ttl_get[V](
+    cache: dict[str, tuple[float, V]], key: str, ttl_seconds: int, label: str
+) -> V | None:
+    """Devuelve el valor cacheado si existe y no expiró. No elimina entradas vencidas.
+
+    Helper compartido por el cache de clima actual y el histórico; cada uno pasa su TTL.
+    """
+    entry = cache.get(key)
+    if entry is None:
+        return None
+    ts, value = entry
+    if time.monotonic() - ts > ttl_seconds:
+        return None
+    logger.debug("Cache hit (%s) para %s", label, key)
+    return value
+
+
+def _evict_oldest_if_full[V](
+    cache: dict[str, tuple[float, V]], max_size: int, label: str
+) -> None:
+    """Evicta la entrada más antigua si el cache supera su tamaño máximo."""
+    if len(cache) > max_size:
+        oldest_key = min(cache, key=lambda k: cache[k][0])
+        del cache[oldest_key]
+        logger.debug("Cache evictado (%s, oldest): %s", label, oldest_key)
+
 
 def _cache_key(lat: float, lon: float) -> str:
     """Clave de cache para un par de coordenadas.
@@ -159,15 +185,7 @@ def _cache_get(lat: float, lon: float) -> WeatherData | None:
     Si la entrada expiró, no la elimina: se conserva para el fallback
     degradado cuando OpenMeteo falla (Issue #120).
     """
-    key = _cache_key(lat, lon)
-    entry = _cache.get(key)
-    if entry is None:
-        return None
-    ts, wd = entry
-    if time.monotonic() - ts > _CACHE_TTL_SECONDS:
-        return None
-    logger.debug("Cache hit para %s", key)
-    return wd
+    return _ttl_get(_cache, _cache_key(lat, lon), _CACHE_TTL_SECONDS, "forecast")
 
 
 def _cache_get_stale(
@@ -217,10 +235,7 @@ def _cache_set(lat: float, lon: float, wd: WeatherData) -> None:
     key = _cache_key(lat, lon)
     _cache[key] = (time.monotonic(), wd)
     _prune_stale_cache(settings.weather_stale_cache_max_age_hours * 3600)
-    if len(_cache) > _CACHE_MAX_SIZE:
-        oldest_key = min(_cache, key=lambda k: _cache[k][0])
-        del _cache[oldest_key]
-        logger.debug("Cache evictado (oldest): %s", oldest_key)
+    _evict_oldest_if_full(_cache, _CACHE_MAX_SIZE, "forecast")
 
 
 def _clear_cache() -> None:
@@ -258,25 +273,19 @@ def _historical_cache_key(lat: float, lon: float, years: int) -> str:
 
 def _historical_cache_get(lat: float, lon: float, years: int) -> list["HistoricalYearSummary"] | None:
     """Devuelve datos históricos cacheados si la entrada existe y no expiró."""
-    key = _historical_cache_key(lat, lon, years)
-    entry = _historical_cache.get(key)
-    if entry is None:
-        return None
-    ts, data = entry
-    if time.monotonic() - ts > _HISTORICAL_CACHE_TTL_SECONDS:
-        return None
-    logger.debug("Historical cache hit para %s", key)
-    return data
+    return _ttl_get(
+        _historical_cache,
+        _historical_cache_key(lat, lon, years),
+        _HISTORICAL_CACHE_TTL_SECONDS,
+        "historico",
+    )
 
 
 def _historical_cache_set(lat: float, lon: float, years: int, data: list["HistoricalYearSummary"]) -> None:
     """Guarda datos históricos en el cache con timestamp actual."""
     key = _historical_cache_key(lat, lon, years)
     _historical_cache[key] = (time.monotonic(), data)
-    if len(_historical_cache) > _HISTORICAL_CACHE_MAX_SIZE:
-        oldest_key = min(_historical_cache, key=lambda k: _historical_cache[k][0])
-        del _historical_cache[oldest_key]
-        logger.debug("Historical cache evictado (oldest): %s", oldest_key)
+    _evict_oldest_if_full(_historical_cache, _HISTORICAL_CACHE_MAX_SIZE, "historico")
 
 
 def _clear_historical_cache() -> None:
