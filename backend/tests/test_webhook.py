@@ -796,7 +796,9 @@ def _mock_llm_answer(monkeypatch: pytest.MonkeyPatch, text: str = "Respuesta moc
     sin importar el contenido de la respuesta del LLM.
     """
 
-    async def fake_answer(query: str, phone_hash: str | None = None) -> str:
+    async def fake_answer(*args: object, **kwargs: object) -> str:
+        # Acepta cualquier firma de answer() (query_text, history, phone_hash,
+        # cultivos, ...) para no romperse si el pipeline agrega parámetros.
         return text
 
     monkeypatch.setattr(

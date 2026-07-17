@@ -52,7 +52,7 @@ def _mock_whisper_transcribe(monkeypatch: pytest.MonkeyPatch) -> None:
 def _mock_llm_answer(monkeypatch: pytest.MonkeyPatch, answer_text: str) -> None:
     """Mockea llm_service.answer para retornar texto fijo."""
 
-    async def fake_answer(query: str, phone_hash: str | None = None) -> str:
+    async def fake_answer(query: str, phone_hash: str | None = None, **kwargs: object) -> str:
         return answer_text
 
     monkeypatch.setattr("app.services.llm_service.answer", fake_answer)
@@ -286,7 +286,7 @@ class TestGenerateResponse:
         ni venta en la query → mensaje generico + intent "desconocido".
         """
 
-        async def fake_answer_error(_query: str, phone_hash: str | None = None) -> str:
+        async def fake_answer_error(_query: str, phone_hash: str | None = None, **kwargs: object) -> str:
             raise RuntimeError("LLM colapso")
 
         # Mockear _force_keyword_tool → None: sin keywords, no hay fallback real.
@@ -313,7 +313,7 @@ class TestGenerateResponse:
         y se responde con datos reales de ODEPA.
         """
 
-        async def fake_answer_error(_query: str, phone_hash: str | None = None) -> str:
+        async def fake_answer_error(_query: str, phone_hash: str | None = None, **kwargs: object) -> str:
             raise RuntimeError("LLM colapso")
 
         async def fake_force_precio(query: str, phone_hash: str | None = None) -> str:
@@ -342,7 +342,7 @@ class TestGenerateResponse:
         _force_keyword_tool y se responde con datos de OpenMeteo.
         """
 
-        async def fake_answer_error(_query: str, phone_hash: str | None = None) -> str:
+        async def fake_answer_error(_query: str, phone_hash: str | None = None, **kwargs: object) -> str:
             raise RuntimeError("LLM colapso")
 
         async def fake_force_clima(query: str, phone_hash: str | None = None) -> str:
@@ -374,7 +374,7 @@ class TestGenerateResponse:
         via _force_keyword_tool.
         """
 
-        async def fake_answer_error(_query: str, phone_hash: str | None = None) -> str:
+        async def fake_answer_error(_query: str, phone_hash: str | None = None, **kwargs: object) -> str:
             raise RuntimeError("LLM colapso")
 
         async def fake_force_venta(query: str, phone_hash: str | None = None) -> str:
@@ -569,7 +569,7 @@ class TestProcess:
         # LLM NO deberia llamarse.
         llm_called = False
 
-        async def fake_answer_check(_query: str) -> str:
+        async def fake_answer_check(_query: str, **kwargs: object) -> str:
             nonlocal llm_called
             llm_called = True
             return "no deberia llamarse"
@@ -683,7 +683,7 @@ class TestProcess:
         _mock_whisper_transcribe(monkeypatch)
 
         # LLM mock que se demora mas que el timeout
-        async def fake_answer_slow(_query: str, phone_hash: str | None = None) -> str:
+        async def fake_answer_slow(_query: str, phone_hash: str | None = None, **kwargs: object) -> str:
             await asyncio.sleep(999.0)  # Nunca termina
             return "muy tarde"
 
@@ -767,7 +767,7 @@ class TestProcess:
         # LLM NO deberia llamarse porque no hay texto transcrito
         llm_called = False
 
-        async def fake_answer_check(_query: str, phone_hash: str | None = None) -> str:
+        async def fake_answer_check(_query: str, phone_hash: str | None = None, **kwargs: object) -> str:
             nonlocal llm_called
             llm_called = True
             return "no deberia generarse"
@@ -857,7 +857,7 @@ class TestProcess:
         # LLM NO deberia llamarse porque no hay texto transcrito
         llm_called = False
 
-        async def fake_answer_check(_query: str, phone_hash: str | None = None) -> str:
+        async def fake_answer_check(_query: str, phone_hash: str | None = None, **kwargs: object) -> str:
             nonlocal llm_called
             llm_called = True
             return "no deberia generarse"

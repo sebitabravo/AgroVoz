@@ -12,7 +12,7 @@ Ver ``app_core/phone_hash.py`` para la función de hashing.
 
 import datetime
 
-from sqlalchemy import Boolean, Integer, String, func
+from sqlalchemy import Boolean, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -29,6 +29,11 @@ class UserPrefs(Base):
     para construir el dataset de voz rural chilena (issue #96). Es opt-in
     explicito: default ``False``; solo se retiene audio cuando el productor
     firmó el Acuerdo de Uso y Consentimiento.
+
+    ``cultivos`` almacena los cultivos de interés del productor como JSON
+    (lista de strings, ej: ``["papa", "trigo", "tomate"]``). Se usa para
+    personalizar el contexto del LLM cuando el agricultor no especifica
+    producto en la consulta (issue #125).
     """
 
     __tablename__ = "user_prefs"
@@ -43,6 +48,10 @@ class UserPrefs(Base):
     # Consentimiento explicito para retener audio en el dataset de voz rural.
     # Default False: privacidad por defecto (#96).
     dataset_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Cultivos de interés del productor, almacenados como JSON en TEXT.
+    # Nullable: se capturan durante el onboarding o via admin (issue #125).
+    # Ejemplo: '["papa", "trigo", "tomate"]'
+    cultivos: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
 
     def __repr__(self) -> str:
@@ -50,7 +59,9 @@ class UserPrefs(Base):
         # En instancias transient (sin flush) el valor puede ser None;
         # mostramos False para no leakear que el campo esta sin setear.
         consent = self.dataset_consent if self.dataset_consent is not None else False
+        cultivos_str = self.cultivos or "sin_cultivos"
         return (
             f"<UserPrefs(phone_hash='{self.phone_hash[:8]}...', "
-            f"comuna='{comuna_str}', dataset_consent={consent})>"
+            f"comuna='{comuna_str}', dataset_consent={consent}, "
+            f"cultivos='{cultivos_str}')>"
         )
