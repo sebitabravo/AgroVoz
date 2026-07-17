@@ -246,6 +246,37 @@ class TestUserPrefsSchema:
         request = ComunaRequest(comuna="Traiguén", cultivos=["", "  ", ""])
         assert request.cultivos is None
 
+    def test_comuna_request_cultivos_deduplica(self) -> None:
+        """ComunaRequest deduplica cultivos (case-insensitive) preservando el orden."""
+        from app.schemas.user_prefs import ComunaRequest
+
+        request = ComunaRequest(comuna="Traiguén", cultivos=["Papa", "PAPA", "papa", "ají"])
+        assert request.cultivos == ["papa", "ají"]
+
+    def test_comuna_request_cultivos_descarta_sobredimensionados(self) -> None:
+        """ComunaRequest descarta cultivos con largo abusivo (> 100 chars)."""
+        from app.schemas.user_prefs import ComunaRequest
+
+        request = ComunaRequest(comuna="Traiguén", cultivos=["papa", "x" * 200, "trigo"])
+        assert request.cultivos == ["papa", "trigo"]
+
+    def test_comuna_request_cultivos_solo_sobredimensionado_es_none(self) -> None:
+        """Si todos los cultivos exceden el largo máximo, se normaliza a None."""
+        from app.schemas.user_prefs import ComunaRequest
+
+        request = ComunaRequest(comuna="Traiguén", cultivos=["x" * 200])
+        assert request.cultivos is None
+
+    def test_comuna_request_cultivos_mas_de_20_rechaza(self) -> None:
+        """Más de 20 cultivos dispara ValidationError (límite del Field)."""
+        import pytest
+        from pydantic import ValidationError
+
+        from app.schemas.user_prefs import ComunaRequest
+
+        with pytest.raises(ValidationError):
+            ComunaRequest(comuna="Traiguén", cultivos=[f"cultivo_{i}" for i in range(30)])
+
 
 class TestUserPrefsAPI:
     """Tests de endpoints admin para user_prefs con cultivos (#125)."""
