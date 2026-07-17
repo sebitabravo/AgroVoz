@@ -414,3 +414,55 @@ async def test_send_audio_con_lid_resuelto(
     post_calls = list(client.post.call_args_list)
     assert len(post_calls) == 1
     assert post_calls[0][1]["json"]["chatId"] == "56912345678@c.us"
+
+
+# ── Robustness: send_text con numero invalido ──────────────
+
+
+@pytest.mark.asyncio
+async def test_send_text_con_numero_invalido_loguea_y_propaga(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """send_text con numero invalido (3 digitos) loguea error y propaga ValueError.
+
+    Valida que la normalizacion E.164 se ejecute dentro del try/except,
+    se loguee el error, y se propague para que el llamador (audio_service)
+    pueda manejarlo.
+    """
+    monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
+    monkeypatch.setattr(settings, "openwa_api_key", "k")
+
+    client = AsyncMock()
+    _patch_async_client(monkeypatch, client)
+    OpenWAService._cached_session_id = "sess-1"
+
+    service = OpenWAService()
+
+    # Llamar send_text con numero invalido debe lanzar ValueError.
+    with pytest.raises(ValueError, match="3 digitos"):
+        await service.send_text("123", "hola")
+
+
+@pytest.mark.asyncio
+async def test_send_typing_indicator_numero_invalido_no_lanza(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """send_typing_indicator con numero invalido NO propaga ValueError.
+
+    El indicador de typing no es critico: un numero mal formado se loguea
+    como warning y el flujo del pipeline continua sin interrupcion.
+    """
+    monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
+    monkeypatch.setattr(settings, "openwa_api_key", "k")
+
+    client = AsyncMock()
+    _patch_async_client(monkeypatch, client)
+    OpenWAService._cached_session_id = "sess-1"
+
+    service = OpenWAService()
+
+    # No debe lanzar a pesar del numero invalido (3 digitos).
+    await service.send_typing_indicator("123", "recording")
+
+    # El ValueError ocurre al armar el payload: nunca se llega a la red.
+    client.post.assert_not_called()
