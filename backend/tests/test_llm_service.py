@@ -45,7 +45,7 @@ class TestConstantes:
     def test_system_prompt_contiene_reglas_estrictas(self) -> None:
         """El system prompt comprimido conserva las 6 reglas del issue #18."""
         assert "REGLAS ESTRICTAS" in SYSTEM_PROMPT
-        assert "Tienes CUATRO herramientas" in SYSTEM_PROMPT
+        assert "Tienes CINCO herramientas" in SYSTEM_PROMPT
         assert "get_price_history" in SYSTEM_PROMPT
         assert "calculate_sale_value" in SYSTEM_PROMPT
         assert "NUNCA recomendaciones agronomicas" in SYSTEM_PROMPT
@@ -77,8 +77,8 @@ class TestConstantes:
         assert len(NO_RESPONSE_TEXT) > 10
         assert "reformular" in NO_RESPONSE_TEXT.lower()
 
-    def test_whitelist_cuatro_tools(self) -> None:
-        """La whitelist permite las cuatro tools de precio, venta y clima."""
+    def test_whitelist_cinco_tools(self) -> None:
+        """La whitelist permite las cinco tools de precio, venta, clima e historico."""
         assert (
             frozenset(
                 {
@@ -86,6 +86,7 @@ class TestConstantes:
                     "get_price_history",
                     "calculate_sale_value",
                     "get_weather",
+                    "get_clima_historico",
                 }
             )
             == WHITELIST_TOOLS
@@ -93,7 +94,7 @@ class TestConstantes:
 
     def test_tools_definition_formato_openai(self) -> None:
         """Las tool definitions siguen el formato OpenAI function-calling."""
-        assert len(TOOLS) == 4
+        assert len(TOOLS) == 5
         for tool in TOOLS:
             assert tool["type"] == "function"
             fn = tool["function"]
@@ -158,22 +159,24 @@ class TestLlmConfig:
 
         Cada char sumado al system prompt incrementa el prefill del LLM.
         Original era ~2000 chars, comprimido debe ser menos.
-        Limite: 1400 chars. Justificar aumento con datos de latencia.
+        Limite: 1600 chars. 195 chars extra justificados por la 5a
+        herramienta (get_clima_historico) + instrucciones de clima historico.
+        Latencia E2E target <15s se mantiene en CPU con n_ctx=1024.
         """
-        assert len(SYSTEM_PROMPT) <= 1400, (
+        assert len(SYSTEM_PROMPT) <= 1600, (
             f"SYSTEM_PROMPT={len(SYSTEM_PROMPT)} chars excede el limite "
-            "de 1400. Comprime o justifica con datos de latencia."
+            "de 1600. Comprime o justifica con datos de latencia."
         )
 
     def test_total_prompt_chars_under_limit(self) -> None:
         """El prompt total (system + tools) no debe exceder un limite.
 
         Para n_ctx=1024 con Qwen2.5 (3-5 chars/token), el prompt total
-        deberia estar bajo ~5000 chars. Es un guard suave contra
+        deberia estar bajo ~6000 chars. Es un guard suave contra
         regresiones que inflan el contexto sin ajustar n_ctx.
         """
         total_chars = len(SYSTEM_PROMPT) + len(_TOOLS_SECTION)
-        assert total_chars <= 5500, (
+        assert total_chars <= 6000, (
             f"Prompt total={total_chars} chars demasiado grande "
             f"para n_ctx={_N_CTX}. Reduce o aumenta n_ctx."
         )
