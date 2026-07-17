@@ -740,6 +740,10 @@ class TestResolverComuna:
         coords = _resolver_comuna("Londres")
         assert coords is None
 
+    def test_comuna_variantes_tilde_mismas_coords(self) -> None:
+        """'traiguen' y 'Traiguén' (con y sin tilde) resuelven a las mismas coordenadas."""
+        assert _resolver_comuna("traiguen") == _resolver_comuna("Traiguén") == (-38.23, -72.68)
+
 
 class TestParseHistoricalResponse:
     """Parseo de respuesta de OpenMeteo Archive a resúmenes anuales."""
@@ -933,6 +937,20 @@ class TestFetchHistorico:
             summaries = await fetch_historico(-38.23, -72.68, years=1)
             assert len(summaries) >= 1
             assert summaries[0].year >= 2024
+        finally:
+            await mock_client.aclose()
+
+    async def test_fetch_historico_clampea_years_sobre_5(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """years > 5 se clampea a 5: el resultado se cachea bajo la clave y5, no y10."""
+        import app.services.weather_service as ws
+
+        mock_client = self._mock_client(monkeypatch, _RESPUESTA_ARCHIVE_2025)
+        try:
+            await fetch_historico(-38.23, -72.68, years=10)
+            assert ws._historical_cache_get(-38.23, -72.68, 5) is not None
+            assert ws._historical_cache_get(-38.23, -72.68, 10) is None
         finally:
             await mock_client.aclose()
 
