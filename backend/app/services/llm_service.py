@@ -688,15 +688,39 @@ def _strip_tool_tags(text: str) -> str:
 # ── Construccion de mensajes ─────────────────────────────────────────
 
 
-def _build_messages(user_query: str, history: list[dict[str, object]]) -> list[dict[str, object]]:
+def _build_messages(
+    user_query: str,
+    history: list[dict[str, object]],
+    cultivos: list[str] | None = None,
+) -> list[dict[str, object]]:
     """Construye la lista de mensajes para el LLM.
 
     Incluye las definiciones de tools en formato nativo Qwen2.5 (<tools> XML)
     dentro del system prompt, para que el modelo genere <tool_call> como texto.
 
-    Formato: system (con tools) + history + user.
+    Si el agricultor tiene cultivos de interés registrados, se agrega una
+    línea personalizada al system prompt para que el LLM pueda asumir un
+    producto cuando el usuario no lo especifique (issue #125).
+
+    Formato: system (con tools + personalización) + history + user.
+
+    Args:
+        user_query: Texto de la consulta del agricultor.
+        history: Mensajes previos del diálogo.
+        cultivos: Lista opcional de cultivos de interés del agricultor.
     """
     system_content = SYSTEM_PROMPT + _TOOLS_SECTION
+
+    # Personalización por cultivos de interés (issue #125).
+    # Si el agricultor tiene cultivos registrados, se lo indicamos al LLM
+    # para que pueda asumir el producto cuando no se especifique explícitamente.
+    if cultivos:
+        cultivos_str = ", ".join(cultivos)
+        system_content += (
+            f"\n\nEl agricultor cultiva: {cultivos_str}. "
+            "Si no especifica producto, asume uno de estos."
+        )
+
     messages: list[dict[str, object]] = [
         {"role": "system", "content": system_content},
     ]
@@ -709,6 +733,7 @@ async def answer(
     query_text: str,
     history: list[dict[str, object]] | None = None,
     phone_hash: str | None = None,
+    cultivos: list[str] | None = None,
 ) -> str:
     """Genera una respuesta textual usando el LLM con Tool Calling.
 
@@ -725,6 +750,8 @@ async def answer(
         history: Mensajes previos del diálogo (opcional). Formato
                  [{"role": "...", "content": "..."}, ...].
         phone_hash: Hash del teléfono para resolver mercado cercano (Issue #89).
+        cultivos: Lista opcional de cultivos de interés del agricultor para
+                  personalizar el contexto del LLM (Issue #125).
 
     Returns:
         Texto de respuesta en español chileno, listo para TTS.
@@ -738,7 +765,7 @@ async def answer(
     if model is None:
         return _mock_answer(query_text)
 
-    messages = _build_messages(query_text.strip(), history)
+    messages = _build_messages(query_text.strip(), history, cultivos=cultivos)
 
     try:
         for _iteration in range(MAX_TOOL_ITERATIONS):

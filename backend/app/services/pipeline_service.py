@@ -359,6 +359,41 @@ class AgroVozPipeline:
         return await detect_and_handle_alert_command(transcribed_text, phone_hash, wa_chat_id)
 
     @staticmethod
+    def _load_user_cultivos(phone_hash: str) -> list[str] | None:
+        """Carga los cultivos de interés de un productor desde user_prefs.
+
+        Args:
+            phone_hash: Hash HMAC-SHA256 del número de teléfono.
+
+        Returns:
+            Lista de cultivos (ej: ["papa", "trigo"]) o None si no tiene.
+        """
+        import json
+
+        from app.core.database import SessionLocal
+        from app.models.user_prefs import UserPrefs
+
+        session = SessionLocal()
+        try:
+            prefs = session.scalar(
+                select(UserPrefs).where(UserPrefs.phone_hash == phone_hash)
+            )
+            if prefs is None or not prefs.cultivos:
+                return None
+            parsed = json.loads(prefs.cultivos)
+            if isinstance(parsed, list) and parsed:
+                return [str(c) for c in parsed]
+            return None
+        except (SQLAlchemyError, json.JSONDecodeError, TypeError, ValueError):
+            logger.exception(
+                "Error cargando cultivos de user_prefs — phone_hash=%s",
+                phone_hash[:8] if phone_hash else "sin_hash",
+            )
+            return None
+        finally:
+            session.close()
+
+    @staticmethod
     async def _generate_response(transcribed_text: str, chat_id_hash: str) -> tuple[str, Intent]:
         """Genera respuesta textual: saludo rápido, resumen o LLM con Tool Calling.
 
@@ -368,7 +403,8 @@ class AgroVozPipeline:
         3. Consulta normal → LLM con Tool Calling.
 
         El hash también se usa para resolver el mercado más cercano según
-        comuna (Issue #89).
+        comuna (Issue #89). Los cultivos de interés del agricultor se cargan
+        de user_prefs para personalizar el contexto del LLM (Issue #125).
 
         Args:
             transcribed_text: Texto transcrito por Whisper.
@@ -422,8 +458,17 @@ class AgroVozPipeline:
         # Import local para permitir mocking en tests
         from app.services.llm_service import answer
 
+        # Cargar cultivos de interés del agricultor para personalizar el
+        # contexto del LLM. Si no tiene cultivos registrados, se pasa None
+        # y el LLM funciona sin personalización (issue #125).
+        cultivos = AgroVozPipeline._load_user_cultivos(chat_id_hash)
+
         try:
-            response_text = await answer(transcribed_text.strip(), phone_hash=chat_id_hash)
+            response_text = await answer(
+                transcribed_text.strip(),
+                phone_hash=chat_id_hash,
+                cultivos=cultivos,
+            )
         except (TimeoutError, RuntimeError, OSError, ValueError):
             logger.exception("Error en generacion LLM — activando fallback determinista")
             # Fallback determinista: resolver sin LLM usando keywords.
