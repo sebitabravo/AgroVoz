@@ -8,12 +8,10 @@ phone_hash), y ventana de 30 dias (no mas viejas).
 
 from datetime import datetime, timedelta
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app.models.consultation import Consultation
 from app.services.summary_service import get_consultation_summary
-
 
 # ── Helpers ────────────────────────────────────────────────────────
 
