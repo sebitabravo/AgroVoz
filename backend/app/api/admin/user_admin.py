@@ -87,10 +87,11 @@ def _apply_prefs_fields(
         )
     if cultivos is not None:
         prefs.cultivos = _serializar_cultivos(cultivos)
+        # No loguear el contenido de cultivos (dato personal); solo la cantidad.
         logger.info(
-            "cultivos actualizados — phone_hash=%s cultivos=%s",
+            "cultivos actualizados — phone_hash=%s count=%d",
             prefs.phone_hash[:8],
-            prefs.cultivos,
+            len(cultivos),
         )
 
 

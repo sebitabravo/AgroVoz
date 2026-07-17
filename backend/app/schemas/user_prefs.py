@@ -11,6 +11,10 @@ import json
 
 from pydantic import BaseModel, Field, field_validator
 
+# Largo máximo por cultivo. Los nombres reales son cortos ("papa", "trigo");
+# este tope descarta payloads abusivos en la columna TEXT de SQLite (#125).
+_MAX_CULTIVO_LEN = 100
+
 
 class ComunaRequest(BaseModel):
     """Body del PUT /admin/users/{phone_hash}/comuna (#86, #96, #125).
@@ -40,14 +44,19 @@ class ComunaRequest(BaseModel):
     @field_validator("cultivos")
     @classmethod
     def _validar_cultivos(cls, v: list[str] | None) -> list[str] | None:
-        """Valida que cada cultivo no esté vacío y esté en minúscula."""
+        """Normaliza cultivos: limpia, minúscula, descarta vacíos/sobredimensionados y deduplica."""
         if v is None:
             return None
-        # Limpiar espacios y normalizar a minúscula
-        limpios = [c.strip().lower() for c in v if c.strip()]
+        # Limpiar espacios, normalizar a minúscula, descartar vacíos y payloads abusivos.
+        limpios = [
+            c.strip().lower()
+            for c in v
+            if c.strip() and len(c.strip()) <= _MAX_CULTIVO_LEN
+        ]
         if not limpios:
             return None
-        return limpios[:20]
+        # Deduplicar preservando el orden de aparición y limitar a 20.
+        return list(dict.fromkeys(limpios))[:20]
 
     model_config = {
         "json_schema_extra": {
