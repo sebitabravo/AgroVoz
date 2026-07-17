@@ -53,3 +53,70 @@ class WeatherResponse(BaseModel):
             ]
         },
     }
+
+
+class HistoricalYearSchema(BaseModel):
+    """Resumen climático de un año específico."""
+
+    year: int = Field(description="Año del resumen climático")
+    temp_promedio: float | None = Field(
+        default=None, description="Temperatura promedio anual en °C"
+    )
+    temp_max_promedio: float | None = Field(
+        default=None, description="Promedio anual de temperatura máxima en °C"
+    )
+    temp_min_promedio: float | None = Field(
+        default=None, description="Promedio anual de temperatura mínima en °C"
+    )
+    precipitacion_total_mm: float | None = Field(
+        default=None, description="Precipitación total anual en mm"
+    )
+    dias_helada: int | None = Field(
+        default=None, description="Días con temperatura mínima bajo 0°C"
+    )
+
+
+class HistoricalWeatherResponse(BaseModel):
+    """Respuesta de histórico climático para coordenadas específicas.
+
+    Incluye resúmenes anuales y una versión en texto natural para TTS.
+    """
+
+    lat: float = Field(description="Latitud consultada")
+    lon: float = Field(description="Longitud consultada")
+    years_solicitados: int = Field(
+        default=1, description="Cantidad de años solicitados"
+    )
+    resumenes: list[HistoricalYearSchema] = Field(
+        description="Lista de resúmenes climáticos anuales"
+    )
+    texto: str = Field(
+        description="Texto natural en español chileno para TTS"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "lat": -38.23,
+                    "lon": -72.68,
+                    "years_solicitados": 1,
+                    "resumenes": [
+                        {
+                            "year": 2025,
+                            "temp_promedio": 12.5,
+                            "temp_max_promedio": 18.2,
+                            "temp_min_promedio": 6.8,
+                            "precipitacion_total_mm": 850.0,
+                            "dias_helada": 15,
+                        }
+                    ],
+                    "texto": (
+                        "En Traiguén, el año 2025 tuvo temperatura promedio de 12°C, "
+                        "máxima promedio de 18°C, mínima promedio de 7°C, "
+                        "850mm de lluvia, 15 días de helada, según OpenMeteo."
+                    ),
+                }
+            ]
+        },
+    }

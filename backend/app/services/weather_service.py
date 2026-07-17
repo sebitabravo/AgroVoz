@@ -22,14 +22,26 @@ __all__ = [
     "DEFAULT_LAT",
     "DEFAULT_LON",
     "ForecastDay",
+    "HistoricalYearSummary",
     "WeatherData",
+    "clear_weather_cache",
+    "fetch_historico",
+    "get_clima_historico",
     "get_weather",
     "get_weather_forecast_daily",
     "get_weather_full",
+    "weather_cache_size",
 ]
 
 # TTL del cache en segundos (30 min).
 _CACHE_TTL_SECONDS = 30 * 60
+
+# TTL del cache histórico en segundos (24h). El histórico no cambia nunca,
+# pero mantener un TTL razonable permite renovar si OpenMeteo agrega datos.
+_HISTORICAL_CACHE_TTL_SECONDS = 24 * 3600
+
+# Tamaño máximo del cache histórico. Cada entrada puede tener varios años.
+_HISTORICAL_CACHE_MAX_SIZE = 30
 
 # Tamaño máximo del cache. Evita crecimiento no acotado.
 _CACHE_MAX_SIZE = 50
@@ -40,6 +52,9 @@ _TIMEOUT_SECONDS = 10
 # URL base de OpenMeteo Forecast API (sin API key, 10.000 req/día).
 _OPENMETEO_URL = "https://api.open-meteo.com/v1/forecast"
 
+# URL base de OpenMeteo Archive API (sin API key, datos históricos desde 1940).
+_OPENMETEO_ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+
 # Coordenadas default para MVP: Traiguén, Región de La Araucanía, Chile.
 DEFAULT_LAT = -38.23
 DEFAULT_LON = -72.68
@@ -48,6 +63,16 @@ DEFAULT_LON = -72.68
 # Si lat y lon están a menos de esta distancia, usamos "Traiguén"
 # como nombre de ubicación.
 _TRAIGUEN_THRESHOLD = 0.05
+
+# Diccionario simple de comunas chilenas a coordenadas para la tool
+# get_clima_historico(). Sin API de geocoding para mantener el MVP simple.
+# Issue #124: cobertura inicial Traiguén, Temuco, Santiago.
+_COMUNAS: dict[str, tuple[float, float]] = {
+    "traiguen": (-38.23, -72.68),
+    "traiguén": (-38.23, -72.68),
+    "temuco": (-38.74, -72.59),
+    "santiago": (-33.45, -70.65),
+}
 
 # Mapa de códigos WMO (World Meteorological Organization) a descripciones
 # en español chileno. OpenMeteo devuelve weather_code según estándar WMO.
@@ -115,6 +140,32 @@ class WeatherData:
 # Cache en memoria: {cache_key: (timestamp_monotonic, WeatherData)}.
 _cache: dict[str, tuple[float, WeatherData]] = {}
 
+def _ttl_get[V](
+    cache: dict[str, tuple[float, V]], key: str, ttl_seconds: int, label: str
+) -> V | None:
+    """Devuelve el valor cacheado si existe y no expiró. No elimina entradas vencidas.
+
+    Helper compartido por el cache de clima actual y el histórico; cada uno pasa su TTL.
+    """
+    entry = cache.get(key)
+    if entry is None:
+        return None
+    ts, value = entry
+    if time.monotonic() - ts > ttl_seconds:
+        return None
+    logger.debug("Cache hit (%s) para %s", label, key)
+    return value
+
+
+def _evict_oldest_if_full[V](
+    cache: dict[str, tuple[float, V]], max_size: int, label: str
+) -> None:
+    """Evicta la entrada más antigua si el cache supera su tamaño máximo."""
+    if len(cache) > max_size:
+        oldest_key = min(cache, key=lambda k: cache[k][0])
+        del cache[oldest_key]
+        logger.debug("Cache evictado (%s, oldest): %s", label, oldest_key)
+
 
 def _cache_key(lat: float, lon: float) -> str:
     """Clave de cache para un par de coordenadas.
@@ -134,15 +185,7 @@ def _cache_get(lat: float, lon: float) -> WeatherData | None:
     Si la entrada expiró, no la elimina: se conserva para el fallback
     degradado cuando OpenMeteo falla (Issue #120).
     """
-    key = _cache_key(lat, lon)
-    entry = _cache.get(key)
-    if entry is None:
-        return None
-    ts, wd = entry
-    if time.monotonic() - ts > _CACHE_TTL_SECONDS:
-        return None
-    logger.debug("Cache hit para %s", key)
-    return wd
+    return _ttl_get(_cache, _cache_key(lat, lon), _CACHE_TTL_SECONDS, "forecast")
 
 
 def _cache_get_stale(
@@ -192,10 +235,7 @@ def _cache_set(lat: float, lon: float, wd: WeatherData) -> None:
     key = _cache_key(lat, lon)
     _cache[key] = (time.monotonic(), wd)
     _prune_stale_cache(settings.weather_stale_cache_max_age_hours * 3600)
-    if len(_cache) > _CACHE_MAX_SIZE:
-        oldest_key = min(_cache, key=lambda k: _cache[k][0])
-        del _cache[oldest_key]
-        logger.debug("Cache evictado (oldest): %s", oldest_key)
+    _evict_oldest_if_full(_cache, _CACHE_MAX_SIZE, "forecast")
 
 
 def _clear_cache() -> None:
@@ -217,6 +257,40 @@ def clear_weather_cache() -> int:
 def weather_cache_size() -> int:
     """Retorna el número de entradas activas en el cache de clima."""
     return len(_cache)
+
+
+# ── Cache de datos históricos ─────────────────────────────────
+
+
+# Cache de datos históricos: {cache_key: (timestamp_monotonic, list[HistoricalYearSummary])}.
+_historical_cache: dict[str, tuple[float, list["HistoricalYearSummary"]]] = {}
+
+
+def _historical_cache_key(lat: float, lon: float, years: int) -> str:
+    """Clave de cache para histórico truncando coordenadas a 2 decimales."""
+    return f"hist:{lat:.2f}:{lon:.2f}:y{years}"
+
+
+def _historical_cache_get(lat: float, lon: float, years: int) -> list["HistoricalYearSummary"] | None:
+    """Devuelve datos históricos cacheados si la entrada existe y no expiró."""
+    return _ttl_get(
+        _historical_cache,
+        _historical_cache_key(lat, lon, years),
+        _HISTORICAL_CACHE_TTL_SECONDS,
+        "historico",
+    )
+
+
+def _historical_cache_set(lat: float, lon: float, years: int, data: list["HistoricalYearSummary"]) -> None:
+    """Guarda datos históricos en el cache con timestamp actual."""
+    key = _historical_cache_key(lat, lon, years)
+    _historical_cache[key] = (time.monotonic(), data)
+    _evict_oldest_if_full(_historical_cache, _HISTORICAL_CACHE_MAX_SIZE, "historico")
+
+
+def _clear_historical_cache() -> None:
+    """Limpia el cache histórico. Para tests."""
+    _historical_cache.clear()
 
 
 async def _get_http_client() -> httpx.AsyncClient:
@@ -697,3 +771,341 @@ def _parse_forecast_daily(data: dict[str, object]) -> list[ForecastDay]:
             )
         )
     return dias
+
+
+# ── Datos climáticos históricos (Issue #124) ────────────────────
+
+
+@dataclass
+class HistoricalYearSummary:
+    """Resumen climático anual extraído de OpenMeteo Archive.
+
+    Calculado a partir de datos diarios de temperatura máxima, mínima
+    y precipitación acumulada.
+
+    Atributos:
+        year: Año del resumen (ej: 2025).
+        temp_promedio: Temperatura promedio anual en °C (promedio de
+            los promedios diarios de temp_max y temp_min).
+        temp_max_promedio: Promedio anual de temperatura máxima en °C.
+        temp_min_promedio: Promedio anual de temperatura mínima en °C.
+        precipitacion_total_mm: Precipitación total anual en mm.
+        dias_helada: Días con temperatura mínima < 0°C en el año.
+    """
+
+    year: int
+    temp_promedio: float | None
+    temp_max_promedio: float | None
+    temp_min_promedio: float | None
+    precipitacion_total_mm: float | None
+    dias_helada: int | None
+
+
+def _resolver_comuna(comuna: str) -> tuple[float, float] | None:
+    """Resuelve nombre de comuna chilena a coordenadas.
+
+    Usa el diccionario _COMUNAS (sin API de geocoding).
+    Búsqueda case-insensitive.
+
+    Args:
+        comuna: Nombre de la comuna (ej: "Traiguén", "temuco").
+
+    Returns:
+        Tupla (lat, lon) si la comuna está en el diccionario, None si no.
+    """
+    return _COMUNAS.get(comuna.strip().lower())
+
+
+async def fetch_historico(
+    lat: float = DEFAULT_LAT,
+    lon: float = DEFAULT_LON,
+    years: int = 1,
+) -> list[HistoricalYearSummary]:
+    """Consulta el histórico climático de OpenMeteo Archive.
+
+    Obtiene datos diarios de temperatura máxima, mínima y precipitación
+    para los últimos `years` años completos. Calcula resúmenes anuales
+    con promedios y totales.
+
+    OpenMeteo Archive no requiere API key. Cache en memoria con TTL 24h
+    porque los datos históricos no cambian.
+
+    Args:
+        lat: Latitud. Default: Traiguén (-38.23).
+        lon: Longitud. Default: Traiguén (-72.68).
+        years: Cantidad de años completos hacia atrás (1-5). Default: 1.
+
+    Returns:
+        Lista de HistoricalYearSummary ordenada por año ascendente.
+
+    Raises:
+        ValueError: Si years está fuera de rango (1-5).
+        ConnectionError: Error de red al consultar OpenMeteo.
+        RuntimeError: Error de API o respuesta malformada.
+    """
+    years = min(max(years, 1), 5)
+    if not (-90.0 <= lat <= 90.0):
+        raise ValueError("Latitud fuera de rango")
+    if not (-180.0 <= lon <= 180.0):
+        raise ValueError("Longitud fuera de rango")
+
+    cached = _historical_cache_get(lat, lon, years)
+    if cached is not None:
+        return cached
+
+    today = datetime.date.today()
+    current_year = today.year
+    start_year = current_year - years
+    end_year = current_year - 1
+
+    if start_year >= current_year:
+        logger.warning("No hay años completos para years=%d", years)
+        return []
+
+    start_date = datetime.date(start_year, 1, 1)
+    end_date = datetime.date(end_year, 12, 31)
+
+    data = await _fetch_historical_data(lat, lon, start_date, end_date)
+    summaries = _parse_historical_response(data, start_year, end_year)
+
+    _historical_cache_set(lat, lon, years, summaries)
+    logger.info(
+        "Histórico obtenido para (%.4f, %.4f): %d años (%d-%d)",
+        lat, lon, len(summaries), start_year, end_year,
+    )
+    return summaries
+
+
+async def _fetch_historical_data(
+    lat: float, lon: float, start_date: datetime.date, end_date: datetime.date,
+) -> dict[str, object]:
+    """Obtiene datos diarios históricos de OpenMeteo Archive.
+
+    Args:
+        lat: Latitud.
+        lon: Longitud.
+        start_date: Fecha de inicio (inclusive).
+        end_date: Fecha de fin (inclusive).
+
+    Returns:
+        Dict con la respuesta JSON de OpenMeteo Archive.
+
+    Raises:
+        ConnectionError: Error de red.
+        RuntimeError: Error de API o respuesta malformada.
+    """
+    params: dict[str, str | float | int] = {
+        "latitude": lat,
+        "longitude": lon,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum",
+        "timezone": "auto",
+    }
+
+    try:
+        client = await _get_http_client()
+        response = await client.get(_OPENMETEO_ARCHIVE_URL, params=params)
+        response.raise_for_status()
+        data: dict[str, object] = response.json()
+        return data
+    except httpx.HTTPStatusError as exc:
+        logger.warning("OpenMeteo Archive respondió HTTP %s", exc.response.status_code)
+        raise RuntimeError(f"OpenMeteo Archive respondió HTTP {exc.response.status_code}") from exc
+    except httpx.RequestError as exc:
+        logger.warning("Error de red al consultar OpenMeteo Archive: %s", exc)
+        raise ConnectionError("Error de red al consultar OpenMeteo Archive") from exc
+    except ValueError as exc:
+        raise RuntimeError(f"Respuesta de OpenMeteo Archive malformada: {exc}") from exc
+
+
+def _parse_historical_response(
+    data: dict[str, object],
+    start_year: int,
+    end_year: int,
+) -> list[HistoricalYearSummary]:
+    """Parsea la respuesta de OpenMeteo Archive a resúmenes anuales.
+
+    Agrupa datos diarios por año y calcula promedios y totales.
+
+    Args:
+        data: JSON parseado de OpenMeteo Archive.
+        start_year: Primer año del rango consultado.
+        end_year: Último año del rango consultado.
+
+    Returns:
+        Lista de HistoricalYearSummary ordenada por año.
+    """
+    daily: dict[str, object] = {}
+    if isinstance(data.get("daily"), dict):
+        daily = data["daily"]  # type: ignore[assignment]
+
+    fechas_raw = daily.get("time", [])
+    maxs_raw = daily.get("temperature_2m_max", [])
+    mins_raw = daily.get("temperature_2m_min", [])
+    precips_raw = daily.get("precipitation_sum", [])
+
+    if not isinstance(fechas_raw, list):
+        raise RuntimeError("OpenMeteo Archive: daily.time no es una lista")
+
+    yearly_data: dict[int, dict[str, list[float]]] = {}
+    for i, fecha_str in enumerate(fechas_raw):
+        try:
+            fecha = datetime.date.fromisoformat(str(fecha_str))
+        except ValueError:
+            continue
+
+        year = fecha.year
+        if year < start_year or year > end_year:
+            continue
+
+        if year not in yearly_data:
+            yearly_data[year] = {"temp_max": [], "temp_min": [], "precip": []}
+
+        tmax = _safe_float(maxs_raw[i]) if isinstance(maxs_raw, list) and i < len(maxs_raw) else None
+        tmin = _safe_float(mins_raw[i]) if isinstance(mins_raw, list) and i < len(mins_raw) else None
+        precip = _safe_float(precips_raw[i]) if isinstance(precips_raw, list) and i < len(precips_raw) else None
+
+        if tmax is not None:
+            yearly_data[year]["temp_max"].append(tmax)
+        if tmin is not None:
+            yearly_data[year]["temp_min"].append(tmin)
+        if precip is not None:
+            yearly_data[year]["precip"].append(precip)
+
+    summaries: list[HistoricalYearSummary] = []
+    for year in sorted(yearly_data.keys()):
+        yd = yearly_data[year]
+        tmax_list = yd["temp_max"]
+        tmin_list = yd["temp_min"]
+        precip_list = yd["precip"]
+
+        if tmax_list and tmin_list:
+            n = min(len(tmax_list), len(tmin_list))
+            daily_avgs = [(tmax_list[i] + tmin_list[i]) / 2.0 for i in range(n)]
+            temp_promedio = sum(daily_avgs) / n
+        else:
+            temp_promedio = None
+
+        temp_max_promedio = sum(tmax_list) / len(tmax_list) if tmax_list else None
+        temp_min_promedio = sum(tmin_list) / len(tmin_list) if tmin_list else None
+        precipitacion_total = sum(precip_list) if precip_list else None
+
+        dias_helada = sum(1 for t in tmin_list if t < 0) if tmin_list else None
+
+        summaries.append(HistoricalYearSummary(
+            year=year,
+            temp_promedio=temp_promedio,
+            temp_max_promedio=temp_max_promedio,
+            temp_min_promedio=temp_min_promedio,
+            precipitacion_total_mm=precipitacion_total,
+            dias_helada=dias_helada,
+        ))
+
+    return summaries
+
+
+def _format_historico_text(
+    summaries: list[HistoricalYearSummary],
+    comuna: str,
+    metrica: str | None = None,
+) -> str:
+    """Formatea resúmenes anuales a texto natural en español chileno.
+
+    Args:
+        summaries: Lista de HistoricalYearSummary ordenada por año.
+        comuna: Nombre de la comuna consultada.
+        metrica: Métrica opcional ("temperatura", "lluvia", "heladas").
+
+    Returns:
+        Texto natural para TTS. Ejemplo:
+        "En Traiguén, el año 2025 tuvo temperatura promedio de 12°C,
+         con 850mm de lluvia y 15 días de helada, según OpenMeteo."
+    """
+    if not summaries:
+        return f"No hay datos históricos disponibles para {comuna}, según OpenMeteo."
+
+    sorted_sums = sorted(summaries, key=lambda s: s.year)
+
+    partes: list[str] = []
+    for s in sorted_sums:
+        year_part = f"el año {s.year} tuvo"
+
+        detalles: list[str] = []
+
+        if metrica in (None, "temperatura"):
+            if s.temp_promedio is not None:
+                detalles.append(f"temperatura promedio de {s.temp_promedio:.0f}°C")
+            if s.temp_max_promedio is not None:
+                detalles.append(f"máxima promedio de {s.temp_max_promedio:.0f}°C")
+            if s.temp_min_promedio is not None:
+                detalles.append(f"mínima promedio de {s.temp_min_promedio:.0f}°C")
+
+        if metrica in (None, "lluvia") and s.precipitacion_total_mm is not None:
+            if s.precipitacion_total_mm >= 1000:
+                detalles.append(
+                    f"precipitación total de {s.precipitacion_total_mm / 1000:.1f} metros"
+                )
+            else:
+                detalles.append(f"{s.precipitacion_total_mm:.0f}mm de lluvia")
+
+        if metrica in (None, "heladas") and s.dias_helada is not None:
+            if s.dias_helada == 0:
+                detalles.append("sin días de helada")
+            elif s.dias_helada == 1:
+                detalles.append("1 día de helada")
+            else:
+                detalles.append(f"{s.dias_helada} días de helada")
+
+        if detalles:
+            year_text = year_part + " " + ", ".join(detalles)
+            partes.append(year_text)
+
+    if not partes:
+        return f"No hay datos climáticos históricos disponibles para {comuna}, según OpenMeteo."
+
+    texto = f"En {comuna}, " + ", y ".join(partes) + ", según OpenMeteo."
+    return texto
+
+
+async def get_clima_historico(comuna: str, metrica: str | None = None) -> str:
+    """Tool function para el LLM: consulta clima histórico de una comuna.
+
+    Recibe nombre de comuna chilena y métrica opcional. Resuelve la comuna
+    a coordenadas, consulta OpenMeteo Archive (último año) y devuelve texto
+    natural en español chileno.
+
+    SOLO INFORMA DATOS. Sin recomendaciones agronómicas.
+
+    Args:
+        comuna: Nombre de la comuna (ej: "Traiguén", "Temuco", "Santiago").
+        metrica: Métrica a enfatizar: "temperatura", "lluvia", "heladas",
+            o None para resumen completo.
+
+    Returns:
+        Texto natural en español chileno para TTS.
+    """
+    coords = _resolver_comuna(comuna)
+    if coords is None:
+        return (
+            f"Disculpa, no reconozco la comuna '{comuna}'. "
+            "Las comunas disponibles son: Traiguén, Temuco, Santiago. "
+            "¿Podrías decirme cuál te interesa?"
+        )
+
+    lat, lon = coords
+
+    try:
+        summaries = await fetch_historico(lat, lon, years=1)
+        if not summaries:
+            return (
+                f"No hay datos históricos disponibles para {comuna} "
+                "en el último año, según OpenMeteo."
+            )
+        return _format_historico_text(summaries, comuna, metrica=metrica)
+    except (ConnectionError, RuntimeError) as exc:
+        logger.warning("Error al consultar histórico de %s: %s", comuna, exc)
+        return (
+            f"No pude consultar el histórico climático de {comuna} ahora. "
+            "¿Probamos más tarde?"
+        )

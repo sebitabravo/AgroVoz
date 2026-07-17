@@ -3,7 +3,10 @@
 Cobertura: _format_weather (respuesta completa, parcial, lluvia, sin viento),
 _parse_openmeteo_response con datos realistas (completo, mínimo, nulos),
 get_weather con mock httpx (happy path, cache, errores),
-validación lat/lon, cache eviction, y _clear_cache.
+validación lat/lon, cache eviction, _clear_cache,
+y datos climáticos históricos vía OpenMeteo Archive (Issue #124):
+_resolver_comuna, _parse_historical_response, _format_historico_text,
+fetch_historico, get_clima_historico.
 Sin red real: MockTransport simula respuestas de OpenMeteo.
 """
 
@@ -14,9 +17,15 @@ import pytest
 
 from app.services.weather_service import (
     _clear_cache,
+    _clear_historical_cache,
+    _format_historico_text,
     _format_weather,
+    _parse_historical_response,
     _parse_openmeteo_response,
+    _resolver_comuna,
     _wmo_description,
+    fetch_historico,
+    get_clima_historico,
     get_weather,
     get_weather_full,
 )
@@ -639,8 +648,8 @@ class TestCacheDegradado:
         _clear_cache()
         mock_client = _install_mock_client(monkeypatch, self._handler_falla)
         try:
-            texto = await get_weather()
-            assert "No pude consultar el clima" in texto
+            with pytest.raises(ConnectionError):
+                await get_weather_full()
         finally:
             await mock_client.aclose()
 
@@ -664,5 +673,431 @@ class TestCacheDegradado:
         try:
             with pytest.raises(ConnectionError):
                 await get_weather_full()
+        finally:
+            await mock_client.aclose()
+
+
+# ── Tests: datos climáticos históricos (Issue #124) ─────────────
+
+
+# Respuesta simulada de OpenMeteo Archive para 2025 (datos diarios reducidos).
+_RESPUESTA_ARCHIVE_2025: dict[str, object] = {
+    "latitude": -38.23,
+    "longitude": -72.68,
+    "daily": {
+        "time": [
+            "2025-01-01", "2025-01-02", "2025-01-03",
+            "2025-06-15", "2025-06-16",
+            "2025-07-10",
+            "2025-12-30", "2025-12-31",
+        ],
+        "temperature_2m_max": [25.0, 26.0, 24.0, 12.0, 11.0, 8.0, 22.0, 23.0],
+        "temperature_2m_min": [10.0, 12.0, 11.0, 2.0, 1.0, -2.0, 10.0, 11.0],
+        "precipitation_sum": [0.0, 0.0, 5.0, 20.0, 15.0, 8.0, 0.0, 0.0],
+    },
+}
+
+# Respuesta simulada multi-anual 2024-2025.
+_RESPUESTA_ARCHIVE_2024_2025: dict[str, object] = {
+    "latitude": -38.23,
+    "longitude": -72.68,
+    "daily": {
+        "time": [
+            "2024-06-01", "2024-06-02",
+            "2025-07-10", "2025-07-11",
+        ],
+        "temperature_2m_max": [15.0, 14.0, 8.0, 9.0],
+        "temperature_2m_min": [5.0, 4.0, -2.0, -1.0],
+        "precipitation_sum": [10.0, 5.0, 8.0, 2.0],
+    },
+}
+
+
+class TestResolverComuna:
+    """Resolución de nombres de comuna a coordenadas."""
+
+    def test_comuna_conocida_traiguen(self) -> None:
+        """Traiguén resuelve a coordenadas conocidas."""
+        coords = _resolver_comuna("Traiguén")
+        assert coords is not None
+        lat, lon = coords
+        assert lat == -38.23
+        assert lon == -72.68
+
+    def test_comuna_conocida_temuco(self) -> None:
+        """Temuco resuelve a coordenadas conocidas."""
+        coords = _resolver_comuna("Temuco")
+        assert coords is not None
+        assert coords == (-38.74, -72.59)
+
+    def test_comuna_case_insensitive(self) -> None:
+        """Búsqueda case-insensitive."""
+        coords = _resolver_comuna("TRAIGUEN")
+        assert coords is not None
+
+    def test_comuna_desconocida(self) -> None:
+        """Comuna no registrada devuelve None."""
+        coords = _resolver_comuna("Londres")
+        assert coords is None
+
+    def test_comuna_variantes_tilde_mismas_coords(self) -> None:
+        """'traiguen' y 'Traiguén' (con y sin tilde) resuelven a las mismas coordenadas."""
+        assert _resolver_comuna("traiguen") == _resolver_comuna("Traiguén") == (-38.23, -72.68)
+
+
+class TestParseHistoricalResponse:
+    """Parseo de respuesta de OpenMeteo Archive a resúmenes anuales."""
+
+    def test_un_ano_datos_completos(self) -> None:
+        """Respuesta con un año produce un resumen con todos los campos."""
+        summaries = _parse_historical_response(_RESPUESTA_ARCHIVE_2025, 2025, 2025)
+        assert len(summaries) == 1
+        s = summaries[0]
+        assert s.year == 2025
+        assert s.temp_promedio is not None
+        assert s.temp_max_promedio is not None
+        assert s.temp_min_promedio is not None
+        assert s.precipitacion_total_mm is not None
+        assert s.dias_helada is not None
+
+    def test_dos_anios(self) -> None:
+        """Respuesta multi-anual produce dos resúmenes."""
+        summaries = _parse_historical_response(_RESPUESTA_ARCHIVE_2024_2025, 2024, 2025)
+        assert len(summaries) == 2
+        years = [s.year for s in summaries]
+        assert 2024 in years
+        assert 2025 in years
+
+    def test_calcula_temp_promedio(self) -> None:
+        """Temp promedio calculado correctamente."""
+        summaries = _parse_historical_response(_RESPUESTA_ARCHIVE_2025, 2025, 2025)
+        s = summaries[0]
+        # (max+min)/2 para 8 días
+        expected_avg = sum([
+            (25.0 + 10.0) / 2,
+            (26.0 + 12.0) / 2,
+            (24.0 + 11.0) / 2,
+            (12.0 + 2.0) / 2,
+            (11.0 + 1.0) / 2,
+            (8.0 + -2.0) / 2,
+            (22.0 + 10.0) / 2,
+            (23.0 + 11.0) / 2,
+        ]) / 8
+        assert s.temp_promedio == pytest.approx(expected_avg, abs=0.01)
+
+    def test_calcula_precipitacion_total(self) -> None:
+        """Precipitación total suma correctamente."""
+        summaries = _parse_historical_response(_RESPUESTA_ARCHIVE_2025, 2025, 2025)
+        s = summaries[0]
+        assert s.precipitacion_total_mm == pytest.approx(48.0, abs=0.01)  # 0+0+5+20+15+8+0+0
+
+    def test_calcula_dias_helada(self) -> None:
+        """Días con temp_min < 0°C se cuentan correctamente."""
+        summaries = _parse_historical_response(_RESPUESTA_ARCHIVE_2025, 2025, 2025)
+        s = summaries[0]
+        # Solo 1 día con temp_min < 0°C: -2.0 el 2025-07-10
+        assert s.dias_helada == 1
+
+    def test_sin_datos_devuelve_lista_vacia(self) -> None:
+        """Respuesta sin daily.time produce lista vacía."""
+        summaries = _parse_historical_response(
+            {"daily": {"time": [], "temperature_2m_max": [], "temperature_2m_min": [], "precipitation_sum": []}},
+            2025, 2025,
+        )
+        assert summaries == []
+
+    def test_fechas_fuera_rango_se_ignoran(self) -> None:
+        """Datos de años fuera del rango no se incluyen."""
+        summaries = _parse_historical_response(_RESPUESTA_ARCHIVE_2024_2025, 2025, 2025)
+        assert len(summaries) == 1
+        assert summaries[0].year == 2025
+
+
+class TestFormatHistoricoText:
+    """Formateo de resúmenes históricos a texto natural."""
+
+    def test_resumen_completo(self) -> None:
+        """Resumen completo incluye temperatura, lluvia y heladas."""
+        from app.services.weather_service import HistoricalYearSummary
+
+        summaries = [
+            HistoricalYearSummary(
+                year=2025, temp_promedio=12.5, temp_max_promedio=18.0,
+                temp_min_promedio=7.0, precipitacion_total_mm=850.0, dias_helada=15,
+            ),
+        ]
+        texto = _format_historico_text(summaries, "Traiguén")
+        assert "Traiguén" in texto
+        assert "2025" in texto
+        assert "12°C" in texto
+        assert "850mm" in texto
+        assert "15 días" in texto
+        assert "según OpenMeteo" in texto
+
+    def test_dos_anios(self) -> None:
+        """Dos años se separan con 'y' en el texto."""
+        from app.services.weather_service import HistoricalYearSummary
+
+        summaries = [
+            HistoricalYearSummary(
+                year=2024, temp_promedio=13.0, temp_max_promedio=19.0,
+                temp_min_promedio=7.0, precipitacion_total_mm=800.0, dias_helada=10,
+            ),
+            HistoricalYearSummary(
+                year=2025, temp_promedio=12.0, temp_max_promedio=18.0,
+                temp_min_promedio=6.0, precipitacion_total_mm=850.0, dias_helada=15,
+            ),
+        ]
+        texto = _format_historico_text(summaries, "Traiguén")
+        assert "2024" in texto
+        assert "2025" in texto
+        assert ", y " in texto  # separador entre años
+        assert "según OpenMeteo" in texto
+
+    def test_metrica_temperatura_solo(self) -> None:
+        """Con metrica='temperatura' solo incluye datos de temperatura."""
+        from app.services.weather_service import HistoricalYearSummary
+
+        summaries = [
+            HistoricalYearSummary(
+                year=2025, temp_promedio=12.5, temp_max_promedio=18.0,
+                temp_min_promedio=7.0, precipitacion_total_mm=850.0, dias_helada=15,
+            ),
+        ]
+        texto = _format_historico_text(summaries, "Traiguén", metrica="temperatura")
+        assert "12°C" in texto
+        assert "mm" not in texto
+        assert "helada" not in texto
+        assert "según OpenMeteo" in texto
+
+    def test_metrica_lluvia_solo(self) -> None:
+        """Con metrica='lluvia' solo incluye precipitación."""
+        from app.services.weather_service import HistoricalYearSummary
+
+        summaries = [
+            HistoricalYearSummary(
+                year=2025, temp_promedio=12.5, temp_max_promedio=18.0,
+                temp_min_promedio=7.0, precipitacion_total_mm=850.0, dias_helada=15,
+            ),
+        ]
+        texto = _format_historico_text(summaries, "Traiguén", metrica="lluvia")
+        assert "mm" in texto
+        assert "°C" not in texto
+        assert "helada" not in texto
+        assert "según OpenMeteo" in texto
+
+    def test_metrica_heladas_solo(self) -> None:
+        """Con metrica='heladas' solo incluye días de helada."""
+        from app.services.weather_service import HistoricalYearSummary
+
+        summaries = [
+            HistoricalYearSummary(
+                year=2025, temp_promedio=12.5, temp_max_promedio=18.0,
+                temp_min_promedio=7.0, precipitacion_total_mm=850.0, dias_helada=15,
+            ),
+        ]
+        texto = _format_historico_text(summaries, "Traiguén", metrica="heladas")
+        assert "helada" in texto
+        assert "°C" not in texto
+        assert "mm" not in texto
+        assert "según OpenMeteo" in texto
+
+    def test_sin_datos_devuelve_mensaje(self) -> None:
+        """Lista vacía produce mensaje informativo."""
+        texto = _format_historico_text([], "Traiguén")
+        assert "No hay datos históricos" in texto
+        assert "Traiguén" in texto
+        assert "según OpenMeteo" in texto
+
+
+class TestFetchHistorico:
+    """fetch_historico con httpx mockeado y cache."""
+
+    def setup_method(self) -> None:
+        """Limpia cache histórico y cliente HTTP entre tests."""
+        _clear_historical_cache()
+        import app.services.weather_service as ws
+        ws._http_client = None
+
+    def _mock_client(
+        self, monkeypatch: pytest.MonkeyPatch, json_body: dict[str, object]
+    ) -> httpx.AsyncClient:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=json_body)
+
+        transport = httpx.MockTransport(handler)
+        mock_client = httpx.AsyncClient(transport=transport)
+        monkeypatch.setattr("app.services.weather_service._http_client", mock_client)
+        return mock_client
+
+    async def test_fetch_historico_un_ano(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """fetch_historico devuelve resumen de un año."""
+        mock_client = self._mock_client(monkeypatch, _RESPUESTA_ARCHIVE_2025)
+        try:
+            summaries = await fetch_historico(-38.23, -72.68, years=1)
+            assert len(summaries) >= 1
+            assert summaries[0].year >= 2024
+        finally:
+            await mock_client.aclose()
+
+    async def test_fetch_historico_clampea_years_sobre_5(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """years > 5 se clampea a 5: el resultado se cachea bajo la clave y5, no y10."""
+        import app.services.weather_service as ws
+
+        mock_client = self._mock_client(monkeypatch, _RESPUESTA_ARCHIVE_2025)
+        try:
+            await fetch_historico(-38.23, -72.68, years=10)
+            assert ws._historical_cache_get(-38.23, -72.68, 5) is not None
+            assert ws._historical_cache_get(-38.23, -72.68, 10) is None
+        finally:
+            await mock_client.aclose()
+
+    async def test_fetch_historico_cache_funciona(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Segunda llamada usa cache, no va a API."""
+        call_count = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal call_count
+            call_count += 1
+            return httpx.Response(200, json=_RESPUESTA_ARCHIVE_2025)
+
+        transport = httpx.MockTransport(handler)
+        mock_client = httpx.AsyncClient(transport=transport)
+        monkeypatch.setattr("app.services.weather_service._http_client", mock_client)
+        try:
+            s1 = await fetch_historico(-38.23, -72.68, years=1)
+            s2 = await fetch_historico(-38.23, -72.68, years=1)
+            assert len(s1) == len(s2)
+            assert call_count == 1  # Segunda llamada no fue a API
+        finally:
+            await mock_client.aclose()
+
+    async def test_fetch_historico_error_http(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Error HTTP 500 propaga RuntimeError."""
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(500)
+
+        transport = httpx.MockTransport(handler)
+        mock_client = httpx.AsyncClient(transport=transport)
+        monkeypatch.setattr("app.services.weather_service._http_client", mock_client)
+        try:
+            with pytest.raises(RuntimeError):
+                await fetch_historico(-38.23, -72.68, years=1)
+        finally:
+            await mock_client.aclose()
+
+    async def test_fetch_historico_error_red(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Error de red propaga ConnectionError."""
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("red caida")
+
+        transport = httpx.MockTransport(handler)
+        mock_client = httpx.AsyncClient(transport=transport)
+        monkeypatch.setattr("app.services.weather_service._http_client", mock_client)
+        try:
+            with pytest.raises(ConnectionError):
+                await fetch_historico(-38.23, -72.68, years=1)
+        finally:
+            await mock_client.aclose()
+
+    async def test_fetch_historico_valida_latitud(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Latitud fuera de rango lanza ValueError."""
+        with pytest.raises(ValueError, match="Latitud fuera de rango"):
+            await fetch_historico(lat=100.0, lon=-70.0)
+
+    async def test_fetch_historico_valida_longitud(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Longitud fuera de rango lanza ValueError."""
+        with pytest.raises(ValueError, match="Longitud fuera de rango"):
+            await fetch_historico(lat=-33.0, lon=200.0)
+
+
+class TestGetClimaHistorico:
+    """get_clima_historico tool function con mock."""
+
+    def setup_method(self) -> None:
+        _clear_historical_cache()
+        import app.services.weather_service as ws
+        ws._http_client = None
+
+    def _mock_client(
+        self, monkeypatch: pytest.MonkeyPatch, json_body: dict[str, object]
+    ) -> httpx.AsyncClient:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=json_body)
+
+        transport = httpx.MockTransport(handler)
+        mock_client = httpx.AsyncClient(transport=transport)
+        monkeypatch.setattr("app.services.weather_service._http_client", mock_client)
+        return mock_client
+
+    async def test_comuna_conocida_devuelve_texto(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Comuna conocida devuelve texto natural."""
+        mock_client = self._mock_client(monkeypatch, _RESPUESTA_ARCHIVE_2025)
+        try:
+            texto = await get_clima_historico("Traiguén")
+            assert "Traiguén" in texto
+            assert "2025" in texto
+            assert "según OpenMeteo" in texto
+        finally:
+            await mock_client.aclose()
+
+    async def test_comuna_desconocida_devuelve_mensaje(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Comuna no registrada devuelve mensaje informativo."""
+        texto = await get_clima_historico("Londres")
+        assert "no reconozco" in texto.lower()
+        assert "Traiguén" in texto or "Temuco" in texto or "Santiago" in texto
+
+    async def test_error_api_devuelve_mensaje_amigable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Error de API devuelve mensaje amigable para el agricultor."""
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("fallo simulado")
+
+        transport = httpx.MockTransport(handler)
+        mock_client = httpx.AsyncClient(transport=transport)
+        monkeypatch.setattr("app.services.weather_service._http_client", mock_client)
+        try:
+            texto = await get_clima_historico("Traiguén")
+            assert "No pude consultar" in texto
+            assert "Traiguén" in texto
+        finally:
+            await mock_client.aclose()
+
+    async def test_texto_cita_fuente_openmeteo(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """El texto histórico incluye 'según OpenMeteo'."""
+        mock_client = self._mock_client(monkeypatch, _RESPUESTA_ARCHIVE_2025)
+        try:
+            texto = await get_clima_historico("Traiguén")
+            assert "según OpenMeteo" in texto
+        finally:
+            await mock_client.aclose()
+
+    async def test_metrica_temperatura(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Solicitar metrica=temperatura solo muestra temperatura."""
+        mock_client = self._mock_client(monkeypatch, _RESPUESTA_ARCHIVE_2025)
+        try:
+            texto = await get_clima_historico("Traiguén", metrica="temperatura")
+            assert "temperatura" in texto or "°C" in texto
         finally:
             await mock_client.aclose()

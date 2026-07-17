@@ -8,7 +8,8 @@ Tools disponibles (whitelist):
   - get_price(producto, mercado)              -> odepa_service.get_price_for_llm()
   - get_price_history(producto, dias)         -> odepa_service.get_price_history_for_llm()
   - calculate_sale_value(producto, kg, mercado) -> odepa_service.calculate_sale_value_for_llm()
-  - get_weather(lat, lon)                      -> weather_service.get_weather()
+   - get_weather(lat, lon)                      -> weather_service.get_weather()
+   - get_clima_historico(comuna, metrica)       -> weather_service.get_clima_historico()
 
 Si el LLM intenta usar cualquier otra tool, se responde con texto
 de fallback. Si no entiende la query, pide reformular.
@@ -46,18 +47,26 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = (
     "Eres AgroVoz, un asistente de voz para pequeños agricultores chilenos.\n"
     "REGLAS ESTRICTAS:\n"
-    "1. Tienes CUATRO herramientas (definidas abajo). USA LA CORRECTA:\n"
+    "1. Tienes CINCO herramientas (definidas abajo). USA LA CORRECTA:\n"
     "   - get_price: PRECIOS ACTUALES ODEPA.\n"
     "   - get_price_history: PRECIOS PASADOS, variacion.\n"
     "   - calculate_sale_value: CALCULAR VENTA (CUANTO RECIBIRA). NO hagas el calculo tu.\n"
-    "   - get_weather: CLIMA (temperatura, lluvia, viento).\n"
+    "   - get_weather: CLIMA ACTUAL (temperatura, lluvia, viento).\n"
+    "   - get_clima_historico: CLIMA HISTORICO (temperatura promedio del"
+    " año, lluvia total, heladas).\n"
     "2. Determina el intent segun:\n"
     "   - PRECIO: precio, cuanto, cuesta, vale, producto agricola, kilo, peso, luca.\n"
     "   - VENTA: kilos a vender (\"voy a vender X kilos\").\n"
     "   - PRECIO PASADO: estaba, semana pasada, ayer, subio, bajo.\n"
-    "   - CLIMA: clima, temperatura, lluvia, pronostico, frio, calor, humedad, viento.\n"
-    "   Ej: \"a cuanto la papa\" -> get_price. \"voy a vender 30 kilos\" -> calculate_sale_value.\n"
-    "   \"a cuanto estaba la papa\" -> get_price_history. \"como esta el clima\" -> get_weather.\n"
+    "   - CLIMA ACTUAL: clima, temperatura, lluvia, pronostico, frio, calor,"
+    " humedad, viento.\n"
+    "   - CLIMA HISTORICO: historico, año pasado, temperatura promedio,"
+    " lluvia total, heladas.\n"
+    "   Ej: \"a cuanto la papa\" -> get_price. \"voy a vender 30 kilos\""
+    " -> calculate_sale_value.\n"
+    "   \"a cuanto estaba la papa\" -> get_price_history."
+    " \"como esta el clima\" -> get_weather.\n"
+    "   \"como fue el clima el año pasado\" -> get_clima_historico.\n"
     "   \"a cuanto la papa y el clima\" -> AMBAS.\n"
     "3. SIEMPRE usa herramienta antes de reformular.\n"
     "4. NUNCA recomendaciones agronomicas. Solo datos de precio y clima.\n"
@@ -78,7 +87,13 @@ NO_RESPONSE_TEXT = "No entendí tu consulta. ¿Podrías reformularla?"
 
 # Tool names permitidas. Cualquier otra -> fallback.
 WHITELIST_TOOLS = frozenset(
-    {"get_price", "get_price_history", "calculate_sale_value", "get_weather"}
+    {
+        "get_price",
+        "get_price_history",
+        "calculate_sale_value",
+        "get_weather",
+        "get_clima_historico",
+    }
 )
 
 # Máximo de iteraciones del Tool Calling loop (previene loops infinitos).
@@ -261,6 +276,44 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_clima_historico",
+            "description": (
+                "USAR para CLIMA HISTORICO. "
+                "Cuando el agricultor pregunte como fue el clima en un periodo "
+                "pasado, la temperatura promedio del año, cuanta lluvia cayo o "
+                "cuantos dias de helada hubo. "
+                "NO usar para clima actual (usa get_weather). "
+                "SOLO INFORMA DATOS, no recomienda cuando sembrar. "
+                "Ej: 'como fue el clima el año pasado en Traiguen', "
+                "'cuanta lluvia cayo el año pasado', "
+                "'cuantos dias de helada hubo en Temuco'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "comuna": {
+                        "type": "string",
+                        "description": (
+                            "Nombre de la comuna chilena (ej: Traiguen, Temuco, Santiago). "
+                            "Usar Traiguen si no se especifica ubicacion."
+                        ),
+                    },
+                    "metrica": {
+                        "type": "string",
+                        "description": (
+                            "Metrica opcional a enfatizar: "
+                            "'temperatura', 'lluvia', 'heladas'. "
+                            "Si no se especifica, se entrega resumen completo."
+                        ),
+                    },
+                },
+                "required": ["comuna"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "calculate_sale_value",
             "description": (
                 "USAR para CALCULAR CUANTO RECIBIRA el agricultor por una venta. "
@@ -428,13 +481,14 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         get_price_for_llm,
         get_price_history_for_llm,
     )
-    from app.services.weather_service import get_weather
+    from app.services.weather_service import get_clima_historico, get_weather
 
     return {
         "get_price": get_price_for_llm,
         "get_price_history": get_price_history_for_llm,
         "calculate_sale_value": calculate_sale_value_for_llm,
         "get_weather": get_weather,
+        "get_clima_historico": get_clima_historico,
     }
 
 
@@ -486,7 +540,9 @@ async def _execute_tool(
 
     # Cache de resultados: evita llamadas redundantes al LLM + DB para
     # la misma consulta repetida (precios ODEPA solo cambian 1 vez al dia).
-    cacheable = frozenset({"get_price", "get_price_history", "get_weather"})
+    cacheable = frozenset({
+        "get_price", "get_price_history", "get_weather", "get_clima_historico",
+    })
     if name in cacheable:
         cached = _tool_cache.get(name, **valid_args)
         if cached is not None:
@@ -834,7 +890,7 @@ async def answer(
                 fn_name = str(fn_info_raw.get("name", ""))
                 fn_args_str = str(fn_info_raw.get("arguments", "{}"))
 
-                # Whitelist enforcement: solo get_price y get_weather.
+                # Whitelist enforcement: solo tools permitidas.
                 if fn_name not in WHITELIST_TOOLS:
                     logger.warning("Tool fuera de whitelist: %s — enviando fallback", fn_name)
                     messages.append({
