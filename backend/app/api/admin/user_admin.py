@@ -11,6 +11,7 @@ Endpoints:
 Todos requieren header X-Admin-Key.
 """
 
+import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
@@ -49,11 +50,31 @@ def _validate_phone_hash_param(phone_hash: str) -> None:
         )
 
 
-def _apply_prefs_fields(prefs: UserPrefs, comuna: str, dataset_consent: bool | None) -> None:
-    """Aplica comuna y, si viene explícito, dataset_consent (#96).
+def _serializar_cultivos(cultivos: list[str] | None) -> str | None:
+    """Serializa lista de cultivos a JSON string para SQLite TEXT.
+
+    Args:
+        cultivos: Lista de strings con cultivos de interés, o None.
+
+    Returns:
+        JSON string o None si la lista está vacía o es None.
+    """
+    if not cultivos:
+        return None
+    return json.dumps(cultivos, ensure_ascii=False)
+
+
+def _apply_prefs_fields(
+    prefs: UserPrefs,
+    comuna: str,
+    dataset_consent: bool | None,
+    cultivos: list[str] | None = None,
+) -> None:
+    """Aplica comuna, dataset_consent y cultivos a un UserPrefs.
 
     Punto único de asignación para el upsert y su retry por race condition.
     El cambio de consentimiento se loguea siempre (auditoría Ley 21.719).
+    Cada campo opcional solo se modifica si viene explícito.
     """
     prefs.comuna = comuna
     if dataset_consent is not None:
@@ -62,6 +83,13 @@ def _apply_prefs_fields(prefs: UserPrefs, comuna: str, dataset_consent: bool | N
             "dataset_consent actualizado — phone_hash=%s consent=%s",
             prefs.phone_hash[:8],
             prefs.dataset_consent,
+        )
+    if cultivos is not None:
+        prefs.cultivos = _serializar_cultivos(cultivos)
+        logger.info(
+            "cultivos actualizados — phone_hash=%s cultivos=%s",
+            prefs.phone_hash[:8],
+            prefs.cultivos,
         )
 
 
@@ -74,15 +102,15 @@ def set_comuna(
     body: ComunaRequest = ...,  # type: ignore[assignment]
     db: Session = Depends(get_db),  # noqa: B008
 ) -> UserPrefsResponse:
-    """Registra o actualiza la comuna de un productor (upsert).
+    """Registra o actualiza la comuna y cultivos de un productor (upsert).
 
     Si el phone_hash no existe en user_prefs, crea una fila nueva.
-    Si ya existe, actualiza la comuna. Idempotente: múltiples PUTs con
-    la misma comuna no crean duplicados (unique constraint en phone_hash).
+    Si ya existe, actualiza los campos. Idempotente: múltiples PUTs con
+    los mismos valores no crean duplicados (unique constraint en phone_hash).
 
     Usado en el onboarding presencial del piloto: el equipo visita al
     productor, recibe su primer audio, anota el phone_hash del log y
-    registra su comuna acá.
+    registra su comuna y cultivos de interés acá.
     """
     _validate_phone_hash_param(phone_hash)
     comuna = body.comuna.strip()
@@ -108,7 +136,7 @@ def set_comuna(
                 phone_hash[:8],
                 comuna,
             )
-        _apply_prefs_fields(prefs, comuna, body.dataset_consent)
+        _apply_prefs_fields(prefs, comuna, body.dataset_consent, body.cultivos)
 
         db.commit()
         db.refresh(prefs)
@@ -122,7 +150,7 @@ def set_comuna(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Conflicto al crear user_prefs.",
             ) from None
-        _apply_prefs_fields(prefs, comuna, body.dataset_consent)
+        _apply_prefs_fields(prefs, comuna, body.dataset_consent, body.cultivos)
         db.commit()
         db.refresh(prefs)
     except SQLAlchemyError:
@@ -137,6 +165,7 @@ def set_comuna(
         phone_hash=prefs.phone_hash,
         comuna=prefs.comuna,
         dataset_consent=prefs.dataset_consent,
+        cultivos=prefs.cultivos,
         created_at=prefs.created_at,
     )
 
@@ -165,5 +194,6 @@ def get_user_prefs(
         phone_hash=prefs.phone_hash,
         comuna=prefs.comuna,
         dataset_consent=prefs.dataset_consent,
+        cultivos=prefs.cultivos,
         created_at=prefs.created_at,
     )
