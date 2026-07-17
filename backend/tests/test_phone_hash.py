@@ -11,7 +11,6 @@ import pytest
 from app.core.phone_hash import hash_phone, normalizar_e164, validate_phone_hash
 from app.services.openwa_service import phone_to_chat_id
 
-
 # ── normalizar_e164: casos validos ──────────────────────────────
 
 VALIDOS = pytest.mark.parametrize(
@@ -38,6 +37,11 @@ VALIDOS = pytest.mark.parametrize(
         ("+1234567890", "+1234567890"),
         # Caracteres mixtos con guiones bajos y barras (no comunes pero defensivos)
         ("+56_9/1234_5678", "+56912345678"),
+        # Celular chileno local (9 digitos, empieza con 9, sin "+"):
+        # se autocompleta el codigo de pais 56 (issue #126)
+        ("9 1234 5678", "+56912345678"),
+        ("912345678", "+56912345678"),
+        ("9-1234-5678", "+56912345678"),
     ],
 )
 
@@ -48,27 +52,40 @@ def test_normalizar_e164_valido(entrada: str, esperado: str) -> None:
     assert normalizar_e164(entrada) == esperado
 
 
-# ── normalizar_e164: chatIds de Open-WA (sin tocar) ─────────────
+# ── normalizar_e164: chatIds de Open-WA (SIN SOPORTAR) ──────────
 
-CHAT_IDS = pytest.mark.parametrize(
-    "entrada,esperado",
+# Los chatIds de Open-WA (@c.us, @lid) NO son soportados en normalizar_e164().
+# El caller (phone_to_chat_id) es quien debe chequear y pasar chatIds sin cambios.
+# Tests de pass-through de chatIds están en PHONE_TO_CHAT_ID_CASES.
+
+
+# ── normalizar_e164: errores (caracteres no permitidos) ────────
+
+CARACTERES_INVALIDOS = pytest.mark.parametrize(
+    "entrada,mensaje_esperado",
     [
-        # ChatId @c.us — no validar largo (ya tiene el sufijo)
-        ("56912345678@c.us", "56912345678@c.us"),
-        ("123@c.us", "123@c.us"),  # corto pero es chatId, no se valida
-        # ChatId @lid — no validar largo
-        ("248069442560050@lid", "248069442560050@lid"),
-        ("123@lid", "123@lid"),
-        # ChatId con espacios (no deberia pasar, pero es defensivo: strip() lo limpia)
-        (" 56912345678@c.us ", "56912345678@c.us"),
+        # Digitos arabes (Unicode no-ASCII)
+        ("٥٦٩١٢٣٤٥٦٧٨", "contiene caracteres no permitidos"),
+        # Digitos fullwidth (Unicode no-ASCII)
+        ("５６９１２３４５６７８９", "contiene caracteres no permitidos"),  # noqa: RUF001
+        # Letras en el numero
+        ("+56abc912345678", "contiene caracteres no permitidos"),
+        ("56 abc 912345678", "contiene caracteres no permitidos"),
+        # "+" en posicion intermedia (luego del primer caracter)
+        ("56+912345678", "contiene caracteres no permitidos"),
+        ("5+6912345678", "contiene caracteres no permitidos"),
     ],
 )
 
 
-@CHAT_IDS
-def test_normalizar_e164_chat_id_sin_cambios(entrada: str, esperado: str) -> None:
-    """ChatIds de Open-WA (@c.us, @lid) se retornan sin validar largo."""
-    assert normalizar_e164(entrada) == esperado
+@CARACTERES_INVALIDOS
+def test_normalizar_e164_caracteres_no_permitidos_lanza_value_error(
+    entrada: str,
+    mensaje_esperado: str,
+) -> None:
+    """Numeros con caracteres no permitidos (letras, Unicode) lanzan ValueError."""
+    with pytest.raises(ValueError, match=mensaje_esperado):
+        normalizar_e164(entrada)
 
 
 # ── normalizar_e164: errores (largo invalido) ───────────────────
@@ -80,12 +97,15 @@ INVALIDOS = pytest.mark.parametrize(
         ("123", "3 digitos"),
         ("+1", "1 digitos"),
         ("+569", "3 digitos"),
-        ("9 1234 5678", "9 digitos"),
-        ("912345678", "9 digitos"),
+        # 9 digitos que NO empiezan con 9: la heuristica chilena no aplica
+        ("812345678", "9 digitos"),
+        # 9 digitos CON "+" explicito: formato internacional incompleto,
+        # no se autocompleta 56 (podria ser otro pais truncado)
+        ("+912345678", "9 digitos"),
         # Muy largo (mas de 15 digitos)
         ("+1234567890123456", "16 digitos"),
         ("12345678901234567890", "20 digitos"),
-        # Solo caracteres no numericos
+        # Solo caracteres no numericos (resulta en 0 digitos)
         ("+--() ...", "0 digitos"),
         # String vacio
         ("", "0 digitos"),
@@ -94,10 +114,34 @@ INVALIDOS = pytest.mark.parametrize(
 
 
 @INVALIDOS
-def test_normalizar_e164_invalido_lanza_value_error(
-    entrada: str, mensaje_esperado: str,
+def test_normalizar_e164_largo_invalido_lanza_value_error(
+    entrada: str,
+    mensaje_esperado: str,
 ) -> None:
     """Numeros con largo fuera de 10-15 digitos lanzan ValueError."""
+    with pytest.raises(ValueError, match=mensaje_esperado):
+        normalizar_e164(entrada)
+
+
+# ── normalizar_e164: errores (cero inicial) ──────────────────────
+
+CERO_INICIAL = pytest.mark.parametrize(
+    "entrada,mensaje_esperado",
+    [
+        # Cero inicial rechazado (E.164 prohibe country code 0)
+        ("0912345678", "no puede empezar con 0"),
+        ("+0912345678", "no puede empezar con 0"),
+        ("0056912345678", "no puede empezar con 0"),
+    ],
+)
+
+
+@CERO_INICIAL
+def test_normalizar_e164_cero_inicial_lanza_value_error(
+    entrada: str,
+    mensaje_esperado: str,
+) -> None:
+    """Numeros que empiezan con 0 (country code 0 prohibido en E.164) lanzan ValueError."""
     with pytest.raises(ValueError, match=mensaje_esperado):
         normalizar_e164(entrada)
 
@@ -113,9 +157,18 @@ PHONE_TO_CHAT_ID_CASES = pytest.mark.parametrize(
         ("+56 9 1234 5678", "56912345678@c.us"),
         ("+56-9-1234-5678", "56912345678@c.us"),
         ("(56)9 1234 5678", "56912345678@c.us"),
-        # ChatIds se retornan sin cambios
+        # Los 3 formatos del criterio de aceptacion de la issue #126
+        # deben producir el MISMO chatId valido
+        ("9 1234 5678", "56912345678@c.us"),
+        ("+56 9 1234-5678", "56912345678@c.us"),
+        ("(569)12345678", "56912345678@c.us"),
+        # ChatIds se retornan sin cambios (incluso sin validar largo)
         ("56912345678@c.us", "56912345678@c.us"),
+        ("123@c.us", "123@c.us"),  # corto pero es chatId, se retorna como-esta
         ("248069442560050@lid", "248069442560050@lid"),
+        # ChatIds con espacios alrededor (strip los limpia)
+        (" 56912345678@c.us ", "56912345678@c.us"),
+        (" 56912345678@lid ", "56912345678@lid"),
     ],
 )
 
@@ -126,13 +179,8 @@ def test_phone_to_chat_id_normaliza_con_e164(entrada: str, esperado: str) -> Non
     assert phone_to_chat_id(entrada) == esperado
 
 
-def test_phone_to_chat_id_numero_invalido_lanza_value_error() -> None:
-    """Si el numero tiene largo E.164 invalido, phone_to_chat_id propaga ValueError."""
-    with pytest.raises(ValueError, match="3 digitos"):
-        phone_to_chat_id("123")
-
-
 # ── hash_phone / validate_phone_hash (regresion) ────────────────
+
 
 def test_hash_phone_consistente() -> None:
     """Mismo numero + mismo pepper = mismo hash."""
@@ -167,3 +215,21 @@ def test_validate_phone_hash_invalido() -> None:
     assert validate_phone_hash("g" * 64) is False  # 'g' no es hex
     assert validate_phone_hash("") is False
     assert validate_phone_hash(123) is False  # type: ignore[arg-type] — no string
+
+
+# ── phone_to_chat_id: propagacion de ValueError ──────────────────
+
+
+def test_phone_to_chat_id_numero_invalido_propaga_value_error() -> None:
+    """Si normalizar_e164 lanza ValueError, phone_to_chat_id lo propaga."""
+    # Numero invalido: "123" es solo 3 digitos (minimo 10 requerido)
+    with pytest.raises(ValueError, match="3 digitos"):
+        phone_to_chat_id("123")
+
+    # Caracter no permitido: letras en el numero
+    with pytest.raises(ValueError, match="contiene caracteres no permitidos"):
+        phone_to_chat_id("56abc912345678")
+
+    # Cero inicial rechazado
+    with pytest.raises(ValueError, match="no puede empezar con 0"):
+        phone_to_chat_id("0912345678")

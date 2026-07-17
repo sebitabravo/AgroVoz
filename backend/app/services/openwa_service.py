@@ -35,12 +35,20 @@ def phone_to_chat_id(target: str) -> str:
     Si es un numero E.164 (ej: +56912345678), agrega el sufijo @c.us.
 
     La normalizacion E.164 se delega en normalizar_e164() que:
-    - Limpia espacios, guiones, parentesis, puntos
-    - Prefija '+' si falta
-    - Valida que el largo este entre 10 y 15 digitos
+    - Limpia SOLO separadores conocidos (espacios, guiones, parentesis, puntos, barras)
+    - Rechaza caracteres no permitidos (letras, dígitos unicode)
+    - Prefija SIEMPRE '+' en el retorno
+    - Valida que el largo este entre 10 y 15 digitos ASCII
+    - Rechaza números que empiezan con 0 (E.164 prohibe country code 0)
+
+    El removeprefix("+") es seguro: normalizar_e164 garantiza retorno con "+".
 
     Para @lid que requieren resolucion de numero real, usar
     resolve_contact_phone() ANTES de llamar a esta funcion.
+
+    Raises:
+        ValueError: Si el numero contiene caracteres no permitidos, tiene
+                    longitud invalida, o empieza con 0.
     """
     stripped = target.strip()
     if stripped.endswith("@c.us") or stripped.endswith("@lid"):
@@ -249,8 +257,8 @@ class OpenWAService:
             target: Numero E.164 o chatId.
             state: "typing", "recording" (muestra indicador) o "paused" (lo limpia).
 
-        Raises:
-            httpx.HTTPError: Si la API de Open-WA falla (loggeado, no bloquea).
+        No lanza excepciones: cualquier fallo (HTTP, red, numero invalido) se
+        loggea como warning porque el indicador no es critico para el flujo.
         """
         try:
             session_id = await self._resolve_session_id()
@@ -265,7 +273,7 @@ class OpenWAService:
                     state,
                     _hash_phone_for_log(target),
                 )
-        except (httpx.HTTPError, OSError):
+        except (httpx.HTTPError, OSError, RuntimeError, ValueError):
             logger.warning(
                 "Typing indicator fallo (no critico) — target_hash=%s state=%s",
                 _hash_phone_for_log(target),
@@ -287,32 +295,41 @@ class OpenWAService:
 
         Raises:
             httpx.HTTPError: Si la API de Open-WA falla.
+            ValueError: Si el numero tiene formato E.164 invalido (propagado de normalizar_e164).
         """
-        # Resolver LID a telefono real si es necesario (best-effort)
-        final_target = target
-        if target.endswith("@lid"):
-            resolved_phone = await self.resolve_contact_phone(target)
-            if resolved_phone:
-                final_target = f"{resolved_phone}@c.us"
-            else:
-                logger.warning(
-                    "No se pudo resolver LID; intentando con @lid original — target_hash=%s",
+        try:
+            # Resolver LID a telefono real si es necesario (best-effort)
+            final_target = target
+            if target.endswith("@lid"):
+                resolved_phone = await self.resolve_contact_phone(target)
+                if resolved_phone:
+                    final_target = f"{resolved_phone}@c.us"
+                else:
+                    logger.warning(
+                        "No se pudo resolver LID; intentando con @lid original — target_hash=%s",
+                        _hash_phone_for_log(target),
+                    )
+
+            session_id = await self._resolve_session_id()
+            url = f"{self._base_url}/api/sessions/{session_id}/messages/send-text"
+            payload = {"chatId": phone_to_chat_id(final_target), "text": message}
+
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.post(url, headers=self._headers(), json=payload)
+                response.raise_for_status()
+                logger.info(
+                    "Texto enviado — phone_hash=%s size_chars=%d",
                     _hash_phone_for_log(target),
+                    len(message),
                 )
-
-        session_id = await self._resolve_session_id()
-        url = f"{self._base_url}/api/sessions/{session_id}/messages/send-text"
-        payload = {"chatId": phone_to_chat_id(final_target), "text": message}
-
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.post(url, headers=self._headers(), json=payload)
-            response.raise_for_status()
-            logger.info(
-                "Texto enviado — phone_hash=%s size_chars=%d",
+                return dict(response.json())
+        except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
+            logger.error(
+                "Error enviando texto — target_hash=%s error=%s",
                 _hash_phone_for_log(target),
-                len(message),
+                exc,
             )
-            return dict(response.json())
+            raise
 
     async def send_audio(self, target: str, audio_path: str, caption: str | None = None) -> dict[str, object]:
         """Envia un mensaje de audio a un numero de WhatsApp via Open-WA.
@@ -330,43 +347,52 @@ class OpenWAService:
 
         Raises:
             httpx.HTTPError: Si la API de Open-WA falla.
+            ValueError: Si el numero tiene formato E.164 invalido (propagado de normalizar_e164).
         """
-        # Resolver LID a telefono real si es necesario (best-effort)
-        final_target = target
-        if target.endswith("@lid"):
-            resolved_phone = await self.resolve_contact_phone(target)
-            if resolved_phone:
-                final_target = f"{resolved_phone}@c.us"
-            else:
-                logger.warning(
-                    "No se pudo resolver LID; intentando con @lid original — target_hash=%s",
+        try:
+            # Resolver LID a telefono real si es necesario (best-effort)
+            final_target = target
+            if target.endswith("@lid"):
+                resolved_phone = await self.resolve_contact_phone(target)
+                if resolved_phone:
+                    final_target = f"{resolved_phone}@c.us"
+                else:
+                    logger.warning(
+                        "No se pudo resolver LID; intentando con @lid original — target_hash=%s",
+                        _hash_phone_for_log(target),
+                    )
+                    # Fallback: intentar con el @lid original, aunque es probable que falle
+
+            session_id = await self._resolve_session_id()
+            url = f"{self._base_url}/api/sessions/{session_id}/messages/send-audio"
+            # Open-WA espera los campos base64 + mimetype al TOP LEVEL, no anidados.
+            # No soporta el campo `ptt` para notas de voz con este endpoint.
+            audio_fields = _audio_file_to_base64_payload(audio_path)
+            payload: dict[str, object] = {
+                "chatId": phone_to_chat_id(final_target),
+                "base64": audio_fields["base64"],
+                "mimetype": audio_fields["mimetype"],
+            }
+
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.post(url, headers=self._headers(), json=payload)
+                response.raise_for_status()
+                # P2-4: Loguear solo el nombre del archivo, no el path completo.
+                # El path completo puede leakear la estructura del sistema de archivos.
+                audio_filename = Path(audio_path).name
+                logger.info(
+                    "Audio enviado — target_hash=%s file=%s",
                     _hash_phone_for_log(target),
+                    audio_filename,
                 )
-                # Fallback: intentar con el @lid original, aunque es probable que falle
-
-        session_id = await self._resolve_session_id()
-        url = f"{self._base_url}/api/sessions/{session_id}/messages/send-audio"
-        # Open-WA espera los campos base64 + mimetype al TOP LEVEL, no anidados.
-        # No soporta el campo `ptt` para notas de voz con este endpoint.
-        audio_fields = _audio_file_to_base64_payload(audio_path)
-        payload: dict[str, object] = {
-            "chatId": phone_to_chat_id(final_target),
-            "base64": audio_fields["base64"],
-            "mimetype": audio_fields["mimetype"],
-        }
-
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.post(url, headers=self._headers(), json=payload)
-            response.raise_for_status()
-            # P2-4: Loguear solo el nombre del archivo, no el path completo.
-            # El path completo puede leakear la estructura del sistema de archivos.
-            audio_filename = Path(audio_path).name
-            logger.info(
-                "Audio enviado — target_hash=%s file=%s",
+                return dict(response.json())
+        except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
+            logger.error(
+                "Error enviando audio — target_hash=%s error=%s",
                 _hash_phone_for_log(target),
-                audio_filename,
+                exc,
             )
-            return dict(response.json())
+            raise
 
 
 def _hash_phone_for_log(phone: str) -> str:
