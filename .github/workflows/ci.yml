@@ -114,6 +114,54 @@ jobs:
           path: backend/.coverage*
           retention-days: 7
 
+  # ── Backend: E2E tests contra API real ──
+  # Corre solo si AGROVOZ_E2E_BASE_URL está seteado en GitHub Actions secrets/vars.
+  # Si no está configurado, el gate skipea y el job sale verde (no blocker).
+  e2e:
+    name: Backend E2E tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - name: Gate — skip si backend no inicializado o E2E_BASE_URL no configurado
+        id: gate
+        run: |
+          if [ ! -f pyproject.toml ]; then
+            echo "⏭️  Backend aún no inicializado (sin pyproject.toml). Nada que testear."
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          if [ -z "${{ secrets.AGROVOZ_E2E_BASE_URL }}" ] && [ -z "${{ vars.AGROVOZ_E2E_BASE_URL }}" ]; then
+            echo "⏭️  AGROVOZ_E2E_BASE_URL no configurado (ni secret ni var). Omitiendo tests E2E."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Python
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-python@v6.3.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Setup uv
+        if: steps.gate.outputs.skip != 'true'
+        uses: astral-sh/setup-uv@v8.3.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        if: steps.gate.outputs.skip != 'true'
+        run: uv sync --dev
+
+      - name: pytest (E2E)
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          AGROVOZ_E2E_BASE_URL: ${{ secrets.AGROVOZ_E2E_BASE_URL || vars.AGROVOZ_E2E_BASE_URL }}
+          AGROVOZ_E2E_ADMIN_KEY: ${{ secrets.AGROVOZ_E2E_ADMIN_KEY || vars.AGROVOZ_E2E_ADMIN_KEY }}
+        run: uv run pytest tests/e2e/ -v -m "e2e"
+
   # ── Landing: build Astro ──
   landing:
     name: Landing build
