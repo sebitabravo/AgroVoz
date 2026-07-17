@@ -250,7 +250,7 @@ class TestPrivacidad:
         assert resp.status_code == 200
         data = resp.json()
         # Solo phone_hash (64 hex), created_at, comuna, dataset_consent. Sin campos extra.
-        assert set(data.keys()) == {"phone_hash", "comuna", "dataset_consent", "created_at"}
+        assert set(data.keys()) == {"phone_hash", "comuna", "dataset_consent", "created_at", "cultivos"}
         # phone_hash es exactamente 64 chars hex.
         assert len(data["phone_hash"]) == 64
         assert all(c in "0123456789abcdef" for c in data["phone_hash"])

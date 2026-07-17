@@ -13,6 +13,7 @@ Todos requieren header X-Admin-Key.
 
 import json
 import logging
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy import select
@@ -165,7 +166,7 @@ def set_comuna(
         phone_hash=prefs.phone_hash,
         comuna=prefs.comuna,
         dataset_consent=prefs.dataset_consent,
-        cultivos=prefs.cultivos,
+        cultivos=cast("list[str] | None", prefs.cultivos),
         created_at=prefs.created_at,
     )
 
@@ -194,6 +195,6 @@ def get_user_prefs(
         phone_hash=prefs.phone_hash,
         comuna=prefs.comuna,
         dataset_consent=prefs.dataset_consent,
-        cultivos=prefs.cultivos,
+        cultivos=cast("list[str] | None", prefs.cultivos),
         created_at=prefs.created_at,
     )

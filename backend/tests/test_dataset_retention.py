@@ -266,7 +266,7 @@ class TestPipelineDatasetRetention:
                 "duration_ms": 1200,
             }
 
-        async def fake_answer(_query: str, phone_hash: str | None = None) -> str:
+        async def fake_answer(_query: str, phone_hash: str | None = None, **kwargs: object) -> str:
             return "La papa está a 450 pesos el kilo."
 
         def fake_synthesize(_self: object, _text: str) -> str:
