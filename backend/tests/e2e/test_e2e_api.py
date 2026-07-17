@@ -131,7 +131,7 @@ class TestHealth:
         reason=(
             "La API aun no tiene CORSMiddleware configurado. "
             "La landing no podra hacer fetch directo hasta agregarlo "
-            "en main.py (ver issue #122)."
+            "en main.py (ver issue #151)."
         ),
     )
     def test_health_cors_headers(self) -> None:
@@ -315,9 +315,9 @@ class TestAdminAuth:
             headers={"X-Admin-Key": E2E_ADMIN_KEY},
             timeout=E2E_TIMEOUT_S,
         )
-        assert resp.status_code in (200, 404, 500), (
+        assert resp.status_code in (200, 404), (
             f"Admin endpoint con key retorno HTTP {resp.status_code}, "
-            f"esperaba 200 (datos), 404 (DB vacia) o 500 (error interno)"
+            f"esperaba 200 (datos) o 404 (DB vacia). Un 500 es un error interno real."
         )
         if resp.status_code == 200:
             body = resp.json()
