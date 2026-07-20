@@ -254,6 +254,20 @@ class AgroVozPipeline:
         if any(p in text for p in precio_patterns):
             return "precio"
 
+        # Indicadores de RAG/corpus (boletines, documentos, contexto).
+        # "segun" solo no basta porque "segun OpenMeteo" es clima.
+        corpus_patterns = [
+            "boletin", "boletín",
+            "odepa dice",
+            "fuente: odepa",
+            "segun el boletin",
+            "segun odepa el",
+            "documento oficial",
+            "corpus odepa",
+        ]
+        if any(p in text for p in corpus_patterns):
+            return "corpus"
+
         # Indicadores de precio mas debiles (solo si no matcheo clima).
         precio_kw = [
             "precio",

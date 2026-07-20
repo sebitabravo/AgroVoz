@@ -62,6 +62,20 @@ FALLBACK_SALE_MESSAGES = {
     "invalid_quantity": "La cantidad tiene que ser",
 }
 
+# Keywords que indican consulta sobre documentos oficiales ODEPA.
+# Activan el fallback search_corpus cuando el LLM no genera tool call.
+_CORPUS_KEYWORDS = [
+    "boletin", "boletín", "documento", "informe",
+    "publicacion", "publicación",
+    "tendencia", "contexto",
+    "mercado agricola", "rubro",
+    "agricultura familiar", "pequeña agricultura", "pequena agricultura",
+    "como funciona", "como es el mercado",
+    "que dice el boletin", "que dice la odepa",
+    "información general", "informacion general",
+    "censo agropecuario", "caracterizacion",
+]
+
 
 def _detect_greeting(query: str) -> bool:
     """Detecta si la consulta es un saludo puro (sin pregunta real).
@@ -264,6 +278,39 @@ async def _force_sale_value_tool(query_text: str) -> str | None:
     return None
 
 
+async def _force_corpus_search(query_text: str) -> str | None:
+    """Fuerza busqueda en corpus ODEPA por deteccion de keywords.
+
+    Detecta keywords de documentos/boletines y ejecuta search_corpus
+    directamente sin pasar por el LLM.
+
+    Args:
+        query_text: Texto de la consulta del agricultor.
+
+    Returns:
+        Resultado textual de la busqueda, o None si no se detecta keyword.
+    """
+    from app.services.rag_service import search_corpus_for_llm
+
+    q = query_text.strip().lower()
+
+    # Detectar keywords de corpus/boletines.
+    if any(kw in q for kw in _CORPUS_KEYWORDS):
+        try:
+            result = search_corpus_for_llm(query_text)
+            if result:
+                logger.info(
+                    "Fallback tool forzado: search_corpus(query=%.100s) — query=%.100s",
+                    query_text,
+                    query_text,
+                )
+                return result
+        except (RuntimeError, ValueError, OSError) as exc:
+            logger.warning("Error en fallback corpus: %s", exc)
+
+    return None
+
+
 async def _force_keyword_tool(
     query_text: str, phone_hash: str | None = None
 ) -> str | None:
@@ -338,7 +385,12 @@ async def _force_keyword_tool(
         finally:
             session.close()
 
-    # 2. Detectar keywords de clima.
+    # 2. Detectar keywords de corpus/boletines (antes que clima).
+    corpus_result = await _force_corpus_search(query_text)
+    if corpus_result:
+        return corpus_result
+
+    # 3. Detectar keywords de clima.
     clima_kw = [
         "clima", "tiempo", "temperatura", "lluvia", "lloviendo",
         "frio", "calor", "humedad", "viento", "pronóstico", "pronostico",
