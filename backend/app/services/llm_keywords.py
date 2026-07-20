@@ -264,6 +264,121 @@ async def _force_sale_value_tool(query_text: str) -> str | None:
     return None
 
 
+# Keywords que indican una venta ya realizada (para margin).
+_VENTA_REALIZADA_KW = [
+    "vendí", "vendi", "vendiste", "vendio", "vendió", "vendieron",
+    "ya vendí", "ya vendi", "acabo de vender", "recién vendí",
+    "recien vendi", "recibí", "recibi", "me pagaron", "me pagó",
+    "me pago", "recibimos", "vendimos",
+]
+
+
+async def _force_margin_tool(query_text: str) -> str | None:
+    """Fuerza tool call calculate_margin por deteccion de venta realizada.
+
+    Detecta "vendi X [unidad] de [producto] a [monto]" como patron para
+    calculate_margin. La extraccion es heuristicamente simple: buscar
+    producto, cantidad y unidad en la consulta, y el monto total si es
+    detectable. Como la extraccion de montos del lenguaje natural es
+    poco confiable (35-55% segun spike del issue #91), este fallback
+    solo cubre patrones MUY claros. El LLM es el camino principal.
+
+    SE EJECUTA SOLO como fallback cuando el LLM no genero tool calls.
+    No reemplaza el Tool Calling del LLM.
+
+    Args:
+        query_text: Texto de la consulta del agricultor.
+
+    Returns:
+        Resultado textual de calculate_margin_for_llm, o None si no se
+        puede extraer el patron completo.
+    """
+    from app.core.database import SessionLocal
+    from app.services.odepa_service import calculate_margin_for_llm
+
+    q = query_text.strip().lower()
+
+    # Verificar si la consulta menciona una venta ya realizada.
+    if not any(kw in q for kw in _VENTA_REALIZADA_KW):
+        return None
+
+    # Extraer producto.
+    product = _extract_product_from_query(q)
+    if not product:
+        return None
+
+    # Extraer cantidad y unidad con regex.
+    # Patrones: "N sacos", "N kilos", "N mallas", "N cajas", "N toneladas"
+    # Tambien: "N saco", "N kilo", etc. (singular)
+    cant_unidad_re = re.compile(
+        r"(\d+(?:[.,]\d+)?)\s*(saco|sacos|kilo|kilos|kg|malla|mallas"
+        r"|caja|cajas|tonelada|toneladas)\b",
+        re.IGNORECASE,
+    )
+    match = cant_unidad_re.search(q)
+    if not match:
+        return None
+
+    cantidad = match.group(1).replace(",", ".")
+    unidad = match.group(2).lower()
+
+    # Normalizar plurales a singular para el handler.
+    mapa_plural = {
+        "sacos": "saco", "kilos": "kilo", "kg": "kilo",
+        "mallas": "malla", "cajas": "caja", "toneladas": "tonelada",
+    }
+    unidad = mapa_plural.get(unidad, unidad)
+
+    # Extraer monto total con regex.
+    # Patrones: "a $X", "a X lucas", "a X pesos", "a X mil",
+    #           "en $X", "por $X", "recibi X", "me pagaron X"
+    monto_re = re.compile(
+        r"(?:a\s*\$?\s*|en\s*\$?\s*|por\s*\$?\s*|recibi\s*\$?\s*"
+        r"|recib[íi]\s*\$?\s*|me\s+(?:pagaron|pago)\s*\$?\s*)"
+        r"(\d+(?:[.,\s]*\d+)*)\s*(?:lucas?|pesos?|mil|\.)?",
+        re.IGNORECASE,
+    )
+    monto_match = monto_re.search(q)
+    if not monto_match:
+        return None
+
+    precio_total_str = monto_match.group(1).replace(" ", "").replace(".", "")
+    # Si el monto tiene formato "150 lucas", convertir a numerico.
+    # "lucas" ya esta capturado en el grupo opcional.
+
+    session = SessionLocal()
+    try:
+        result = await asyncio.to_thread(
+            calculate_margin_for_llm,
+            session,
+            producto=product,
+            cantidad=cantidad,
+            unidad=unidad,
+            precio_total=precio_total_str,
+        )
+        # Solo retornar si no es mensaje de error de parseo.
+        if not any(
+            result.startswith(msg)
+            for msg in [
+                FALLBACK_SALE_MESSAGES["no_data"],
+                FALLBACK_SALE_MESSAGES["parsing_error"],
+            ]
+        ):
+            logger.info(
+                "Fallback tool forzado: calculate_margin"
+                "(producto=%s, cantidad=%s, unidad=%s, precio_total=%s)"
+                " — query=%.100s",
+                product, cantidad, unidad, precio_total_str, query_text,
+            )
+            return result
+    except SQLAlchemyError as exc:
+        logger.warning("Error DB en fallback margin: %s", exc)
+    finally:
+        session.close()
+
+    return None
+
+
 async def _force_keyword_tool(
     query_text: str, phone_hash: str | None = None
 ) -> str | None:
@@ -294,6 +409,14 @@ async def _force_keyword_tool(
     # Va antes que el bloque de precio: la cantidad de kilos es señal
     # fuerte de cálculo de venta y el LLM no debe hacer la multiplicación.
     forced = await _force_sale_value_tool(query_text)
+    if forced:
+        return forced
+
+    # 0.5 Detectar venta ya realizada -> calculate_margin (Issue #91).
+    # Va antes del bloque de precio: "vendi" es señal fuerte de
+    # comparacion de margen, no de precio actual. Extraccion heuristicamente
+    # simple; el LLM es el camino principal para margin.
+    forced = await _force_margin_tool(query_text)
     if forced:
         return forced
 

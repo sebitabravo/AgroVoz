@@ -47,16 +47,20 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = (
     "Eres AgroVoz, un asistente de voz para pequeños agricultores chilenos.\n"
     "REGLAS ESTRICTAS:\n"
-    "1. Tienes CINCO herramientas (definidas abajo). USA LA CORRECTA:\n"
+    "1. Tienes SEIS herramientas (definidas abajo). USA LA CORRECTA:\n"
     "   - get_price: PRECIOS ACTUALES ODEPA.\n"
     "   - get_price_history: PRECIOS PASADOS, variacion.\n"
     "   - calculate_sale_value: CALCULAR VENTA (CUANTO RECIBIRA). NO hagas el calculo tu.\n"
+    "   - calculate_margin: CALCULAR MARGEN (comparar venta ya realizada"
+    " contra referencia ODEPA).\n"
     "   - get_weather: CLIMA ACTUAL (temperatura, lluvia, viento).\n"
     "   - get_clima_historico: CLIMA HISTORICO (temperatura promedio del"
     " año, lluvia total, heladas).\n"
     "2. Determina el intent segun:\n"
     "   - PRECIO: precio, cuanto, cuesta, vale, producto agricola, kilo, peso, luca.\n"
     "   - VENTA: kilos a vender (\"voy a vender X kilos\").\n"
+    "   - MARGEN: vendi, vendiste, vendio, vendieron, ya vendi, acabo de"
+    " vender, recibi por.\n"
     "   - PRECIO PASADO: estaba, semana pasada, ayer, subio, bajo.\n"
     "   - CLIMA ACTUAL: clima, temperatura, lluvia, pronostico, frio, calor,"
     " humedad, viento.\n"
@@ -64,6 +68,7 @@ SYSTEM_PROMPT = (
     " lluvia total, heladas.\n"
     "   Ej: \"a cuanto la papa\" -> get_price. \"voy a vender 30 kilos\""
     " -> calculate_sale_value.\n"
+    "   \"vendi 3 sacos de papa a 150 lucas\" -> calculate_margin.\n"
     "   \"a cuanto estaba la papa\" -> get_price_history."
     " \"como esta el clima\" -> get_weather.\n"
     "   \"como fue el clima el año pasado\" -> get_clima_historico.\n"
@@ -91,6 +96,7 @@ WHITELIST_TOOLS = frozenset(
         "get_price",
         "get_price_history",
         "calculate_sale_value",
+        "calculate_margin",
         "get_weather",
         "get_clima_historico",
     }
@@ -346,6 +352,60 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_margin",
+            "description": (
+                "USAR para CALCULAR MARGEN de una venta YA REALIZADA. "
+                "Cuando el agricultor diga que ya VENDIO o ya RECIBIO dinero por "
+                "su cosecha (vendi, vendiste, acabo de vender, recibi por, me pagaron). "
+                "Pide EXPLICITAMENTE: producto, cantidad, unidad (kilo/saco/malla/caja/tonelada) "
+                "y monto total recibido. "
+                "NO usar para calcular cuanto recibira (usa calculate_sale_value). "
+                "Ej: 'vendi 3 sacos de papa a 150 lucas', "
+                "'me pagaron 250 mil por 4 mallas de tomate', "
+                "'recibi 100 lucas por 2 cajas de cebolla'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "producto": {
+                        "type": "string",
+                        "description": "Nombre del producto en singular (ej: papa, tomate, lechuga, cebolla)",
+                    },
+                    "cantidad": {
+                        "type": "string",
+                        "description": (
+                            "Cantidad vendida como string (ej: '3', '100', '2.5'). "
+                            "La herramienta valida y convierte a Decimal."
+                        ),
+                    },
+                    "unidad": {
+                        "type": "string",
+                        "description": (
+                            "Unidad de medida: kilo, saco (50kg), malla (25kg), "
+                            "caja (20kg), tonelada (1000kg). "
+                            "Ej: 'saco', 'malla', 'caja', 'kilo', 'tonelada'."
+                        ),
+                    },
+                    "precio_total": {
+                        "type": "string",
+                        "description": (
+                            "Monto TOTAL recibido en pesos chilenos como string "
+                            "(ej: '150000', '250000', '100000'). "
+                            "La herramienta valida y convierte a Decimal."
+                        ),
+                    },
+                    "mercado": {
+                        "type": "string",
+                        "description": "Nombre del mercado mayorista (ej: Lo Valledor, La Vega, Talca). Opcional.",
+                    },
+                },
+                "required": ["producto", "cantidad", "unidad", "precio_total"],
+            },
+        },
+    },
 ]
 
 # Generar _TOOLS_LINES desde TOOLS (una fuente de verdad).
@@ -477,6 +537,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
     que el modulo llm_service.py sea importable sin DB ni servicios.
     """
     from app.services.odepa_service import (
+        calculate_margin_for_llm,
         calculate_sale_value_for_llm,
         get_price_for_llm,
         get_price_history_for_llm,
@@ -487,6 +548,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         "get_price": get_price_for_llm,
         "get_price_history": get_price_history_for_llm,
         "calculate_sale_value": calculate_sale_value_for_llm,
+        "calculate_margin": calculate_margin_for_llm,
         "get_weather": get_weather,
         "get_clima_historico": get_clima_historico,
     }
@@ -550,7 +612,10 @@ async def _execute_tool(
 
     try:
         # Las tools de precio necesitan session de DB. Se la pasamos como kwarg.
-        if name in ("get_price", "get_price_history", "calculate_sale_value"):
+        if name in (
+            "get_price", "get_price_history", "calculate_sale_value",
+            "calculate_margin",
+        ):
             from app.core.database import SessionLocal
 
             # Completar defaults para argumentos vacios que el LLM no especifico.
@@ -568,6 +633,23 @@ async def _execute_tool(
                     "No entendi cuantos kilos vas a vender. "
                     "¿Podrias repetir la cantidad?"
                 )
+            # calculate_margin requiere cantidad, unidad y precio_total.
+            if name == "calculate_margin":
+                if not str(valid_args.get("cantidad", "")).strip():
+                    return (
+                        "No entendi cuantos vendiste. "
+                        "¿Podrias repetir la cantidad?"
+                    )
+                if not str(valid_args.get("unidad", "")).strip():
+                    return (
+                        "No entendi la unidad de medida. "
+                        "¿Podrias repetir si son kilos, sacos, mallas, cajas o toneladas?"
+                    )
+                if not str(valid_args.get("precio_total", "")).strip():
+                    return (
+                        "No entendi el monto total que recibiste. "
+                        "¿Podrias repetir cuanto te pagaron en total?"
+                    )
             # Mercado/dias son opcionales: cada handler aplica su default.
 
             session = SessionLocal()
@@ -748,6 +830,7 @@ def _build_messages(
     user_query: str,
     history: list[dict[str, object]],
     cultivos: list[str] | None = None,
+    system_tip: str | None = None,
 ) -> list[dict[str, object]]:
     """Construye la lista de mensajes para el LLM.
 
@@ -758,12 +841,17 @@ def _build_messages(
     línea personalizada al system prompt para que el LLM pueda asumir un
     producto cuando el usuario no lo especifique (issue #125).
 
-    Formato: system (con tools + personalización) + history + user.
+    Si se pasa system_tip, se agrega como instrucción adicional al system
+    prompt. Usado por pipeline_service para sugerir calculate_margin cuando
+    se detectan keywords de venta realizada (issue #91).
+
+    Formato: system (con tools + personalización + tip) + history + user.
 
     Args:
         user_query: Texto de la consulta del agricultor.
         history: Mensajes previos del diálogo.
         cultivos: Lista opcional de cultivos de interés del agricultor.
+        system_tip: Instrucción adicional opcional para el system prompt.
     """
     system_content = SYSTEM_PROMPT + _TOOLS_SECTION
 
@@ -776,6 +864,10 @@ def _build_messages(
             f"\n\nEl agricultor cultiva: {cultivos_str}. "
             "Si no especifica producto, asume uno de estos."
         )
+
+    # Tip adicional para el LLM (issue #91: sugerir calculate_margin).
+    if system_tip:
+        system_content += f"\n\n{system_tip}"
 
     messages: list[dict[str, object]] = [
         {"role": "system", "content": system_content},
@@ -790,6 +882,7 @@ async def answer(
     history: list[dict[str, object]] | None = None,
     phone_hash: str | None = None,
     cultivos: list[str] | None = None,
+    system_tip: str | None = None,
 ) -> str:
     """Genera una respuesta textual usando el LLM con Tool Calling.
 
@@ -808,6 +901,9 @@ async def answer(
         phone_hash: Hash del teléfono para resolver mercado cercano (Issue #89).
         cultivos: Lista opcional de cultivos de interés del agricultor para
                   personalizar el contexto del LLM (Issue #125).
+        system_tip: Instrucción adicional opcional para el system prompt.
+                    Usado por pipeline_service para sugerir calculate_margin
+                    cuando se detectan keywords de venta realizada (Issue #91).
 
     Returns:
         Texto de respuesta en español chileno, listo para TTS.
@@ -821,7 +917,7 @@ async def answer(
     if model is None:
         return _mock_answer(query_text)
 
-    messages = _build_messages(query_text.strip(), history, cultivos=cultivos)
+    messages = _build_messages(query_text.strip(), history, cultivos=cultivos, system_tip=system_tip)
 
     try:
         for _iteration in range(MAX_TOOL_ITERATIONS):

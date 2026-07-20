@@ -963,6 +963,196 @@ def get_price_history_for_llm(session: Session, producto: str, dias: int = 7) ->
     )
 
 
+# Factores de conversion de unidades del agricultor a kilos para
+# calculate_margin. El agricultor dice "vendi un saco", "vendi una malla",
+# etc. Son factores FIJOS del dominio chileno, independientes de la
+# unidad en que ODEPA publique sus precios.
+_UNIDAD_AGRICULTOR_A_KILOS: dict[str, Decimal] = {
+    "kilo": Decimal("1"),
+    "kilos": Decimal("1"),
+    "kg": Decimal("1"),
+    "saco": Decimal("50"),
+    "sacos": Decimal("50"),
+    "malla": Decimal("25"),
+    "mallas": Decimal("25"),
+    "caja": Decimal("20"),
+    "cajas": Decimal("20"),
+    "tonelada": Decimal("1000"),
+    "toneladas": Decimal("1000"),
+}
+
+_UNIDADES_VALIDAS = frozenset(_UNIDAD_AGRICULTOR_A_KILOS.keys())
+
+
+def calculate_margin_for_llm(
+    session: Session,
+    producto: str,
+    cantidad: str,
+    unidad: str,
+    precio_total: str,
+    mercado: str = "",
+) -> str:
+    """Tool function para el LLM: calcula el margen de venta contra referencia ODEPA.
+
+    Compara el precio TOTAL recibido por el agricultor contra el precio
+    de referencia mayorista ODEPA para la misma cantidad. Responde con
+    diferencia absoluta y porcentual, SIN almacenar los montos del
+    agricultor (cumplimiento Ley 21.719 — solo retorna texto).
+
+    Flujo:
+    1. Valida que precio_total y cantidad sean numeros validos (>0).
+    2. Obtiene precio de referencia ODEPA del producto (vía
+       _obtener_registro_referencia, misma logica que get_price).
+    3. Convierte la unidad del agricultor a kilos usando factores
+       fijos del dominio chileno (saco=50kg, malla=25kg, etc).
+    4. Calcula el precio de referencia total:
+       precio_por_kilo_odepa * cantidad_en_kilos.
+    5. Calcula diferencia absoluta y porcentual.
+    6. Retorna texto en espanol chileno con fuente ODEPA. Sin
+       persistencia de datos financieros del agricultor.
+
+    Args:
+        session: Sesion de SQLAlchemy (inyectada por _execute_tool).
+        producto: Nombre del producto en singular (ej: "papa").
+        cantidad: Cantidad vendida como string (ej: "100", "3.5").
+        unidad: Unidad de medida (kilo, saco, malla, caja, tonelada).
+        precio_total: Monto TOTAL recibido en pesos chilenos (ej: "250000").
+        mercado: Mercado opcional (ej: "Lo Valledor").
+
+    Returns:
+        Texto en espanol chileno con el analisis de margen, listo para TTS.
+    """
+    # 1. Validar y parsear precio_total.
+    try:
+        precio_total_dec = Decimal(
+            str(precio_total).strip()
+            .replace(",", ".")
+            .replace("$", "")
+            .replace(" ", "")
+        )
+    except InvalidOperation:
+        return (
+            "No entendi el monto total de la venta. "
+            "¿Podrias repetir cuanto recibiste en total?"
+        )
+    if precio_total_dec <= 0:
+        return (
+            "El monto total tiene que ser mayor a cero. "
+            "¿Podrias repetir cuanto recibiste?"
+        )
+
+    # 2. Validar y parsear cantidad.
+    try:
+        cantidad_dec = Decimal(str(cantidad).strip().replace(",", "."))
+    except InvalidOperation:
+        return (
+            "No entendi la cantidad vendida. "
+            "¿Podrias repetir cuantas unidades vendiste?"
+        )
+    if cantidad_dec <= 0:
+        return (
+            "La cantidad tiene que ser mayor a cero. "
+            "¿Podrias repetir cuantas unidades vendiste?"
+        )
+
+    # 3. Validar y convertir unidad a kilos.
+    unidad_norm = unidad.strip().lower()
+    factor = _UNIDAD_AGRICULTOR_A_KILOS.get(unidad_norm)
+    if factor is None:
+        unidades_habladas = ", ".join(sorted(_UNIDADES_VALIDAS))
+        return (
+            f"No conozco la unidad '{unidad_norm}'. "
+            f"Las unidades que manejo son: {unidades_habladas}. "
+            "¿Podrias repetir la unidad?"
+        )
+
+    cantidad_kilos = cantidad_dec * factor
+
+    # 4. Obtener precio de referencia ODEPA.
+    try:
+        record = _obtener_registro_referencia(session, producto, mercado)
+    except ValueError:
+        return "No entendi el producto. ¿Podrias repetirlo?"
+
+    if record is None:
+        if not mercado or not mercado.strip():
+            return (
+                f"No tengo datos de precio de referencia para "
+                f"{producto.strip()}. ¿Podrias probar con otro producto?"
+            )
+        return (
+            f"No tengo datos de precio para {producto.strip()} "
+            f"en {mercado.strip()}."
+        )
+
+    producto_str = f"{record.producto[0].upper()}{record.producto[1:]}"
+    fecha_str = record.fecha.strftime("%d/%m/%Y")
+
+    # 5. Derivar precio por kilo segun unidad de venta ODEPA.
+    if _es_unidad_kilo(record.unidad):
+        precio_por_kilo = record.precio_kg
+    else:
+        kilos = _kilos_por_unidad(record.unidad)
+        if kilos is None:
+            return (
+                f"{producto_str} esta a {_formatear_pesos(record.precio_kg)} "
+                f"por {_unidad_hablada(record.unidad)} en {record.mercado}. "
+                "No puedo calcular la comparacion porque ODEPA publica "
+                "el precio por unidad de venta, no por kilo. "
+                "¿Podrias consultar en otra unidad?"
+            )
+        precio_por_kilo = record.precio_kg / kilos
+
+    # Redondear precio por kilo a entero antes de calcular.
+    precio_por_kilo = precio_por_kilo.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    precio_referencia_total = (
+        precio_por_kilo * cantidad_kilos
+    ).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+    # 6. Calcular diferencia y porcentaje.
+    if precio_referencia_total == 0:
+        return "No tengo datos de precio de referencia para comparar."
+
+    diferencia = precio_total_dec - precio_referencia_total
+    porcentaje = (
+        (precio_total_dec / precio_referencia_total) - Decimal("1")
+    ) * Decimal("100")
+    porcentaje = porcentaje.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+
+    # 7. Formatear respuesta en espanol chileno.
+    if diferencia > 0:
+        direccion = "sobre"
+        mensaje_diferencia = (
+            f"Vendiste {_formatear_pesos(abs(diferencia))} mas que la referencia"
+        )
+    elif diferencia < 0:
+        direccion = "bajo"
+        mensaje_diferencia = (
+            f"Vendiste {_formatear_pesos(abs(diferencia))} menos que la referencia"
+        )
+    else:
+        direccion = "igual a"
+        mensaje_diferencia = "Vendiste exactamente al precio de referencia"
+
+    # Formatear porcentaje para TTS.
+    if porcentaje == porcentaje.to_integral_value():
+        pct_str = str(int(abs(porcentaje)))
+    else:
+        pct_entero, _, pct_dec = str(abs(porcentaje)).partition(".")
+        pct_dec = pct_dec.rstrip("0") or "0"
+        pct_str = f"{pct_entero} coma {pct_dec}"
+
+    return (
+        f"{producto_str}: segun ODEPA, el precio de referencia mayorista "
+        f"es de {_formatear_pesos(precio_por_kilo)} el kilo "
+        f"(precio del {fecha_str}). "
+        f"Para la cantidad que vendiste, la referencia son "
+        f"{_formatear_pesos(precio_referencia_total)}. "
+        f"{mensaje_diferencia}, un {pct_str} por ciento {direccion} "
+        f"del precio de referencia."
+    )
+
+
 def list_products(session: Session) -> list[str]:
     """Lista todos los productos disponibles en ODEPA, ordenados A-Z.
 
