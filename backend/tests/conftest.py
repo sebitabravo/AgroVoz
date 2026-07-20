@@ -37,14 +37,14 @@ def db(tmp_path: Path, monkeypatch) -> Generator[Session, None, None]:
         connect_args={"check_same_thread": False},
     )
     Base.metadata.create_all(engine)
-    TestSessionLocal = sessionmaker(bind=engine)
+    test_session_local = sessionmaker(bind=engine)
 
     # Parchear SessionLocal para que funciones internas usen la misma DB.
     import app.core.database as db_module
 
-    monkeypatch.setattr(db_module, "SessionLocal", TestSessionLocal)
+    monkeypatch.setattr(db_module, "SessionLocal", test_session_local)
 
-    session = TestSessionLocal()
+    session = test_session_local()
     try:
         yield session
     finally:
