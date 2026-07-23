@@ -9,7 +9,6 @@ Cubre:
 - Privacidad: solo phone_hash, sin PII.
 """
 
-import datetime
 
 import pytest
 from httpx import AsyncClient
@@ -333,7 +332,8 @@ class TestPilotoEndpoints:
         resp = await client.get("/admin/piloto/export", follow_redirects=False)
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "text/csv; charset=utf-8"
-        assert "adjunto" in resp.headers.get("content-disposition", "").lower() or "attachment" in resp.headers.get("content-disposition", "").lower()
+        content_disp = resp.headers.get("content-disposition", "").lower()
+        assert "adjunto" in content_disp or "attachment" in content_disp
         # El CSV debe contener las métricas.
         body = resp.text
         assert "Productores activos" in body

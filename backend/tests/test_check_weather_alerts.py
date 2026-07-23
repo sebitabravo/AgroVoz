@@ -169,10 +169,22 @@ class TestEvaluarAlertasClima:
     @pytest.mark.asyncio
     async def test_alerta_ya_disparada_hoy_no_re_dispara(self, db: Session) -> None:
         """Alerta con last_triggered_at hoy no dispara de nuevo."""
-        hoy_hace_1h = datetime.datetime.now() - datetime.timedelta(hours=1)
+        # Reloj fijo: la resta de 1h sobre now() real cruzaba de día en la
+        # ventana 00:00-01:00 y hacía que "hoy" pareciera "ayer" (test flaky).
+        ahora_fijo = datetime.datetime(2026, 6, 15, 10, 0, 0)
+
+        class _RelojFijo(datetime.datetime):
+            @classmethod
+            def now(cls, tz: datetime.tzinfo | None = None) -> datetime.datetime:
+                return ahora_fijo
+
+        hoy_hace_1h = ahora_fijo - datetime.timedelta(hours=1)
         _crear_alerta_clima(db, umbral_clima="helada", last_triggered_at=hoy_hace_1h)
 
-        with patch("app.services.alert_service.get_weather_forecast_daily") as mock_weather:
+        with (
+            patch("app.services.alert_service.datetime.datetime", _RelojFijo),
+            patch("app.services.alert_service.get_weather_forecast_daily") as mock_weather,
+        ):
             mock_weather.return_value = _forecast_helada()  # Condición sí se cumple
             enviados = await evaluar_alertas_clima(db, None)  # type: ignore[arg-type]
 

@@ -18,6 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import Response
@@ -201,10 +202,13 @@ app = FastAPI(
 # el más externo (outermost).
 #
 # Orden de procesamiento del request (outermost → innermost):
-#   RequestID → SecurityHeaders → TrustedHost → RateLimit → AdminAuth → GZip → app
+#   CORSMiddleware → RequestID → SecurityHeaders → TrustedHost → RateLimit → AdminAuth → GZip → app
 #
-# - RequestIDMiddleware es el MÁS EXTERNO: setea el ContextVar antes que
-#   cualquier otro middleware, así todos los logs tienen request_id.
+# - CORSMiddleware es el MÁS EXTERNO (agregado último): debe responder OPTIONS
+#   preflight antes que cualquier otro middleware, especialmente TrustedHost
+#   que rechazaria el preflight por Origin no permitido.
+#   En desarrollo permite "*", en producción solo origenes configurados.
+# - RequestIDMiddleware setea el ContextVar antes que otros middlewares,
 # - SecurityHeadersMiddleware envuelve todo: agrega headers de seguridad
 #   incluso en respuestas de error de TrustedHost (P2-3).
 # - TrustedHostMiddleware rechaza hosts no permitidos antes de llegar
@@ -228,6 +232,18 @@ app.add_middleware(RateLimitMiddleware)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestIDMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins_list,
+    # allow_credentials queda en False (default): el landing consulta endpoints
+    # publicos de forma anonima y el admin es same-origin (nunca cruza CORS).
+    # Combinar allow_credentials=True con allow_origins=["*"] (dev) viola la
+    # RFC 6454: el browser rechaza la respuesta y, peor, expondria la cookie de
+    # sesion admin a cualquier origen. No usamos credenciales cross-origin.
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
 
 # Static files — JS bundles locales (HTMX, Chart.js) + favicon.
 # Montado antes que los routers para que las rutas estáticas tengan prioridad.

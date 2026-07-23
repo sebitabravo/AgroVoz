@@ -9,7 +9,14 @@ Sin dependencias externas (DB, LLM, red).
 """
 
 
-from app.services.llm_keywords import _detect_greeting, _extract_product_from_query
+from app.services.llm_keywords import (
+    _CANT_UNIDAD_RE,
+    _MONTO_RE,
+    _VENTA_KILOS_RE,
+    _detect_greeting,
+    _extract_product_from_query,
+    _parse_monto,
+)
 
 
 class TestDetectGreeting:
@@ -188,3 +195,65 @@ class TestExtractProductFromQuery:
         # El punto es que no retorne None.
         assert result is not None
         assert result in ("sandía", "sandia")
+
+
+class TestParseMontoJergaChilena:
+    """_parse_monto respeta la jerga chilena: 'lucas'/'mil' multiplican por 1000.
+
+    Regresión del bug #91: el sufijo se capturaba pero nunca se aplicaba el x1000,
+    así "150 lucas" se calculaba como 150 pesos (margen 1000x errado, dato
+    financiero falso para el agricultor).
+    """
+
+    def test_lucas_multiplica_por_mil(self) -> None:
+        assert _parse_monto("vendi a 150 lucas") == "150000"
+        assert _parse_monto("me pagaron 80 lucas") == "80000"
+
+    def test_mil_multiplica_por_mil(self) -> None:
+        assert _parse_monto("a 5 mil") == "5000"
+        assert _parse_monto("a 150 mil pesos") == "150000"
+
+    def test_pesos_no_multiplica(self) -> None:
+        assert _parse_monto("recibi 250000 pesos") == "250000"
+
+    def test_sin_sufijo_no_multiplica(self) -> None:
+        assert _parse_monto("a 150") == "150"
+
+    def test_separador_de_miles_con_punto(self) -> None:
+        """'1.200.000' usa el punto como separador de miles (formato chileno)."""
+        assert _parse_monto("por 1.200.000") == "1200000"
+
+    def test_sin_monto_retorna_none(self) -> None:
+        assert _parse_monto("hola que precio tiene la papa") is None
+
+
+class TestRegexVentaAcotadosReDoS:
+    r"""Los regex de venta van acotados con \d{1,N} para evitar ReDoS.
+
+    El pipeline es síncrono (workers=1): un texto transcrito con miles de dígitos
+    disparaba backtracking O(n^2) que congelaba el único worker (DoS con un solo
+    mensaje). El límite acota la captura; un \d+ sin tope capturaría todos los
+    dígitos. Si alguien revierte el tope, estos asserts fallan.
+    """
+
+    def test_cant_unidad_acota_cantidad(self) -> None:
+        match = _CANT_UNIDAD_RE.search("1" * 100 + " kilos")
+        assert match is not None
+        assert len(match.group(1)) <= 7
+
+    def test_cant_unidad_matchea_cantidad_normal(self) -> None:
+        match = _CANT_UNIDAD_RE.search("100 sacos")
+        assert match is not None
+        assert match.group(1) == "100"
+        assert match.group(2) == "sacos"
+
+    def test_venta_kilos_acota_cantidad(self) -> None:
+        match = _VENTA_KILOS_RE.search("9" * 100 + " kilos de papa")
+        assert match is not None
+        assert len(match.group(1)) <= 7
+
+    def test_monto_acota_digitos(self) -> None:
+        match = _MONTO_RE.search("a " + "1" * 100)
+        assert match is not None
+        # Con el tope, el monto capturado no incluye los 100 dígitos.
+        assert len(match.group(1).replace(" ", "").replace(".", "")) <= 45

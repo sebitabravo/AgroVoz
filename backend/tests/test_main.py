@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.orm import Session
 
 import app.main as app_main
@@ -419,3 +419,130 @@ async def test_gzip_comprime_audio_ogg_por_defecto(
         assert int(response.headers.get("content-length", "0")) < 100
     finally:
         app.router.routes = _original_routes
+
+
+# ── CORSMiddleware ──────────────────────────────────────────────────
+
+
+async def test_cors_dev_expone_allow_origin_sin_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """En dev (cors_origins_list=['*']) la API expone Access-Control-Allow-Origin.
+
+    Verifica que la landing puede hacer fetch (issue #151) y, sobre todo, que
+    NUNCA se emite Access-Control-Allow-Credentials: true. Combinar credentials
+    con origen wildcard viola la RFC 6454 y expondria la cookie de sesion admin
+    a cualquier origen.
+
+    Reconstruye la app bajo app_env=development (autocontenido): otros tests del
+    modulo recargan app.main bajo production y dejan el modulo en ese estado.
+    """
+    original_env = config.settings.app_env
+    try:
+        monkeypatch.setattr(config.settings, "app_env", "development")
+        reload(app_main)
+
+        transport = ASGITransport(app=app_main.app)
+        async with AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as dev_client:
+            response = await dev_client.get(
+                "/api/v1/health?probe=liveness",
+                headers={"Origin": "https://una-landing-cualquiera.cl"},
+            )
+
+        assert response.status_code == 200
+        # En dev el middleware responde con ACAO (wildcard).
+        assert response.headers.get("access-control-allow-origin") is not None
+        # Seguridad: jamas credenciales cross-origin.
+        assert response.headers.get("access-control-allow-credentials") != "true"
+    finally:
+        monkeypatch.setattr(config.settings, "app_env", original_env)
+        reload(app_main)
+
+
+async def test_cors_preflight_options_responde_allow_methods(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """El preflight OPTIONS es respondido por CORSMiddleware (el mas externo).
+
+    CORS debe responder el preflight ANTES que TrustedHost lo rechace, para que
+    el navegador autorice el POST/PUT/DELETE de la landing.
+    """
+    original_env = config.settings.app_env
+    try:
+        monkeypatch.setattr(config.settings, "app_env", "development")
+        reload(app_main)
+
+        transport = ASGITransport(app=app_main.app)
+        async with AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as dev_client:
+            response = await dev_client.options(
+                "/api/v1/health",
+                headers={
+                    "Origin": "https://agrovoz.cl",
+                    "Access-Control-Request-Method": "POST",
+                },
+            )
+
+        assert response.status_code == 200
+        allow_methods = response.headers.get("access-control-allow-methods", "")
+        assert "POST" in allow_methods
+        # El preflight tampoco debe habilitar credenciales.
+        assert response.headers.get("access-control-allow-credentials") != "true"
+    finally:
+        monkeypatch.setattr(config.settings, "app_env", original_env)
+        reload(app_main)
+
+
+async def test_cors_produccion_refleja_solo_origenes_permitidos(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """En produccion solo se reflejan los origenes configurados; evil.com no.
+
+    Reconstruye la app con app_env=production y cors_origins fijos, luego verifica
+    que un origen permitido se refleja y uno no permitido queda sin ACAO. Confirma
+    que el fix del issue #151 no deja un CORS abierto en prod.
+    """
+    original_env = config.settings.app_env
+
+    try:
+        monkeypatch.setattr(config.settings, "app_env", "production")
+        monkeypatch.setattr(
+            config.settings,
+            "cors_origins",
+            "https://agrovoz.cl,https://www.agrovoz.cl",
+        )
+        reload(app_main)
+
+        transport = ASGITransport(app=app_main.app)
+        async with AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as prod_client:
+            permitido = await prod_client.get(
+                "/api/v1/health?probe=liveness",
+                headers={"Origin": "https://agrovoz.cl"},
+            )
+            prohibido = await prod_client.get(
+                "/api/v1/health?probe=liveness",
+                headers={"Origin": "https://evil.com"},
+            )
+
+        # Origen permitido: se refleja exactamente (no wildcard en prod).
+        assert (
+            permitido.headers.get("access-control-allow-origin")
+            == "https://agrovoz.cl"
+        )
+        # Origen no permitido: no se refleja.
+        assert (
+            prohibido.headers.get("access-control-allow-origin")
+            != "https://evil.com"
+        )
+        # Nunca credenciales, ni siquiera con origen permitido.
+        assert (
+            permitido.headers.get("access-control-allow-credentials") != "true"
+        )
+    finally:
+        monkeypatch.setattr(config.settings, "app_env", original_env)
+        reload(app_main)
