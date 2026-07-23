@@ -508,33 +508,46 @@ class AgroVozPipeline:
                 system_tip=system_tip,
             )
         except (TimeoutError, RuntimeError, OSError, ValueError):
-            logger.exception("Error en generacion LLM — activando fallback determinista")
-            # Fallback determinista: resolver sin LLM usando keywords.
-            # Precedencia: venta -> precio -> clima (misma que _force_keyword_tool).
-            # Issue #121: si el LLM cae, respondemos con datos reales de
-            # ODEPA/OpenMeteo en vez de un mensaje generico de disculpa.
+            logger.exception("Error en generacion LLM local — probando fallbacks")
+
+            # Fallback de 3 capas cuando el LLM local falla:
+            # 1. OpenRouter (tool calling remoto, deshabilitado por defecto —
+            #    solo si OPENROUTER_API_KEY esta configurada). Ver riesgos
+            #    documentados en llm_service.answer_via_openrouter().
+            # 2. Keywords deterministas (Issue #121): datos reales de
+            #    ODEPA/OpenMeteo en vez de un mensaje generico.
+            # 3. Mensaje generico si ambos anteriores fallan.
             from app.services.llm_keywords import _force_keyword_tool
+            from app.services.llm_service import answer_via_openrouter
 
-            try:
-                forced_result = await _force_keyword_tool(
-                    transcribed_text.strip(), phone_hash=chat_id_hash
-                )
-            except (TimeoutError, RuntimeError, OSError, ValueError, SQLAlchemyError):
-                logger.exception("Fallback determinista tambien fallo")
-                forced_result = None
-
+            forced_result = await answer_via_openrouter(
+                transcribed_text.strip(), phone_hash=chat_id_hash, cultivos=cultivos
+            )
             if forced_result:
-                response_text = forced_result
                 logger.warning(
-                    "Respuesta DEGRADADA (sin LLM) — query=%s phone_hash=%s",
-                    _sanitize_for_log(transcribed_text),
+                    "Respuesta via OpenRouter (LLM local fallo) — phone_hash=%s",
                     chat_id_hash[:8] if chat_id_hash else "sin_chat",
                 )
             else:
-                response_text = (
-                    "Tuve un problema al procesar tu consulta. "
-                    "¿Podrias intentar de nuevo?"
-                )
+                try:
+                    forced_result = await _force_keyword_tool(
+                        transcribed_text.strip(), phone_hash=chat_id_hash
+                    )
+                except (TimeoutError, RuntimeError, OSError, ValueError, SQLAlchemyError):
+                    logger.exception("Fallback determinista tambien fallo")
+                    forced_result = None
+
+                if forced_result:
+                    logger.warning(
+                        "Respuesta DEGRADADA (sin LLM) — query=%s phone_hash=%s",
+                        _sanitize_for_log(transcribed_text),
+                        chat_id_hash[:8] if chat_id_hash else "sin_chat",
+                    )
+
+            response_text = forced_result or (
+                "Tuve un problema al procesar tu consulta. "
+                "¿Podrias intentar de nuevo?"
+            )
 
         intent = AgroVozPipeline._detect_intent(transcribed_text, response_text)
         return response_text, intent

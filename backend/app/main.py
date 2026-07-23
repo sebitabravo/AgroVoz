@@ -185,6 +185,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     engine.dispose()
     from app.services.weather_service import _close_http_client
     await _close_http_client()
+    from app.services.openrouter_service import close_http_client as _close_openrouter_client
+    await _close_openrouter_client()
 
 
 app = FastAPI(
