@@ -1,0 +1,72 @@
+# AgroVoz — Ayuda completa para agentes AI
+
+> Este archivo es un índice extendido. Para el contexto completo, leer en orden:
+> 1. [`AGENTS.md`](./AGENTS.md) — fuente de verdad (~16K): stack, constraints, fases, reglas, skills, convenciones
+> 2. [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — arquitectura detallada: diagramas, flujo E2E, ADRs, schema DB
+
+---
+
+## Qué construimos
+
+Asistente de voz por WhatsApp para agricultura familiar campesina en Chile. Pipeline end-to-end:
+
+```
+Productor → WhatsApp (audio) → Open-WA → VPS Hetzner CX43
+  → ffmpeg (.ogg → .wav 16kHz mono)
+  → Whisper small (transcripción)
+  → LLM Qwen2.5-3B Q4_K_M con Tool Calling (whitelist: get_price, get_weather)
+  → Piper TTS (texto → .wav)
+  → ffmpeg (.wav → .ogg)
+  → Open-WA → WhatsApp (respuesta de voz)
+```
+
+## Fuentes de datos
+
+- **ODEPA** — CSV de precios agrícolas, cron `sync_odepa.py` diario 06:00 AM → SQLite
+- **OpenWeatherMap** — API gratuita (60 calls/min), clima en tiempo real
+
+## Decisiones de arquitectura clave (ADRs)
+
+1. SQLite (no PostgreSQL) — MVP <1000 usuarios
+2. Whisper local (no API paga) — costo $0
+3. LLM cuantizado local ≤3B params, 4-bit — corre en CPU
+4. Piper TTS (no ElevenLabs/Google) — open-source, español
+5. FastAPI (no Django) — más liviano, mejor para APIs asíncronas
+6. Monorepo: backend + landing + admin
+7. Sin Redis/Celery — procesamiento síncrono para MVP
+8. Audio temporal <24h, transcripciones anonimizadas — cumple Ley 21.719
+9. Sin WebSockets — respuesta HTTP síncrona
+10. Sin autenticación de usuarios en MVP — número WhatsApp = identidad
+11. Open-WA en vez de Twilio — self-hosted, gratuito, protocolo WhatsApp Web
+12. Dokploy (Traefik + Let's Encrypt SSL) en vez de nginx + certbot
+13. Uvicorn workers=1 — modelos singleton en memoria, evitar recarga por worker fork
+14. Flag is_test en consultations — excluir datos sintéticos de métricas del dashboard
+
+## Fases del proyecto
+
+| # | Fase | Archivo |
+|---|---|---|
+| 00 | Inicialización del proyecto | `docs/phases/00-project-init.md` |
+| 01 | Backend core (FastAPI + DB + APIs) | `docs/phases/01-backend-core.md` |
+| 02 | Pipeline de voz (Whisper + LLM + TTS) | `docs/phases/02-pipeline-voz.md` |
+| 03 | Integración Open-WA (WhatsApp webhook) | `docs/phases/03-integracion-openwa.md` |
+| 04 | Landing page (Astro + Tailwind) | `docs/phases/04-landing-page.md` |
+| 05 | Admin dashboard (Jinja2 + HTMX) | `docs/phases/05-admin-dashboard.md` |
+| 06 | Deploy y puesta en marcha (VPS + Dokploy) | `docs/phases/06-deploy.md` |
+
+## Skills del equipo
+
+Guías en `skills/<tema>/SKILL.md`. Obligatorias antes de actuar en:
+- Issues (`issue-creation`)
+- Branches y PRs (`branch-pr`)
+- Commits (`commit-hygiene`)
+- Código Python (`python-standards`)
+- Tests (`testing-coverage`)
+- Documentación (`docs-alignment`)
+
+## Documentos de referencia completos
+
+- [`AGENTS.md`](./AGENTS.md) — 318 líneas. Stack completo, hard constraints, product scope, reglas para AI agents, coding conventions, comandos útiles.
+- [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — 204 líneas. Diagrama de arquitectura, flujo de datos E2E, componentes backend/frontend, schema DB completo, 14 ADRs.
+- [`docs/phases/`](./docs/phases/) — 7 fases con instrucciones detalladas de implementación.
+- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — Workflow GitHub: issues, kanban, branches, PRs, code review.
