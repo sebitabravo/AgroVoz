@@ -123,11 +123,21 @@ MAX_TOOL_ITERATIONS = 3
 # - Tool calling loop: cada iteracion necesita generar + ejecutar tool
 _GENERATION_TIMEOUT = 60.0
 
-# Contexto máximo del modelo (tokens). Reducido de 2048 a 1024 para
-# mantener latencia <15s en CPU. El system prompt comprimido + tools
-# + query cabe dentro de este limite. A 2048 el decode en CPU toma
-# ~77s vs target <15s E2E (Issue B-14).
-_N_CTX = 1024
+# Contexto máximo del modelo (tokens). Con las 7 tools actuales (incluye
+# calculate_margin #91 y search_corpus #100), el system prompt + tools ya
+# ocupa ~2771 tokens medidos con el tokenizer real de Qwen2.5 — n_ctx=1024
+# y n_ctx=2048 NO alcanzan ni para el primer prompt (ValueError instantaneo
+# de llama-cpp-python, no timeout). Con tool_response de search_corpus
+# (peor caso, ~360 tokens) la segunda vuelta del loop necesita ~3171
+# tokens, asi que 3072 tampoco alcanza. 4096 es el minimo medido que no
+# revienta.
+# RIESGO DE LATENCIA SIN VALIDAR EN VPS (gate del Issue #100, overrideado):
+# medido en Apple M3 con Metal (mejor caso posible, no representativo del
+# VPS CX43 sin GPU): 1a llamada ~36s + 2a llamada ~10s = ~46s solo LLM,
+# vs target <15s E2E total (que ademas incluye Whisper + TTS). Validar en
+# el VPS real antes del piloto de Traiguen; puede requerir comprimir el
+# prompt (menos tools/texto) en vez de, o ademas de, subir n_ctx.
+_N_CTX = 4096
 
 # Hilos para inferencia. Usar todos los nucleos disponibles del VPS CX43
 # (8 vCPU). cpu_count retorna None en entornos restringidos -> fallback 4.
@@ -1095,7 +1105,12 @@ async def answer(
     except TimeoutError:
         logger.warning("Timeout del LLM (%ss) — query=%.100s", _GENERATION_TIMEOUT, query_text)
         return "Estoy teniendo problemas para responder. ¿Podrías preguntar de nuevo más breve?"
-    except (json.JSONDecodeError, RuntimeError, OSError) as exc:
+    except (json.JSONDecodeError, RuntimeError, OSError, ValueError) as exc:
+        # ValueError: llama-cpp-python la lanza cuando el prompt (system+tools+
+        # historial+query, o el tool_response inyectado) excede n_ctx. Con
+        # n_ctx=4096 no ocurre en el flujo normal, pero un tool_response
+        # inusualmente largo o un audio muy extenso transcrito podrian
+        # seguir gatillandola.
         logger.exception("Error en generacion LLM: %s", exc)
         return "Tuve un problema al procesar tu consulta. ¿Probamos de nuevo?"
 
