@@ -43,7 +43,7 @@ requires-dist = [
     { name = "httpx", specifier = "==0.28.1" },
     { name = "itsdangerous", specifier = ">=2.2.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "llama-cpp-python", specifier = ">=0.3.32" },
+    { name = "llama-cpp-python", specifier = ">=0.3.34" },
     { name = "piper-tts", specifier = "==1.4.2" },
     { name = "psutil", specifier = ">=7.2.2" },
     { name = "pydantic-settings", specifier = "==2.14.2" },
@@ -533,7 +533,7 @@ wheels = [
 
 [[package]]
 name = "llama-cpp-python"
-version = "0.3.32"
+version = "0.3.34"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "diskcache" },
@@ -541,7 +541,7 @@ dependencies = [
     { name = "numpy" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/18/c8/3eb9c10c138eaa9d6148471701476169322eafbd825fdc13ec326552b516/llama_cpp_python-0.3.32.tar.gz", hash = "sha256:b06502361770f82eb08b7f1a192eb084b9ead2b88fe32cda8c397a2782eabde6", size = 70308017, upload-time = "2026-06-29T05:59:48.626Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c1/2f/46487e949da42b31847853793ddbfd44c7414e94d4364c9a41f91f30af27/llama_cpp_python-0.3.34.tar.gz", hash = "sha256:d849d286d808284f1d3ec1bd6875572430d29d1f9574a010232caa4e9cef0e35", size = 71617302, upload-time = "2026-07-12T04:33:41.928Z" }
 
 [[package]]
 name = "mako"
