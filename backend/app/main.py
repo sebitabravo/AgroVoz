@@ -235,7 +235,12 @@ app.add_middleware(RequestIDMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
-    allow_credentials=True,
+    # allow_credentials queda en False (default): el landing consulta endpoints
+    # publicos de forma anonima y el admin es same-origin (nunca cruza CORS).
+    # Combinar allow_credentials=True con allow_origins=["*"] (dev) viola la
+    # RFC 6454: el browser rechaza la respuesta y, peor, expondria la cookie de
+    # sesion admin a cualquier origen. No usamos credenciales cross-origin.
+    allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
