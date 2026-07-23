@@ -14,6 +14,7 @@ import asyncio
 import difflib
 import logging
 import re
+from contextlib import suppress
 from typing import TYPE_CHECKING
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -49,8 +50,28 @@ _COMMON_PRODUCTS = [
 # <producto>" sin depender del LLM. El "de" tras kilos reduce falsos positivos
 # ("tengo 30 kilos" sin intención de venta no matchea). El producto se valida
 # aparte contra _COMMON_PRODUCTS via _extract_product_from_query.
+# La cantidad va acotada (\d{1,7}) por la misma razón que _CANT_UNIDAD_RE (ReDoS).
 _VENTA_KILOS_RE = re.compile(
-    r"(\d+)\s*(?:kilos?|kg)\s+de\s+",
+    r"(\d{1,7})\s*(?:kilos?|kg)\s+de\s+",
+    re.IGNORECASE,
+)
+
+# Cantidades y montos acotados con \d{1,N} para EVITAR ReDoS: el pipeline es
+# síncrono (workers=1) y un texto transcrito con miles de dígitos disparaba
+# backtracking cuadrático que congelaba el único worker (DoS con un solo
+# mensaje). Los límites cubren cualquier venta real (7 dígitos de cantidad).
+_CANT_UNIDAD_RE = re.compile(
+    r"(\d{1,7}(?:[.,]\d{1,3})?)\s*(saco|sacos|kilo|kilos|kg|malla|mallas"
+    r"|caja|cajas|tonelada|toneladas)\b",
+    re.IGNORECASE,
+)
+
+# El sufijo "lucas"/"mil" se CAPTURA (grupo 2) para aplicar el multiplicador
+# x1000 de la jerga chilena: "150 lucas" = 150.000 pesos. Dígitos acotados.
+_MONTO_RE = re.compile(
+    r"(?:a\s*\$?\s*|en\s*\$?\s*|por\s*\$?\s*|recibi\s*\$?\s*"
+    r"|recib[íi]\s*\$?\s*|me\s+(?:pagaron|pago)\s*\$?\s*)"
+    r"(\d{1,9}(?:[.,\s]{0,2}\d{1,9}){0,4})\s*(lucas?|pesos?|mil|\.)?",
     re.IGNORECASE,
 )
 
@@ -273,6 +294,27 @@ _VENTA_REALIZADA_KW = [
 ]
 
 
+def _parse_monto(query: str) -> str | None:
+    """Extrae el monto total de venta de un texto y aplica la jerga chilena.
+
+    "lucas" y "mil" multiplican por 1000 ("150 lucas" = 150.000). Retorna el
+    monto como string de dígitos, o None si no encuentra un patrón de monto.
+    Separado de _force_margin_tool para testear la conversión sin tocar la DB.
+    """
+    monto_match = _MONTO_RE.search(query)
+    if not monto_match:
+        return None
+
+    precio_total_str = monto_match.group(1).replace(" ", "").replace(".", "")
+    sufijo = (monto_match.group(2) or "").lower()
+    if sufijo.startswith("luca") or sufijo == "mil":
+        # Monto no entero (ej. traía coma decimal): se deja tal cual y
+        # calculate_margin_for_llm lo valida/parsea aguas abajo.
+        with suppress(ValueError):
+            precio_total_str = str(int(precio_total_str) * 1000)
+    return precio_total_str
+
+
 async def _force_margin_tool(query_text: str) -> str | None:
     """Fuerza tool call calculate_margin por deteccion de venta realizada.
 
@@ -307,15 +349,9 @@ async def _force_margin_tool(query_text: str) -> str | None:
     if not product:
         return None
 
-    # Extraer cantidad y unidad con regex.
-    # Patrones: "N sacos", "N kilos", "N mallas", "N cajas", "N toneladas"
-    # Tambien: "N saco", "N kilo", etc. (singular)
-    cant_unidad_re = re.compile(
-        r"(\d+(?:[.,]\d+)?)\s*(saco|sacos|kilo|kilos|kg|malla|mallas"
-        r"|caja|cajas|tonelada|toneladas)\b",
-        re.IGNORECASE,
-    )
-    match = cant_unidad_re.search(q)
+    # Extraer cantidad y unidad con el patrón acotado a nivel módulo.
+    # Cubre "N sacos/kilos/mallas/cajas/toneladas" y sus singulares.
+    match = _CANT_UNIDAD_RE.search(q)
     if not match:
         return None
 
@@ -329,22 +365,10 @@ async def _force_margin_tool(query_text: str) -> str | None:
     }
     unidad = mapa_plural.get(unidad, unidad)
 
-    # Extraer monto total con regex.
-    # Patrones: "a $X", "a X lucas", "a X pesos", "a X mil",
-    #           "en $X", "por $X", "recibi X", "me pagaron X"
-    monto_re = re.compile(
-        r"(?:a\s*\$?\s*|en\s*\$?\s*|por\s*\$?\s*|recibi\s*\$?\s*"
-        r"|recib[íi]\s*\$?\s*|me\s+(?:pagaron|pago)\s*\$?\s*)"
-        r"(\d+(?:[.,\s]*\d+)*)\s*(?:lucas?|pesos?|mil|\.)?",
-        re.IGNORECASE,
-    )
-    monto_match = monto_re.search(q)
-    if not monto_match:
+    # Extraer monto total (incluye el multiplicador "lucas"/"mil" x1000).
+    precio_total_str = _parse_monto(q)
+    if precio_total_str is None:
         return None
-
-    precio_total_str = monto_match.group(1).replace(" ", "").replace(".", "")
-    # Si el monto tiene formato "150 lucas", convertir a numerico.
-    # "lucas" ya esta capturado en el grupo opcional.
 
     session = SessionLocal()
     try:
