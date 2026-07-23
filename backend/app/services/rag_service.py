@@ -236,9 +236,12 @@ class RAGCorpus:
             query_vec = self._vectorizer.transform([query.strip()])
             scores = cosine_similarity(query_vec, self._tfidf_matrix)[0]
 
-            # Obtener indices ordenados por score descendente
-            # np.argsort ordena ascendente; tomamos los ultimos top_k
-            top_indices = np.argsort(scores)[-top_k:][::-1]
+            # Obtener indices ordenados por score descendente.
+            # np.argsort ordena ascendente; tomamos los ultimos top_k.
+            # kind="stable" garantiza orden determinista ante scores empatados
+            # (el default quicksort no es estable): requisito de tests
+            # deterministas y de respuestas reproducibles para el agricultor.
+            top_indices = np.argsort(scores, kind="stable")[-top_k:][::-1]
 
             results: list[dict[str, Any]] = []
             for idx in top_indices:

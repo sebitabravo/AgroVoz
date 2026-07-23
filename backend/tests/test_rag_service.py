@@ -242,3 +242,63 @@ class TestSearchCorpusForLLM:
         # Deberia tener al menos 2 resultados
         assert "[1]" in result
         assert "[2]" in result or "[3]" in result
+
+
+# ── RAGCorpus: robustez y determinismo ───────────────────────────────
+
+
+class TestRAGCorpusRobustez:
+    """Casos borde: determinismo, top_k > corpus, tildes y YAML corrupto."""
+
+    def test_search_determinista(self, corpus_tmp_dir: Path) -> None:
+        """La misma query dos veces retorna resultados idénticos.
+
+        TF-IDF es determinista y argsort usa kind='stable', así que el orden
+        (incluso ante scores empatados) no debe variar entre ejecuciones.
+        """
+        rag = RAGCorpus(corpus_dir=str(corpus_tmp_dir))
+        r1 = rag.search("papa precio mercado")
+        r2 = rag.search("papa precio mercado")
+        assert [c["text"] for c in r1] == [c["text"] for c in r2]
+        assert [c["score"] for c in r1] == [c["score"] for c in r2]
+
+    def test_search_top_k_mayor_que_corpus(self, corpus_tmp_dir: Path) -> None:
+        """Pedir más resultados que chunks no rompe ni inventa entradas."""
+        rag = RAGCorpus(corpus_dir=str(corpus_tmp_dir))
+        # El corpus tiene 3 chunks; top_k=10 debe acotar sin error.
+        results = rag.search("papa", top_k=10)
+        assert len(results) <= 3
+
+    def test_search_tildes_matchea(self, corpus_tmp_dir: Path) -> None:
+        """strip_accents='unicode': 'región' (con tilde) matchea 'Region'."""
+        rag = RAGCorpus(corpus_dir=str(corpus_tmp_dir))
+        results = rag.search("región de coquimbo")
+        assert len(results) >= 1
+
+    def test_load_ignora_yaml_malformado(self, tmp_path: Path) -> None:
+        """Un YAML corrupto se ignora; los archivos válidos siguen cargando."""
+        corpus_dir = tmp_path / "corpus"
+        corpus_dir.mkdir()
+
+        valido = {
+            "documentos": [
+                {
+                    "titulo": "OK",
+                    "fuente": "ODEPA",
+                    "fecha": "2026",
+                    "chunks": [{"texto": "la papa cuesta ocho mil pesos el saco"}],
+                }
+            ]
+        }
+        with open(corpus_dir / "ok.yaml", "w", encoding="utf-8") as f:
+            yaml.dump(valido, f, allow_unicode=True)
+        # Sintaxis YAML rota (llaves/corchetes sin cerrar).
+        (corpus_dir / "roto.yaml").write_text(
+            "documentos: [ {titulo: 'x', chunks: [", encoding="utf-8"
+        )
+
+        rag = RAGCorpus(corpus_dir=str(corpus_dir))
+        rag.load()
+
+        assert rag.is_available()
+        assert len(rag._chunks) == 1
