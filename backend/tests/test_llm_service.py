@@ -43,11 +43,12 @@ class TestConstantes:
     """Verifica que las constantes del modulo no se modifiquen accidentalmente."""
 
     def test_system_prompt_contiene_reglas_estrictas(self) -> None:
-        """El system prompt comprimido conserva las 6 reglas del issue #18."""
+        """El system prompt comprimido conserva las reglas del issue #18 + #91."""
         assert "REGLAS ESTRICTAS" in SYSTEM_PROMPT
-        assert "Tienes CINCO herramientas" in SYSTEM_PROMPT
+        assert "Tienes SEIS herramientas" in SYSTEM_PROMPT
         assert "get_price_history" in SYSTEM_PROMPT
         assert "calculate_sale_value" in SYSTEM_PROMPT
+        assert "calculate_margin" in SYSTEM_PROMPT
         assert "NUNCA recomendaciones agronomicas" in SYSTEM_PROMPT
         assert "NUNCA inventes precios" in SYSTEM_PROMPT
         assert "espanol chileno" in SYSTEM_PROMPT
@@ -77,14 +78,15 @@ class TestConstantes:
         assert len(NO_RESPONSE_TEXT) > 10
         assert "reformular" in NO_RESPONSE_TEXT.lower()
 
-    def test_whitelist_cinco_tools(self) -> None:
-        """La whitelist permite las cinco tools de precio, venta, clima e historico."""
+    def test_whitelist_seis_tools(self) -> None:
+        """La whitelist permite las seis tools de precio, venta, margen, clima e historico."""
         assert (
             frozenset(
                 {
                     "get_price",
                     "get_price_history",
                     "calculate_sale_value",
+                    "calculate_margin",
                     "get_weather",
                     "get_clima_historico",
                 }
@@ -94,7 +96,7 @@ class TestConstantes:
 
     def test_tools_definition_formato_openai(self) -> None:
         """Las tool definitions siguen el formato OpenAI function-calling."""
-        assert len(TOOLS) == 5
+        assert len(TOOLS) == 6  # 5 originales + calculate_margin
         for tool in TOOLS:
             assert tool["type"] == "function"
             fn = tool["function"]
@@ -159,24 +161,27 @@ class TestLlmConfig:
 
         Cada char sumado al system prompt incrementa el prefill del LLM.
         Original era ~2000 chars, comprimido debe ser menos.
-        Limite: 1600 chars. 195 chars extra justificados por la 5a
-        herramienta (get_clima_historico) + instrucciones de clima historico.
-        Latencia E2E target <15s se mantiene en CPU con n_ctx=1024.
+        Limite: 1900 chars. ~300 chars extra justificados por la 6a
+        herramienta (calculate_margin) + instrucciones de MARGEN
+        (keywords de venta realizada + ejemplo). Latencia E2E target
+        <15s se mantiene en CPU con n_ctx=1024.
         """
-        assert len(SYSTEM_PROMPT) <= 1600, (
+        assert len(SYSTEM_PROMPT) <= 1900, (
             f"SYSTEM_PROMPT={len(SYSTEM_PROMPT)} chars excede el limite "
-            "de 1600. Comprime o justifica con datos de latencia."
+            "de 1900. Comprime o justifica con datos de latencia."
         )
 
     def test_total_prompt_chars_under_limit(self) -> None:
         """El prompt total (system + tools) no debe exceder un limite.
 
         Para n_ctx=1024 con Qwen2.5 (3-5 chars/token), el prompt total
-        deberia estar bajo ~6000 chars. Es un guard suave contra
+        deberia estar bajo ~8000 chars. Es un guard suave contra
         regresiones que inflan el contexto sin ajustar n_ctx.
+        Limite aumentado de 6000 a 8000 por la 6a herramienta
+        (calculate_margin, ~1400 chars en JSON) + margen keywords.
         """
         total_chars = len(SYSTEM_PROMPT) + len(_TOOLS_SECTION)
-        assert total_chars <= 6000, (
+        assert total_chars <= 8000, (
             f"Prompt total={total_chars} chars demasiado grande "
             f"para n_ctx={_N_CTX}. Reduce o aumenta n_ctx."
         )
@@ -458,6 +463,7 @@ class TestToolsSection:
         assert "get_price" in _TOOLS_SECTION
         assert "get_weather" in _TOOLS_SECTION
         assert "calculate_sale_value" in _TOOLS_SECTION
+        assert "calculate_margin" in _TOOLS_SECTION
 
     def test_tools_section_tiene_tool_call_example(self) -> None:
         """Incluye ejemplo de como hacer tool_call."""
@@ -682,6 +688,45 @@ class TestExecuteToolWhitelist:
         # No lanzo TypeError, y get_price SI esta en whitelist -> no es FALLBACK_TEXT.
         assert result != FALLBACK_TEXT
 
+    async def test_tool_calculate_margin_en_whitelist_no_es_fallback(self) -> None:
+        """calculate_margin esta en whitelist, NO retorna FALLBACK_TEXT.
+
+        Similar a test_tool_get_price_en_whitelist_se_ejecuta:
+        verifica que la tool no sea rechazada por whitelist.
+        """
+        result = await _execute_tool(
+            "calculate_margin",
+            {"producto": "papa", "cantidad": "1", "unidad": "saco", "precio_total": "60000"},
+        )
+        assert result != FALLBACK_TEXT
+
+    async def test_calculate_margin_sin_cantidad_retorna_validacion(self) -> None:
+        """calculate_margin sin cantidad retorna mensaje de validacion, no fallback."""
+        result = await _execute_tool(
+            "calculate_margin",
+            {"producto": "papa", "unidad": "saco", "precio_total": "60000"},
+        )
+        assert result != FALLBACK_TEXT
+        assert "cantidad" in result.lower() or "No entendi" in result
+
+    async def test_calculate_margin_sin_unidad_retorna_validacion(self) -> None:
+        """calculate_margin sin unidad retorna mensaje de validacion."""
+        result = await _execute_tool(
+            "calculate_margin",
+            {"producto": "papa", "cantidad": "1", "precio_total": "60000"},
+        )
+        assert result != FALLBACK_TEXT
+        assert "unidad" in result.lower() or "No entendi" in result
+
+    async def test_calculate_margin_sin_precio_total_retorna_validacion(self) -> None:
+        """calculate_margin sin precio_total retorna mensaje de validacion."""
+        result = await _execute_tool(
+            "calculate_margin",
+            {"producto": "papa", "cantidad": "1", "unidad": "saco"},
+        )
+        assert result != FALLBACK_TEXT
+        assert "monto" in result.lower() or "No entendi" in result
+
 
 # ── Fallback keyword detection (_force_keyword_tool) ────────────
 
@@ -880,6 +925,435 @@ class TestForceKeywordToolVenta:
         await _force_keyword_tool("30 kilos de papa")
         # Error en venta -> cae a precio, no propaga la excepción.
         assert len(price_calls) == 1
+
+
+# ── Calculate Margin Tool ────────────────────────────────────────
+
+
+class TestCalculateMarginToolDefinition:
+    """Verifica que la tool calculate_margin este correctamente definida."""
+
+    def test_margin_tool_en_whitelist(self) -> None:
+        """calculate_margin debe estar en WHITELIST_TOOLS."""
+        assert "calculate_margin" in WHITELIST_TOOLS
+
+    def test_margin_tool_tiene_cuatro_parametros_requeridos(self) -> None:
+        """La tool requiere producto, cantidad, unidad y precio_total."""
+        margin_tool = [t for t in TOOLS if t["function"]["name"] == "calculate_margin"]
+        assert len(margin_tool) == 1
+        params = margin_tool[0]["function"]["parameters"]
+        required = set(params.get("required", []))
+        assert required == {"producto", "cantidad", "unidad", "precio_total"}
+
+    def test_margin_tool_mercado_opcional(self) -> None:
+        """Mercado es opcional en calculate_margin."""
+        margin_tool = [t for t in TOOLS if t["function"]["name"] == "calculate_margin"]
+        params = margin_tool[0]["function"]["parameters"]["properties"]
+        assert "mercado" in params
+        assert "mercado" not in set(margin_tool[0]["function"]["parameters"].get("required", []))
+
+
+class TestCalculateMarginDb:
+    """Tests de calculate_margin_for_llm con DB real.
+
+    Usa la fixture db que crea una SQLite temporal con tablas, y
+    parchea SessionLocal para que las funciones internas la usen.
+    """
+
+    def _insertar_precio(self, db, producto="papa", precio_kg=850, mercado="Mercado Mayorista Lo Valledor de Santiago",
+                         unidad="kg", fecha=None):
+        """Helper: inserta un precio ODEPA de prueba."""
+        import datetime
+
+        from app.models.odepa_price import OdepaPrice
+        if fecha is None:
+            fecha = datetime.date(2026, 7, 15)
+        reg = OdepaPrice(
+            producto=producto,
+            mercado=mercado,
+            precio_kg=precio_kg,
+            unidad=unidad,
+            fecha=fecha,
+            fuente="test",
+        )
+        db.add(reg)
+        db.commit()
+        return reg
+
+    def test_precio_superior_a_referencia(self, db) -> None:
+        """Venta de 1 saco (50 kg) a $60.000, referencia ODEPA $850/kg -> $42.500.
+        Diferencia: +$17.500, +41,2%.
+        """
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        self._insertar_precio(db, producto="papa", precio_kg=850)
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="papa",
+            cantidad="1",
+            unidad="saco",
+            precio_total="60000",
+        )
+        assert "Papa" in result
+        assert "ODEPA" in result
+        assert "17.500" in result  # $60.000 - $42.500 = +$17.500
+        assert "sobre" in result  # vendio sobre referencia
+
+    def test_precio_inferior_a_referencia(self, db) -> None:
+        """Venta de 1 saco (50 kg) a $30.000, referencia ODEPA $850/kg -> $42.500.
+        Diferencia: -$12.500, -29,4%.
+        """
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        self._insertar_precio(db, producto="papa", precio_kg=850)
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="papa",
+            cantidad="1",
+            unidad="saco",
+            precio_total="30000",
+        )
+        assert "Papa" in result
+        assert "ODEPA" in result
+        assert "12.500" in result  # $42.500 - $30.000 = -$12.500
+        assert "bajo" in result  # vendio bajo referencia
+
+    def test_precio_exactamente_igual_a_referencia(self, db) -> None:
+        """Venta de 1 saco (50 kg) al mismo precio que ODEPA: $42.500 -> 0% dif."""
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        self._insertar_precio(db, producto="papa", precio_kg=850)
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="papa",
+            cantidad="1",
+            unidad="saco",
+            precio_total="42500",
+        )
+        assert "Papa" in result
+        assert "ODEPA" in result
+        assert "exactamente" in result or "0" in result.split("por ciento")[0]
+
+    def test_conversion_saco_a_kilos(self, db) -> None:
+        """Saco = 50 kg: 3 sacos = 150 kg."""
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        self._insertar_precio(db, producto="papa", precio_kg=1000)
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="papa",
+            cantidad="3",
+            unidad="saco",
+            precio_total="500000",
+        )
+        assert "Papa" in result
+        assert "ODEPA" in result
+        # 150 kg * $1.000 = $150.000 de referencia
+        assert "150.000" in result or "150000" in result
+
+    def test_conversion_malla_a_kilos(self, db) -> None:
+        """Malla = 25 kg: 4 mallas = 100 kg."""
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        self._insertar_precio(db, producto="tomate", precio_kg=1200)
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="tomate",
+            cantidad="4",
+            unidad="malla",
+            precio_total="200000",
+        )
+        assert "Tomate" in result or "tomate" in result
+        assert "ODEPA" in result
+        # 100 kg * $1.200 = $120.000 de referencia
+
+    def test_conversion_caja_a_kilos(self, db) -> None:
+        """Caja = 20 kg."""
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        self._insertar_precio(db, producto="cebolla", precio_kg=500)
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="cebolla",
+            cantidad="10",
+            unidad="caja",
+            precio_total="150000",
+        )
+        assert "Cebolla" in result or "cebolla" in result
+        assert "ODEPA" in result
+        # 10 cajas * 20 kg = 200 kg * $500 = $100.000
+
+    def test_conversion_tonelada_a_kilos(self, db) -> None:
+        """Tonelada = 1000 kg."""
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        self._insertar_precio(db, producto="trigo", precio_kg=300)
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="trigo",
+            cantidad="2",
+            unidad="tonelada",
+            precio_total="800000",
+        )
+        assert "Trigo" in result or "trigo" in result
+        assert "ODEPA" in result
+        # 2 toneladas = 2000 kg * $300 = $600.000 referencia
+
+    def test_conversion_kilo_directo(self, db) -> None:
+        """Kilo no necesita conversion: 100 kilos = 100 kg."""
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        self._insertar_precio(db, producto="papa", precio_kg=850)
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="papa",
+            cantidad="100",
+            unidad="kilo",
+            precio_total="100000",
+        )
+        assert "Papa" in result
+        assert "ODEPA" in result
+        # 100 kg * $850 = $85.000 referencia
+
+    def test_producto_sin_datos_odepa(self, db) -> None:
+        """Producto sin precio ODEPA retorna mensaje informativo, no error."""
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="kiwi",
+            cantidad="10",
+            unidad="kilo",
+            precio_total="50000",
+        )
+        assert "No tengo datos" in result
+        assert "kiwi" in result.lower()
+
+    def test_cantidad_invalida(self, db) -> None:
+        """Cantidad no numerica retorna mensaje de error."""
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="papa",
+            cantidad="abc",
+            unidad="kilo",
+            precio_total="50000",
+        )
+        assert "No entendi" in result
+
+    def test_cantidad_cero(self, db) -> None:
+        """Cantidad cero retorna mensaje."""
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="papa",
+            cantidad="0",
+            unidad="kilo",
+            precio_total="50000",
+        )
+        assert "mayor a cero" in result
+
+    def test_precio_total_invalido(self, db) -> None:
+        """Precio total no numerico retorna mensaje de error."""
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="papa",
+            cantidad="10",
+            unidad="kilo",
+            precio_total="abc",
+        )
+        assert "No entendi" in result
+
+    def test_precio_total_cero(self, db) -> None:
+        """Precio total cero retorna mensaje."""
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="papa",
+            cantidad="10",
+            unidad="kilo",
+            precio_total="0",
+        )
+        assert "mayor a cero" in result
+
+    def test_unidad_invalida(self, db) -> None:
+        """Unidad no reconocida retorna mensaje con lista de unidades validas."""
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        self._insertar_precio(db, producto="papa", precio_kg=850)
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="papa",
+            cantidad="10",
+            unidad="atado",
+            precio_total="50000",
+        )
+        assert "No conozco" in result
+        assert "kilo" in result  # menciona unidades validas
+
+    def test_unidad_vacia(self, db) -> None:
+        """Unidad vacia retorna mensaje."""
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="papa",
+            cantidad="10",
+            unidad="",
+            precio_total="50000",
+        )
+        assert "No conozco" in result
+
+    def test_no_persiste_datos_financieros(self, db) -> None:
+        """calculate_margin_for_llm NO escribe en la DB.
+
+        Verifica que la tabla consultations no reciba nuevas filas
+        tras ejecutar calculate_margin_for_llm. La funcion es
+        read-only (solo SELECT en odepa_prices).
+        """
+        from sqlalchemy import func, select
+
+        from app.models.consultation import Consultation
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        self._insertar_precio(db, producto="papa", precio_kg=850)
+
+        # Contar filas antes.
+        antes = db.scalar(select(func.count()).select_from(Consultation))
+
+        # Ejecutar la funcion.
+        calculate_margin_for_llm(
+            session=db,
+            producto="papa",
+            cantidad="50",
+            unidad="saco",
+            precio_total="60000",
+        )
+
+        # Contar filas despues — no debe haber cambiado.
+        despues = db.scalar(select(func.count()).select_from(Consultation))
+        assert despues == antes
+
+    def test_unidad_kilos_plural(self, db) -> None:
+        """'kilos' (plural) funciona igual que 'kilo'."""
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        self._insertar_precio(db, producto="papa", precio_kg=850)
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="papa",
+            cantidad="30",
+            unidad="kilos",
+            precio_total="30000",
+        )
+        assert "Papa" in result
+        assert "ODEPA" in result
+
+    def test_unidad_kg_abreviatura(self, db) -> None:
+        """'kg' funciona como abreviatura de kilo."""
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        self._insertar_precio(db, producto="papa", precio_kg=850)
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="papa",
+            cantidad="30",
+            unidad="kg",
+            precio_total="30000",
+        )
+        assert "Papa" in result
+        assert "ODEPA" in result
+
+    def test_precio_decimal_coma(self, db) -> None:
+        """Precio total con coma decimal se normaliza correctamente."""
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        self._insertar_precio(db, producto="papa", precio_kg=850)
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="papa",
+            cantidad="50",
+            unidad="saco",
+            precio_total="60,500",
+        )
+        # $60.500 -> $60.500, no error de parseo
+        assert "No entendi" not in result
+        assert "ODEPA" in result
+
+    def test_precio_con_signo_peso(self, db) -> None:
+        """Precio total con $ se normaliza."""
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        self._insertar_precio(db, producto="papa", precio_kg=850)
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="papa",
+            cantidad="50",
+            unidad="saco",
+            precio_total="$60000",
+        )
+        assert "No entendi" not in result
+        assert "ODEPA" in result
+
+    def test_mercado_especifico(self, db) -> None:
+        """Mercado especifico filtra correctamente."""
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        # Dos mercados, precio diferente.
+        self._insertar_precio(db, producto="papa", precio_kg=850,
+                              mercado="Mercado Mayorista Lo Valledor de Santiago")
+        self._insertar_precio(db, producto="papa", precio_kg=700,
+                              mercado="Vega Modelo de Temuco")
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="papa",
+            cantidad="1",
+            unidad="saco",
+            precio_total="35000",
+            mercado="Vega Modelo de Temuco",
+        )
+        # Debe usar precio de Temuco ($700/kg, no $850).
+        assert "ODEPA" in result
+        # 50 kg * $700 = $35.000 = exactamente lo que recibio
+        assert "exactamente" in result
+
+    def test_unidad_odepa_no_convertible(self, db) -> None:
+        """Cuando ODEPA publica en unidad no convertible, avisa y no inventa."""
+        from app.services.odepa_service import calculate_margin_for_llm
+
+        # ODEPA con unidad no convertible (docena de atados).
+        self._insertar_precio(db, producto="lechuga", precio_kg=1200,
+                              unidad="$/docena de atados")
+
+        result = calculate_margin_for_llm(
+            session=db,
+            producto="lechuga",
+            cantidad="10",
+            unidad="kilo",
+            precio_total="15000",
+        )
+        # No debe fallar, debe avisar que no puede comparar.
+        assert "No puedo calcular" in result
+        assert "ODEPA" in result
 
 
 # ── ToolResultCache ───────────────────────────────────────────────

@@ -463,11 +463,35 @@ class AgroVozPipeline:
         # y el LLM funciona sin personalización (issue #125).
         cultivos = AgroVozPipeline._load_user_cultivos(chat_id_hash)
 
+        # Detectar keywords de venta realizada para sugerir calculate_margin
+        # al LLM via system_tip (Issue #91). El LLM ya tiene la tool en su
+        # definicion, pero el system_tip refuerza la seleccion cuando el
+        # agricultor habla en pasado ("vendi", "recibi").
+        margin_keywords = ["vendí", "vendi", "vender", "vendido",
+                           "vendió", "vendio", "vendiste", "vendieron",
+                           "recibí", "recibi", "recibiste", "recibió",
+                           "recibio", "me pagaron", "me pagó", "me pago",
+                           "acabo de vender", "recién vendí", "recien vendi"]
+        system_tip = None
+        if any(kw in transcribed_text.strip().lower() for kw in margin_keywords):
+            system_tip = (
+                "El agricultor menciona una venta YA REALIZADA. "
+                "Si te da producto, cantidad, unidad y monto total, "
+                "usa calculate_margin para comparar contra la referencia ODEPA."
+            )
+            logger.info(
+                "Margin keywords detectados — system_tip activado para calculate_margin"
+                " — query=%.100s chat_id_hash=%s",
+                transcribed_text,
+                chat_id_hash[:8] if chat_id_hash else "sin_chat",
+            )
+
         try:
             response_text = await answer(
                 transcribed_text.strip(),
                 phone_hash=chat_id_hash,
                 cultivos=cultivos,
+                system_tip=system_tip,
             )
         except (TimeoutError, RuntimeError, OSError, ValueError):
             logger.exception("Error en generacion LLM — activando fallback determinista")
