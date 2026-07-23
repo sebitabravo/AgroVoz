@@ -131,9 +131,14 @@ class TestHealth:
 
         CORSMiddleware configurado en main.py via issue #151.
         En produccion debe venir de https://agrovoz.cl o https://www.agrovoz.cl.
+
+        Se envia el header Origin: Starlette solo emite Access-Control-Allow-Origin
+        cuando el request trae Origin (un GET sin Origin no gatilla CORS). Sin este
+        header el test pasaba trivialmente sin verificar nada.
         """
         resp = httpx.get(
             f"{E2E_BASE_URL}/api/v1/health?probe=liveness",
+            headers={"Origin": "https://agrovoz.cl"},
             timeout=E2E_TIMEOUT_S,
         )
         # Assert que el header CORS existe, cualquiera sea su valor.

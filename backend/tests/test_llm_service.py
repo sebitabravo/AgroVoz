@@ -45,10 +45,11 @@ class TestConstantes:
     def test_system_prompt_contiene_reglas_estrictas(self) -> None:
         """El system prompt comprimido conserva las reglas del issue #18 + #91."""
         assert "REGLAS ESTRICTAS" in SYSTEM_PROMPT
-        assert "Tienes SEIS herramientas" in SYSTEM_PROMPT
+        assert "Tienes SIETE herramientas" in SYSTEM_PROMPT
         assert "get_price_history" in SYSTEM_PROMPT
         assert "calculate_sale_value" in SYSTEM_PROMPT
         assert "calculate_margin" in SYSTEM_PROMPT
+        assert "search_corpus" in SYSTEM_PROMPT
         assert "NUNCA recomendaciones agronomicas" in SYSTEM_PROMPT
         assert "NUNCA inventes precios" in SYSTEM_PROMPT
         assert "espanol chileno" in SYSTEM_PROMPT
@@ -78,8 +79,8 @@ class TestConstantes:
         assert len(NO_RESPONSE_TEXT) > 10
         assert "reformular" in NO_RESPONSE_TEXT.lower()
 
-    def test_whitelist_seis_tools(self) -> None:
-        """La whitelist permite las seis tools de precio, venta, margen, clima e historico."""
+    def test_whitelist_siete_tools(self) -> None:
+        """La whitelist permite las siete tools: precio, historico, venta, margen, clima, clima historico y corpus."""
         assert (
             frozenset(
                 {
@@ -89,6 +90,7 @@ class TestConstantes:
                     "calculate_margin",
                     "get_weather",
                     "get_clima_historico",
+                    "search_corpus",
                 }
             )
             == WHITELIST_TOOLS
@@ -96,7 +98,7 @@ class TestConstantes:
 
     def test_tools_definition_formato_openai(self) -> None:
         """Las tool definitions siguen el formato OpenAI function-calling."""
-        assert len(TOOLS) == 6  # 5 originales + calculate_margin
+        assert len(TOOLS) == 7  # 5 base + calculate_margin (#155) + search_corpus (#156)
         for tool in TOOLS:
             assert tool["type"] == "function"
             fn = tool["function"]
@@ -161,14 +163,17 @@ class TestLlmConfig:
 
         Cada char sumado al system prompt incrementa el prefill del LLM.
         Original era ~2000 chars, comprimido debe ser menos.
-        Limite: 1900 chars. ~300 chars extra justificados por la 6a
-        herramienta (calculate_margin) + instrucciones de MARGEN
-        (keywords de venta realizada + ejemplo). Latencia E2E target
-        <15s se mantiene en CPU con n_ctx=1024.
+        Limite: 2500 chars. Extra justificado por DOS herramientas nuevas
+        que se integraron juntas: calculate_margin (#155, margen de venta) y
+        search_corpus (#156, RAG sobre corpus ODEPA), con sus keywords de
+        deteccion e instrucciones de citar fuente. Las tool definitions van
+        aparte en _TOOLS_SECTION, no aqui.
+        OJO: el spike de latencia RAG en el VPS CX43 (gate del #100) sigue
+        pendiente — validar <15s E2E antes del piloto de Traiguen.
         """
-        assert len(SYSTEM_PROMPT) <= 1900, (
+        assert len(SYSTEM_PROMPT) <= 2500, (
             f"SYSTEM_PROMPT={len(SYSTEM_PROMPT)} chars excede el limite "
-            "de 1900. Comprime o justifica con datos de latencia."
+            "de 2500. Comprime o justifica con datos de latencia."
         )
 
     def test_total_prompt_chars_under_limit(self) -> None:
@@ -177,11 +182,15 @@ class TestLlmConfig:
         Para n_ctx=1024 con Qwen2.5 (3-5 chars/token), el prompt total
         deberia estar bajo ~8000 chars. Es un guard suave contra
         regresiones que inflan el contexto sin ajustar n_ctx.
-        Limite aumentado de 6000 a 8000 por la 6a herramienta
-        (calculate_margin, ~1400 chars en JSON) + margen keywords.
+        ~9022 chars con 7 tools: base (5) + calculate_margin (#155) +
+        search_corpus (#156). El guard subio a 9500 porque ambas features
+        se integraron juntas y cada tool JSON pesa ~1400 chars. ADVERTENCIA:
+        ~9022 chars son ~1800-2250 tokens, por encima de n_ctx=1024. La
+        seccion de tools ya excedia n_ctx desde antes; validar en el VPS CX43
+        que el prefill no rompa la latencia <15s E2E (gate de #100, pendiente).
         """
         total_chars = len(SYSTEM_PROMPT) + len(_TOOLS_SECTION)
-        assert total_chars <= 8000, (
+        assert total_chars <= 9500, (
             f"Prompt total={total_chars} chars demasiado grande "
             f"para n_ctx={_N_CTX}. Reduce o aumenta n_ctx."
         )

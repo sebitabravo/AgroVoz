@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = (
     "Eres AgroVoz, un asistente de voz para pequeños agricultores chilenos.\n"
     "REGLAS ESTRICTAS:\n"
-    "1. Tienes SEIS herramientas (definidas abajo). USA LA CORRECTA:\n"
+    "1. Tienes SIETE herramientas (definidas abajo). USA LA CORRECTA:\n"
     "   - get_price: PRECIOS ACTUALES ODEPA.\n"
     "   - get_price_history: PRECIOS PASADOS, variacion.\n"
     "   - calculate_sale_value: CALCULAR VENTA (CUANTO RECIBIRA). NO hagas el calculo tu.\n"
@@ -56,6 +56,8 @@ SYSTEM_PROMPT = (
     "   - get_weather: CLIMA ACTUAL (temperatura, lluvia, viento).\n"
     "   - get_clima_historico: CLIMA HISTORICO (temperatura promedio del"
     " año, lluvia total, heladas).\n"
+    "   - search_corpus: BUSCAR en documentos oficiales ODEPA"
+    " (boletines, contexto del mercado, definiciones).\n"
     "2. Determina el intent segun:\n"
     "   - PRECIO: precio, cuanto, cuesta, vale, producto agricola, kilo, peso, luca.\n"
     "   - VENTA: kilos a vender (\"voy a vender X kilos\").\n"
@@ -66,12 +68,15 @@ SYSTEM_PROMPT = (
     " humedad, viento.\n"
     "   - CLIMA HISTORICO: historico, año pasado, temperatura promedio,"
     " lluvia total, heladas.\n"
+    "   - CORPUS: boletines, documentos, contexto del mercado,"
+    " definiciones, información general del rubro.\n"
     "   Ej: \"a cuanto la papa\" -> get_price. \"voy a vender 30 kilos\""
     " -> calculate_sale_value.\n"
     "   \"vendi 3 sacos de papa a 150 lucas\" -> calculate_margin.\n"
     "   \"a cuanto estaba la papa\" -> get_price_history."
     " \"como esta el clima\" -> get_weather.\n"
     "   \"como fue el clima el año pasado\" -> get_clima_historico.\n"
+    "   \"que dice el boletin de la papa\" -> search_corpus.\n"
     "   \"a cuanto la papa y el clima\" -> AMBAS.\n"
     "3. SIEMPRE usa herramienta antes de reformular.\n"
     "4. NUNCA recomendaciones agronomicas. Solo datos de precio y clima.\n"
@@ -80,6 +85,11 @@ SYSTEM_PROMPT = (
     "7. Precios en pesos chilenos con la unidad de medida.\n"
     "8. CONSERVA la fuente: ODEPA para precios, OpenMeteo para clima.\n"
     "   Nunca omitas \"segun ODEPA\" o \"segun OpenMeteo\" al resumir.\n"
+    "9. search_corpus devuelve textos con fuente y fecha. CITA la fuente"
+    " y fecha textualmente al usarlos.\n"
+    "   Ej: 'Segun el boletin de ODEPA de junio 2026, el precio...'\n"
+    "10. Si search_corpus no encuentra documentos relevantes, DILO"
+    " explicitamente ('No hay informacion en los documentos oficiales').\n"
 )
 
 # Texto de fallback cuando el LLM intenta una tool fuera del whitelist.
@@ -99,6 +109,7 @@ WHITELIST_TOOLS = frozenset(
         "calculate_margin",
         "get_weather",
         "get_clima_historico",
+        "search_corpus",
     }
 )
 
@@ -406,6 +417,39 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_corpus",
+            "description": (
+                "USAR para BUSCAR en documentos oficiales ODEPA. "
+                "Cuando el agricultor pregunte por informacion de boletines, "
+                "contexto del mercado agricola, tendencias de precios, "
+                "definiciones del rubro o datos de los documentos oficiales. "
+                "NO usar para precios actuales (usa get_price). "
+                "CITA la fuente y fecha que devuelve la herramienta. "
+                "Ej: 'que dice el boletin de la papa', "
+                "'cual es la tendencia del mercado', "
+                "'informacion sobre la papa en Chile'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "La consulta o pregunta del agricultor "
+                            "para buscar en los documentos oficiales. "
+                            "Ej: 'precio de la papa en ferias', "
+                            "'produccion de papa en Chile', "
+                            "'mercado mayorista papa'."
+                        ),
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
 ]
 
 # Generar _TOOLS_LINES desde TOOLS (una fuente de verdad).
@@ -542,6 +586,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         get_price_for_llm,
         get_price_history_for_llm,
     )
+    from app.services.rag_service import search_corpus_for_llm
     from app.services.weather_service import get_clima_historico, get_weather
 
     return {
@@ -551,6 +596,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         "calculate_margin": calculate_margin_for_llm,
         "get_weather": get_weather,
         "get_clima_historico": get_clima_historico,
+        "search_corpus": search_corpus_for_llm,
     }
 
 
@@ -605,6 +651,7 @@ async def _execute_tool(
     cacheable = frozenset({
         "get_price", "get_price_history", "get_weather", "get_clima_historico",
     })
+    # search_corpus es tan rapido (<2ms) que no necesita cache.
     if name in cacheable:
         cached = _tool_cache.get(name, **valid_args)
         if cached is not None:
