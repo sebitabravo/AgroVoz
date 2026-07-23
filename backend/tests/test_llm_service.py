@@ -123,15 +123,28 @@ class TestLlmConfig:
     el impacto, estos tests fallan.
     """
 
-    def test_n_ctx_leq_1024(self) -> None:
-        """n_ctx no debe exceder 1024 para mantener latencia en CPU.
+    def test_n_ctx_alcanza_para_prompt_con_siete_tools(self) -> None:
+        """n_ctx debe cubrir el prompt real: system+tools (~2771 tokens
 
-        Cada token de contexto suma al prefill. A 2048, el decode en CPU
-        toma ~77s. A 1024 con prompt comprimido, el target es <15s E2E.
+        medidos con el tokenizer real de Qwen2.5) + tool_response de RAG
+        (peor caso, ~360 tokens) + margen para query/respuesta.
+
+        n_ctx=1024 y 2048 NO alcanzaban ni para el primer prompt (crash
+        ValueError instantaneo de llama-cpp-python). n_ctx=3072 alcanzaba
+        para la 1a llamada pero no para la 2a vuelta del loop con
+        tool_response de search_corpus inyectado. 4096 es el minimo medido
+        que no revienta con las 7 tools actuales.
+
+        RIESGO SIN VALIDAR EN VPS (gate #100, overrideado): medido en
+        Apple M3 con Metal (mejor caso, no representativo del VPS CX43 sin
+        GPU) da ~46s solo LLM (36s + 10s) vs target <15s E2E total. Si
+        alguien sube mas este valor, medir de nuevo en el VPS antes de
+        asumir que la latencia sigue siendo aceptable.
         """
-        assert _N_CTX <= 1024, (
-            f"_N_CTX={_N_CTX} excede el limite de 1024. "
-            "Aumentar sin medir impacto degrada latencia a >60s en CPU."
+        assert _N_CTX >= 4096, (
+            f"_N_CTX={_N_CTX} no alcanza para el prompt con 7 tools "
+            "(~2771 tokens) + tool_response de RAG (~3171 tokens en la "
+            "2a vuelta). Medir tokens reales con el tokenizer antes de bajarlo."
         )
 
     def test_n_threads_minimo_4(self) -> None:
@@ -179,15 +192,14 @@ class TestLlmConfig:
     def test_total_prompt_chars_under_limit(self) -> None:
         """El prompt total (system + tools) no debe exceder un limite.
 
-        Para n_ctx=1024 con Qwen2.5 (3-5 chars/token), el prompt total
-        deberia estar bajo ~8000 chars. Es un guard suave contra
-        regresiones que inflan el contexto sin ajustar n_ctx.
-        ~9022 chars con 7 tools: base (5) + calculate_margin (#155) +
-        search_corpus (#156). El guard subio a 9500 porque ambas features
-        se integraron juntas y cada tool JSON pesa ~1400 chars. ADVERTENCIA:
-        ~9022 chars son ~1800-2250 tokens, por encima de n_ctx=1024. La
-        seccion de tools ya excedia n_ctx desde antes; validar en el VPS CX43
-        que el prefill no rompa la latencia <15s E2E (gate de #100, pendiente).
+        Guard barato (no requiere cargar el modelo) contra regresiones que
+        inflan el prompt sin querer. ~9022 chars con 7 tools: base (5) +
+        calculate_margin (#155) + search_corpus (#156), medidos en ~2771
+        tokens reales con el tokenizer de Qwen2.5 (ver test_n_ctx_alcanza_
+        para_prompt_con_siete_tools). Con n_ctx=4096 hay margen, pero la
+        latencia real (~46s medidos solo-LLM en Apple M3, sin validar en
+        el VPS CX43) sigue siendo el riesgo — este test NO lo cubre, solo
+        evita que el prompt crezca sin darse cuenta.
         """
         total_chars = len(SYSTEM_PROMPT) + len(_TOOLS_SECTION)
         assert total_chars <= 9500, (
