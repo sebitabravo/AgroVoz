@@ -93,6 +93,22 @@ class Settings(BaseSettings):
     # ── Modelos IA (paths) ───────────────
     piper_model_path: str = "models/es_MX-claude-high.onnx"
 
+    # ── CORS ──────────────────────────────
+    # Origenes permitidos para CORS en produccion.
+    # Separados por coma. En desarrollo se usa "*" automaticamente.
+    cors_origins: str = "https://agrovoz.cl,https://www.agrovoz.cl"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """Retorna la lista de origenes CORS.
+
+        En desarrollo retorna ["*"] para facilitar el desarrollo local.
+        En produccion retorna la lista configurada en CORS_ORIGINS.
+        """
+        if self.app_env == "development":
+            return ["*"]
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
     # ── Seguridad ────────────────────────
     rate_limit_per_minute: int = 60
     weather_rate_limit_per_minute: int = 30

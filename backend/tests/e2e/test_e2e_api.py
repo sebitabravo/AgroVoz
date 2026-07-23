@@ -126,23 +126,11 @@ class TestHealth:
         partes = version.split(".")
         assert len(partes) >= 2, f"version no parece semver: {version}"
 
-    @pytest.mark.xfail(
-        strict=False,
-        reason=(
-            "La API aun no tiene CORSMiddleware configurado. "
-            "La landing no podra hacer fetch directo hasta agregarlo "
-            "en main.py (ver issue #151)."
-        ),
-    )
     def test_health_cors_headers(self) -> None:
         """El endpoint health incluye headers CORS.
 
-        Si la API deployada tiene CORS configurado (via middleware o
-        Traefik), Access-Control-Allow-Origin debe estar presente.
-        Si falta, la landing page no podra hacer fetch directo.
-
-        Marcado xfail porque el gap es conocido. Cuando se implemente
-        CORS, este test pasara y se quitara el decorador.
+        CORSMiddleware configurado en main.py via issue #151.
+        En produccion debe venir de https://agrovoz.cl o https://www.agrovoz.cl.
         """
         resp = httpx.get(
             f"{E2E_BASE_URL}/api/v1/health?probe=liveness",
