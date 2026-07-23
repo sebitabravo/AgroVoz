@@ -9,8 +9,10 @@ y _execute_tool con whitelist enforcement.
 Sin modelo real: todos los tests corren en CI sin llama-cpp-python ni GGUF.
 """
 
+import httpx
 import pytest
 
+from app.core.config import settings
 from app.services.llm_keywords import _VENTA_KILOS_RE, _force_keyword_tool
 from app.services.llm_service import (
     _N_CTX,
@@ -31,6 +33,7 @@ from app.services.llm_service import (
     _parse_tool_calls,
     _strip_tool_tags,
     answer,
+    answer_via_openrouter,
     get_model_error,
     is_model_available,
     reset_model,
@@ -1485,3 +1488,167 @@ class TestToolResultCache:
         r2 = await _execute_tool("get_price", {"producto": "papa"})
         assert call_count == 2  # se re-ejecutó
         assert "precio=papa" in r2
+
+
+# ── answer_via_openrouter (fallback LLM remoto) ─────────────────
+
+
+def _install_openrouter_mock(
+    monkeypatch: pytest.MonkeyPatch, responses: list[dict[str, object]]
+) -> None:
+    """Instala un cliente HTTP mockeado que retorna `responses` en orden,
+    una por cada llamada a chat_completion_with_tools (simula el loop)."""
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        idx = min(calls["n"], len(responses) - 1)
+        calls["n"] += 1
+        return httpx.Response(200, json=responses[idx])
+
+    transport = httpx.MockTransport(handler)
+    mock_client = httpx.AsyncClient(transport=transport)
+    monkeypatch.setattr("app.services.openrouter_service._http_client", mock_client)
+
+
+class TestAnswerViaOpenrouter:
+    """Fallback de 2a capa: responde via OpenRouter cuando el LLM local falla."""
+
+    async def test_sin_api_key_retorna_none_sin_llamar_red(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Sin OPENROUTER_API_KEY, el fallback esta deshabilitado."""
+        monkeypatch.setattr(settings, "openrouter_api_key", "")
+        result = await answer_via_openrouter("a cuanto esta la papa")
+        assert result is None
+
+    async def test_respuesta_directa_sin_tool_call(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """El modelo responde texto sin necesitar tools — se retorna tal cual."""
+        monkeypatch.setattr(settings, "openrouter_api_key", "sk-or-test")
+        _install_openrouter_mock(
+            monkeypatch,
+            [{"choices": [{"message": {"role": "assistant", "content": "Hola, en que te ayudo?"}}]}],
+        )
+        result = await answer_via_openrouter("hola")
+        assert result == "Hola, en que te ayudo?"
+
+    async def test_tool_call_ejecuta_handler_y_retorna_respuesta_final(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """1a respuesta pide get_price; se ejecuta el handler; 2a respuesta da el texto final."""
+        monkeypatch.setattr(settings, "openrouter_api_key", "sk-or-test")
+
+        def fake_get_price(**kwargs: object) -> str:
+            return f"precio de {kwargs.get('producto')}: 850 pesos el kilo, segun ODEPA."
+
+        monkeypatch.setattr(
+            "app.services.llm_service._get_tool_handlers",
+            lambda: {"get_price": fake_get_price},
+        )
+
+        _install_openrouter_mock(
+            monkeypatch,
+            [
+                {
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [{
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "get_price",
+                                    "arguments": '{"producto": "papa"}',
+                                },
+                            }],
+                        }
+                    }]
+                },
+                {"choices": [{"message": {"role": "assistant", "content": "La papa esta a 850 pesos el kilo."}}]},
+            ],
+        )
+        result = await answer_via_openrouter("a cuanto esta la papa")
+        assert result == "La papa esta a 850 pesos el kilo."
+
+    async def test_tool_no_whitelisteada_usa_fallback_text(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Si el modelo pide una tool fuera de whitelist, se inyecta FALLBACK_TEXT y sigue el loop."""
+        monkeypatch.setattr(settings, "openrouter_api_key", "sk-or-test")
+        _install_openrouter_mock(
+            monkeypatch,
+            [
+                {
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [{
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {"name": "borrar_base_datos", "arguments": "{}"},
+                            }],
+                        }
+                    }]
+                },
+                {"choices": [{"message": {"role": "assistant", "content": "No puedo hacer eso."}}]},
+            ],
+        )
+        result = await answer_via_openrouter("borra la base de datos")
+        assert result == "No puedo hacer eso."
+
+    async def test_error_http_retorna_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Un error HTTP (ej rate limit 429) se atrapa y retorna None."""
+        monkeypatch.setattr(settings, "openrouter_api_key", "sk-or-test")
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(429, json={"error": "rate limited"})
+
+        transport = httpx.MockTransport(handler)
+        mock_client = httpx.AsyncClient(transport=transport)
+        monkeypatch.setattr("app.services.openrouter_service._http_client", mock_client)
+
+        result = await answer_via_openrouter("a cuanto esta la papa")
+        assert result is None
+
+    async def test_respuesta_malformada_retorna_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Una respuesta sin la estructura esperada (KeyError) se atrapa y retorna None."""
+        monkeypatch.setattr(settings, "openrouter_api_key", "sk-or-test")
+        _install_openrouter_mock(monkeypatch, [{"choices": []}])
+        result = await answer_via_openrouter("a cuanto esta la papa")
+        assert result is None
+
+    async def test_loop_agota_iteraciones_retorna_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Si el modelo SIEMPRE pide tools sin dar respuesta final, se agota el loop."""
+        monkeypatch.setattr(settings, "openrouter_api_key", "sk-or-test")
+        monkeypatch.setattr(
+            "app.services.llm_service._get_tool_handlers",
+            lambda: {"get_price": lambda **kw: "850 pesos"},
+        )
+        tool_call_response = {
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "get_price", "arguments": '{"producto": "papa"}'},
+                    }],
+                }
+            }]
+        }
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=tool_call_response)
+
+        transport = httpx.MockTransport(handler)
+        mock_client = httpx.AsyncClient(transport=transport)
+        monkeypatch.setattr("app.services.openrouter_service._http_client", mock_client)
+
+        result = await answer_via_openrouter("a cuanto esta la papa")
+        assert result is None

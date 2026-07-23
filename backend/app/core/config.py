@@ -93,6 +93,17 @@ class Settings(BaseSettings):
     # ── Modelos IA (paths) ───────────────
     piper_model_path: str = "models/es_MX-claude-high.onnx"
 
+    # ── OpenRouter (fallback LLM remoto) ─
+    # Vacio por defecto: el fallback esta DESHABILITADO hasta que se configure
+    # una API key explicitamente. Se usa SOLO si el LLM local (Qwen2.5-3B) no
+    # esta disponible o falla generando (Issue: fallback OpenRouter free tier).
+    # "openrouter/free" es el router automatico de OpenRouter: elige entre los
+    # modelos gratuitos disponibles que soporten tool calling. El catalogo
+    # rota sin aviso (no es un modelo fijo) — ver docs/ARCHITECTURE.md.
+    openrouter_api_key: str = ""
+    openrouter_model: str = "openrouter/free"
+    openrouter_timeout_seconds: float = 12.0
+
     # ── CORS ──────────────────────────────
     # Origenes permitidos para CORS en produccion.
     # Separados por coma. En desarrollo se usa "*" automaticamente.

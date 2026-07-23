@@ -202,3 +202,22 @@ CREATE INDEX idx_consultations_created ON consultations(created_at);
     (default False) filtrando `is_test=False` en todas las queries de
     metrics_service.py. Backfill manual para filas existentes con patrones
     de prueba conocidos. Reversible: desmarcar is_test restaura la visibilidad.
+
+15. **OpenRouter como fallback LLM remoto — deshabilitado por defecto.**
+    Segunda capa de un fallback de 3 niveles (LLM local → OpenRouter → keywords
+    deterministas) que se activa SOLO si `OPENROUTER_API_KEY` está configurada.
+    Excepción explícita y acotada al hard constraint "sin APIs pagas externas":
+    el tier gratuito de OpenRouter (`openrouter/free`) no cobra, pero sigue
+    siendo un tercero no auditado. Riesgos evaluados y aceptados conscientemente:
+    - El catálogo de modelos gratuitos rota sin aviso (no es un modelo fijo).
+    - Los modelos `:free` exigen, para poder usarse, aceptar en el dashboard de
+      OpenRouter que el contenido puede usarse para entrenar o publicarse —
+      la consulta transcrita del agricultor sale del VPS hacia ese tercero.
+    - Rate limit del tier gratis: 20 req/min, 50-1000 req/día según créditos.
+    Por eso es fallback de última instancia, no el camino principal, y por
+    eso el flag existe desactivado por defecto (opt-in explícito en `.env`).
+    Usa tool calling nativo (`tools=`, formato OpenAI) en vez del parseo de
+    texto `<tool_call>` que necesita Qwen2.5 vía llama-cpp-python — son
+    implementaciones separadas (`llm_service.answer()` vs
+    `llm_service.answer_via_openrouter()`) porque el formato de tool calling
+    de cada backend es distinto.

@@ -29,6 +29,7 @@ import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+import httpx
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
@@ -213,7 +214,9 @@ def clear_tool_result_cache() -> None:
 
 # Mantener TOOLS como lista de tool definitions (fuente única de verdad).
 # _TOOLS_SECTION se genera desde esta lista para inyectar en system prompt.
-TOOLS = [
+# Tipado explicito (list[dict[str, object]]) para que sea compatible con
+# openrouter_service.chat_completion_with_tools(tools=...).
+TOOLS: list[dict[str, object]] = [
     {
         "type": "function",
         "function": {
@@ -1113,6 +1116,96 @@ async def answer(
         # seguir gatillandola.
         logger.exception("Error en generacion LLM: %s", exc)
         return "Tuve un problema al procesar tu consulta. ¿Probamos de nuevo?"
+
+
+# System prompt reducido para OpenRouter: las tools van en el parametro
+# nativo `tools=` (no como texto <tools> en el system prompt, que es un
+# formato especifico para que Qwen2.5 genere <tool_call> via llama-cpp-python).
+_OPENROUTER_SYSTEM_PROMPT = (
+    "Eres AgroVoz, un asistente de voz para pequeños agricultores chilenos. "
+    "Responde en español chileno, maximo 3 oraciones cortas. "
+    "SIEMPRE usa una herramienta antes de responder. "
+    "NUNCA inventes precios ni clima. NUNCA des recomendaciones agronomicas. "
+    "Conserva la fuente (ODEPA para precios, OpenMeteo para clima) al citar datos."
+)
+
+
+async def answer_via_openrouter(
+    query_text: str,
+    phone_hash: str | None = None,
+    cultivos: list[str] | None = None,
+) -> str | None:
+    """Segunda capa de fallback: responde via OpenRouter (tool calling nativo).
+
+    Se usa SOLO cuando el LLM local (Qwen2.5 via llama-cpp-python) no esta
+    disponible o fallo generando. Reusa TOOLS/WHITELIST_TOOLS/_execute_tool
+    del modelo local — el unico cambio es el transporte (HTTP remoto en vez
+    de llama-cpp local) y el formato de tool calls (tool_calls nativo OpenAI
+    en vez de <tool_call> como texto plano).
+
+    Nunca lanza excepcion: retorna None si OpenRouter no esta configurado
+    (OPENROUTER_API_KEY vacia) o si falla por cualquier motivo (red, timeout,
+    respuesta invalida, rate limit). El caller (pipeline_service) decide el
+    siguiente escalon (fallback determinista de keywords).
+
+    Riesgos conocidos (evaluados explicitamente, no accidentales):
+    - El catalogo de "openrouter/free" rota sin aviso: el modelo real detras
+      del alias puede cambiar entre llamadas.
+    - Los modelos gratuitos de OpenRouter exigen, para poder usarse, aceptar
+      que el contenido puede usarse para entrenar o publicarse (configurar
+      en el dashboard de OpenRouter, no en este codigo). La consulta del
+      agricultor sale del VPS hacia un tercero no auditado.
+    - Rate limit del tier gratis: 20 req/min, 50-1000 req/dia segun creditos
+      cargados. Es un fallback ocasional, no el camino principal.
+    """
+    from app.services import openrouter_service
+
+    if not openrouter_service.is_configured():
+        return None
+
+    system_content = _OPENROUTER_SYSTEM_PROMPT
+    if cultivos:
+        system_content += f" El agricultor cultiva: {', '.join(cultivos)}."
+
+    messages: list[dict[str, object]] = [
+        {"role": "system", "content": system_content},
+        {"role": "user", "content": query_text},
+    ]
+
+    try:
+        for _iteration in range(MAX_TOOL_ITERATIONS):
+            response = await openrouter_service.chat_completion_with_tools(messages, TOOLS)
+            message = response["choices"][0]["message"]
+            tool_calls = message.get("tool_calls")
+
+            if not tool_calls:
+                content = message.get("content")
+                return content.strip() if content else None
+
+            messages.append(message)
+            for call in tool_calls:
+                name = call["function"]["name"]
+                try:
+                    arguments = json.loads(call["function"]["arguments"])
+                except json.JSONDecodeError:
+                    arguments = {}
+
+                result = (
+                    await _execute_tool(name, arguments, phone_hash=phone_hash)
+                    if name in WHITELIST_TOOLS
+                    else FALLBACK_TEXT
+                )
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": call.get("id", ""),
+                    "content": result,
+                })
+
+        logger.warning("OpenRouter Tool Calling loop agoto %d iteraciones", MAX_TOOL_ITERATIONS)
+        return None
+    except (httpx.HTTPError, KeyError, IndexError, TypeError) as exc:
+        logger.warning("Fallback OpenRouter fallo: %s", exc)
+        return None
 
 
 def _mock_answer(query_text: str) -> str:
