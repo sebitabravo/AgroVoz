@@ -74,10 +74,22 @@ def get_system_stats() -> SystemStats:
 
     cpu_percent(interval=None) retorna el uso desde la última llamada
     (o 0.0 la primera vez). Aceptable para polling del dashboard.
+
+    Si /proc no está disponible (container sin acceso al host), retorna
+    SystemStats con valores cero — el dashboard muestra "N/D".
     """
-    cpu = psutil.cpu_percent(interval=None)
-    mem = psutil.virtual_memory()
-    disk = psutil.disk_usage(_DISK_PATH)
+    try:
+        cpu = psutil.cpu_percent(interval=None)
+    except (FileNotFoundError, OSError, PermissionError):
+        cpu = 0.0
+    try:
+        mem = psutil.virtual_memory()
+    except (FileNotFoundError, OSError, PermissionError):
+        mem = type("_Mem", (), {"percent": 0.0, "used": 0, "total": 0})()
+    try:
+        disk = psutil.disk_usage(_DISK_PATH)
+    except (FileNotFoundError, OSError, PermissionError):
+        disk = type("_Disk", (), {"percent": 0.0, "used": 0, "total": 0})()
     return SystemStats(
         cpu_percent=round(cpu, 1),
         ram_percent=round(mem.percent, 1),
