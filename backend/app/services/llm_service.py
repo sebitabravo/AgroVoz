@@ -111,6 +111,7 @@ WHITELIST_TOOLS = frozenset(
         "get_weather",
         "get_clima_historico",
         "search_corpus",
+        "register_expense",
     }
 )
 
@@ -463,6 +464,39 @@ TOOLS: list[dict[str, object]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "register_expense",
+            "description": (
+                "USAR para REGISTRAR GASTOS del agricultor. "
+                "Cuando el agricultor reporte que GASTO, COMPRO, PAGO o INVIRTIO "
+                "dinero en insumos, semillas, fertilizantes, transporte u otros "
+                "costos del cultivo. Pide: producto, concepto (que compro) y "
+                "monto en pesos. Ej: 'gaste 50 lucas en semilla de papa', "
+                "'compre abono por 30 mil pesos para el tomate', "
+                "'pague 100 lucas de flete'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "producto": {
+                        "type": "string",
+                        "description": "Producto o cultivo relacionado (ej: papa, tomate, general)",
+                    },
+                    "concepto": {
+                        "type": "string",
+                        "description": "Que compro o en que gasto (ej: semilla, abono, flete, pesticida)",
+                    },
+                    "monto": {
+                        "type": "string",
+                        "description": "Monto gastado en pesos chilenos (ej: 50000, 100000)",
+                    },
+                },
+                "required": ["producto", "concepto", "monto"],
+            },
+        },
+    },
 ]
 
 # Generar _TOOLS_LINES desde TOOLS (una fuente de verdad).
@@ -598,6 +632,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         calculate_sale_value_for_llm,
         get_price_for_llm,
         get_price_history_for_llm,
+        register_expense_for_llm,
     )
     from app.services.rag_service import search_corpus_for_llm
     from app.services.weather_service import get_clima_historico, get_weather
@@ -610,6 +645,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         "get_weather": get_weather,
         "get_clima_historico": get_clima_historico,
         "search_corpus": search_corpus_for_llm,
+        "register_expense": register_expense_for_llm,
     }
 
 

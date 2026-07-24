@@ -52,15 +52,39 @@ async def _ejecutar() -> int:
         finally:
             session.close()
 
+        _touch_sync_timestamp()
         return 0
     except OdepaSyncError as exc:
         logger.error("Sync ODEPA falló: %s", exc)
         return 1
     except (sqlalchemy.exc.SQLAlchemyError, OSError, ValueError) as exc:
-        # Errores de BD/sistema inesperados: trace completo en log y exit 1.
+        logger.exception("Sync ODEPA falló con error inesperado: %s", exc)
         # No se usa except Exception por convención del proyecto.
         logger.exception("Sync ODEPA falló con error inesperado: %s", exc)
         return 1
+
+
+def _touch_sync_timestamp() -> None:
+    """Escribe archivo de timestamp tras sync exitoso para monitoreo."""
+    import datetime
+    from pathlib import Path
+    ts_file = Path(__file__).resolve().parent.parent / "data" / ".odepa_last_sync"
+    ts_file.parent.mkdir(parents=True, exist_ok=True)
+    ts_file.write_text(datetime.datetime.now().isoformat())
+
+
+def get_sync_stale_hours() -> float | None:
+    """Retorna horas desde el último sync exitoso, o None si nunca sync."""
+    import datetime
+    from pathlib import Path
+    ts_file = Path(__file__).resolve().parent.parent / "data" / ".odepa_last_sync"
+    if not ts_file.exists():
+        return None
+    try:
+        last = datetime.datetime.fromisoformat(ts_file.read_text().strip())
+        return (datetime.datetime.now() - last).total_seconds() / 3600
+    except (ValueError, OSError):
+        return None
 
 
 def main() -> None:

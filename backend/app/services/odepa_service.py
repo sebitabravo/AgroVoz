@@ -12,11 +12,14 @@ batch completo solo falla si faltan columnas requeridas (schema roto).
 import csv
 import datetime
 import io
+import json
 import logging
+import os
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from pathlib import Path
 
 import httpx
 from sqlalchemy import func, select
@@ -1150,6 +1153,43 @@ def calculate_margin_for_llm(
         f"{_formatear_pesos(precio_referencia_total)}. "
         f"{mensaje_diferencia}, un {pct_str} por ciento {direccion} "
         f"del precio de referencia."
+    )
+
+
+def register_expense_for_llm(
+    session: Session,
+    producto: str,
+    concepto: str,
+    monto: str,
+    phone_hash: str = "",
+) -> str:
+    """Tool function: registra un gasto del agricultor para seguimiento (#170).
+
+    Usado cuando el agricultor reporta un gasto por voz: compra de insumos,
+    semillas, fertilizantes, transporte, etc. Almacena en archivo JSON lines
+    para MVP (sin DB separada).
+
+    Retorna confirmacion en espanol chileno listo para TTS.
+    """
+    gasto: dict[str, object] = {
+        "phone_hash": phone_hash or "anonimo",
+        "producto": producto.strip(),
+        "concepto": concepto.strip(),
+        "monto": monto.strip(),
+        "fecha": datetime.datetime.now().isoformat(),
+    }
+
+    gastos_file = Path(__file__).resolve().parent.parent / "data" / "gastos.jsonl"
+    gastos_file.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(gastos_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(gasto, ensure_ascii=False) + "\n")
+    except OSError:
+        return "Tuve un problema al guardar el gasto. ¿Probamos de nuevo?"
+
+    return (
+        f"Listo. Registré {concepto.strip()} por {monto.strip()} pesos "
+        f"para {producto.strip()}. Tus gastos quedan guardados."
     )
 
 
