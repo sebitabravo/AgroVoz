@@ -85,11 +85,11 @@ def get_system_stats() -> SystemStats:
     try:
         mem = psutil.virtual_memory()
     except (FileNotFoundError, OSError, PermissionError):
-        mem = type("_Mem", (), {"percent": 0.0, "used": 0, "total": 0})()  # type: ignore[operator]
+        mem = type("_Mem", (), {"percent": 0.0, "used": 0, "total": 0})()
     try:
         disk = psutil.disk_usage(_DISK_PATH)
     except (FileNotFoundError, OSError, PermissionError):
-        disk = type("_Disk", (), {"percent": 0.0, "used": 0, "total": 0})()  # type: ignore[operator]
+        disk = type("_Disk", (), {"percent": 0.0, "used": 0, "total": 0})()
     return SystemStats(
         cpu_percent=round(cpu, 1),
         ram_percent=round(mem.percent, 1),
