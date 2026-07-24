@@ -117,9 +117,9 @@ Productor → WhatsApp (audio) → Open-WA → VPS Hetzner
   │  → Open-WA descarga audio .ogg                     │
   │  → ffmpeg: .ogg → .wav 16kHz mono                │
   │  → Whisper small: .wav → texto                    │
-  │  → LLM con whitelist de herramientas:             │
+  │  → LLM con whitelist de 9 tools (ej):              │
   │     ├─ get_price(producto, mercado) → SQLite ODEPA│
-  │  │     └─ get_weather(lat, lon) → OpenMeteo API    │
+  │     └─ get_weather(lat, lon) → OpenMeteo API       │
   │  → Piper TTS: texto → .wav                        │
   │  → ffmpeg: .wav → .ogg                            │
   │  → Responde vía Open-WA API con audio              │

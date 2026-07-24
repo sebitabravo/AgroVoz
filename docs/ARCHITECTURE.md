@@ -54,7 +54,7 @@ Productor envía audio → sistema transcribe → consulta ODEPA/clima → respo
 6. Texto → LLM con Tool Calling:
    - Si pregunta por precio → query SQLite ODEPA
    - Si pregunta por clima → GET OpenMeteo API
-   - Whitelist: solo estas 2 herramientas. Si alucina otra → fallback.
+   - Whitelist de 9 tools (ver lista completa en `app/services/` más abajo). Si alucina una tool fuera de la whitelist → fallback.
 7. LLM genera respuesta textual (datos, NO recomendaciones agronómicas)
 8. Piper TTS convierte texto → audio .wav
 9. ffmpeg convierte .wav → .ogg (compatible WhatsApp)
