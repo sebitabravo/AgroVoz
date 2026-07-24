@@ -75,6 +75,6 @@ soporte nativo de audio y SDK Python.
 
 ## Decisión
 
-Registrada en `docs/ARCHITECTURE.md` sección Decisiones como D6:
-"Spike Kapso como alternativa a Open-WA — solo si Open-WA falla en piloto
-y hay presupuesto institucional."
+Pendiente de registrar en `docs/ARCHITECTURE.md` sección Decisiones.
+Por ahora: seguir con Open-WA. Solo reconsiderar si el piloto muestra
+inestabilidad y hay presupuesto institucional.

@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     admin_session_secret: str = "agrovoz-dev-session-secret"
     # Tiempo de vida de la cookie de sesión admin (segundos). 8h por defecto.
     admin_session_ttl: int = 8 * 60 * 60
+    # API keys para MCP server (issue #193). Post-MVP.
+    # Vacías por defecto: MCP server está desactivado hasta que se configuren.
+    mcp_api_key: str = ""
+    mcp_admin_key: str = ""
 
     # ── Modelos IA (paths) ───────────────
     piper_model_path: str = "models/es_MX-claude-high.onnx"
