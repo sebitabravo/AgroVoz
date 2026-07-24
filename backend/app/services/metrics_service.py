@@ -820,4 +820,4 @@ def toggle_decision_productiva(db: Session, consultation_id: int) -> bool | None
         consultation_id,
         consulta.decision_productiva,
     )
-    return consulta.decision_productiva  # type: ignore[no-any-return]
+    return consulta.decision_productiva

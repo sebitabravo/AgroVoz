@@ -986,7 +986,7 @@ async def answer(
             response = await asyncio.wait_for(
                 asyncio.to_thread(
                     model.create_chat_completion,
-                    messages=messages,
+                    messages=messages,  # type: ignore[arg-type]
                     temperature=0.0,
                     max_tokens=128,
                 ),
@@ -1089,7 +1089,7 @@ async def answer(
             final_response = await asyncio.wait_for(
                 asyncio.to_thread(
                     model.create_chat_completion,
-                    messages=messages,
+                    messages=messages,  # type: ignore[arg-type]
                     temperature=0.0,
                     max_tokens=128,
                 ),

@@ -89,9 +89,9 @@ def _get_client_ip(request: Request) -> str:
     if parts:
         # El último valor es el que agrega nuestro proxy de confianza (Traefik).
         # Los valores anteriores pueden ser spoofeados por el cliente.
-        return parts[-1]  # type: ignore[no-any-return]
+        return parts[-1]
     if request.client is not None:
-        return request.client.host  # type: ignore[no-any-return]
+        return request.client.host
     return "unknown"
 
 

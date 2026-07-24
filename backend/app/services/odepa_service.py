@@ -182,7 +182,7 @@ async def download_csv(url: str, timeout: float = _TIMEOUT_SEGUNDOS) -> str:
     if any(marcador in _prefix for marcador in ("<!doctype", "<html", "<head", "<body", "<meta", "<title")):
         raise OdepaSyncError(f"ODEPA devolvió HTML en vez de CSV. ¿Cambió la URL? ({url})")
 
-    return texto  # type: ignore[no-any-return]  # httpx sin stubs
+    return texto
 
 
 def _resolver_columna(headers: Sequence[str], claves: tuple[str, ...]) -> str | None:
@@ -514,7 +514,7 @@ def query_latest_price(session: Session, producto: str, mercado: str) -> OdepaPr
         .order_by(OdepaPrice.fecha.desc())
         .limit(1)
     )
-    return session.scalars(q).first()  # type: ignore[no-any-return]
+    return session.scalars(q).first()
 
 
 def query_latest_by_product(session: Session, producto: str) -> dict[str, OdepaPrice]:
