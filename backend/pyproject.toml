@@ -71,6 +71,10 @@ warn_unused_ignores = true
 disallow_untyped_defs = true
 disallow_any_generics = true
 no_implicit_optional = true
+# FastAPI router decorators (@router.get, @router.post, etc.) no tienen
+# stubs tipados — son Any en runtime. Suprimimos el error en vez de llenar
+# cada endpoint con # type: ignore[untyped-decorator].
+disable_error_code = ["untyped-decorator", "misc"]
 
 [[tool.mypy.overrides]]
 module = [
