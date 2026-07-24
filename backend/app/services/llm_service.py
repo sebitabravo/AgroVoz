@@ -108,6 +108,7 @@ WHITELIST_TOOLS = frozenset(
         "get_price_history",
         "calculate_sale_value",
         "calculate_margin",
+        "get_price_spread",
         "get_weather",
         "get_clima_historico",
         "search_corpus",
@@ -243,6 +244,27 @@ TOOLS: list[dict[str, object]] = [
                     },
                 },
                 "required": ["producto", "mercado"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_price_spread",
+            "description": (
+                "USAR para COMPARAR PRECIOS entre mercados: rango, diferencia "
+                "o variacion de precio de un producto. Muestra minimo, maximo "
+                "y promedio. Ej: 'cuanto varia la papa entre mercados'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "producto": {
+                        "type": "string",
+                        "description": "Producto en singular (ej: papa, tomate)",
+                    },
+                },
+                "required": ["producto"],
             },
         },
     },
@@ -629,6 +651,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         calculate_sale_value_for_llm,
         get_price_for_llm,
         get_price_history_for_llm,
+        get_price_spread_for_llm,
         register_expense_for_llm,
     )
     from app.services.rag_service import search_corpus_for_llm
@@ -636,6 +659,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
 
     return {
         "get_price": get_price_for_llm,
+        "get_price_spread": get_price_spread_for_llm,
         "get_price_history": get_price_history_for_llm,
         "calculate_sale_value": calculate_sale_value_for_llm,
         "calculate_margin": calculate_margin_for_llm,

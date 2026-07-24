@@ -26,6 +26,7 @@ from app.services.odepa_service import (
     _parsear_precio,
     download_csv,
     download_csv_with_fallback,
+    get_price_spread_for_llm,
     parse_csv,
     register_expense_for_llm,
     sync_odepa,
@@ -714,3 +715,53 @@ class TestRegisterExpenseForLlm:
 
         modo = gastos_file.stat().st_mode & 0o777
         assert modo == 0o600
+
+
+class TestGetPriceSpreadForLlm:
+    """get_price_spread_for_llm: rango de precios entre mercados (#171)."""
+
+    def test_multiples_mercados_calcula_spread(self, db: Session) -> None:
+        upsert_prices(
+            db,
+            [
+                OdepaCsvRecord("papa", "Lo Valledor", Decimal("1200"), "kg", datetime.date(2026, 6, 20)),
+                OdepaCsvRecord("papa", "Vega Central", Decimal("850"), "kg", datetime.date(2026, 6, 20)),
+                OdepaCsvRecord("papa", "Temuco", Decimal("900"), "kg", datetime.date(2026, 6, 20)),
+            ],
+        )
+
+        respuesta = get_price_spread_for_llm(db, "papa")
+
+        assert "850" in respuesta
+        assert "1.200" in respuesta or "1200" in respuesta
+        assert "3 mercados" in respuesta
+
+    def test_un_solo_mercado_retorna_precio_simple_sin_spread(self, db: Session) -> None:
+        upsert_prices(db, [OdepaCsvRecord("papa", "Lo Valledor", Decimal("800"), "kg", datetime.date(2026, 6, 20))])
+
+        respuesta = get_price_spread_for_llm(db, "papa")
+
+        assert "%" not in respuesta
+        assert "800" in respuesta
+
+    def test_sin_datos_para_producto(self, db: Session) -> None:
+        respuesta = get_price_spread_for_llm(db, "quinoa")
+        assert "no tengo datos" in respuesta.lower()
+
+    def test_producto_vacio_pide_repetir(self, db: Session) -> None:
+        respuesta = get_price_spread_for_llm(db, "   ")
+        assert "no entendí" in respuesta.lower() or "no entendi" in respuesta.lower()
+
+    def test_spread_porcentaje_correcto(self, db: Session) -> None:
+        """1000 y 500: promedio 750, diferencia 500 -> 66.7% de spread."""
+        upsert_prices(
+            db,
+            [
+                OdepaCsvRecord("tomate", "A", Decimal("1000"), "kg", datetime.date(2026, 6, 20)),
+                OdepaCsvRecord("tomate", "B", Decimal("500"), "kg", datetime.date(2026, 6, 20)),
+            ],
+        )
+
+        respuesta = get_price_spread_for_llm(db, "tomate")
+
+        assert "66.7%" in respuesta
