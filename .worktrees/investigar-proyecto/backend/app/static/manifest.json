@@ -1,0 +1,13 @@
+{
+  "name": "AgroVoz Admin",
+  "short_name": "AgroVoz",
+  "start_url": "/admin/",
+  "scope": "/admin/",
+  "display": "standalone",
+  "background_color": "#FBFAF7",
+  "theme_color": "#4f7d5a",
+  "icons": [
+    { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

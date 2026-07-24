@@ -29,9 +29,6 @@ from app.services.tts_service import PiperModelNotFoundError, TTSService
 from app.services.whisper_service import WhisperService
 
 if TYPE_CHECKING:
-    from app.schemas.variables import ExtractedVariables
-
-if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -363,43 +360,6 @@ class AgroVozPipeline:
         return None
 
     @staticmethod
-    def _extract_variables(
-        query_text: str,
-        use_typed: bool = False,
-    ) -> ExtractedVariables:
-        """Extrae variables tipadas de la consulta (issue #191).
-
-        Si el feature flag está activado, intenta extraer producto, mercado,
-        ubicación y tipo de consulta usando el LLM. Si falla o el flag está
-        desactivado, degrada al keyword matching tradicional.
-
-        Args:
-            query_text: Texto transcrito por Whisper.
-            use_typed: Si debe usar extracción tipada (feature flag).
-
-        Returns:
-            ExtractedVariables con los campos detectados.
-        """
-        from app.schemas.variables import ExtractedVariables
-
-        # Degradación: si el flag está apagado, usar solo keyword matching.
-        if not use_typed:
-            producto = AgroVozPipeline._extract_producto(query_text)
-            return ExtractedVariables(
-                producto=producto,
-                consulta_tipo="desconocido",
-            )
-
-        # TODO: Integrar extracción vía LLM cuando el flag esté activo.
-        # Por ahora, el comportamiento por defecto es keyword matching.
-        # La extracción tipada completa requiere un prompt de extracción
-        # + llamada al LLM que se implementará en iteración futura.
-        producto = AgroVozPipeline._extract_producto(query_text)
-        return ExtractedVariables(
-            producto=producto,
-            consulta_tipo="desconocido",
-        )
-
     @staticmethod
     async def _handle_alert_commands(
         transcribed_text: str,
@@ -487,15 +447,6 @@ class AgroVozPipeline:
                 "¡Hola! Preguntame por el precio de algún producto o por el clima de Traiguén.",
                 "saludo",
             )
-
-        # 0.5. Extraer variables tipadas de la consulta (issue #191).
-        from app.core.config import settings
-
-        extracted = AgroVozPipeline._extract_variables(
-            transcribed_text,
-            use_typed=settings.use_typed_extraction,
-        )
-        producto_detectado = extracted.producto
 
         # 1. Detectar "resumen" por keyword ANTES del LLM: es mas rapido y determinista.
         if AgroVozPipeline._is_resumen_query(transcribed_text):
@@ -783,7 +734,7 @@ class AgroVozPipeline:
             count = session.scalar(
                 select(func.count()).select_from(Consultation).where(Consultation.phone_hash == phone_hash)
             )
-            return bool(count == 0)
+            return count == 0
         except SQLAlchemyError:
             logger.exception(
                 "Error consultando consultas previas — phone_hash=%s",

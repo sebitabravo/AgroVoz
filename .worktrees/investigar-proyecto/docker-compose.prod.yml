@@ -1,0 +1,170 @@
+# AgroVoz — Docker Compose para PRODUCCIÓN (Dokploy)
+#
+# Dokploy deploya este compose automáticamente al detectar cambios en main.
+# Traefik (gestionado por Dokploy) hace reverse proxy + SSL Let's Encrypt.
+#
+# REGLAS DOKPLOY (decisión #12):
+#   - NO usar `ports` (Traefik reserva 80/443 del host). Usar `expose`.
+#   - NO definir `container_name` (Dokploy gestiona los nombres).
+#   - Red externa `dokploy-network` (`external: true`).
+#   - Variables de entorno via Secrets UI de Dokploy (NO .env commiteado).
+#     Cada ${VAR} en `environment:` lo inyecta Dokploy desde su vault de secrets.
+#     Referencia: .env.production.example para ver TODAS las variables a configurar.
+#
+# Dashboard de Open-WA (puerto 2886) NO se expone públicamente.
+# Para escanear QR por primera vez:
+#   ssh -L 2886:localhost:2886 ubuntu@api.agrovoz.cl
+#   Luego abrir http://localhost:2886 y escanear QR con WhatsApp.
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      # ── Entorno ──────────────────────
+      - APP_ENV=production
+      - DEBUG=false
+      - HOST=0.0.0.0
+      - PORT=8000
+      - PYTHONDONTWRITEBYTECODE=1       # Sin .pyc en filesystem read-only
+      # ── Base de datos ────────────────
+      - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/agrovoz.db}
+      # ── Secrets — Dokploy Secrets UI ──
+      - OPENWA_API_KEY=${OPENWA_API_KEY:?OPENWA_API_KEY requerida — configurar en Dokploy Secrets UI}
+      - OPENWA_WEBHOOK_SECRET=${OPENWA_WEBHOOK_SECRET:?OPENWA_WEBHOOK_SECRET requerido — configurar en Dokploy Secrets UI}
+      - OPENWA_API_URL=http://openwa:2785
+      - OPENWEATHERMAP_API_KEY=${OPENWEATHERMAP_API_KEY}
+      - ADMIN_API_KEY=${ADMIN_API_KEY}
+      # Secret para firmar cookies de sesión del dashboard SSR (itsdangerous).
+      # Sin esto el backend arranca con default y validate_admin_keys_not_default
+      # bloquea el arranque en producción.
+      - ADMIN_SESSION_SECRET=${ADMIN_SESSION_SECRET}
+      # ── Modelos IA (paths dentro del contenedor) ──
+      - WHISPER_MODEL=${WHISPER_MODEL:-small}
+      - LLM_MODEL_PATH=${LLM_MODEL_PATH:-/app/models/qwen2.5-3b-q4_k_m.gguf}
+      - PIPER_VOICE=${PIPER_VOICE:-es_MX-claude-high}
+      - PIPER_MODEL_PATH=${PIPER_MODEL_PATH:-/app/models/es_MX-claude-high.onnx}
+      # ── ODEPA ────────────────────────
+      - ODEPA_SYNC_HOUR=${ODEPA_SYNC_HOUR:-6}
+      - ODEPA_SYNC_MINUTE=${ODEPA_SYNC_MINUTE:-0}
+      # ── Seguridad ────────────────────
+      - PHONE_HASH_PEPPER=${PHONE_HASH_PEPPER}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-60}
+      - AUDIO_RETENTION_HOURS=${AUDIO_RETENTION_HOURS:-24}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--workers",
+        "1",
+      ]
+    volumes:
+      - backend_models:/app/models    # Modelos IA (Piper + Qwen GGUF)
+      - backend_data:/app/data        # SQLite DB + audio temporal
+      - backend_whisper_cache:/home/agrovoz/.cache  # Cache Whisper (FS read-only)
+    expose:
+      - "8000"                        # Expuesto a Traefik, NO bind host port
+    networks:
+      - dokploy-network               # Red externa de Dokploy para dominio
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "http://localhost:8000/api/v1/health?probe=liveness",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # 10 min: primer arranque descarga Piper (~63 MB) + Qwen GGUF (~2 GB) +
+      # Whisper small (~462 MB) si no estan en el volumen. Arranques siguientes
+      # son instantaneos (modelos cacheados en el volumen).
+      start_period: 600s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: "6"
+        reservations:
+          memory: 4G
+          cpus: "2"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  # Open-WA: gateway WhatsApp self-hosted
+  openwa:
+    # ⚠️  PENDIENTE: Reemplazar :latest por digest SHA256 después del primer pull:
+    #   docker pull ghcr.io/rmyndharis/openwa:latest
+    #   docker inspect ghcr.io/rmyndharis/openwa:latest --format='{{index .RepoDigests 0}}'
+    #   Reemplazar la línea de abajo con: image: ghcr.io/rmyndharis/openwa@sha256:<digest>
+    #   Esto previene supply chain attacks via tag mutability.
+    image: ghcr.io/rmyndharis/openwa:latest
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - DATABASE_TYPE=sqlite
+      - ALLOW_DEV_API_KEY=false
+      - API_MASTER_KEY=${OPENWA_API_KEY}
+      - AUTO_START_SESSIONS=true
+      - WEBHOOK_URL=http://backend:8000/api/v1/webhook/whatsapp
+      - WEBHOOK_SECRET=${OPENWA_WEBHOOK_SECRET}
+    volumes:
+      - openwa_data:/app/data         # Sesión WhatsApp persiste entre reinicios
+    expose:
+      - "2785"                        # API interna (solo backend accede)
+    networks:
+      - dokploy-network
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      # curl no está garantizado en la imagen Open-WA (basada en Node.js).
+      # Usamos node -e con http.get para healthcheck sin dependencias externas.
+      # La imagen escucha en puerto 2785 internamente (v0.4.0+).
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:2785/api/health', r => { process.exit(r.statusCode === 200 ? 0 : 1) })"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  backend_models:
+  backend_data:
+  backend_whisper_cache:
+  openwa_data:
+
+networks:
+  dokploy-network:
+    external: true                    # Creada por Dokploy automáticamente

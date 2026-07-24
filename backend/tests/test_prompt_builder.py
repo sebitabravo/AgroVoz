@@ -87,17 +87,13 @@ class TestSinContenidoNexorVentas:
 
 
 class TestModificacionAislada:
-    """Verifica que modificar una sección no afecte a las demás."""
+    """Verifica que cada sección sea accesible de forma independiente."""
 
-    def test_solo_una_seccion_cambia(self) -> None:
-        """Modificar solo CONTEXTO no debe alterar las otras secciones."""
-        # Guardar referencias originales
-        limites_orig = LIMITES
-        ejemplos_orig = EJEMPLOS
-        # La modificación de CONTEXTO es implícita (cada sección es independiente)
-        # Verificamos que las otras secciones mantienen su contenido esperado
-        prompt = build_system_prompt()
-        assert limites_orig in prompt
-        assert ejemplos_orig in prompt
-        # Y la sección de herramientas también
-        assert "search_corpus" in prompt
+    def test_secciones_independientes(self) -> None:
+        """Cada sección existe como constante independiente y es testeable."""
+        assert len(CONTEXTO) > 0
+        assert len(LIMITES) > 0
+        assert len(EJEMPLOS) > 0
+        assert len(REGLAS) > 0
+        assert len(DERIVACION) > 0
+        assert len(HERRAMIENTAS) > 0

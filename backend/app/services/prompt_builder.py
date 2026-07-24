@@ -1,6 +1,6 @@
 """Builder del system prompt del LLM en secciones mantenibles.
 
-Organiza el prompt en 5 secciones con propósito único cada una,
+Organiza el prompt en 6 secciones con propósito único cada una,
 permitiendo modificar una sección sin tocar las demás.
 
 Issue: #190 — Discussion #135 (adaptado de Nexor AI).
@@ -67,30 +67,23 @@ DERIVACION = (
 )
 
 
-# ── Sección 6: Herramientas ─────────────────────────────────────────
+# ── Sección 6: Herramientas (intent detection, no definiciones) ──────
 
+# Las definiciones de tools van en _TOOLS_SECTION (llm_service.py).
+# Esta sección SOLO da reglas de cuál tool usar para qué consulta.
+# No duplica las definiciones — eso infla el prompt sin beneficio.
 HERRAMIENTAS = (
-    "HERRAMIENTAS DISPONIBLES:\n"
-    "Tienes 9 herramientas. USA LA CORRECTA:\n"
-    "- get_price: PRECIOS ACTUALES ODEPA.\n"
-    "- get_price_history: PRECIOS PASADOS.\n"
-    "- calculate_sale_value: CALCULAR VENTA (NO hagas el cálculo).\n"
-    "- calculate_margin: MARGEN (venta ya realizada vs ODEPA).\n"
-    "- get_price_spread: RANGO de precios entre mercados.\n"
-    "- get_weather: CLIMA ACTUAL.\n"
-    "- get_clima_historico: CLIMA HISTÓRICO.\n"
-    "- search_corpus: BUSCAR documentos ODEPA.\n"
-    "- register_expense: REGISTRAR gasto.\n"
-    "CÓMO ELEGIR:\n"
-    "- PRECIO: 'precio', 'cuánto', 'cuesta', producto, 'kilo' → get_price\n"
-    "- VENTA: 'voy a vender X kilos' → calculate_sale_value\n"
-    "- MARGEN: 'vendí', 'ya vendí', 'recibí por' → calculate_margin\n"
-    "- PASADO: 'estaba', 'semana pasada', 'subió' → get_price_history\n"
-    "- CLIMA: 'clima', 'temperatura', 'lluvia' → get_weather\n"
-    "- HISTÓRICO: 'histórico', 'año pasado' → get_clima_historico\n"
-    "- CORPUS: 'boletines', 'documentos' → search_corpus\n"
-    "- GASTO: 'gasté', 'compré', 'insumos' → register_expense\n"
-    "- Mixta: 'precio y clima' → AMBAS.\n"
+    "HERRAMIENTAS DISPONIBLES:\\n"
+    "Usa la herramienta correcta según la consulta:\\n"
+    "- PRECIO → get_price\\n"
+    "- PRECIO PASADO → get_price_history\\n"
+    "- VENTA → calculate_sale_value\\n"
+    "- MARGEN → calculate_margin\\n"
+    "- RANGO MERCADOS → get_price_spread\\n"
+    "- CLIMA → get_weather\\n"
+    "- CLIMA HISTÓRICO → get_clima_historico\\n"
+    "- DOCUMENTOS → search_corpus\\n"
+    "- GASTO → register_expense\\n"
     "SIEMPRE usa herramienta antes de reformular."
 )
 

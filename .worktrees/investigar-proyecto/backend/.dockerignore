@@ -1,0 +1,69 @@
+# AgroVoz — .dockerignore
+# Excluye del contexto de build todo lo que NO necesita la imagen.
+# Reduce tamaño del contexto → builds más rápidos y seguros.
+
+# ── Modelos IA (pesados, se descargan en el VPS o se montan como volumen) ──
+models/
+*.gguf
+*.bin
+*.pt
+*.safetensors
+*.onnx
+
+# ── Datos y runtime (se montan como volumen en runtime) ──
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Secrets y config local ──
+# .env.production.example NO se whitelistea: no debe ir en la imagen de prod.
+.env
+.env.*
+!.env.example
+
+# ── Python cache y artefactos ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.uv/
+
+# ── Git ──
+.git/
+.gitignore
+.gitattributes
+
+# ── IDE y OS ──
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Tests y cobertura ──
+htmlcov/
+.coverage
+.pytest_cache/
+
+# ── CI/CD y docs (no necesarios en runtime) ──
+.github/
+docs/
+
+# ── Landing (frontend separado, no va en imagen backend) ──
+landing/
+
+# ── Node (si queda algo en raíz) ──
+node_modules/
+
+# ── Logs ──
+*.log
+logs/
+
+# ── Docker (no recursivo) ──
+Dockerfile
+.dockerignore
+docker-compose*.yml

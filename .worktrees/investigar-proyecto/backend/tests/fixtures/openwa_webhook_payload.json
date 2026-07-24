@@ -1,0 +1,108 @@
+{
+  "voice_message": {
+    "event": "message.received",
+    "timestamp": "2026-06-21T20:07:14.448Z",
+    "sessionId": "56aa0085-8eb7-4b3c-a353-7e7b57b094a1",
+    "idempotencyKey": "msg_56aa0085-8eb7-4b3c-a353-7e7b57b094a1_false_test",
+    "deliveryId": "dlv_test_001",
+    "data": {
+      "id": "false_test_lid_001",
+      "from": "248069442560050@lid",
+      "to": "56930365990@c.us",
+      "chatId": "248069442560050@lid",
+      "body": "",
+      "type": "voice",
+      "timestamp": 1782072434,
+      "fromMe": false,
+      "isGroup": false,
+      "isStatusBroadcast": false,
+      "isLidSender": true,
+      "contact": {
+        "name": "Test User",
+        "pushName": "Test User"
+      },
+      "media": {
+        "mimetype": "audio/ogg; codecs=opus",
+        "data": "T2dnUwACAAAAAAAAAAAAAAAAAAAAAEkq9qABE09wdXNIZWFkAQE4AYA+AAAAAABPZ2dTAAAAAAAAAAAAAAAAAAABAAAAjzLsvAEYT3B1c1RhZ3MIAAAAV2hhdHNBcHAAAAAAT2dnUwAAOJYBAAAAAAAAAAAAAgAAAJ1cwl8WQOHL/e7k/yf/APXp7/P/AdDi6v8Q71oUAvkwTbsN5eOhPNodccrnt7ze"
+      }
+    }
+  },
+  "voice_message_sin_media": {
+    "event": "message.received",
+    "timestamp": "2026-06-21T20:07:14.448Z",
+    "sessionId": "56aa0085-8eb7-4b3c-a353-7e7b57b094a1",
+    "idempotencyKey": "msg_test_002",
+    "deliveryId": "dlv_test_002",
+    "data": {
+      "id": "false_test_lid_002",
+      "from": "248069442560050@lid",
+      "to": "56930365990@c.us",
+      "chatId": "248069442560050@lid",
+      "body": "",
+      "type": "voice",
+      "timestamp": 1782072434,
+      "fromMe": false,
+      "isGroup": false,
+      "isStatusBroadcast": false,
+      "isLidSender": true,
+      "contact": {
+        "name": "Test User",
+        "pushName": "Test User"
+      },
+      "media": null
+    }
+  },
+  "text_message": {
+    "event": "message.received",
+    "timestamp": "2026-06-21T20:07:14.448Z",
+    "sessionId": "56aa0085-8eb7-4b3c-a353-7e7b57b094a1",
+    "idempotencyKey": "msg_test_003",
+    "deliveryId": "dlv_test_003",
+    "data": {
+      "id": "false_test_text_001",
+      "from": "248069442560050@lid",
+      "to": "56930365990@c.us",
+      "chatId": "248069442560050@lid",
+      "body": "¿A cuanto esta la papa?",
+      "type": "text",
+      "timestamp": 1782072434,
+      "fromMe": false,
+      "isGroup": false,
+      "isStatusBroadcast": false,
+      "isLidSender": true,
+      "contact": {
+        "name": "Test User",
+        "pushName": "Test User"
+      },
+      "media": null
+    }
+  },
+  "image_message": {
+    "event": "message.received",
+    "timestamp": "2026-06-21T20:07:14.448Z",
+    "sessionId": "56aa0085-8eb7-4b3c-a353-7e7b57b094a1",
+    "idempotencyKey": "msg_test_004",
+    "deliveryId": "dlv_test_004",
+    "data": {
+      "id": "false_test_image_001",
+      "from": "248069442560050@lid",
+      "to": "56930365990@c.us",
+      "chatId": "248069442560050@lid",
+      "body": "Mira esta foto",
+      "type": "image",
+      "timestamp": 1782072434,
+      "fromMe": false,
+      "isGroup": false,
+      "isStatusBroadcast": false,
+      "isLidSender": true,
+      "contact": {
+        "name": "Test User",
+        "pushName": "Test User"
+      },
+      "media": {
+        "mimetype": "image/jpeg",
+        "data": "/9j/4AAQSkZJRg=="
+      }
+    }
+  }
+}

@@ -1,0 +1,79 @@
+# AgroVoz — LLM-friendly project overview
+
+> Asistente de IA que responde por voz a través de WhatsApp para pequeños agricultores chilenos. Recibe audio, consulta precios agrícolas (ODEPA) y clima (OpenMeteo), y responde con voz. Sin app, sin lectura, sin escritura.
+>
+> Proyecto estudiantil INACAP Temuco — Desafío Crea 2026. MVP funcional implementado con pipeline E2E de voz, landing page y dashboard admin.
+
+## Stack
+
+| Capa | Tecnología |
+|---|---|
+| Backend | Python 3.12+, FastAPI, Uvicorn, SQLAlchemy, SQLite |
+| Voz | Whisper (transcripción), Qwen2.5-3B Q4 (LLM local cuantizado), Piper TTS (síntesis) |
+| Landing | Astro 7.x + Tailwind CSS 4.x (SSG, zero JS) |
+| Admin | Jinja2 + HTMX (server-side, parte del backend) |
+| Infra | Docker Compose, Dokploy (PaaS con Traefik + Let's Encrypt SSL), VPS Hetzner CX43 |
+| WhatsApp | Open-WA (gateway self-hosted, gratuito, protocolo WhatsApp Web) |
+| APIs externas | OpenMeteo (gratuito, 10.000 req/día, sin API key), ODEPA (CSV datos abiertos, cron diario 06:00 AM) |
+| CI/CD | GitHub Actions |
+
+## Estructura de carpetas
+
+```
+AgroVoz/
+├── backend/app/              ← FastAPI: api/, services/, core/, models/, schemas/, jobs/, admin/
+├── backend/tests/            ← pytest + pytest-asyncio + pytest-cov
+├── landing/                  ← Astro static site
+├── docs/
+│   ├── ARCHITECTURE.md       ← Arquitectura detallada, ADRs, schema DB, flujo E2E
+│   ├── DEV-GUIDE.md          ← Guía de desarrollo y setup
+│   └── piloto/               ← Kit operativo del piloto Traiguén
+├── skills/                   ← Guías de trabajo del equipo (leer ANTES de codear)
+├── scripts/                  ← provision-vps.sh, smoke-test.sh
+├── docker-compose.yml        ← Dev
+├── docker-compose.prod.yml   ← Prod (Dokploy)
+├── Makefile                  ← Comandos unificados
+├── AGENTS.md                 ← Fuente de verdad (instrucciones completas para AI/humanos)
+└── llms.txt                  ← Este archivo
+```
+
+## Comandos principales
+
+```bash
+make setup-dev        # Setup completo: .env + dependencias
+make setup-models     # Descargar modelos IA (Whisper, LLM, Piper)
+make up               # Levantar Docker Compose
+make dev-backend      # FastAPI con hot reload (:8000)
+make dev-frontend     # Landing en modo dev
+make test-backend     # pytest con cobertura
+make lint             # Ruff linter
+make typecheck        # Mypy strict
+make sync-odepa       # Forzar sincronización de precios ODEPA
+make build-landing    # Build de landing
+make db-init / db-reset / db-seed  # Gestión de DB SQLite
+make tunnel           # ngrok para exponer webhook local
+make clean            # Limpiar temporales
+```
+
+## Hard constraints
+
+- Stack 100% open-source. Sin APIs pagas externas. Todo corre local en el VPS.
+- Sin app nativa: WhatsApp ES la app.
+- SQLite, procesamiento síncrono, sin Celery/Redis para MVP.
+- Sin recomendaciones agronómicas: el LLM entrega datos, no interpreta.
+- Latencia target: <15s end-to-end.
+- Sin autenticación de usuarios en MVP: número WhatsApp = identidad.
+- Audio temporal eliminado en <24h, transcripciones anonimizadas (Ley 21.719).
+- Código comentado en español (contexto académico INACAP).
+- LLM cuantizado ≤3B params, 4-bit (Qwen2.5-3B-Instruct Q4_K_M) vía llama-cpp-python en CPU.
+- Whisper model `small` para transcripción; Piper TTS para síntesis de voz.
+
+## Docs completas
+
+- [`AGENTS.md`](./AGENTS.md) — fuente de verdad: stack, constraints, fases, reglas de trabajo, skills del equipo
+- [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — diagramas, flujo E2E, ADRs, schema DB, decisiones técnicas
+- [`docs/DEV-GUIDE.md`](./docs/DEV-GUIDE.md) — guía de desarrollo y setup local
+- [`docs/piloto/`](./docs/piloto/) — kit operativo del piloto Traiguén
+- [`skills/`](./skills/) — guías de trabajo: issues, branches, commits, Python, tests, docs alineados
+
+Para el contexto completo que un agente AI necesita, leer AGENTS.md primero, luego docs/ARCHITECTURE.md.
