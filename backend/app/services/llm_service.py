@@ -252,19 +252,16 @@ TOOLS: list[dict[str, object]] = [
         "function": {
             "name": "get_price_spread",
             "description": (
-                "USAR para COMPARAR PRECIOS entre mercados. "
-                "Cuando el agricultor quiera saber el RANGO de precios de un producto, "
-                "la DIFERENCIA entre el mas barato y el mas caro, o como VARIA el precio "
-                "entre distintos mercados. Muestra el minimo, maximo y promedio. "
-                "Ej: 'hay diferencia de precio entre mercados', "
-                "'cuanto varia la papa', 'cual es el rango de precios del tomate'."
+                "USAR para COMPARAR PRECIOS entre mercados: rango, diferencia "
+                "o variacion de precio de un producto. Muestra minimo, maximo "
+                "y promedio. Ej: 'cuanto varia la papa entre mercados'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "producto": {
                         "type": "string",
-                        "description": "Nombre del producto en singular (ej: papa, tomate, lechuga, cebolla)",
+                        "description": "Producto en singular (ej: papa, tomate)",
                     },
                 },
                 "required": ["producto"],
