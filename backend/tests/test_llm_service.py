@@ -82,18 +82,20 @@ class TestConstantes:
         assert len(NO_RESPONSE_TEXT) > 10
         assert "reformular" in NO_RESPONSE_TEXT.lower()
 
-    def test_whitelist_siete_tools(self) -> None:
-        """La whitelist permite las siete tools: precio, historico, venta, margen, clima, clima historico y corpus."""
+    def test_whitelist_nueve_tools(self) -> None:
+        """Whitelist: precio, spread, historico, venta, margen, clima, clima historico, corpus y gastos (9 tools)."""
         assert (
             frozenset(
                 {
                     "get_price",
+                    "get_price_spread",
                     "get_price_history",
                     "calculate_sale_value",
                     "calculate_margin",
                     "get_weather",
                     "get_clima_historico",
                     "search_corpus",
+                    "register_expense",
                 }
             )
             == WHITELIST_TOOLS
@@ -101,7 +103,8 @@ class TestConstantes:
 
     def test_tools_definition_formato_openai(self) -> None:
         """Las tool definitions siguen el formato OpenAI function-calling."""
-        assert len(TOOLS) == 7  # 5 base + calculate_margin (#155) + search_corpus (#156)
+        # 5 base + calculate_margin (#155) + search_corpus (#156) + register_expense (#170) + get_price_spread (#171)
+        assert len(TOOLS) == 9
         for tool in TOOLS:
             assert tool["type"] == "function"
             fn = tool["function"]
@@ -196,16 +199,23 @@ class TestLlmConfig:
         """El prompt total (system + tools) no debe exceder un limite.
 
         Guard barato (no requiere cargar el modelo) contra regresiones que
-        inflan el prompt sin querer. ~9022 chars con 7 tools: base (5) +
-        calculate_margin (#155) + search_corpus (#156), medidos en ~2771
-        tokens reales con el tokenizer de Qwen2.5 (ver test_n_ctx_alcanza_
-        para_prompt_con_siete_tools). Con n_ctx=4096 hay margen, pero la
-        latencia real (~46s medidos solo-LLM en Apple M3, sin validar en
-        el VPS CX43) sigue siendo el riesgo — este test NO lo cubre, solo
-        evita que el prompt crezca sin darse cuenta.
+        inflan el prompt sin querer. ~9022 chars con 7 tools (ratio medido
+        ~3.26 chars/token con el tokenizer de Qwen2.5, ver test_n_ctx_
+        alcanza_para_prompt_con_siete_tools). Con register_expense (#170)
+        y get_price_spread (#171) son 9 tools, ~10104 chars ≈ ~3103 tokens
+        — sumado al peor caso de tool_response (~360 tokens) deja ~633
+        tokens de margen dentro de n_ctx=4096 para query + respuesta.
+        Limite subido a 10200 (margen de ~96 chars sobre el valor actual)
+        para seguir detectando crecimiento no intencional sin bloquear el
+        estado real con 9 tools. Si el limite se acerca de nuevo, medir
+        tokens reales antes de subirlo otra vez y considerar recortar
+        descripciones existentes en vez de seguir subiendo el limite — la
+        latencia (~46s solo-LLM en Apple M3, sin validar en el VPS CX43)
+        sigue siendo el riesgo de fondo; este test NO lo cubre, solo evita
+        que el prompt crezca sin darse cuenta.
         """
         total_chars = len(SYSTEM_PROMPT) + len(_TOOLS_SECTION)
-        assert total_chars <= 9500, (
+        assert total_chars <= 10200, (
             f"Prompt total={total_chars} chars demasiado grande "
             f"para n_ctx={_N_CTX}. Reduce o aumenta n_ctx."
         )

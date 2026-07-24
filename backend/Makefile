@@ -17,8 +17,8 @@ install: ## Instalar dependencias de desarrollo
 run: ## Iniciar servidor en modo desarrollo (hot reload)
 	uv run uvicorn app.main:app --reload --port 8000
 
-test: ## Correr todos los tests con cobertura
-	uv run pytest tests/ -v --cov=app --cov-report=term-missing
+test: ## Correr todos los tests con cobertura (fail si <70%)
+	uv run pytest tests/ -v --cov=app --cov-report=term-missing --cov-fail-under=70
 
 lint: ## Linter (ruff) — app/ y tests/
 	uv run ruff check app/ tests/

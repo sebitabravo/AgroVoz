@@ -23,7 +23,7 @@ def _check_db() -> bool:
     try:
         with engine.connect() as conn:
             result = conn.exec_driver_sql("SELECT 1")
-            return result.scalar() == 1
+            return bool(result.scalar())
     except (SQLAlchemyError, OSError):
         logger.exception("Health check: DB no responde")
         return False

@@ -104,7 +104,7 @@ jobs:
 
       - name: pytest
         if: steps.gate.outputs.skip != 'true'
-        run: uv run pytest tests/ -v --cov=app --cov-report=term-missing
+        run: uv run pytest tests/ -v --cov=app --cov-report=term-missing --cov-fail-under=70
 
       - name: Upload coverage
         uses: actions/upload-artifact@v7
