@@ -1,0 +1,37 @@
+# Corpus INDAP — Programas de apoyo a la Agricultura Familiar Campesina
+# Fuente: https://www.indap.gob.cl/
+# Información pública de referencia. Sin recomendaciones financieras directas.
+documentos:
+  - titulo: "Programas de crédito INDAP 2025"
+    fuente: "INDAP Chile — Programas de crédito"
+    fecha: "2025"
+    chunks:
+      - texto: >
+          Según INDAP, el Programa de Crédito de Corto Plazo Individual
+          entrega financiamiento de hasta 200 UF por agricultor para
+          capital de trabajo: compra de insumos, semillas, fertilizantes,
+          pago de mano de obra y flete. Plazo: hasta 12 meses. Tasa de
+          interés: 3,5% anual para agricultores acreditados.
+      - texto: >
+          El Crédito de Enlace de INDAP está orientado a cubrir necesidades
+          financieras urgentes del agricultor mientras se aprueba otro
+          crédito de largo plazo. Monto máximo: 100 UF. Plazo: hasta 6 meses.
+          Disponible en todas las agencias de área INDAP del país.
+      - texto: >
+          INDAP ofrece el Programa de Desarrollo de Inversiones (PDI) como
+          incentivo no reembolsable para que pequeños agricultores
+          implementen proyectos de inversión productiva: riego tecnificado,
+          invernaderos, packing, salas de proceso. Cofinanciamiento INDAP
+          de hasta el 80% del costo total con tope de 3.500 UF.
+      - texto: >
+          Los agricultores usuarios de INDAP pueden acceder al Programa de
+          Desarrollo Local (PRODESAL) que entrega asesoría técnica gratuita
+          a través de equipos municipales. Incluye capacitación en manejo
+          de cultivos, comercialización, acceso a créditos y registro de
+          precios de mercado. Contacto: municipio correspondiente.
+      - texto: >
+          Para postular a los programas INDAP, el agricultor debe estar
+          acreditado como usuario INDAP. La acreditación se realiza en la
+          agencia de área más cercana a su comuna. Requisitos: ser pequeño
+          productor agrícola, tener iniciación de actividades ante el SII,
+          y mantener residencia en la comuna donde postula.
