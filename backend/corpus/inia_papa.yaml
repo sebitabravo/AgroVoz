@@ -1,0 +1,37 @@
+# Corpus INIA — Fichas técnicas de cultivo
+# Fuente: https://www.inia.cl/ (Instituto de Investigaciones Agropecuarias, Chile)
+# Datos públicos de referencia para agricultores. Información factual,
+# sin recomendaciones agronómicas directas.
+documentos:
+  - titulo: "Ficha técnica: Cultivo de la papa — INIA Chile"
+    fuente: "INIA Chile — Fichas técnicas"
+    fecha: "2024"
+    chunks:
+      - texto: >
+          Según INIA, la papa (Solanum tuberosum) es el cuarto cultivo
+          alimenticio más importante del mundo. En Chile se cultivan
+          alrededor de 36.000 hectáreas al año, concentradas entre las
+          regiones de Coquimbo y Los Lagos. Las variedades más comunes
+          son Desiree, Asterix, Patagonia, Karú y Yagana.
+      - texto: >
+          El tizón tardío (Phytophthora infestans) es la enfermedad más
+          importante del cultivo de papa en Chile, según INIA. Se presenta
+          en condiciones de alta humedad y temperaturas entre 10°C y 25°C.
+          Los síntomas incluyen manchas marrones en hojas y pudrición del
+          tubérculo.
+      - texto: >
+          Según ficha técnica INIA, la papa requiere suelos profundos, bien
+          drenados y con pH entre 5.0 y 6.5. La preparación del suelo incluye
+          aradura y rastraje. La época de plantación en la zona centro-sur de
+          Chile es entre agosto y noviembre, dependiendo de la variedad y la
+          altitud.
+      - texto: >
+          INIA recomienda rotación de cultivos cada 3-4 años para prevenir
+          enfermedades del suelo. Los cultivos que anteceden a la papa no
+          deben ser solanáceas (tomate, ají, berenjena). Cultivos como
+          cereales, leguminosas o praderas son adecuados como antecesores.
+      - texto: >
+          La cosecha de papa, según ficha INIA, se realiza cuando el follaje
+          se ha secado completamente, aproximadamente 90 a 150 días después
+          de la plantación. El rendimiento promedio nacional es de 25 a 35
+          toneladas por hectárea en secano y hasta 50 toneladas bajo riego.
