@@ -108,6 +108,7 @@ WHITELIST_TOOLS = frozenset(
         "get_price_history",
         "calculate_sale_value",
         "calculate_margin",
+        "get_price_spread",
         "get_weather",
         "get_clima_historico",
         "search_corpus",
@@ -242,6 +243,30 @@ TOOLS: list[dict[str, object]] = [
                     },
                 },
                 "required": ["producto", "mercado"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_price_spread",
+            "description": (
+                "USAR para COMPARAR PRECIOS entre mercados. "
+                "Cuando el agricultor quiera saber el RANGO de precios de un producto, "
+                "la DIFERENCIA entre el mas barato y el mas caro, o como VARIA el precio "
+                "entre distintos mercados. Muestra el minimo, maximo y promedio. "
+                "Ej: 'hay diferencia de precio entre mercados', "
+                "'cuanto varia la papa', 'cual es el rango de precios del tomate'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "producto": {
+                        "type": "string",
+                        "description": "Nombre del producto en singular (ej: papa, tomate, lechuga, cebolla)",
+                    },
+                },
+                "required": ["producto"],
             },
         },
     },
@@ -598,12 +623,14 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         calculate_sale_value_for_llm,
         get_price_for_llm,
         get_price_history_for_llm,
+        get_price_spread_for_llm,
     )
     from app.services.rag_service import search_corpus_for_llm
     from app.services.weather_service import get_clima_historico, get_weather
 
     return {
         "get_price": get_price_for_llm,
+        "get_price_spread": get_price_spread_for_llm,
         "get_price_history": get_price_history_for_llm,
         "calculate_sale_value": calculate_sale_value_for_llm,
         "calculate_margin": calculate_margin_for_llm,

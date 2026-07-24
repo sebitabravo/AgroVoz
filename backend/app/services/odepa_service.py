@@ -787,6 +787,51 @@ def get_price_for_llm(
     return format_price_text(record)
 
 
+def get_price_spread_for_llm(session: Session, producto: str) -> str:
+    """Tool function: muestra el rango de precios de un producto entre mercados.
+
+    Consulta el precio más reciente en cada mercado y retorna el mínimo,
+    máximo y promedio, para que el agricultor vea el spread.
+
+    ODEPA no publica serie de \"precio a productor\" o \"precio en chacra\" —
+    solo datos mayoristas. El spread entre mercados da una referencia del
+    rango de negociación posible.
+
+    Retorna texto natural en español chileno listo para TTS.
+    """
+    if not producto or not producto.strip():
+        return "No entendí el producto. ¿Podrías repetirlo?"
+
+    try:
+        precios = query_latest_by_product(session, producto)
+    except ValueError:
+        return "No entendí el producto. ¿Podrías repetirlo?"
+
+    if not precios:
+        return f"No tengo datos de precio para {producto.strip()}."
+
+    values = [r.precio_kg for r in precios.values()]
+    if len(values) < 2:
+        # Solo un mercado: sin spread que mostrar, retornar precio simple.
+        only = next(iter(precios.values()))
+        return format_price_text(only)
+
+    minimo = min(values)
+    maximo = max(values)
+    promedio = Decimal(sum(values) / len(values)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    spread_pct = round(float((maximo - minimo) / promedio * 100), 1)
+
+    mercados = list(precios.keys())
+    producto_str = f"{producto.strip()[0].upper()}{producto.strip()[1:]}"
+
+    return (
+        f"{producto_str}: el precio va entre {_formatear_pesos(minimo)} "
+        f"y {_formatear_pesos(maximo)} el kilo, según ODEPA. "
+        f"El promedio en {len(mercados)} mercados es {_formatear_pesos(promedio)}, "
+        f"con una diferencia del {spread_pct}% entre el más barato y el más caro."
+    )
+
+
 def _obtener_registro_referencia(session: Session, producto: str, mercado: str = "") -> OdepaPrice | None:
     """Obtiene el registro de referencia para una tool de precio.
 
