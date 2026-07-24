@@ -734,7 +734,7 @@ class AgroVozPipeline:
             count = session.scalar(
                 select(func.count()).select_from(Consultation).where(Consultation.phone_hash == phone_hash)
             )
-            return count == 0
+            return bool(count == 0)
         except SQLAlchemyError:
             logger.exception(
                 "Error consultando consultas previas — phone_hash=%s",

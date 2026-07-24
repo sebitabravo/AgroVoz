@@ -47,7 +47,7 @@ def _serializer() -> URLSafeTimedSerializer:
 
 def create_session_cookie() -> str:
     """Genera un token firmado de sesión. Payload mínimo opaco."""
-    return _serializer().dumps({"v": 1})
+    return _serializer().dumps({"v": 1})  # type: ignore[no-any-return]
 
 
 def verify_session_cookie(value: str | None) -> bool:

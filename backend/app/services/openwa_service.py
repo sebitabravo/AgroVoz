@@ -244,7 +244,7 @@ class OpenWAService:
                 safe_id,
                 len(response.content),
             )
-            return response.content
+            return response.content  # type: ignore[no-any-return]
 
     async def send_typing_indicator(self, target: str, state: str = "recording") -> None:
         """Muestra o limpia el indicador de escritura/grabando en WhatsApp.

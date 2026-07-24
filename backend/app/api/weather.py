@@ -64,7 +64,7 @@ async def get_weather_endpoint(
             headers={"Retry-After": "120"},  # 2 min: reintentar pronto
         ) from exc
 
-    return WeatherResponse.model_validate(wd)
+    return WeatherResponse.model_validate(wd)  # type: ignore[no-any-return]
 
 
 @router.get("/weather/history", response_model=HistoricalWeatherResponse)

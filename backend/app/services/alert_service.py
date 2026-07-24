@@ -403,7 +403,7 @@ def _ya_disparada_hoy(alerta: Alert, hoy: datetime.date) -> bool:
     """True si la alerta ya fue disparada hoy."""
     if alerta.last_triggered_at is None:
         return False
-    return alerta.last_triggered_at.date() == hoy
+    return alerta.last_triggered_at.date() == hoy  # type: ignore[no-any-return]
 
 
 def _calcular_precio_por_kg(registro: OdepaPrice) -> Decimal | None:
@@ -414,11 +414,11 @@ def _calcular_precio_por_kg(registro: OdepaPrice) -> Decimal | None:
     retorna None para no comparar erroneamente con el umbral por kg.
     """
     if _es_unidad_kilo(registro.unidad):
-        return registro.precio_kg
+        return registro.precio_kg  # type: ignore[no-any-return]
     kilos = _kilos_por_unidad(registro.unidad)
     if kilos is None:
         return None
-    return (registro.precio_kg / kilos).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return (registro.precio_kg / kilos).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)  # type: ignore[no-any-return]
 
 
 def _cumple_condicion(
