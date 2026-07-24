@@ -13,6 +13,9 @@ service-account*.json
 AgroVoz_Informe_Completo.md
 agrovoz-postulacion-crea2026.md
 
+# ── Docs de ideación local (no commiteables) ──
+IDEA.md
+
 # ── Modelos IA (solo backend/models/, no backend/app/models/ que es SQLAlchemy) ──
 /backend/models/
 *.gguf
@@ -93,3 +96,9 @@ logs/
 .playwright-mcp/
 # Local Pi runtime state
 .atl/
+
+# ── CodeGraph index (generado local, regenerable) ──
+.codegraph/
+
+# ── SDD artifacts (locales, no commiteables) ──
+openspec/
