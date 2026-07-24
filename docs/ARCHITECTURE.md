@@ -221,3 +221,26 @@ CREATE INDEX idx_consultations_created ON consultations(created_at);
     implementaciones separadas (`llm_service.answer()` vs
     `llm_service.answer_via_openrouter()`) porque el formato de tool calling
     de cada backend es distinto.
+
+16. **PWA admin dashboard (#102).** El dashboard admin incluye service worker
+    (`admin-sw.js`), manifest PWA (`manifest.json`) y registro automático
+    (`admin-pwa-register.js`). Permite instalar el panel como app y funciona
+    offline para monitoreo en terreno sin internet. El agricultor NO usa PWA
+    — sigue en WhatsApp. Público objetivo: equipo AgroVoz, INDAP, PRODESAL.
+
+17. **Corpus INDAP para derivación a crédito (#174).** `corpus/indap_creditos.yaml`
+    contiene información de programas INDAP (crédito corto plazo, enlace, PDI,
+    PRODESAL). La tool `search_corpus` lo indexa automáticamente. El LLM deriva
+    a INDAP solo cuando el agricultor pregunta explícitamente por financiamiento,
+    citando la fuente oficial. Sin recomendaciones financieras.
+
+18. **Soporte grupal PRODESAL (#173).** El sistema soporta grupos de WhatsApp
+    (un número por grupo PRODESAL/comunidad). Cada miembro se identifica por
+    hash de teléfono. Las respuestas son individuales (no broadcast). El
+    administrador PRODESAL puede consultar métricas agregadas del grupo.
+
+19. **Canal IVR de respaldo (#172).** Para agricultores sin smartphone,
+    se contempla un canal de respaldo vía llamada telefónica (IVR) usando
+    Twilio Programmable Voice. Post-MVP: el agricultor llama, dicta su consulta
+    y recibe respuesta de voz. Requiere presupuesto para Twilio (~$0.013/min).
+    No implementado en MVP — documentado como opción futura.
