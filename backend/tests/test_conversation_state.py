@@ -31,6 +31,10 @@ class TestTransicionesValidas:
         conv = Conversation(state=ConversationState.RESPONDIENDO)
         assert conv.can_transition_to(ConversationState.ESPERANDO_CONSULTA)
 
+    def test_aclarando_a_derivado(self) -> None:
+        conv = Conversation(state=ConversationState.ACLARANDO)
+        assert conv.can_transition_to(ConversationState.DERIVADO)
+
 
 class TestTransicionesInvalidas:
     """Verifica que las transiciones inválidas sean rechazadas."""

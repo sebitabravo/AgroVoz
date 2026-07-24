@@ -5,6 +5,12 @@ Por defecto desactivado — el pipeline opera en modo stateless (actual).
 
 Post-MVP: solo tiene sentido cuando se habilite conversación multi-turno
 con historial (que requiere consentimiento Ley 21.719).
+
+⚠️ IMPORTANTE: Este módulo es ANDAMIAJE ADELANTADO. El feature flag
+use_conversation_state está definido en config.py pero NO está conectado
+al pipeline productivo. La state machine existe como base lista para
+integrar cuando el piloto Traiguén valide la necesidad de multi-turno.
+No asumir que la conversación multi-turno ya funciona.
 """
 
 from __future__ import annotations
@@ -37,6 +43,7 @@ _VALID_TRANSITIONS: dict[ConversationState, frozenset[ConversationState]] = {
     ConversationState.CONSULTA_RECIBIDA: frozenset({
         ConversationState.BUSCANDO_DATOS,
         ConversationState.ACLARANDO,
+        ConversationState.DERIVADO,
     }),
     ConversationState.BUSCANDO_DATOS: frozenset({
         ConversationState.RESPONDIENDO,
@@ -45,10 +52,12 @@ _VALID_TRANSITIONS: dict[ConversationState, frozenset[ConversationState]] = {
     ConversationState.ACLARANDO: frozenset({
         ConversationState.ESPERANDO_CONSULTA,
         ConversationState.CERRADO,
+        ConversationState.DERIVADO,
     }),
     ConversationState.RESPONDIENDO: frozenset({
         ConversationState.ESPERANDO_CONSULTA,
         ConversationState.CERRADO,
+        ConversationState.DERIVADO,
     }),
     ConversationState.CERRADO: frozenset(),
     ConversationState.DERIVADO: frozenset(),
