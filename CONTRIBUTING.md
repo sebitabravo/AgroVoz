@@ -6,7 +6,7 @@ Las reglas del proyecto (stack, restricciones, convenciones de código) viven en
 issues, GitHub Project (kanban), branches, pull requests y code review.
 
 > **Fuente de verdad**: `AGENTS.md`. Este archivo describe CÓMO trabajamos en GitHub.
-> `docs/ARCHITECTURE.md` describe QUÉ construimos. `docs/phases/0X-*.md` describen el CUÁNDO.
+> `docs/ARCHITECTURE.md` describe QUÉ construimos. `docs/DEV-GUIDE.md` describe cómo montar el entorno.
 
 ---
 
@@ -14,10 +14,8 @@ issues, GitHub Project (kanban), branches, pull requests y code review.
 
 1. Leer [`AGENTS.md`](./AGENTS.md): stack, hard constraints, convenciones.
 2. Leer [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md): flujo, ADRs, schema DB.
-3. Leer la fase asignada: [`docs/phases/0X-*.md`](./docs/phases/).
-4. Revisar [`skills/`](./skills): guías de issue-creation, branch-pr, commit-hygiene,
+3. Revisar [`skills/`](./skills): guías de issue-creation, branch-pr, commit-hygiene,
    python-standards, testing-coverage, docs-alignment. Evitan errores tontos.
-5. Regla de oro: **1 issue = 1 branch = 1 PR = 1 objetivo claro.**
 
 ---
 

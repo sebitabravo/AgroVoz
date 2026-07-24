@@ -4,11 +4,11 @@
 
 ## Project summary
 
-**AgroVoz** es un asistente de IA que responde por voz a través de WhatsApp, diseñado para que pequeños agricultores chilenos accedan a precios agrícolas (ODEPA) y pronósticos climáticos (OpenWeatherMap) sin leer, escribir ni instalar aplicaciones. El productor envía un audio por WhatsApp y recibe una respuesta hablada con datos oficiales en tiempo real.
+**AgroVoz** es un asistente de IA que responde por voz a través de WhatsApp, diseñado para que pequeños agricultores chilenos accedan a precios agrícolas (ODEPA) y pronósticos climáticos (OpenMeteo) sin leer, escribir ni instalar aplicaciones. El productor envía un audio por WhatsApp y recibe una respuesta hablada con datos oficiales en tiempo real.
 
 Problema: más de 205.000 agricultores INDAP pierden 40-60% del precio mayorista por asimetría de información. No tienen acceso a datos de mercado cuando negocian con intermediarios.
 
-Proyecto estudiantil para Desafío Crea INACAP 2026. Etapa actual: IDEA con arquitectura definida. Sin código aún.
+Proyecto estudiantil para Desafío Crea INACAP 2026. Etapa actual: MVP implementado — pipeline E2E de voz (Whisper + LLM + TTS), landing page (Astro 7 + Tailwind 4), dashboard admin (Jinja2 + HTMX + PWA), y piloto de validación en Traiguén.
 
 ## Team
 
@@ -82,7 +82,7 @@ Proyecto estudiantil para Desafío Crea INACAP 2026. Etapa actual: IDEA con arqu
 
 ### APIs externas
 - Open-WA (WhatsApp Web protocol, self-hosted en VPS)
-- OpenWeatherMap (plan gratuito, 60 calls/min)
+- OpenMeteo (gratuito, sin API key, 10.000 req/día)
 - ODEPA (CSV datos abiertos, cron diario 06:00 AM)
 
 ## Product scope
@@ -119,7 +119,7 @@ Productor → WhatsApp (audio) → Open-WA → VPS Hetzner
   │  → Whisper small: .wav → texto                    │
   │  → LLM con whitelist de herramientas:             │
   │     ├─ get_price(producto, mercado) → SQLite ODEPA│
-  │     └─ get_weather(lat, lon) → OpenWeatherMap API │
+  │  │     └─ get_weather(lat, lon) → OpenMeteo API    │
   │  → Piper TTS: texto → .wav                        │
   │  → ffmpeg: .wav → .ogg                            │
   │  → Responde vía Open-WA API con audio              │
@@ -173,7 +173,8 @@ AgroVoz/
 │   └── src/
 ├── docs/
 │   ├── ARCHITECTURE.md
-│   └── phases/            ← Instrucciones por fase (00–06)
+│   ├── DEV-GUIDE.md
+│   └── piloto/            ← Kit operativo del piloto Traiguén
 ├── scripts/               ← provision-vps.sh, smoke-test.sh
 └── skills/                ← Guías de trabajo del equipo (leer ANTES de codear)
     ├── issue-creation/SKILL.md   ← Crear issues (flujo issue-first)
@@ -302,17 +303,19 @@ git log origin/main..HEAD --oneline    # verificar: commits atómicos, sin WIP n
 - Listar riesgos o trade-offs
 - Listar próximo paso (siguiente fase)
 
-## Fases del proyecto (orden de ejecución)
+## Fases del proyecto (completadas)
 
-| # | Fase | Archivo | Días est. |
-|---|---|---|---|
-| 00 | Inicialización del proyecto | `docs/phases/00-project-init.md` | 2-3 |
-| 01 | Backend core (FastAPI + DB + APIs) | `docs/phases/01-backend-core.md` | 4-5 |
-| 02 | Pipeline de voz (Whisper + LLM + TTS) | `docs/phases/02-pipeline-voz.md` | 5-6 |
-| 03 | Integración Open-WA (WhatsApp webhook self-hosted) | `docs/phases/03-integracion-openwa.md` | 4-5 |
-| 04 | Landing page (Astro + Tailwind) | `docs/phases/04-landing-page.md` | 3-4 |
-| 05 | Admin dashboard (Jinja2 + HTMX) | `docs/phases/05-admin-dashboard.md` | 3-4 |
-| 06 | Deploy y puesta en marcha (VPS + Dokploy + CI/CD) | `docs/phases/06-deploy.md` | 2-3 |
+Todas las fases del plan original (00–06) fueron implementadas entre mayo y julio 2026.
+El detalle de cada fase está en el historial de git y en los issues cerrados del repo.
 
-**Total estimado**: 23-30 días de desarrollo (5-6 semanas).
-Las fases 04 y 05 pueden ejecutarse en paralelo con 03 si hay más de un desarrollador.
+| # | Fase | Estado |
+|---|---|---|
+| 00 | Inicialización del proyecto | ✅ Completado |
+| 01 | Backend core (FastAPI + DB + APIs) | ✅ Completado |
+| 02 | Pipeline de voz (Whisper + LLM + TTS) | ✅ Completado |
+| 03 | Integración Open-WA (WhatsApp webhook self-hosted) | ✅ Completado |
+| 04 | Landing page (Astro + Tailwind) | ✅ Completado |
+| 05 | Admin dashboard (Jinja2 + HTMX) | ✅ Completado |
+| 06 | Deploy y puesta en marcha (VPS + Dokploy + CI/CD) | ✅ Completado |
+
+**Próximo hito**: piloto de validación con 3-5 productores en Traiguén (4 semanas).

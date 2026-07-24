@@ -26,8 +26,8 @@ Productor envía audio → sistema transcribe → consulta ODEPA/clima → respo
                                 │  │  └────┬──────────────┬────┘  │   │
                                 │  │       │              │        │   │
                                 │  │  ┌────▼─────┐  ┌────▼─────┐  │   │
-                                │  │  │  ODEPA   │  │OpenWeather│  │   │
-                                │  │  │  SQLite  │  │   API     │  │   │
+                                │  │  │  ODEPA   │  │OpenMeteo │  │   │
+                                │  │  │  SQLite  │  │   API    │  │   │
                                 │  │  └──────────┘  └──────────┘  │   │
                                 │  └──────────────────────────────┘   │
                                 │                                     │
@@ -53,7 +53,7 @@ Productor envía audio → sistema transcribe → consulta ODEPA/clima → respo
 5. Whisper transcribe .wav → texto
 6. Texto → LLM con Tool Calling:
    - Si pregunta por precio → query SQLite ODEPA
-   - Si pregunta por clima → GET OpenWeatherMap API
+   - Si pregunta por clima → GET OpenMeteo API
    - Whitelist: solo estas 2 herramientas. Si alucina otra → fallback.
 7. LLM genera respuesta textual (datos, NO recomendaciones agronómicas)
 8. Piper TTS convierte texto → audio .wav
@@ -66,18 +66,25 @@ Productor envía audio → sistema transcribe → consulta ODEPA/clima → respo
 
 ### `app/api/` — Capa HTTP
 - `webhooks.py` — endpoint POST `/api/v1/webhook/whatsapp`
-- `prices.py` — endpoint GET `/api/v1/prices/{product}`
-- `weather.py` — endpoint GET `/api/v1/weather/{lat}/{lon}`
+- `prices.py` — endpoints GET `/api/v1/prices/{product}`, `/api/v1/products`, `/api/v1/mercados`
+- `weather.py` — endpoints GET `/api/v1/weather`, `/api/v1/weather/history`
 - `health.py` — endpoint GET `/api/v1/health`
+- `demo.py` — endpoint POST `/api/v1/demo/preguntar` (chat web interactivo)
+- `admin/` — APIs JSON administrativas (métricas, ODEPA sync, user prefs) con auth X-Admin-Key
 
 ### `app/services/` — Capa de negocio
 - `whisper_service.py` — transcripción de audio (descarga, ffmpeg, Whisper)
-- `llm_service.py` — interpretación NL + Tool Calling con whitelist
+- `llm_service.py` — interpretación NL + Tool Calling con whitelist + fallback OpenRouter
 - `tts_service.py` — síntesis de voz con Piper TTS
-- `odepa_service.py` — consultas a SQLite ODEPA
-- `weather_service.py` — consultas a OpenWeatherMap API
+- `odepa_service.py` — consultas a SQLite ODEPA + sync diario
+- `weather_service.py` — consultas a OpenMeteo API (forecast + histórico)
 - `pipeline_service.py` — orquestador del pipeline end-to-end
 - `openwa_service.py` — cliente HTTP para Open-WA API (enviar/recibir mensajes, webhooks)
+- `rag_service.py` — retrieval de documentos oficiales con TF-IDF + citations
+- `demo_service.py` — lógica del chat demo web
+- `monitor_service.py` — salud de servicios (CPU, RAM, disco, Whisper, LLM, TTS)
+- `alert_service.py` — alertas proactivas de precio y clima
+- `metrics_service.py` — agregación de métricas para dashboard y piloto
 
 ### `app/core/` — Configuración
 - `config.py` — settings con pydantic-settings
@@ -85,24 +92,31 @@ Productor envía audio → sistema transcribe → consulta ODEPA/clima → respo
 - `database.py` — conexión SQLite + SQLAlchemy
 
 ### `app/models/` — Datos
-- `odepa.py` — modelo SQLAlchemy para tabla de precios ODEPA
-- `consultation.py` — modelo para registro de consultas (métricas)
+- `odepa_price.py` — modelo SQLAlchemy para tabla de precios ODEPA
+- `consultation.py` — modelo para registro de consultas (métricas, feedback, revisión)
+- `alert.py` — modelo para alertas proactivas de precio/clima
+- `user_prefs.py` — preferencias del agricultor (comuna, cultivos de interés)
 
 ### `app/jobs/` — Tareas programadas
 - `sync_odepa.py` — cron job 06:00 AM: descarga CSV ODEPA → upsert SQLite
 
 ## Componentes del frontend
 
-### Landing (Astro)
-- `index.astro` — hero, propuesta de valor, cómo funciona
-- `equipo.astro` — sección equipo
-- `contacto.astro` — formulario contacto
-- Componentes: Header, Footer, PricingCard, FeatureCard
+### Landing (Astro 7.x + Tailwind CSS 4.x)
+- `index.astro` — página principal: hero, problema, cómo funciona, demo, stack, planes, impacto, equipo, contacto
+- `demo.astro` — chat web interactivo (prueba AgroVoz desde el navegador)
+- Componentes: Header, Footer, Hero, FeatureCard, StatCard, PlanCard, TeamCard, DemoPhone, ContactForm, Waveform
 
-### Admin Dashboard (parte del backend o standalone simple)
-- Login con API key
-- Métricas: consultas/día, latencia promedio, productos top
-- Monitoreo: estado del VPS, carga, errores
+### Admin Dashboard (Jinja2 + HTMX + Chart.js, parte del backend)
+- Login con cookie de sesión firmada (itsdangerous) + API key para endpoints JSON
+- Dashboard: KPIs, sparkline, salud de servicios, consultas recientes
+- Métricas: series diarias, latencia, intents, productos top, errores
+- ODEPA: estado de sync, stats, precios recientes, export CSV
+- Monitor: CPU, RAM, disco, estado de servicios (Whisper, LLM, TTS, SQLite, Open-WA)
+- Piloto: métricas para Crea INACAP (productores activos, %útiles, decisiones productivas)
+- Alertas: gestión de alertas proactivas de precio/clima
+- Revisión: cola de revisión humana para consultas marcadas
+- PWA: manifest, service worker, instalable en dispositivo móvil
 
 ## Base de datos
 

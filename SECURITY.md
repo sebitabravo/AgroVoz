@@ -5,12 +5,12 @@
 
 ## Versiones soportadas
 
-AgroVoz está en etapa IDEA (sin código). Solo la versión actual del MVP recibe parches de seguridad.
+AgroVoz está en etapa MVP implementado — pipeline E2E de voz funcionando, landing page y dashboard admin. El piloto de validación con 3-5 productores en Traiguén está en preparación.
 
 | Versión         | Soporte de seguridad                          |
 | --------------- | --------------------------------------------- |
-| MVP (planificado) | ✅ Parches de seguridad y actualizaciones |
-| Pre-MVP (actual)  | ✅ Configuración de tooling de seguridad    |
+| MVP (actual) | ✅ Parches de seguridad y actualizaciones |
+| Pre-MVP (completado) | ✅ Tooling de seguridad configurado |
 
 ## Cómo reportar una vulnerabilidad
 

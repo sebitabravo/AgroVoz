@@ -70,7 +70,7 @@ async def test_sync_odepa_maneja_timeout(client, mock_httpx_timeout):
         await sync_odepa()
 ```
 
-Mockear: httpx (OpenWeatherMap, Open-WA API), Whisper, LLM, Piper, filesystem de audio.
+Mockear: httpx (OpenMeteo, Open-WA API), Whisper, LLM, Piper, filesystem de audio.
 
 ### Test de regresión (bug fix)
 

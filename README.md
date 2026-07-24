@@ -1,6 +1,6 @@
 # AgroVoz — Tu voz tiene el precio justo
 
-Asistente de IA que responde por voz a través de WhatsApp, diseñado para que pequeños agricultores chilenos accedan a precios agrícolas (ODEPA) y pronósticos climáticos (OpenWeatherMap) sin leer, escribir ni instalar aplicaciones.
+Asistente de IA que responde por voz a través de WhatsApp, diseñado para que pequeños agricultores chilenos accedan a precios agrícolas (ODEPA) y pronósticos climáticos (OpenMeteo) sin leer, escribir ni instalar aplicaciones.
 
 El productor envía un audio por WhatsApp y recibe una respuesta hablada con datos oficiales en tiempo real.
 
@@ -8,7 +8,7 @@ El productor envía un audio por WhatsApp y recibe una respuesta hablada con dat
 
 - **Backend:** Python 3.12+ / FastAPI / SQLAlchemy / SQLite
 - **Voz:** Whisper (transcripción) + Qwen2.5-3B (LLM) + Piper TTS (síntesis)
-- **Frontend:** Astro 5.x + Tailwind CSS 4.x (landing)
+- **Frontend:** Astro 7.x + Tailwind CSS 4.x (landing)
 - **Admin:** Jinja2 + HTMX (dashboard server-side)
 - **Infra:** Docker Compose / Dokploy (Traefik + SSL Let's Encrypt) / VPS Hetzner CX43
 
@@ -54,7 +54,8 @@ AgroVoz/
 
 - `AGENTS.md` — instrucciones completas del proyecto (source of truth)
 - `docs/ARCHITECTURE.md` — arquitectura, DB schema, decisiones técnicas
-- `docs/phases/` — fases de ejecución (00 → 06)
+- `docs/DEV-GUIDE.md` — guía de desarrollo y setup local
+- `docs/piloto/` — kit operativo del piloto en Traiguén
 
 ## Licencia
 
