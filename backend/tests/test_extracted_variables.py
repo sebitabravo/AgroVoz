@@ -1,0 +1,85 @@
+"""Tests para extracción tipada de variables (issue #191)."""
+
+import pytest
+from pydantic import ValidationError
+
+from app.schemas.variables import ExtractedVariables
+from app.services.pipeline_service import AgroVozPipeline
+
+
+class TestExtractedVariablesSchema:
+    """Tests del schema Pydantic ExtractedVariables."""
+
+    def test_defaults_correctos(self) -> None:
+        """ExtractedVariables debe tener defaults razonables."""
+        v = ExtractedVariables()
+        assert v.producto is None
+        assert v.mercado is None
+        assert v.ubicacion == "Traiguén"
+        assert v.consulta_tipo == "desconocido"
+        assert v.urgencia is None
+
+    def test_campos_opcionales(self) -> None:
+        """Los campos producto, mercado y urgencia deben aceptar None."""
+        v = ExtractedVariables(producto=None, mercado=None, urgencia=None)
+        assert v.producto is None
+        assert v.mercado is None
+        assert v.urgencia is None
+
+    def test_consulta_tipo_valores_validos(self) -> None:
+        """consulta_tipo solo acepta valores del Literal."""
+        for tipo in ("precio", "clima", "ambos", "desconocido"):
+            v = ExtractedVariables(consulta_tipo=tipo)  # type: ignore[arg-type]
+            assert v.consulta_tipo == tipo
+
+    def test_consulta_tipo_invalido_rechazado(self) -> None:
+        """consulta_tipo debe rechazar valores fuera del Literal."""
+        with pytest.raises(ValidationError):
+            ExtractedVariables(consulta_tipo="invalido")  # type: ignore[arg-type]
+
+    def test_producto_con_valor(self) -> None:
+        """producto debe aceptar strings válidos."""
+        v = ExtractedVariables(producto="papa")
+        assert v.producto == "papa"
+
+    def test_ubicacion_default_traiguen(self) -> None:
+        """La ubicación por defecto debe ser Traiguén."""
+        v = ExtractedVariables()
+        assert v.ubicacion == "Traiguén"
+
+
+class TestExtractVariablesDegradacion:
+    """Tests de degradación del método _extract_variables."""
+
+    def test_flag_off_usa_keyword_matching(self) -> None:
+        """Con use_typed=False, debe degradar a keyword matching."""
+        result = AgroVozPipeline._extract_variables(
+            "precio de la papa en Santiago", use_typed=False,
+        )
+        assert isinstance(result, ExtractedVariables)
+        # Con keyword matching, el tipo siempre es "desconocido"
+        assert result.consulta_tipo == "desconocido"
+
+    def test_flag_off_detecta_producto(self) -> None:
+        """Con use_typed=False, debe detectar producto por keyword."""
+        result = AgroVozPipeline._extract_variables(
+            "¿a cómo está la papa?", use_typed=False,
+        )
+        assert result.producto == "papa"
+
+    def test_flag_off_producto_no_encontrado(self) -> None:
+        """Si no hay producto reconocible, producto debe ser None."""
+        result = AgroVozPipeline._extract_variables(
+            "hola buenos días", use_typed=False,
+        )
+        assert result.producto is None
+
+    def test_flag_on_comportamiento_actual(self) -> None:
+        """Con use_typed=True, actualmente también degrada a keywords
+        (la extracción LLM se implementará en iteración futura)."""
+        result = AgroVozPipeline._extract_variables(
+            "precio papa", use_typed=True,
+        )
+        assert isinstance(result, ExtractedVariables)
+        assert result.producto == "papa"
+        assert result.consulta_tipo == "desconocido"

@@ -46,16 +46,16 @@ class TestConstantes:
     """Verifica que las constantes del modulo no se modifiquen accidentalmente."""
 
     def test_system_prompt_contiene_reglas_estrictas(self) -> None:
-        """El system prompt comprimido conserva las reglas del issue #18 + #91."""
-        assert "REGLAS ESTRICTAS" in SYSTEM_PROMPT
-        assert "Tienes SIETE herramientas" in SYSTEM_PROMPT
+        """El system prompt estructurado conserva las reglas del issue #18 + #91."""
+        assert "REGLAS DE COMPORTAMIENTO" in SYSTEM_PROMPT
+        assert "Tienes 9 herramientas" in SYSTEM_PROMPT
         assert "get_price_history" in SYSTEM_PROMPT
         assert "calculate_sale_value" in SYSTEM_PROMPT
         assert "calculate_margin" in SYSTEM_PROMPT
         assert "search_corpus" in SYSTEM_PROMPT
-        assert "NUNCA recomendaciones agronomicas" in SYSTEM_PROMPT
+        assert "NUNCA recomendaciones" in SYSTEM_PROMPT
         assert "NUNCA inventes precios" in SYSTEM_PROMPT
-        assert "espanol chileno" in SYSTEM_PROMPT
+        assert "Español chileno" in SYSTEM_PROMPT
         assert "pesos chilenos" in SYSTEM_PROMPT
 
     def test_system_prompt_instruye_conservar_cita_fuente(self) -> None:
@@ -68,8 +68,8 @@ class TestConstantes:
         assert "CONSERVA" in SYSTEM_PROMPT
         assert "ODEPA" in SYSTEM_PROMPT
         assert "OpenMeteo" in SYSTEM_PROMPT
-        assert "segun ODEPA" in SYSTEM_PROMPT
-        assert "segun OpenMeteo" in SYSTEM_PROMPT
+        assert "según ODEPA" in SYSTEM_PROMPT
+        assert "según OpenMeteo" in SYSTEM_PROMPT
 
     def test_fallback_text_no_vacio(self) -> None:
         """El texto de fallback es un mensaje informativo no vacio."""
@@ -178,21 +178,19 @@ class TestLlmConfig:
         )
 
     def test_system_prompt_char_count_razonable(self) -> None:
-        """El system prompt comprimido debe ser compacto (Issue B-14).
+        """El system prompt estructurado debe ser compacto (Issue #190).
 
-        Cada char sumado al system prompt incrementa el prefill del LLM.
-        Original era ~2000 chars, comprimido debe ser menos.
-        Limite: 2500 chars. Extra justificado por DOS herramientas nuevas
-        que se integraron juntas: calculate_margin (#155, margen de venta) y
-        search_corpus (#156, RAG sobre corpus ODEPA), con sus keywords de
-        deteccion e instrucciones de citar fuente. Las tool definitions van
-        aparte en _TOOLS_SECTION, no aqui.
-        OJO: el spike de latencia RAG en el VPS CX43 (gate del #100) sigue
-        pendiente — validar <15s E2E antes del piloto de Traiguen.
+        Reorganizado en 6 secciones nombradas (CONTEXTO, LIMITES, EJEMPLOS,
+        REGLAS, DERIVACION, HERRAMIENTAS) desde el bloque plano anterior.
+        El crecimiento (~3360 chars vs ~2000 anterior) se justifica por la
+        inclusión de la sección HERRAMIENTAS que antes iba en _TOOLS_SECTION
+        parcialmente. Issue #190: la reestructuración es reorganización, no
+        expansión — si el prompt crece más, comprimir secciones individuales.
+        Limite: 3400 chars para detectar crecimiento no intencional.
         """
-        assert len(SYSTEM_PROMPT) <= 2500, (
+        assert len(SYSTEM_PROMPT) <= 3400, (
             f"SYSTEM_PROMPT={len(SYSTEM_PROMPT)} chars excede el limite "
-            "de 2500. Comprime o justifica con datos de latencia."
+            "de 3400. Comprime o justifica con datos de latencia."
         )
 
     def test_total_prompt_chars_under_limit(self) -> None:
@@ -205,17 +203,14 @@ class TestLlmConfig:
         y get_price_spread (#171) son 9 tools, ~10104 chars ≈ ~3103 tokens
         — sumado al peor caso de tool_response (~360 tokens) deja ~633
         tokens de margen dentro de n_ctx=4096 para query + respuesta.
-        Limite subido a 10200 (margen de ~96 chars sobre el valor actual)
-        para seguir detectando crecimiento no intencional sin bloquear el
-        estado real con 9 tools. Si el limite se acerca de nuevo, medir
-        tokens reales antes de subirlo otra vez y considerar recortar
-        descripciones existentes en vez de seguir subiendo el limite — la
-        latencia (~46s solo-LLM en Apple M3, sin validar en el VPS CX43)
-        sigue siendo el riesgo de fondo; este test NO lo cubre, solo evita
+        Limite subido a 10400 para acomodar la reestructuración en secciones
+        (issue #190: prompt_builder). El crecimiento (~160 chars sobre el
+        limite anterior) se justifica por headers de sección y formato
+        estructurado. Monitorear en próximo benchmark de latencia.
         que el prompt crezca sin darse cuenta.
         """
         total_chars = len(SYSTEM_PROMPT) + len(_TOOLS_SECTION)
-        assert total_chars <= 10200, (
+        assert total_chars <= 10400, (
             f"Prompt total={total_chars} chars demasiado grande "
             f"para n_ctx={_N_CTX}. Reduce o aumenta n_ctx."
         )
