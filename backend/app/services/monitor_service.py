@@ -184,7 +184,7 @@ def _check_odepa_data() -> ServiceCheck:
         return ServiceCheck("ODEPA Datos", False, f"{detalle} · {dias}d sin actualizar")
     # Alerta temprana: sync no corrió en >3 días (#176).
     try:
-        from app.jobs.sync_odepa import get_sync_stale_hours  # noqa: PLC0415
+        from app.jobs.sync_odepa import get_sync_stale_hours
         stale = get_sync_stale_hours()
         if stale is not None and stale > 72:
             return ServiceCheck("ODEPA Datos", False, f"{detalle} · sync {stale:.0f}h atrasado")

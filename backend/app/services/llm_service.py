@@ -470,27 +470,24 @@ TOOLS: list[dict[str, object]] = [
             "name": "register_expense",
             "description": (
                 "USAR para REGISTRAR GASTOS del agricultor. "
-                "Cuando el agricultor reporte que GASTO, COMPRO, PAGO o INVIRTIO "
-                "dinero en insumos, semillas, fertilizantes, transporte u otros "
-                "costos del cultivo. Pide: producto, concepto (que compro) y "
-                "monto en pesos. Ej: 'gaste 50 lucas en semilla de papa', "
-                "'compre abono por 30 mil pesos para el tomate', "
-                "'pague 100 lucas de flete'."
+                "Cuando reporte que GASTO, COMPRO o PAGO dinero en insumos, "
+                "semillas, fertilizantes o transporte. "
+                "Ej: 'gaste 50 lucas en semilla de papa', 'pague 100 lucas de flete'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "producto": {
                         "type": "string",
-                        "description": "Producto o cultivo relacionado (ej: papa, tomate, general)",
+                        "description": "Producto o cultivo (ej: papa, tomate, general)",
                     },
                     "concepto": {
                         "type": "string",
-                        "description": "Que compro o en que gasto (ej: semilla, abono, flete, pesticida)",
+                        "description": "En que gasto (ej: semilla, abono, flete)",
                     },
                     "monto": {
                         "type": "string",
-                        "description": "Monto gastado en pesos chilenos (ej: 50000, 100000)",
+                        "description": "Monto en pesos chilenos (ej: 50000)",
                     },
                 },
                 "required": ["producto", "concepto", "monto"],
@@ -690,8 +687,9 @@ async def _execute_tool(
 
     # Filtrar argumentos alucinados por el LLM contra la firma real del handler.
     # Evita TypeError cuando el LLM inventa params que el handler no acepta.
-    # Inyectar phone_hash para tools de precio (Issue #89: mercado cercano).
-    if name in ("get_price", "get_price_history") and phone_hash:
+    # Inyectar phone_hash: tools de precio (Issue #89: mercado cercano) y
+    # register_expense (Issue #170: scoping de gastos por agricultor).
+    if name in ("get_price", "get_price_history", "register_expense") and phone_hash:
         arguments = {**arguments, "phone_hash": phone_hash}
     valid_args = _filter_handler_args(handler, arguments)
 
