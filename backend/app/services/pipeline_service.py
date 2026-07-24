@@ -29,9 +29,23 @@ from app.services.tts_service import PiperModelNotFoundError, TTSService
 from app.services.whisper_service import WhisperService
 
 if TYPE_CHECKING:
+    from app.schemas.variables import ExtractedVariables, TipoConsulta
+
+if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
+
+# Keywords para inferir el tipo de consulta en _extract_variables (issue #191).
+# Extracción keyword-based (no LLM) para no sumar latencia al pipeline (#165).
+_PRECIO_KEYWORDS = frozenset({
+    "precio", "cuanto", "cuánto", "cuesta", "vale", "kilo", "saco",
+    "luca", "peso", "vender", "vendi", "vendí", "comprar",
+})
+_CLIMA_KEYWORDS = frozenset({
+    "clima", "tiempo", "lluvia", "llover", "temperatura", "frio", "frío",
+    "calor", "helada", "viento", "pronostico", "pronóstico", "grados",
+})
 
 # Timeout interno del pipeline. Si el pipeline completo excede este limite,
 # se aborta y se retorna AudioResponse con texto de error. Distinto del
@@ -360,6 +374,44 @@ class AgroVozPipeline:
         return None
 
     @staticmethod
+    def _extract_variables(query_text: str) -> ExtractedVariables:
+        """Extrae variables tipadas de la consulta por keyword matching (issue #191).
+
+        Gate de validación temprana ANTES del tool calling: detecta producto y
+        tipo de consulta (precio / clima / ambos / desconocido) con keywords.
+
+        Decisión de diseño: la extracción es keyword-based, NO vía LLM. Agregar
+        una llamada LLM de extracción empeoraría la latencia crítica del
+        pipeline (#165, ~46s solo-LLM en CPU). Además el tool calling nativo ya
+        extrae los parámetros finos (producto, mercado) al invocar las tools;
+        este paso solo aporta un contrato tipado barato y determinista para el
+        pipeline y la auditoría de qué consultan los agricultores.
+
+        Args:
+            query_text: Texto transcrito por Whisper.
+
+        Returns:
+            ExtractedVariables con producto y consulta_tipo detectados.
+        """
+        from app.schemas.variables import ExtractedVariables
+
+        producto = AgroVozPipeline._extract_producto(query_text)
+        q = query_text.lower()
+        tiene_precio = producto is not None or any(kw in q for kw in _PRECIO_KEYWORDS)
+        tiene_clima = any(kw in q for kw in _CLIMA_KEYWORDS)
+
+        consulta_tipo: TipoConsulta
+        if tiene_precio and tiene_clima:
+            consulta_tipo = "ambos"
+        elif tiene_precio:
+            consulta_tipo = "precio"
+        elif tiene_clima:
+            consulta_tipo = "clima"
+        else:
+            consulta_tipo = "desconocido"
+
+        return ExtractedVariables(producto=producto, consulta_tipo=consulta_tipo)
+
     @staticmethod
     async def _handle_alert_commands(
         transcribed_text: str,
@@ -447,6 +499,17 @@ class AgroVozPipeline:
                 "¡Hola! Preguntame por el precio de algún producto o por el clima de Traiguén.",
                 "saludo",
             )
+
+        # 0.5. Extraer variables tipadas de la consulta (issue #191).
+        # Gate tipado temprano + trazabilidad de qué consultan los agricultores.
+        # El tool calling nativo extrae los parámetros finos; esto registra
+        # producto y tipo detectados para auditoría, sin costo de latencia LLM.
+        extracted = AgroVozPipeline._extract_variables(transcribed_text)
+        logger.debug(
+            "Variables extraídas — producto=%s consulta_tipo=%s",
+            extracted.producto,
+            extracted.consulta_tipo,
+        )
 
         # 1. Detectar "resumen" por keyword ANTES del LLM: es mas rapido y determinista.
         if AgroVozPipeline._is_resumen_query(transcribed_text):

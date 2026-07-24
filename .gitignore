@@ -102,3 +102,6 @@ logs/
 
 # ── SDD artifacts (locales, no commiteables) ──
 openspec/
+
+# Git worktrees locales (no commitear)
+.worktrees/
