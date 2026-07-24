@@ -74,7 +74,7 @@ Productor envía audio → sistema transcribe → consulta ODEPA/clima → respo
 
 ### `app/services/` — Capa de negocio
 - `whisper_service.py` — transcripción de audio (descarga, ffmpeg, Whisper)
-- `llm_service.py` — interpretación NL + Tool Calling con whitelist + fallback OpenRouter
+- `llm_service.py` — interpretación NL + Tool Calling con whitelist (9 tools: get_price, get_price_spread, get_price_history, calculate_sale_value, calculate_margin, get_weather, get_clima_historico, search_corpus, register_expense) + fallback OpenRouter
 - `tts_service.py` — síntesis de voz con Piper TTS
 - `odepa_service.py` — consultas a SQLite ODEPA + sync diario
 - `weather_service.py` — consultas a OpenMeteo API (forecast + histórico)

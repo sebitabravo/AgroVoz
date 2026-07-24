@@ -8,7 +8,7 @@
 
 Problema: más de 205.000 agricultores INDAP pierden 40-60% del precio mayorista por asimetría de información. No tienen acceso a datos de mercado cuando negocian con intermediarios.
 
-Proyecto estudiantil para Desafío Crea INACAP 2026. Etapa actual: MVP implementado — pipeline E2E de voz (Whisper + LLM + TTS), landing page (Astro 7 + Tailwind 4), dashboard admin (Jinja2 + HTMX + PWA), y piloto de validación en Traiguén.
+Proyecto estudiantil para Desafío Crea INACAP 2026. Etapa actual: MVP implementado — pipeline E2E de voz (Whisper + LLM + TTS, 9 tools), landing page (Astro 7 + Tailwind 4), dashboard admin (Jinja2 + HTMX + PWA), y piloto de validación en Traiguén. Backend: 58 archivos en app/, 1077 tests.
 
 ## Team
 

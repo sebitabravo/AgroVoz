@@ -49,6 +49,7 @@ const canonical = new URL(Astro.url.pathname, site).toString();
     <meta name="twitter:image" content={`${site}/og-image.png`} />
   </head>
   <body>
+    <a href="#top" class="skip-link">Saltar al contenido principal</a>
     <slot />
   </body>
 </html>

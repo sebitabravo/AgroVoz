@@ -5,7 +5,7 @@ los indexa con TF-IDF (scikit-learn) y permite busqueda por similitud
 coseno. Sin sentence-transformers, sin torch, sin DB externa.
 
 Diseno deliberadamente simple:
-- Corpus: archivos YAML estaticos en backend/data/corpus/
+- Corpus: archivos YAML estaticos en backend/corpus/
 - Indexacion: TfidfVectorizer con ngram_range=(1,2) y stop_words="spanish"
 - Retrieval: cosine similarity sobre la matriz TF-IDF (brute force)
 - Sin persistencia: se reconstruye al iniciar el servicio
