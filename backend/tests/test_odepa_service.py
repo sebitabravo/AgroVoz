@@ -6,6 +6,7 @@ y orquestador sync_odepa con session inyectada.
 """
 
 import datetime
+import json
 from collections.abc import Callable
 from decimal import Decimal
 from pathlib import Path
@@ -15,6 +16,7 @@ import httpx
 import pytest
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.odepa_price import OdepaPrice
 from app.services.odepa_service import (
     OdepaCsvRecord,
@@ -23,7 +25,9 @@ from app.services.odepa_service import (
     _normalizar_precio,
     _parsear_precio,
     download_csv,
+    download_csv_with_fallback,
     parse_csv,
+    register_expense_for_llm,
     sync_odepa,
     upsert_prices,
 )
@@ -449,6 +453,94 @@ class TestDownloadCsv:
         assert registros[0].producto == "papa"
 
 
+class TestDownloadCsvWithFallback:
+    """download_csv_with_fallback: URL primaria + fallback CKAN (#175)."""
+
+    async def test_primaria_ok_no_intenta_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        llamadas: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            llamadas.append(str(request.url))
+            return httpx.Response(200, text="producto,mercado,precio,unidad,fecha\npapa,X,1,kg,2026-06-20\n")
+
+        fake_cls, real_client = _csv_fake_client(handler)
+        monkeypatch.setattr("app.services.odepa_service.httpx.AsyncClient", fake_cls)
+        try:
+            contenido = await download_csv_with_fallback()
+        finally:
+            await real_client.aclose()
+
+        assert "papa" in contenido
+        assert llamadas == [settings.odepa_csv_url]
+
+    async def test_primaria_falla_usa_fallback_ckan(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if str(request.url) == settings.odepa_csv_url:
+                return httpx.Response(503, text="")
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "result": {
+                        "records": [
+                            {"producto": "papa", "mercado": "X", "precio": "900", "unidad": "kg", "fecha": "2026-06-20"}
+                        ]
+                    },
+                },
+            )
+
+        fake_cls, real_client = _csv_fake_client(handler)
+        monkeypatch.setattr("app.services.odepa_service.httpx.AsyncClient", fake_cls)
+        try:
+            contenido = await download_csv_with_fallback()
+        finally:
+            await real_client.aclose()
+
+        registros = parse_csv(contenido)
+        assert len(registros) == 1
+        assert registros[0].producto == "papa"
+
+    async def test_ambas_fallan_propaga_error_combinado(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(500, text="")
+
+        fake_cls, real_client = _csv_fake_client(handler)
+        monkeypatch.setattr("app.services.odepa_service.httpx.AsyncClient", fake_cls)
+        try:
+            with pytest.raises(OdepaSyncError, match="Fallaron URL primaria y fallback CKAN"):
+                await download_csv_with_fallback()
+        finally:
+            await real_client.aclose()
+
+    async def test_fallback_json_invalido_lanza_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if str(request.url) == settings.odepa_csv_url:
+                return httpx.Response(503, text="")
+            return httpx.Response(200, text="no soy json")
+
+        fake_cls, real_client = _csv_fake_client(handler)
+        monkeypatch.setattr("app.services.odepa_service.httpx.AsyncClient", fake_cls)
+        try:
+            with pytest.raises(OdepaSyncError, match="Fallaron URL primaria y fallback CKAN"):
+                await download_csv_with_fallback()
+        finally:
+            await real_client.aclose()
+
+    async def test_fallback_success_false_lanza_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if str(request.url) == settings.odepa_csv_url:
+                return httpx.Response(503, text="")
+            return httpx.Response(200, json={"success": False})
+
+        fake_cls, real_client = _csv_fake_client(handler)
+        monkeypatch.setattr("app.services.odepa_service.httpx.AsyncClient", fake_cls)
+        try:
+            with pytest.raises(OdepaSyncError, match="Fallaron URL primaria y fallback CKAN"):
+                await download_csv_with_fallback()
+        finally:
+            await real_client.aclose()
+
+
 class TestSyncOdepa:
     """Orquestador sync_odepa con download_csv mockeado."""
 
@@ -470,8 +562,9 @@ class TestSyncOdepa:
         assert tomates == 1
 
     async def test_sync_error_de_red_propaga(self, db: Session) -> None:
+        """Si la URL primaria Y el fallback CKAN fallan, el error se propaga (#175)."""
         with patch(
-            "app.services.odepa_service.download_csv",
+            "app.services.odepa_service.download_csv_with_fallback",
             new=AsyncMock(side_effect=OdepaSyncError("red caída")),
         ), pytest.raises(OdepaSyncError, match="red caída"):
             await sync_odepa(session=db)
@@ -495,3 +588,129 @@ class TestSyncOdepa:
         # odepa_productos_list = None ('*'), sin filtro: 5 registros.
         assert resultado.insertados == 5
         mock_session.close.assert_called_once()
+
+
+class TestRegisterExpenseForLlm:
+    """register_expense_for_llm: JSONL scoped por phone_hash (#170)."""
+
+    def _gastos_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        gastos_file = tmp_path / "gastos.jsonl"
+        monkeypatch.setattr("app.services.odepa_service._GASTOS_FILE", gastos_file)
+        return gastos_file
+
+    def test_happy_path_guarda_scoped_por_phone_hash(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gastos_file = self._gastos_file(tmp_path, monkeypatch)
+
+        respuesta = register_expense_for_llm(
+            session=MagicMock(spec=Session),
+            producto="papa",
+            concepto="semilla",
+            monto="50000",
+            phone_hash="hash_agricultor_a",
+        )
+
+        assert "semilla" in respuesta
+        assert "50000" in respuesta
+        lineas = gastos_file.read_text(encoding="utf-8").strip().splitlines()
+        assert len(lineas) == 1
+        registro = json.loads(lineas[0])
+        assert registro["phone_hash"] == "hash_agricultor_a"
+        assert registro["producto"] == "papa"
+        assert registro["monto"] == "50000"
+
+    def test_dos_agricultores_no_se_mezclan(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        gastos_file = self._gastos_file(tmp_path, monkeypatch)
+        session = MagicMock(spec=Session)
+
+        register_expense_for_llm(
+            session=session, producto="papa", concepto="semilla", monto="10000", phone_hash="hash_a"
+        )
+        register_expense_for_llm(
+            session=session, producto="tomate", concepto="abono", monto="20000", phone_hash="hash_b"
+        )
+
+        lineas = gastos_file.read_text(encoding="utf-8").strip().splitlines()
+        registros = [json.loads(linea) for linea in lineas]
+        assert {r["phone_hash"] for r in registros} == {"hash_a", "hash_b"}
+
+    def test_sin_phone_hash_cae_a_anonimo(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        gastos_file = self._gastos_file(tmp_path, monkeypatch)
+
+        register_expense_for_llm(session=MagicMock(spec=Session), producto="papa", concepto="flete", monto="5000")
+
+        registro = json.loads(gastos_file.read_text(encoding="utf-8").strip())
+        assert registro["phone_hash"] == "anonimo"
+
+    def test_monto_no_numerico_no_escribe_archivo(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        gastos_file = self._gastos_file(tmp_path, monkeypatch)
+
+        respuesta = register_expense_for_llm(
+            session=MagicMock(spec=Session),
+            producto="papa",
+            concepto="semilla",
+            monto="no-es-un-numero",
+            phone_hash="hash_a",
+        )
+
+        assert "no entendí" in respuesta.lower() or "no entendi" in respuesta.lower()
+        assert not gastos_file.exists()
+
+    def test_monto_cero_o_negativo_rechazado(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        gastos_file = self._gastos_file(tmp_path, monkeypatch)
+
+        respuesta = register_expense_for_llm(
+            session=MagicMock(spec=Session), producto="papa", concepto="semilla", monto="0", phone_hash="hash_a"
+        )
+
+        assert "mayor a cero" in respuesta.lower()
+        assert not gastos_file.exists()
+
+    def test_monto_formato_chileno_se_normaliza(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        gastos_file = self._gastos_file(tmp_path, monkeypatch)
+
+        register_expense_for_llm(
+            session=MagicMock(spec=Session), producto="papa", concepto="semilla", monto="$50.000", phone_hash="hash_a"
+        )
+
+        registro = json.loads(gastos_file.read_text(encoding="utf-8").strip())
+        assert registro["monto"] == "50.000" or registro["monto"] == "50000"
+
+    def test_caracteres_especiales_no_rompen_jsonl(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        gastos_file = self._gastos_file(tmp_path, monkeypatch)
+
+        register_expense_for_llm(
+            session=MagicMock(spec=Session),
+            producto='papa "criolla"\ncon salto',
+            concepto="semilla",
+            monto="1000",
+            phone_hash="hash_a",
+        )
+
+        lineas = gastos_file.read_text(encoding="utf-8").strip().splitlines()
+        # Un salto de linea embebido en producto no debe partir el JSONL en 2 líneas.
+        assert len(lineas) == 1
+        registro = json.loads(lineas[0])
+        assert "criolla" in registro["producto"]
+
+    def test_error_de_escritura_retorna_mensaje_amigable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._gastos_file(tmp_path, monkeypatch)
+        with patch("builtins.open", side_effect=OSError("disco lleno")):
+            respuesta = register_expense_for_llm(
+                session=MagicMock(spec=Session), producto="papa", concepto="semilla", monto="1000", phone_hash="hash_a"
+            )
+
+        assert "problema" in respuesta.lower()
+
+    def test_archivo_nuevo_queda_con_permisos_0600(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        gastos_file = self._gastos_file(tmp_path, monkeypatch)
+
+        register_expense_for_llm(
+            session=MagicMock(spec=Session), producto="papa", concepto="semilla", monto="1000", phone_hash="hash_a"
+        )
+
+        modo = gastos_file.stat().st_mode & 0o777
+        assert modo == 0o600

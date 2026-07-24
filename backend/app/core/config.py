@@ -71,6 +71,11 @@ class Settings(BaseSettings):
         "580beca0-e87e-4dd4-9e8a-0bd92773f4a6/download/"
         "precio_mayorista_fruta-hortaliza_2026.csv"
     )
+    # Fallback via CKAN API (mismo dataset, URL dinámica) (#175).
+    odepa_fallback_urls: str = (
+        "https://datos.odepa.gob.cl/api/3/action/datastore_search?"
+        "resource_id=580beca0-e87e-4dd4-9e8a-0bd92773f4a6&limit=32000"
+    )
     # Productos a sincronizar, separados por coma (lowercase).
     # "*" = sincronizar TODOS los productos del CSV (60+ productos ODEPA).
     odepa_productos: str = "*"
