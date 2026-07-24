@@ -201,7 +201,7 @@ se aplican todos los fixes. Estos NO son bugs — son condiciones del sistema
 que el equipo debe conocer:
 
 - Limitaciones conocidas del stack (ej. "SQLite no soporta concurrencia alta")
-- Dependencias externas (ej. "OpenWeatherMap API puede rate-limitar en hora peak")
+- Dependencias externas (ej. "OpenMeteo API puede fallar en zonas sin internet")
 - Trade-offs aceptados (ej. "Whisper small sacrifica precisión por velocidad")
 - Riesgos de integración (ej. "Open-WA requiere reinicio si WhatsApp Web se desconecta")
 

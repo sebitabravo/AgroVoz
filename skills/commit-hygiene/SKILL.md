@@ -42,7 +42,7 @@ Regex de validación:
 | openwa | `app/services/` Open-WA, webhook, HMAC |
 | landing | `landing/` (Astro) |
 | admin | `app/admin/` (Jinja2 + HTMX) |
-| datos | `app/jobs/` ODEPA sync, OpenWeatherMap |
+| datos | `app/jobs/` ODEPA sync, OpenMeteo |
 | infra | Docker, Dokploy, VPS, scripts/ |
 | ci | `.github/workflows/` |
 | config | `.env`, `pyproject.toml`, Makefile |

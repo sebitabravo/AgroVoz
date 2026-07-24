@@ -10,9 +10,9 @@ Cuando un cambio afecta arquitectura, stack, restricciones o plan de fases.
 
 | Doc | Contenido |
 |---|---|
-| `AGENTS.md` | Stack, hard constraints, convenciones, estructura, comando |
+| `AGENTS.md` | Stack, hard constraints, convenciones, estructura, comandos |
 | `docs/ARCHITECTURE.md` | Flujo, ADRs, schema DB, decisiones técnicas |
-| `docs/phases/0X-*.md` | Qué hacer y en qué orden (plan de ejecución) |
+| `docs/DEV-GUIDE.md` | Guía de desarrollo y setup local |
 | `CONTRIBUTING.md` | Cómo trabajamos en GitHub (issues, PR, review) |
 | `README.md` | Pitch corto + setup rápido |
 
@@ -25,7 +25,7 @@ Cuando un cambio afecta arquitectura, stack, restricciones o plan de fases.
 | Decisión técnica significativa | `docs/ARCHITECTURE.md` (sección ADR) |
 | Cambio de schema DB | migración Alembic + `docs/ARCHITECTURE.md` |
 | Nuevo endpoint / flujo | `docs/ARCHITECTURE.md` (diagrama) |
-| Fase completada | marcar done en `docs/phases/0X-*.md` |
+| Fase completada | actualizar `AGENTS.md` (tabla de fases) |
 | Convención de código nueva | `AGENTS.md` (convenciones) + skill |
 | Workflow GitHub nuevo | `CONTRIBUTING.md` + skill |
 
@@ -51,7 +51,7 @@ no Twilio?) se documenta en `docs/ARCHITECTURE.md` sección Decisiones:
 - Cambiar de Twilio a Open-WA en código pero dejar docs hablando de Twilio.
 - Agregar endpoint sin actualizar diagrama de flujo.
 - Documentar decisión solo en el PR (se pierde). → copiar a `docs/ARCHITECTURE.md`.
-- Drift entre `AGENTS.md` (dice X) y `docs/phases/` (dice Y). → reconciliar.
+- Drift entre `AGENTS.md` (dice X) y `docs/ARCHITECTURE.md` (dice Y). → reconciliar.
 
 ## Cookbook
 
@@ -59,5 +59,5 @@ no Twilio?) se documenta en `docs/ARCHITECTURE.md` sección Decisiones:
 |---|---|
 | Agregás campo a la DB | migración + actualizar doc de schema |
 | Cambiás modelo Whisper (small → tiny) | ADR con motivo (latencia vs precisión) |
-| Nueva fase o cambio de plan | `docs/phases/` |
+| Nueva feature o cambio de arquitectura | `AGENTS.md` + `docs/ARCHITECTURE.md` |
 | Hard constraint nueva (ej: PII) | `AGENTS.md` hard constraints |

@@ -23,7 +23,7 @@ Productor → WhatsApp (audio) → Open-WA → VPS Hetzner CX43
 ## Fuentes de datos
 
 - **ODEPA** — CSV de precios agrícolas, cron `sync_odepa.py` diario 06:00 AM → SQLite
-- **OpenWeatherMap** — API gratuita (60 calls/min), clima en tiempo real
+- **OpenMeteo** — API gratuita (sin API key, 10.000 req/día), forecast + histórico
 
 ## Decisiones de arquitectura clave (ADRs)
 

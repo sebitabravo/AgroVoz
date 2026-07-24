@@ -1,6 +1,6 @@
 # AgroVoz — LLM-friendly project overview
 
-> Asistente de IA que responde por voz a través de WhatsApp para pequeños agricultores chilenos. Recibe audio, consulta precios agrícolas (ODEPA) y clima (OpenWeatherMap/OpenMeteo), y responde con voz. Sin app, sin lectura, sin escritura.
+> Asistente de IA que responde por voz a través de WhatsApp para pequeños agricultores chilenos. Recibe audio, consulta precios agrícolas (ODEPA) y clima (OpenMeteo), y responde con voz. Sin app, sin lectura, sin escritura.
 >
 > Proyecto estudiantil INACAP Temuco — Desafío Crea 2026. MVP funcional implementado con pipeline E2E de voz, landing page y dashboard admin.
 
@@ -14,7 +14,7 @@
 | Admin | Jinja2 + HTMX (server-side, parte del backend) |
 | Infra | Docker Compose, Dokploy (PaaS con Traefik + Let's Encrypt SSL), VPS Hetzner CX43 |
 | WhatsApp | Open-WA (gateway self-hosted, gratuito, protocolo WhatsApp Web) |
-| APIs externas | OpenMeteo (gratuito, 10.000 req/día, sin API key), OpenWeatherMap (gratuito, 60 calls/min), ODEPA (CSV datos abiertos, cron diario 06:00 AM) |
+| APIs externas | OpenMeteo (gratuito, 10.000 req/día, sin API key), ODEPA (CSV datos abiertos, cron diario 06:00 AM) |
 | CI/CD | GitHub Actions |
 
 ## Estructura de carpetas
@@ -26,7 +26,8 @@ AgroVoz/
 ├── landing/                  ← Astro static site
 ├── docs/
 │   ├── ARCHITECTURE.md       ← Arquitectura detallada, ADRs, schema DB, flujo E2E
-│   └── phases/               ← Instrucciones por fase (00–06)
+│   ├── DEV-GUIDE.md          ← Guía de desarrollo y setup
+│   └── piloto/               ← Kit operativo del piloto Traiguén
 ├── skills/                   ← Guías de trabajo del equipo (leer ANTES de codear)
 ├── scripts/                  ← provision-vps.sh, smoke-test.sh
 ├── docker-compose.yml        ← Dev
@@ -71,7 +72,8 @@ make clean            # Limpiar temporales
 
 - [`AGENTS.md`](./AGENTS.md) — fuente de verdad: stack, constraints, fases, reglas de trabajo, skills del equipo
 - [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — diagramas, flujo E2E, ADRs, schema DB, decisiones técnicas
-- [`docs/phases/`](./docs/phases/) — instrucciones detalladas por fase de desarrollo (00–06)
+- [`docs/DEV-GUIDE.md`](./docs/DEV-GUIDE.md) — guía de desarrollo y setup local
+- [`docs/piloto/`](./docs/piloto/) — kit operativo del piloto Traiguén
 - [`skills/`](./skills/) — guías de trabajo: issues, branches, commits, Python, tests, docs alineados
 
 Para el contexto completo que un agente AI necesita, leer AGENTS.md primero, luego docs/ARCHITECTURE.md.
