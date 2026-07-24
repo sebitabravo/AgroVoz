@@ -31,9 +31,7 @@ _TOOL_SCOPES: dict[str, str] = {
 def _check_scope(tool_name: str, api_key_scope: str) -> bool:
     """Verifica que la API key tenga scope suficiente para la tool."""
     required = _TOOL_SCOPES.get(tool_name, "admin:write")
-    if required == "admin:write" and api_key_scope != "admin:write":
-        return False
-    return True
+    return not (required == "admin:write" and api_key_scope != "admin:write")
 
 
 @router.post("/tools")
