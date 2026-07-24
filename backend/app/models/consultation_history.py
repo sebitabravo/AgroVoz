@@ -6,7 +6,8 @@ explícito (opt-in vía user_prefs.dataset_consent).
 Cumplimiento Ley 21.719:
 - Sin consentimiento → stateless (comportamiento actual).
 - Borrado a pedido → irreversible, registrado en auditoría.
-- Recordatorios proactivos → opt-in separado (reminders_opt_in).
+- Retención: mientras dure el piloto (4 semanas Traiguén).
+  Para producción, definir TTL automático.
 """
 
 from __future__ import annotations

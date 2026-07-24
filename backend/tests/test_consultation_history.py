@@ -1,4 +1,6 @@
-"""Tests para modelo ConsultationHistory (issue #195)."""
+"""Tests para historial de consultas con consentimiento (issue #195)."""
+
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -6,107 +8,143 @@ from sqlalchemy.orm import Session
 
 from app.core.database import Base
 from app.models.consultation_history import ConsultationHistory
+from app.models.user_prefs import UserPrefs
+from app.services.consultation_history_service import (
+    delete_history,
+    get_history,
+    save_to_history_if_consented,
+)
 
 
 @pytest.fixture
-def session() -> Session:
-    """Sesión SQLite en memoria para tests."""
-    engine = create_engine("sqlite:///:memory:", echo=False)
-    Base.metadata.create_all(engine)
-    with Session(engine) as s:
-        yield s
+def engine():
+    """Engine SQLite en memoria."""
+    eng = create_engine("sqlite:///:memory:", echo=False)
+    Base.metadata.create_all(eng)
+    return eng
 
 
-class TestConsultationHistoryModel:
-    """Verifica el modelo ConsultationHistory."""
+def _create_session(engine):
+    """Factory de sesión para monkeypatch."""
+    return Session(engine)
 
-    def test_crear_registro(self, session: Session) -> None:
-        """Debe poder crear un registro de historial."""
-        entry = ConsultationHistory(
-            phone_hash="abc123def456",
-            query_text="¿a cómo está la papa?",
-            response_text="La papa está a $500 el kilo en Santiago.",
-            producto="papa",
-            intent="precio",
-        )
-        session.add(entry)
-        session.commit()
-        assert entry.id is not None
 
-    def test_consultar_por_phone_hash(self, session: Session) -> None:
-        """Debe poder consultar historial por phone_hash."""
-        session.add(
-            ConsultationHistory(
-                phone_hash="hash1",
-                query_text="precio papa",
-                response_text="respuesta",
-                intent="precio",
+class TestSaveWithConsent:
+    """Verifica que solo guarde con consentimiento."""
+
+    def test_con_consentimiento_guarda(self, engine) -> None:
+        with Session(engine) as s:
+            s.add(UserPrefs(
+                phone_hash="hash_ok", comuna="Traiguén", dataset_consent=True
+            ))
+            s.commit()
+
+        with patch(
+            "app.services.consultation_history_service.SessionLocal",
+            lambda: _create_session(engine),
+        ):
+            result = save_to_history_if_consented(
+                "hash_ok", "precio papa", "respuesta", "precio", "papa"
             )
-        )
-        session.add(
-            ConsultationHistory(
-                phone_hash="hash1",
-                query_text="clima",
-                response_text="respuesta clima",
-                intent="clima",
-            )
-        )
-        session.add(
-            ConsultationHistory(
-                phone_hash="hash2",
-                query_text="otro",
-                response_text="otra respuesta",
-                intent="desconocido",
-            )
-        )
-        session.commit()
+            assert result is True
 
-        stmt = (
-            select(ConsultationHistory)
-            .where(ConsultationHistory.phone_hash == "hash1")
-            .order_by(ConsultationHistory.created_at.asc())
-        )
-        results = session.scalars(stmt).all()
-        assert len(results) == 2
+    def test_sin_consentimiento_no_guarda(self, engine) -> None:
+        with Session(engine) as s:
+            s.add(UserPrefs(
+                phone_hash="hash_no", comuna="Traiguén", dataset_consent=False
+            ))
+            s.commit()
 
-    def test_borrar_historial(self, session: Session) -> None:
-        """Debe poder borrar todo el historial de un phone_hash."""
-        session.add(
-            ConsultationHistory(
-                phone_hash="borrar_hash",
-                query_text="test",
-                response_text="test",
-                intent="test",
+        with patch(
+            "app.services.consultation_history_service.SessionLocal",
+            lambda: _create_session(engine),
+        ):
+            result = save_to_history_if_consented(
+                "hash_no", "precio papa", "respuesta", "precio", "papa"
             )
-        )
-        session.commit()
-        assert session.scalar(
-            select(ConsultationHistory).where(
-                ConsultationHistory.phone_hash == "borrar_hash"
-            )
-        ) is not None
+            assert result is False
 
-        # Borrar
-        session.query(ConsultationHistory).filter(
-            ConsultationHistory.phone_hash == "borrar_hash"
-        ).delete()
-        session.commit()
-        assert session.scalar(
-            select(ConsultationHistory).where(
-                ConsultationHistory.phone_hash == "borrar_hash"
+    def test_usuario_sin_prefs_no_guarda(self, engine) -> None:
+        with patch(
+            "app.services.consultation_history_service.SessionLocal",
+            lambda: _create_session(engine),
+        ):
+            result = save_to_history_if_consented(
+                "no_existe", "test", "test", "test"
             )
-        ) is None
+            assert result is False
 
-    def test_producto_nullable(self, session: Session) -> None:
-        """El campo producto debe aceptar None."""
-        entry = ConsultationHistory(
-            phone_hash="hash3",
-            query_text="¿cómo está el clima?",
-            response_text="Soleado, 22°C.",
-            producto=None,
-            intent="clima",
-        )
-        session.add(entry)
-        session.commit()
-        assert entry.producto is None
-        assert entry.id is not None
+
+class TestDeleteHistory:
+    """Verifica borrado a pedido."""
+
+    def test_borrar_historial(self, engine) -> None:
+        with Session(engine) as s:
+            s.add(UserPrefs(
+                phone_hash="hash_del", comuna="Traiguén", dataset_consent=True
+            ))
+            s.add_all([
+                ConsultationHistory(
+                    phone_hash="hash_del", query_text="q1",
+                    response_text="r1", intent="precio",
+                ),
+                ConsultationHistory(
+                    phone_hash="hash_del", query_text="q2",
+                    response_text="r2", intent="clima",
+                ),
+            ])
+            s.commit()
+
+        with patch(
+            "app.services.consultation_history_service.SessionLocal",
+            lambda: _create_session(engine),
+        ):
+            count = delete_history("hash_del")
+            assert count == 2
+
+    def test_borrar_sin_historial(self, engine) -> None:
+        with patch(
+            "app.services.consultation_history_service.SessionLocal",
+            lambda: _create_session(engine),
+        ):
+            count = delete_history("sin_historial")
+            assert count == 0
+
+
+class TestGetHistory:
+    """Verifica lectura de historial."""
+
+    def test_get_history_vacio(self, engine) -> None:
+        with patch(
+            "app.services.consultation_history_service.SessionLocal",
+            lambda: _create_session(engine),
+        ):
+            result = get_history("no_existe")
+            assert result == []
+
+    def test_get_history_con_datos(self, engine) -> None:
+        with Session(engine) as s:
+            s.add(UserPrefs(
+                phone_hash="hash_get", comuna="Traiguén", dataset_consent=True
+            ))
+            s.add_all([
+                ConsultationHistory(
+                    phone_hash="hash_get", query_text="q1",
+                    response_text="r1", intent="precio", producto="papa",
+                ),
+                ConsultationHistory(
+                    phone_hash="hash_get", query_text="q2",
+                    response_text="r2", intent="clima",
+                ),
+            ])
+            s.commit()
+
+        with patch(
+            "app.services.consultation_history_service.SessionLocal",
+            lambda: _create_session(engine),
+        ):
+            result = get_history("hash_get", limit=10)
+            assert len(result) == 2
+            assert result[0]["query"] == "q2"  # Más reciente primero
+            assert result[0]["intent"] == "clima"
+            assert result[1]["producto"] == "papa"
