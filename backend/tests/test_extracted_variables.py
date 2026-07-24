@@ -52,34 +52,41 @@ class TestExtractVariablesDegradacion:
     """Tests de degradación del método _extract_variables."""
 
     def test_flag_off_usa_keyword_matching(self) -> None:
-        """Con use_typed=False, debe degradar a keyword matching."""
+        """Consulta de precio detecta producto y consulta_tipo='precio'."""
         result = AgroVozPipeline._extract_variables(
-            "precio de la papa en Santiago", use_typed=False,
+            "precio de la papa en Santiago",
         )
         assert isinstance(result, ExtractedVariables)
-        # Con keyword matching, el tipo siempre es "desconocido"
-        assert result.consulta_tipo == "desconocido"
-
-    def test_flag_off_detecta_producto(self) -> None:
-        """Con use_typed=False, debe detectar producto por keyword."""
-        result = AgroVozPipeline._extract_variables(
-            "¿a cómo está la papa?", use_typed=False,
-        )
         assert result.producto == "papa"
+        assert result.consulta_tipo == "precio"
 
-    def test_flag_off_producto_no_encontrado(self) -> None:
-        """Si no hay producto reconocible, producto debe ser None."""
-        result = AgroVozPipeline._extract_variables(
-            "hola buenos días", use_typed=False,
-        )
+    def test_detecta_producto(self) -> None:
+        """Debe detectar producto por keyword."""
+        result = AgroVozPipeline._extract_variables("¿a cómo está la papa?")
+        assert result.producto == "papa"
+        assert result.consulta_tipo == "precio"
+
+    def test_producto_no_encontrado(self) -> None:
+        """Sin producto ni keywords reconocibles: producto None, tipo desconocido."""
+        result = AgroVozPipeline._extract_variables("hola buenos días")
         assert result.producto is None
-
-    def test_flag_on_comportamiento_actual(self) -> None:
-        """Con use_typed=True, actualmente también degrada a keywords
-        (la extracción LLM se implementará en iteración futura)."""
-        result = AgroVozPipeline._extract_variables(
-            "precio papa", use_typed=True,
-        )
-        assert isinstance(result, ExtractedVariables)
-        assert result.producto == "papa"
         assert result.consulta_tipo == "desconocido"
+
+    def test_consulta_clima(self) -> None:
+        """Consulta de clima infiere consulta_tipo='clima'."""
+        result = AgroVozPipeline._extract_variables(
+            "¿va a llover mañana en Traiguén?",
+        )
+        assert result.consulta_tipo == "clima"
+
+    def test_consulta_ambos(self) -> None:
+        """Consulta mixta (precio + clima) infiere consulta_tipo='ambos'."""
+        result = AgroVozPipeline._extract_variables(
+            "¿a cuánto la papa y cómo va a estar el clima?",
+        )
+        assert result.consulta_tipo == "ambos"
+
+    def test_keyword_precio_sin_producto(self) -> None:
+        """Keyword de precio sin producto explícito igual infiere 'precio'."""
+        result = AgroVozPipeline._extract_variables("¿cuánto cuesta el kilo?")
+        assert result.consulta_tipo == "precio"

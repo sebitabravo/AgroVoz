@@ -1,1 +1,0 @@
-"""Tareas programadas (cron jobs)."""
