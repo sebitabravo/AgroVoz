@@ -258,3 +258,22 @@ CREATE INDEX idx_consultations_created ON consultations(created_at);
     Twilio Programmable Voice. Post-MVP: el agricultor llama, dicta su consulta
     y recibe respuesta de voz. Requiere presupuesto para Twilio (~$0.013/min).
     No implementado en MVP — documentado como opción futura.
+
+20. **WhatsApp: seguir con Open-WA, no migrar a Kapso (#194).** Se evaluó
+    Kapso, WaliChat y Wassenger como APIs WhatsApp que no requieren mantener
+    una instancia de browser (ver `docs/spike-kapso.md`). Todas rompen el
+    hard constraint "sin APIs pagas externas" (USD 20-50/mes por número).
+    **Decisión: seguir con Open-WA** (gratuito, self-hosted). Reconsiderar
+    Kapso solo si se cumplen 3 condiciones: (a) el piloto Traiguén muestra
+    caídas frecuentes de Open-WA que requieran intervención manual, (b) hay
+    presupuesto institucional (B2G) que absorba el costo, (c) el costo por
+    agricultor se mantiene bajo CLP 150/mes.
+
+21. **MCP server de gestión (#193) — andamiaje post-MVP.** Se creó la base
+    de un MCP server (`app/mcp/router.py`) con autenticación por API key
+    (`secrets.compare_digest` contra `settings.mcp_admin_key`/`mcp_api_key`)
+    y scopes granulares (read / admin:write). **No está montado en `main.py`
+    ni tiene los handlers de tools implementados (son stubs).** Complementa,
+    no reemplaza, el dashboard admin Jinja2+HTMX ya existente. Se activará
+    solo si el equipo valida que prefiere gestionar por Claude Code vs. el
+    dashboard.

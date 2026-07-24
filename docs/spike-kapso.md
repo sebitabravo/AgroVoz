@@ -75,6 +75,6 @@ soporte nativo de audio y SDK Python.
 
 ## Decisión
 
-Pendiente de registrar en `docs/ARCHITECTURE.md` sección Decisiones.
-Por ahora: seguir con Open-WA. Solo reconsiderar si el piloto muestra
-inestabilidad y hay presupuesto institucional.
+Registrada en `docs/ARCHITECTURE.md` sección Decisiones como #20:
+seguir con Open-WA. Solo reconsiderar si el piloto muestra inestabilidad
+y hay presupuesto institucional que absorba el costo de una API paga.
