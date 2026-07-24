@@ -27,7 +27,10 @@ class ConsultationHistory(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     phone_hash: Mapped[str] = mapped_column(
-        String(64), ForeignKey("user_prefs.phone_hash"), nullable=False, index=True
+        String(64),
+        ForeignKey("user_prefs.phone_hash", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     query_text: Mapped[str] = mapped_column(Text, nullable=False)
     response_text: Mapped[str] = mapped_column(Text, nullable=False)

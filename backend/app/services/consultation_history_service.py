@@ -16,7 +16,6 @@ que se active AGROVOZ_CONSULTATION_HISTORY.
 
 from __future__ import annotations
 
-import json
 import logging
 
 from sqlalchemy import select
@@ -123,7 +122,7 @@ def delete_history(phone_hash: str) -> int:
         session.close()
 
 
-def get_history(phone_hash: str, limit: int = 5) -> list[dict]:
+def get_history(phone_hash: str, limit: int = 5) -> list[dict[str, object]]:
     """Obtiene las últimas consultas de un agricultor.
 
     Args:
