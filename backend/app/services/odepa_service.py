@@ -1260,7 +1260,7 @@ def calculate_margin_for_llm(
 
 
 _GASTOS_LOCK = threading.Lock()
-_GASTOS_FILE = Path(__file__).resolve().parent.parent / "data" / "gastos.jsonl"
+_GASTOS_FILE = Path(__file__).resolve().parent.parent.parent / "data" / "gastos.jsonl"
 
 
 def register_expense_for_llm(
