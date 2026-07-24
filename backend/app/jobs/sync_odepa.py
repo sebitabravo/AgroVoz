@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # que grepee ese archivo.
 _FALLOS_CONSECUTIVOS_PARA_ALERTA = 3
 
-_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 _TS_FILE = _DATA_DIR / ".odepa_last_sync"
 _FAIL_COUNT_FILE = _DATA_DIR / ".odepa_fail_count"
 
