@@ -74,10 +74,22 @@ def get_system_stats() -> SystemStats:
 
     cpu_percent(interval=None) retorna el uso desde la última llamada
     (o 0.0 la primera vez). Aceptable para polling del dashboard.
+
+    Si /proc no está disponible (container sin acceso al host), retorna
+    SystemStats con valores cero — el dashboard muestra "N/D".
     """
-    cpu = psutil.cpu_percent(interval=None)
-    mem = psutil.virtual_memory()
-    disk = psutil.disk_usage(_DISK_PATH)
+    try:
+        cpu = psutil.cpu_percent(interval=None)
+    except (FileNotFoundError, OSError, PermissionError):
+        cpu = 0.0
+    try:
+        mem = psutil.virtual_memory()
+    except (FileNotFoundError, OSError, PermissionError):
+        mem = type("_Mem", (), {"percent": 0.0, "used": 0, "total": 0})()
+    try:
+        disk = psutil.disk_usage(_DISK_PATH)
+    except (FileNotFoundError, OSError, PermissionError):
+        disk = type("_Disk", (), {"percent": 0.0, "used": 0, "total": 0})()
     return SystemStats(
         cpu_percent=round(cpu, 1),
         ram_percent=round(mem.percent, 1),
@@ -182,6 +194,14 @@ def _check_odepa_data() -> ServiceCheck:
     detalle = f"{ultima_fecha.isoformat()} · {total} filas"
     if dias > 7:
         return ServiceCheck("ODEPA Datos", False, f"{detalle} · {dias}d sin actualizar")
+    # Alerta temprana: sync no corrió en >3 días (#176).
+    try:
+        from app.jobs.sync_odepa import get_sync_stale_hours
+        stale = get_sync_stale_hours()
+        if stale is not None and stale > 72:
+            return ServiceCheck("ODEPA Datos", False, f"{detalle} · sync {stale:.0f}h atrasado")
+    except ImportError:
+        pass
     return ServiceCheck("ODEPA Datos", True, detalle)
 
 

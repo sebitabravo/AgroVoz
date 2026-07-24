@@ -112,6 +112,7 @@ WHITELIST_TOOLS = frozenset(
         "get_weather",
         "get_clima_historico",
         "search_corpus",
+        "register_expense",
     }
 )
 
@@ -488,6 +489,36 @@ TOOLS: list[dict[str, object]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "register_expense",
+            "description": (
+                "USAR para REGISTRAR GASTOS del agricultor. "
+                "Cuando reporte que GASTO, COMPRO o PAGO dinero en insumos, "
+                "semillas, fertilizantes o transporte. "
+                "Ej: 'gaste 50 lucas en semilla de papa', 'pague 100 lucas de flete'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "producto": {
+                        "type": "string",
+                        "description": "Producto o cultivo (ej: papa, tomate, general)",
+                    },
+                    "concepto": {
+                        "type": "string",
+                        "description": "En que gasto (ej: semilla, abono, flete)",
+                    },
+                    "monto": {
+                        "type": "string",
+                        "description": "Monto en pesos chilenos (ej: 50000)",
+                    },
+                },
+                "required": ["producto", "concepto", "monto"],
+            },
+        },
+    },
 ]
 
 # Generar _TOOLS_LINES desde TOOLS (una fuente de verdad).
@@ -624,6 +655,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         get_price_for_llm,
         get_price_history_for_llm,
         get_price_spread_for_llm,
+        register_expense_for_llm,
     )
     from app.services.rag_service import search_corpus_for_llm
     from app.services.weather_service import get_clima_historico, get_weather
@@ -637,6 +669,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         "get_weather": get_weather,
         "get_clima_historico": get_clima_historico,
         "search_corpus": search_corpus_for_llm,
+        "register_expense": register_expense_for_llm,
     }
 
 
@@ -681,8 +714,9 @@ async def _execute_tool(
 
     # Filtrar argumentos alucinados por el LLM contra la firma real del handler.
     # Evita TypeError cuando el LLM inventa params que el handler no acepta.
-    # Inyectar phone_hash para tools de precio (Issue #89: mercado cercano).
-    if name in ("get_price", "get_price_history") and phone_hash:
+    # Inyectar phone_hash: tools de precio (Issue #89: mercado cercano) y
+    # register_expense (Issue #170: scoping de gastos por agricultor).
+    if name in ("get_price", "get_price_history", "register_expense") and phone_hash:
         arguments = {**arguments, "phone_hash": phone_hash}
     valid_args = _filter_handler_args(handler, arguments)
 

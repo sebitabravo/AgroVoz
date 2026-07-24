@@ -18,6 +18,24 @@
     Arial, sans-serif;
 }
 
+/* Skip-to-content link (accesibilidad: WCAG 2.4.1 Bypass Blocks). */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 16px;
+  z-index: 9999;
+  padding: 10px 20px;
+  background: var(--color-accent);
+  color: #fff;
+  border-radius: 6px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: top 0.2s;
+}
+.skip-link:focus {
+  top: 16px;
+}
+
 /* ---- Reset ---- */
 *,
 *::before,

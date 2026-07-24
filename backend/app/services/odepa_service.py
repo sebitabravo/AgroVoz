@@ -12,11 +12,14 @@ batch completo solo falla si faltan columnas requeridas (schema roto).
 import csv
 import datetime
 import io
+import json
 import logging
 import re
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from pathlib import Path
 
 import httpx
 from sqlalchemy import func, select
@@ -183,6 +186,64 @@ async def download_csv(url: str, timeout: float = _TIMEOUT_SEGUNDOS) -> str:
         raise OdepaSyncError(f"ODEPA devolvió HTML en vez de CSV. ¿Cambió la URL? ({url})")
 
     return texto
+
+
+async def download_csv_with_fallback(timeout: float = _TIMEOUT_SEGUNDOS) -> str:
+    """Descarga el CSV ODEPA con fallback a la API CKAN si la URL principal falla (#175).
+
+    Intenta primero ``settings.odepa_csv_url`` (comportamiento actual, sin
+    cambios). Si falla, intenta ``settings.odepa_fallback_urls`` — un
+    endpoint CKAN ``datastore_search`` que devuelve JSON en vez de CSV —
+    y reserializa los registros como CSV para reusar el mismo parser
+    (misma detección de columnas por palabra clave, sin duplicar lógica).
+    """
+    try:
+        return await download_csv(settings.odepa_csv_url, timeout=timeout)
+    except OdepaSyncError as exc_primaria:
+        logger.warning("URL primaria ODEPA falló (%s). Probando fallback CKAN.", exc_primaria)
+        try:
+            return await _download_csv_via_ckan(settings.odepa_fallback_urls, timeout=timeout)
+        except OdepaSyncError as exc_fallback:
+            raise OdepaSyncError(
+                f"Fallaron URL primaria y fallback CKAN. Primaria: {exc_primaria}. Fallback: {exc_fallback}"
+            ) from exc_fallback
+
+
+async def _download_csv_via_ckan(url: str, timeout: float) -> str:
+    """Descarga precios vía CKAN datastore_search y los re-serializa como CSV.
+
+    NOTA: la correspondencia de nombres de columna entre el CSV principal
+    y los campos que devuelve datastore_search asume que CKAN expone el
+    mismo nombre de columna del recurso original. Validar contra la API
+    real antes de confiar en esto en producción — no hay forma de
+    verificarlo sin acceso a datos.odepa.gob.cl en este entorno.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.get(url, follow_redirects=True)
+            response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise OdepaSyncError(f"CKAN respondió HTTP {exc.response.status_code} para {url}") from exc
+    except httpx.RequestError as exc:
+        raise OdepaSyncError(f"Error de red en fallback CKAN: {exc}") from exc
+
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise OdepaSyncError("Fallback CKAN no devolvió JSON válido") from exc
+
+    if not isinstance(data, dict) or not data.get("success"):
+        raise OdepaSyncError("Fallback CKAN respondió success=false o formato inesperado")
+
+    records = data.get("result", {}).get("records", [])
+    if not records:
+        raise OdepaSyncError("Fallback CKAN sin registros")
+
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=list(records[0].keys()))
+    writer.writeheader()
+    writer.writerows(records)
+    return buffer.getvalue()
 
 
 def _resolver_columna(headers: Sequence[str], claves: tuple[str, ...]) -> str | None:
@@ -455,7 +516,7 @@ async def sync_odepa(session: Session | None = None) -> SyncResult:
 
     _ok = False
     try:
-        contenido = await download_csv(settings.odepa_csv_url)
+        contenido = await download_csv_with_fallback()
         registros = parse_csv(contenido, settings.odepa_productos_list)
 
         if not registros:
@@ -1195,6 +1256,58 @@ def calculate_margin_for_llm(
         f"{_formatear_pesos(precio_referencia_total)}. "
         f"{mensaje_diferencia}, un {pct_str} por ciento {direccion} "
         f"del precio de referencia."
+    )
+
+
+_GASTOS_LOCK = threading.Lock()
+_GASTOS_FILE = Path(__file__).resolve().parent.parent / "data" / "gastos.jsonl"
+
+
+def register_expense_for_llm(
+    session: Session,
+    producto: str,
+    concepto: str,
+    monto: str,
+    phone_hash: str = "",
+) -> str:
+    """Tool function: registra un gasto del agricultor para seguimiento (#170).
+
+    Usado cuando el agricultor reporta un gasto por voz: compra de insumos,
+    semillas, fertilizantes, transporte, etc. Almacena en archivo JSON lines
+    para MVP (sin DB separada). ``phone_hash`` scoped por agricultor —
+    ver inyección en ``_execute_tool`` (llm_service.py).
+
+    Retorna confirmacion en espanol chileno listo para TTS.
+    """
+    try:
+        monto_dec = Decimal(str(monto).strip().replace(",", ".").replace("$", "").replace(" ", ""))
+    except InvalidOperation:
+        return "No entendí el monto gastado. ¿Podrías repetir cuánto fue?"
+    if monto_dec <= 0:
+        return "El monto tiene que ser mayor a cero. ¿Podrías repetir cuánto gastaste?"
+
+    gasto: dict[str, object] = {
+        "phone_hash": phone_hash or "anonimo",
+        "producto": producto.strip(),
+        "concepto": concepto.strip(),
+        "monto": str(monto_dec),
+        "fecha": datetime.datetime.now().isoformat(),
+    }
+
+    try:
+        with _GASTOS_LOCK:
+            _GASTOS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            existe = _GASTOS_FILE.exists()
+            with open(_GASTOS_FILE, "a", encoding="utf-8") as f:
+                f.write(json.dumps(gasto, ensure_ascii=False) + "\n")
+            if not existe:
+                _GASTOS_FILE.chmod(0o600)
+    except OSError:
+        return "Tuve un problema al guardar el gasto. ¿Probamos de nuevo?"
+
+    return (
+        f"Listo. Registré {concepto.strip()} por {monto_dec} pesos "
+        f"para {producto.strip()}. Tus gastos quedan guardados."
     )
 
 
