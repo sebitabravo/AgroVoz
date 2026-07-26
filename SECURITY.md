@@ -1,16 +1,21 @@
 # Política de Seguridad — AgroVoz
 
-> Última actualización: 2026-06-17
-> Repositorio privado. Proyecto estudiantil Desafío Crea INACAP 2026.
+> Última actualización: 2026-07-26
+> Repositorio privado. Proyecto INACAP Temuco, Desafío Crea 2026.
 
-## Versiones soportadas
+## Alcance
 
-AgroVoz está en etapa MVP implementado — pipeline E2E de voz funcionando, landing page y dashboard admin. El piloto de validación con 3-5 productores en Traiguén está en preparación.
+AgroVoz es un producto desplegado y en operación: pipeline E2E de voz y texto, catálogo ODEPA
+completo, alertas proactivas, dashboard admin, landing. El piloto de validación con 3-5 productores
+en Traiguén está en preparación.
 
-| Versión         | Soporte de seguridad                          |
-| --------------- | --------------------------------------------- |
-| MVP (actual) | ✅ Parches de seguridad y actualizaciones |
-| Pre-MVP (completado) | ✅ Tooling de seguridad configurado |
+**Estar desplegado cambia el modelo de riesgo:** desde que el piloto arranque se procesan datos
+personales de personas reales, y las obligaciones de la Ley 21.719 dejan de ser teóricas.
+
+| Componente | Soporte de seguridad |
+| --- | --- |
+| Backend en producción | ✅ Parches y actualizaciones |
+| Landing y dashboard admin | ✅ Parches y actualizaciones |
 
 ## Cómo reportar una vulnerabilidad
 
@@ -32,7 +37,7 @@ Si encontrás una vulnerabilidad en el código, dependencias o infraestructura:
 
 Una vez que AgroVoz sea público (post-clasificación Crea INACAP), se habilitará
 GitHub Private Vulnerability Reporting. Mientras tanto, contactar a
-`sebastian.bravo13@inacapmail.cl`.
+`sebastian.bravo77@inacapmail.cl`.
 
 ## Modelo de seguridad
 
@@ -41,26 +46,61 @@ GitHub Private Vulnerability Reporting. Mientras tanto, contactar a
 | Dato                        | Nivel de sensibilidad | Protección                                      |
 | --------------------------- | --------------------- | ----------------------------------------------- |
 | Audio de WhatsApp (.ogg)    | Alto (voz del usuario) | Almacenado <24h, nombre UUID, borrado automático |
-| Transcripción de texto      | Medio                  | Anonimizada (sin phone number), sin historial    |
-| Número de teléfono          | Alto (dato personal)   | Hasheado (SHA-256), nunca en logs ni backups     |
+| Transcripción de texto      | Medio                  | Seudonimizada (sin número). Se retiene solo con opt-in explícito |
+| Texto de consulta escrita   | Medio                  | Mismo tratamiento que la transcripción           |
+| Número de teléfono          | Alto (dato personal)   | HMAC-SHA256 con pepper secreto, irreversible sin el pepper. Nunca en texto claro, logs ni backups |
+| Comuna y cultivos declarados | Medio                 | Ligados al hash, no al número                    |
+| Historial de consultas      | Medio                  | Tabla `consultation_history`, **solo con opt-in** (`dataset_consent`) |
+| Preferencia de alertas      | Bajo                   | `alert_consent`, opt-in separado. Sin él no sale ninguna alerta |
 | Consultas de precio/clima   | Bajo                   | Agregadas para métricas, sin PII                 |
 | API keys y credenciales     | Crítico                | `.env` excluido de git, vault en VPS             |
 
+> **Nota honesta sobre la seudonimización.** El hash protege ante una filtración de la base de datos,
+> pero quien controle el servidor puede asociar consultas al número, porque el mensaje entrante lo
+> trae. No es anonimato absoluto y no se presenta como tal.
+
 ### Cumplimiento normativo
 
-- **Ley 21.719** (Protección de Datos Personales, Chile, diciembre 2026):
-  - Phone numbers hasheados (seudonimización).
-  - Audio eliminado del VPS en <24h.
-  - Transcripciones anonimizadas antes de almacenar.
-  - Auditoría formal de cumplimiento antes del escalamiento post-piloto.
+- **Ley 21.719** (Protección de Datos Personales, Chile, vigente desde diciembre 2026):
+  - Números seudonimizados con HMAC-SHA256 y pepper.
+  - Audio eliminado del VPS en menos de 24 h.
+  - Retención de transcripciones solo con consentimiento explícito.
+  - Consentimiento **separado** para alertas proactivas: son comunicación no solicitada y requieren
+    su propia base de licitud.
+  - Auditoría formal de cumplimiento pendiente antes del escalamiento post-piloto.
+
+  Documentos: `docs/legal/politica-privacidad.md`, `docs/legal/aviso-responsabilidad.md` y
+  `docs/piloto/06-acuerdo-consentimiento.md`.
+
+- **Responsabilidad por el dato entregado:** el aviso de responsabilidad se envía en el primer
+  contacto por WhatsApp, en los dos canales. Deja explícito que AgroVoz entrega información y no
+  recomendaciones, y que los precios de ODEPA son de terminal mayorista y no de predio.
 
 ### Principios de seguridad
 
 1. **Zero trust en input externo.** Todo mensaje de WhatsApp se valida (HMAC, rate limit).
 2. **Principio de mínimo privilegio.** El worker del pipeline no tiene acceso a la DB de métricas.
 3. **Sin recomendaciones agronómicas.** El LLM entrega datos, no interpreta. Esto reduce riesgo de responsabilidad por malas decisiones.
-4. **Stack 100% open-source.** Sin APIs pagas externas. Whisper, LLM, TTS y WhatsApp gateway corren localmente en VPS.
-5. **Sin autenticación de usuarios en MVP.** Número WhatsApp = identidad. No se almacenan contraseñas.
+4. **Stack 100% open-source.** Sin APIs pagas externas. Whisper, LLM, TTS y el gateway de WhatsApp
+   corren localmente en el VPS. Las consultas no se envían a OpenAI, Google ni Anthropic.
+5. **Sin autenticación de usuarios.** Número WhatsApp = identidad. No se almacenan contraseñas.
+   Es una decisión de producto (el agricultor no instala ni configura nada), no una omisión: la
+   contrapartida es que quien controle el teléfono controla la sesión.
+6. **Consentimiento por tratamiento, no global.** Usar el sistema, aportar al dataset de voz y
+   recibir alertas son tres permisos distintos y se piden por separado.
+
+### Riesgo declarado: Open-WA
+
+El gateway de WhatsApp es **Open-WA**, un cliente no oficial que opera sobre el protocolo de WhatsApp
+Web. Elimina el costo por mensaje, pero implica dos riesgos que conviene tener escritos:
+
+| Riesgo | Consecuencia |
+| --- | --- |
+| Meta bloquea el cliente o el número | El servicio queda caído hasta migrar a la API oficial |
+| Incumplimiento de los términos de servicio de Meta | Puede ser bloqueante para contratar con una institución pública, que revisa el compliance del proveedor |
+
+Resolver esto es requisito previo a cualquier venta institucional. Ver `docs/negocio/07-estructura-de-costos.md`
+para el impacto financiero de migrar a la API oficial.
 
 ## Dependencias
 

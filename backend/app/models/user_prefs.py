@@ -34,6 +34,13 @@ class UserPrefs(Base):
     (lista de strings, ej: ``["papa", "trigo", "tomate"]``). Se usa para
     personalizar el contexto del LLM cuando el agricultor no especifica
     producto en la consulta (issue #125).
+
+    El flag ``alert_consent`` es independiente de ``dataset_consent`` y controla
+    el envío de alertas proactivas de precio y clima. Va aparte porque es un
+    tratamiento distinto: una alerta es una comunicación que AgroVoz inicia sin
+    que el productor pregunte, y por lo tanto necesita su propia base de licitud.
+    Default ``False``: sin consentimiento registrado no se envía ninguna alerta.
+    Se recoge en la sección 7.3 del Acuerdo de Uso (docs/piloto/06).
     """
 
     __tablename__ = "user_prefs"
@@ -48,6 +55,10 @@ class UserPrefs(Base):
     # Consentimiento explicito para retener audio en el dataset de voz rural.
     # Default False: privacidad por defecto (#96).
     dataset_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Consentimiento explicito para recibir alertas proactivas de precio y clima.
+    # Separado de dataset_consent: es otro tratamiento (comunicacion no solicitada).
+    # Default False: sin opt-in registrado no sale ninguna alerta.
+    alert_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Cultivos de interés del productor, almacenados como JSON en TEXT.
     # Nullable: se capturan durante el onboarding o via admin (issue #125).
     # Ejemplo: '["papa", "trigo", "tomate"]'

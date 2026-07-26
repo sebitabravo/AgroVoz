@@ -31,6 +31,15 @@ class AudioResponse(BaseModel):
         description="Audio de bienvenida para primer contacto. None si no aplica.",
     )
 
+    # Primer contacto, independiente de si se generó audio de bienvenida.
+    # Va separado de welcome_audio_path porque quien escribe no recibe audio
+    # pero SÍ tiene que recibir el aviso de responsabilidad, que es requisito
+    # legal previo al piloto (docs/legal/aviso-responsabilidad.md).
+    es_primer_contacto: bool = Field(
+        default=False,
+        description="True si es el primer mensaje de este número. Dispara el aviso de responsabilidad.",
+    )
+
     model_config = {
         "json_schema_extra": {
             "examples": [
@@ -43,6 +52,7 @@ class AudioResponse(BaseModel):
                     "llm_ms": 4000,
                     "tts_ms": 1300,
                     "welcome_audio_path": None,
+                    "es_primer_contacto": False,
                 }
             ]
         },

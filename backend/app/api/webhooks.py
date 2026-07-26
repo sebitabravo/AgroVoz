@@ -50,6 +50,25 @@ def _is_voice_message(payload: WebhookPayload) -> bool:
     return payload.data.type == "voice"
 
 
+# Largo maximo de un mensaje escrito. Mismo criterio que el demo web: por
+# encima de esto no es una consulta, es un pegado accidental, y el prompt del
+# LLM se dispara.
+_MAX_TEXTO_CHARS = 500
+
+
+def _is_text_message(payload: WebhookPayload) -> bool:
+    """Determina si el mensaje es texto escrito con contenido util.
+
+    Open-WA marca los mensajes escritos como ``type="chat"``; se aceptan
+    tambien "text" y el caso sin tipo pero con body, por tolerancia a cambios
+    del gateway. Se descartan los vacios y los desmedidamente largos.
+    """
+    if payload.data.type not in ("chat", "text", ""):
+        return False
+    cuerpo = payload.data.body.strip()
+    return bool(cuerpo) and len(cuerpo) <= _MAX_TEXTO_CHARS
+
+
 def _extract_audio_bytes(payload: WebhookPayload) -> bytes | None:
     """Extrae el audio base64 inline del payload del webhook.
 
@@ -116,7 +135,30 @@ async def webhook_whatsapp(
         request_id,
     )
 
-    # Solo procesamos notas de voz (type=voice)
+    # Mensajes escritos: se procesan igual que los de voz, pero sin Whisper ni
+    # TTS. El productor no siempre puede mandar audio (lugar ruidoso, reunion,
+    # mala senal), asi que el texto es una via de entrada valida.
+    if _is_text_message(payload):
+        texto = payload.data.body.strip()
+        logger.info(
+            "Mensaje de texto recibido — message_id=%s chat_id_hash=%s chars=%d request_id=%s",
+            message_id_safe,
+            hash_phone(chat_id, settings.phone_hash_pepper) if chat_id else "sin_chat",
+            len(texto),
+            request_id,
+        )
+        background_tasks.add_task(
+            audio_service.process_text,
+            texto=texto,
+            chat_id=chat_id,
+            request_id=request_id,
+        )
+        return JSONResponse(
+            status_code=200,
+            content={"status": "received", "message_id": message_id_safe},
+        )
+
+    # Ni voz ni texto (imagen, sticker, ubicacion, ...): fuera de alcance.
     if not _is_voice_message(payload):
         logger.info(
             "Mensaje no-audio ignorado — message_id=%s type=%s has_body=%s request_id=%s",

@@ -108,12 +108,32 @@ _FEEDBACK_NO_UTIL = [
 
 # Texto fijo de bienvenida para primer contacto (issue #86).
 # No requiere LLM: es un mensaje predefinido sintetizado con TTS.
-# Corto (<200 chars) para que el audio dure <10s y no fatigue al agricultor.
+# Sin tildes a proposito: Piper las verbaliza mal en algunas palabras.
+# Se mencionan las DOS vias de entrada (audio y texto) y se aclara de entrada
+# que entregamos datos y no recomendaciones, que es la limitacion de alcance
+# que el productor firma en el acuerdo de consentimiento (docs/piloto/06).
 _WELCOME_TEXT = (
     "Hola, te doy la bienvenida a AgroVoz. "
-    "Soy un asistente de voz que te ayuda a consultar "
+    "Soy un asistente que te ayuda a consultar "
     "precios de productos agricolas y el clima. "
-    "Solo mandame un audio con tu pregunta y te respondere."
+    "Mandame un audio con tu pregunta, o escribimela si prefieres. "
+    "Te entrego datos oficiales, no consejos: la decision siempre es tuya."
+)
+
+# Aviso de responsabilidad que se envia como TEXTO en el primer contacto.
+# Va aparte del audio de bienvenida a proposito: un descargo legal leido en voz
+# alta es inusable, y en texto el productor puede releerlo o mostrarselo a alguien.
+# Requisito legal previo al piloto — ver docs/legal/aviso-responsabilidad.md.
+WELCOME_DISCLAIMER_TEXT = (
+    "⚠️ Antes de empezar, algo importante:\n\n"
+    "• AgroVoz te entrega precios de ODEPA y clima de Open-Meteo. "
+    "Son datos oficiales, pero son informacion, NO una recomendacion.\n"
+    "• Los precios de ODEPA son de mercados mayoristas (como Lo Valledor en Santiago). "
+    "En tu predio te van a ofrecer menos, porque incluye transporte e intermediacion. "
+    "El dato te sirve para saber cual es el piso del mercado al negociar.\n"
+    "• El dato puede tener horas de antiguedad. Verifica siempre con tu comprador.\n"
+    "• AgroVoz no se hace responsable de las decisiones de venta que tomes.\n\n"
+    "Para asesoria tecnica habla con tu extensionista de PRODESAL o con INDAP."
 )
 
 
@@ -424,6 +444,75 @@ class AgroVozPipeline:
         """
         return await detect_and_handle_alert_command(transcribed_text, phone_hash, wa_chat_id)
 
+    # Marcas de consulta compuesta o conversacional. Si aparecen, el fast-path
+    # no aplica: son casos donde el productor pregunta dos cosas, compara, o
+    # pide una explicacion, y ahi el LLM si aporta.
+    _FAST_PATH_BLOQUEANTES = (
+        " y ademas", " y además", " tambien", " también", " o sea",
+        " por que", " por qué", " porque", " conviene", " me sirve",
+        " comparado", " diferencia", " deberia", " debería", " recomend",
+    )
+
+    # Tope de largo para el fast-path. Una consulta larga suele traer contexto o
+    # varias preguntas; el atajo esta pensado para la pregunta directa y corta.
+    _FAST_PATH_MAX_CHARS = 120
+
+    # Nombres de mercados ODEPA. Si el productor pide un mercado concreto, el
+    # atajo NO sirve: _force_keyword_tool resuelve el mercado por el telefono
+    # del productor y no lee el nombre de la consulta, asi que responderia con
+    # otro mercado (preguntar por Vega Central y recibir Lo Valledor). Esos
+    # casos van al LLM, que si extrae el mercado como parametro de la tool.
+    #
+    # Solo tokens ESPECIFICOS: "mercado" y "feria" a secas son genericos
+    # ("¿a como esta la papa en el mercado?") y deben seguir usando el atajo.
+    _FAST_PATH_MERCADOS = (
+        "vega central", "valledor", "palmera", "femacal", "mapocho",
+        "macroferia", "lagunitas", "limari", "limarí", "chillan", "chillán",
+        "arica", "talca", "puerto montt", "la serena", "la calera",
+    )
+
+    @staticmethod
+    def _puede_usar_fast_path(
+        texto: str,
+        extracted: ExtractedVariables,
+        system_tip: str | None,
+    ) -> bool:
+        """Decide si la consulta puede responderse sin invocar al LLM.
+
+        Solo con certeza total: tipo clasificado como precio o clima, producto
+        identificado si es precio, consulta corta, sin mercado especifico, sin
+        marcas de pregunta compuesta y sin el tip de margen (que necesita
+        razonamiento del LLM).
+
+        Args:
+            texto: Consulta transcrita del agricultor.
+            extracted: Variables tipadas detectadas por ``_extract_variables``.
+            system_tip: Tip de margen si se detecto venta realizada.
+
+        Returns:
+            True si conviene el atajo determinista.
+        """
+        if system_tip is not None:
+            return False
+        if extracted.consulta_tipo not in ("precio", "clima"):
+            return False
+        if extracted.consulta_tipo == "precio" and not extracted.producto:
+            return False
+
+        limpio = texto.strip().lower()
+        if len(limpio) > AgroVozPipeline._FAST_PATH_MAX_CHARS:
+            return False
+
+        if any(m in limpio for m in AgroVozPipeline._FAST_PATH_MERCADOS):
+            return False
+
+        # Se normalizan los signos de apertura y se rodea de espacios para que
+        # las marcas (que llevan espacio inicial, para no matchear dentro de otra
+        # palabra) tambien peguen al principio de la frase: "¿por que ..." debe
+        # detectarse igual que "... por que ...".
+        normalizado = f" {limpio.replace('¿', ' ').replace('¡', ' ')} "
+        return all(marca not in normalizado for marca in AgroVozPipeline._FAST_PATH_BLOQUEANTES)
+
     @staticmethod
     def _load_user_cultivos(phone_hash: str) -> list[str] | None:
         """Carga los cultivos de interés de un productor desde user_prefs.
@@ -533,6 +622,7 @@ class AgroVozPipeline:
 
         # 2. Pipeline normal: LLM con tool calling.
         # Import local para permitir mocking en tests
+        from app.services.llm_keywords import _force_keyword_tool
         from app.services.llm_service import answer
 
         # Cargar cultivos de interés del agricultor para personalizar el
@@ -563,12 +653,33 @@ class AgroVozPipeline:
                 chat_id_hash[:8] if chat_id_hash else "sin_chat",
             )
 
+        # 1.9. Fast-path determinista: consulta simple y clasificada con certeza.
+        # El LLM en CPU limitada tarda decenas de segundos casi todo en leer el
+        # prompt de tools. Para la consulta tipica ("a cuanto esta la papa") las
+        # tools deterministas ya arman la frase final con el dato de ODEPA, y el
+        # LLM no aporta nada que el productor escuche. Solo se toma este atajo
+        # cuando NO hay ambiguedad; ante la menor duda se usa el LLM completo.
+        if AgroVozPipeline._puede_usar_fast_path(transcribed_text, extracted, system_tip):
+            fast = await _force_keyword_tool(transcribed_text.strip(), phone_hash=chat_id_hash)
+            if fast:
+                # El gate ya garantizo precio|clima; se reafirma aca para que el
+                # tipo calce con Intent (que no tiene "ambos").
+                intent_fast: Intent = "precio" if extracted.consulta_tipo == "precio" else "clima"
+                logger.info(
+                    "Fast-path sin LLM — tipo=%s producto=%s chat_id_hash=%s",
+                    intent_fast,
+                    extracted.producto,
+                    chat_id_hash[:8] if chat_id_hash else "sin_chat",
+                )
+                return fast, intent_fast
+
         try:
             response_text = await answer(
                 transcribed_text.strip(),
                 phone_hash=chat_id_hash,
                 cultivos=cultivos,
                 system_tip=system_tip,
+                consulta_tipo=extracted.consulta_tipo,
             )
         except (TimeoutError, RuntimeError, OSError, ValueError):
             logger.exception("Error en generacion LLM local — probando fallbacks")
@@ -580,7 +691,6 @@ class AgroVozPipeline:
             # 2. Keywords deterministas (Issue #121): datos reales de
             #    ODEPA/OpenMeteo en vez de un mensaje generico.
             # 3. Mensaje generico si ambos anteriores fallan.
-            from app.services.llm_keywords import _force_keyword_tool
             from app.services.llm_service import answer_via_openrouter
 
             forced_result = await answer_via_openrouter(
@@ -809,12 +919,14 @@ class AgroVozPipeline:
 
     async def process(
         self,
-        wav_path: Path,
+        wav_path: Path | None,
         audio_duration_ms: int,
         message_id: str,
         chat_id_hash: str,
         request_id: str,
         chat_id: str | None = None,
+        texto_directo: str | None = None,
+        generar_audio: bool = True,
     ) -> AudioResponse:
         """Ejecuta el pipeline completo: Whisper → LLM → TTS.
 
@@ -822,12 +934,18 @@ class AgroVozPipeline:
         AudioResponse con texto de error predefinido.
 
         Args:
-            wav_path: Path al archivo .wav 16kHz mono listo para Whisper.
-            audio_duration_ms: Duracion del audio en milisegundos.
+            wav_path: Path al .wav 16kHz mono para Whisper. None si la consulta
+                      ya viene en texto (``texto_directo``).
+            audio_duration_ms: Duracion del audio en milisegundos. 0 para texto.
             message_id: ID del mensaje para trazabilidad en logs.
             chat_id_hash: Hash anonimizado del chat para guardar consulta.
             request_id: ID del request para trazabilidad.
             chat_id: Chat ID real de WhatsApp (opcional, para alertas proactivas).
+            texto_directo: Consulta ya en texto (mensaje escrito de WhatsApp).
+                           Salta Whisper: no hay audio que transcribir.
+            generar_audio: Si False, salta el TTS y responde solo texto. Quien
+                           escribe puede leer, y ahorrarse la sintesis baja
+                           varios segundos de latencia.
 
         Returns:
             AudioResponse con ruta del audio TTS, texto, latencia e intent.
@@ -837,6 +955,7 @@ class AgroVozPipeline:
         llm_ms_ref = [0]
         tts_ms_ref = [0]
         welcome_ogg_ref: list[str | None] = [None]
+        primer_contacto_ref: list[bool] = [False]
 
         try:
             # Ejecutar pipeline con timeout.
@@ -853,6 +972,9 @@ class AgroVozPipeline:
                     llm_ms_ref=llm_ms_ref,
                     tts_ms_ref=tts_ms_ref,
                     welcome_ogg_ref=welcome_ogg_ref,
+                    primer_contacto_ref=primer_contacto_ref,
+                    texto_directo=texto_directo,
+                    generar_audio=generar_audio,
                 ),
                 timeout=self._timeout,
             )
@@ -881,7 +1003,7 @@ class AgroVozPipeline:
 
     async def _process_stages(
         self,
-        wav_path: Path,
+        wav_path: Path | None,
         audio_duration_ms: int,
         message_id: str,
         chat_id_hash: str,
@@ -892,6 +1014,9 @@ class AgroVozPipeline:
         llm_ms_ref: list[int],
         tts_ms_ref: list[int],
         welcome_ogg_ref: list[str | None],
+        primer_contacto_ref: list[bool],
+        texto_directo: str | None = None,
+        generar_audio: bool = True,
     ) -> AudioResponse:
         """Ejecuta las etapas del pipeline secuencialmente con benchmark.
 
@@ -912,14 +1037,23 @@ class AgroVozPipeline:
         # solo previene repeticion en el SIGUIENTE request. Aceptado para piloto
         # MVP de 3-5 productores; post-MVP considerar flag de bienvenida_enviada
         # con unique constraint para atomicidad.
+        # La DETECCION corre siempre, tambien para consultas escritas: el aviso de
+        # responsabilidad se manda por texto en ambos caminos y es requisito legal.
+        # Lo que depende de generar_audio es solo el TTS de la bienvenida, que no
+        # tiene sentido mandarle a quien escribio.
         if chat_id_hash and chat_id_hash != "sin_chat":
             try:
                 is_first = await asyncio.to_thread(self._is_first_contact, chat_id_hash)
                 if is_first:
-                    tts_welcome = _get_tts_service()
-                    welcome_ogg_ref[0] = await asyncio.to_thread(tts_welcome.synthesize, _WELCOME_TEXT)
+                    primer_contacto_ref[0] = True
+                    if generar_audio:
+                        tts_welcome = _get_tts_service()
+                        welcome_ogg_ref[0] = await asyncio.to_thread(
+                            tts_welcome.synthesize, _WELCOME_TEXT
+                        )
                     logger.info(
-                        "Primer contacto detectado — bienvenida generada — phone_hash=%s message_id=%s request_id=%s",
+                        "Primer contacto detectado — bienvenida=%s — phone_hash=%s message_id=%s request_id=%s",
+                        "audio" if generar_audio else "solo texto",
                         chat_id_hash[:8],
                         message_id,
                         request_id,
@@ -934,10 +1068,27 @@ class AgroVozPipeline:
                 )
 
         # ── Etapa 1: Transcripcion Whisper ──────────────────────────
+        # Si la consulta llego escrita, no hay nada que transcribir: se usa el
+        # texto tal cual y el pipeline sigue igual desde la etapa 2.
         transcribed_text = ""
         t_whisper_start = time.monotonic()
 
-        if audio_duration_ms > _MAX_WHISPER_AUDIO_MS:
+        if texto_directo is not None:
+            transcribed_text = texto_directo
+            logger.info(
+                "Consulta de texto (sin Whisper) — message_id=%s text=%.200s chars=%d request_id=%s",
+                message_id,
+                transcribed_text,
+                len(transcribed_text),
+                request_id,
+            )
+        elif wav_path is None:
+            logger.warning(
+                "Sin audio ni texto para procesar — message_id=%s request_id=%s",
+                message_id,
+                request_id,
+            )
+        elif audio_duration_ms > _MAX_WHISPER_AUDIO_MS:
             logger.warning(
                 "Audio demasiado largo para transcripcion Whisper — "
                 "message_id=%s duration_ms=%d limite_ms=%d request_id=%s",
@@ -975,7 +1126,14 @@ class AgroVozPipeline:
         # Solo si Whisper produjo transcripcion y el chat no es anonimo.
         # La retencion es opt-in (dataset_consent=True en user_prefs).
         # El cleanup posterior de audio_temp/ NO toca data/dataset/.
-        if transcribed_text and transcribed_text.strip() and chat_id_hash and chat_id_hash != "sin_chat":
+        # wav_path is not None: una consulta escrita no genera audio que retener.
+        if (
+            wav_path is not None
+            and transcribed_text
+            and transcribed_text.strip()
+            and chat_id_hash
+            and chat_id_hash != "sin_chat"
+        ):
             try:
                 await asyncio.to_thread(
                     retain_audio,
@@ -1074,10 +1232,12 @@ class AgroVozPipeline:
                         )
 
         # ── Etapa 3: Sintesis TTS ────────────────────────────────────
+        # generar_audio=False para consultas escritas: quien escribe puede leer,
+        # y saltarse Piper ahorra ~2s de los pocos que tenemos en 1 vCPU.
         response_ogg_path: str = ""
         t_tts_start = time.monotonic()
 
-        if response_text:
+        if response_text and generar_audio:
             try:
                 tts = _get_tts_service()
                 response_ogg_path = await asyncio.to_thread(tts.synthesize, response_text)
@@ -1160,4 +1320,5 @@ class AgroVozPipeline:
             llm_ms=llm_ms_ref[0],
             tts_ms=tts_ms_ref[0],
             welcome_audio_path=welcome_ogg_ref[0],
+            es_primer_contacto=primer_contacto_ref[0],
         )

@@ -8,7 +8,7 @@
     "data": {
       "id": "false_test_lid_001",
       "from": "248069442560050@lid",
-      "to": "56930365990@c.us",
+      "to": "56900000000@c.us",
       "chatId": "248069442560050@lid",
       "body": "",
       "type": "voice",
@@ -36,7 +36,7 @@
     "data": {
       "id": "false_test_lid_002",
       "from": "248069442560050@lid",
-      "to": "56930365990@c.us",
+      "to": "56900000000@c.us",
       "chatId": "248069442560050@lid",
       "body": "",
       "type": "voice",
@@ -61,7 +61,7 @@
     "data": {
       "id": "false_test_text_001",
       "from": "248069442560050@lid",
-      "to": "56930365990@c.us",
+      "to": "56900000000@c.us",
       "chatId": "248069442560050@lid",
       "body": "¿A cuanto esta la papa?",
       "type": "text",
@@ -86,7 +86,7 @@
     "data": {
       "id": "false_test_image_001",
       "from": "248069442560050@lid",
-      "to": "56930365990@c.us",
+      "to": "56900000000@c.us",
       "chatId": "248069442560050@lid",
       "body": "Mira esta foto",
       "type": "image",

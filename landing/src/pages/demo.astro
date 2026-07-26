@@ -4,50 +4,52 @@ import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";
 
 const pageTitle = "Demo Interactiva — AgroVoz";
-const pageDescription = "Proba AgroVoz desde el navegador. Escribi una pregunta sobre precios agricolas o clima y recibi la respuesta por voz.";
+const pageDescription = "Probá AgroVoz desde el navegador. Escribí una pregunta sobre precios agrícolas o clima y recibí la respuesta por voz.";
 ---
 
 <Base title={pageTitle} description={pageDescription}>
   <Header />
-  <main class="demo-page">
+  {/* id="top": destino del skip link de Base.astro. Sin esto, "Saltar al
+      contenido principal" no llevaba a ningun lado en esta pagina. */}
+  <main id="top" class="demo-page">
     <section class="demo-hero">
       <div class="demo-hero__inner">
-        <h1>Proba AgroVoz</h1>
+        <h1>Probá AgroVoz</h1>
         <p>
-          Escribi una pregunta sobre precios de productos agricolas o el clima
-          en Traiguen. AgroVoz te responde con voz, como en WhatsApp.
+          Escribí una pregunta sobre precios de productos agrícolas o el clima
+          en Traiguén. AgroVoz te responde con voz, como en WhatsApp.
         </p>
       </div>
     </section>
 
-    <section class="demo-chat-section" aria-label="Chat de demostracion">
+    <section class="demo-chat-section" aria-label="Chat de demostración">
       <div class="demo-chat-container">
         <div class="chat-header">
           <div class="chat-header__avatar" aria-hidden="true">A</div>
           <div class="chat-header__info">
             <span class="chat-header__name">AgroVoz</span>
-            <span class="chat-header__status" id="chat-status">en linea</span>
+            <span class="chat-header__status" id="chat-status">en línea</span>
           </div>
         </div>
 
-        <div class="chat-messages" id="chat-messages" role="log" aria-live="polite" aria-label="Conversacion">
+        <div class="chat-messages" id="chat-messages" role="log" aria-live="polite" aria-label="Conversación">
           <div class="chat-date-divider"><span>Hoy</span></div>
 
           <div class="chat-bubble chat-bubble--received">
             <div class="chat-bubble__text">
-              Hola! Soy AgroVoz. Preguntame por el precio de la papa,
-              el tomate, la cebolla, o por el clima en Traiguen.
+              Hola! Soy AgroVoz. Preguntáme por el precio de la papa,
+              el tomate, la cebolla, o por el clima en Traiguén.
             </div>
             <span class="chat-bubble__time">Ahora</span>
           </div>
 
           <div class="chat-bubble chat-bubble--received">
             <div class="chat-bubble__text">
-              Proba con:
+              Probá con:
               <ul>
-                <li>A cuanto esta la papa?</li>
-                <li>Va a llover en Traiguen manana?</li>
-                <li>Cual es el precio del tomate?</li>
+                <li>¿A cuánto está la papa?</li>
+                <li>¿Va a llover en Traiguén mañana?</li>
+                <li>¿Cuál es el precio del tomate?</li>
               </ul>
             </div>
             <span class="chat-bubble__time">Ahora</span>
@@ -60,9 +62,9 @@ const pageDescription = "Proba AgroVoz desde el navegador. Escribi una pregunta 
               type="text"
               id="chat-input"
               class="chat-input"
-              placeholder="Escribi tu pregunta..."
+              placeholder="Escribí tu pregunta..."
               maxlength="500"
-              aria-label="Escribi tu consulta"
+              aria-label="Escribí tu consulta"
               autofocus
             />
             <button
@@ -115,14 +117,14 @@ const pageDescription = "Proba AgroVoz desde el navegador. Escribi una pregunta 
   function clearLoading() {
     loading = false;
     sendBtn.disabled = input.value.trim().length === 0;
-    statusEl.textContent = "en linea";
+    statusEl.textContent = "en línea";
     stateEl.hidden = true;
   }
 
   function showError(msg: string) {
     loading = false;
     sendBtn.disabled = input.value.trim().length === 0;
-    statusEl.textContent = "en linea";
+    statusEl.textContent = "en línea";
     stateEl.hidden = false;
     stateText.textContent = msg;
     stateEl.classList.add("demo-state--error");

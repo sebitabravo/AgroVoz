@@ -1,8 +1,10 @@
 # AgroVoz — Tu voz tiene el precio justo
 
-Asistente de IA que responde por voz a través de WhatsApp, diseñado para que pequeños agricultores chilenos accedan a precios agrícolas (ODEPA) y pronósticos climáticos (OpenMeteo) sin leer, escribir ni instalar aplicaciones.
+Asistente de IA que responde por WhatsApp, diseñado para que pequeños agricultores chilenos accedan a precios agrícolas (ODEPA) y pronósticos climáticos (Open-Meteo) sin instalar aplicaciones.
 
-El productor envía un audio por WhatsApp y recibe una respuesta hablada con datos oficiales en tiempo real.
+El productor manda un audio y recibe una respuesta hablada con datos oficiales en tiempo real. También puede escribir: el camino de texto salta Whisper y Piper, así que responde en ~100 ms contra los ~11 s del de voz. No siempre se puede mandar audio —lugar ruidoso, una reunión, mala señal—, así que el texto es una vía de entrada de primera clase, no un fallback.
+
+Además de responder, avisa: alertas proactivas cuando el precio de un cultivo se mueve o cuando viene helada o lluvia extrema en la comuna del productor.
 
 ## Stack
 
@@ -46,16 +48,25 @@ AgroVoz/
 ├── Makefile               ← Comandos de desarrollo
 ├── backend/               ← FastAPI + servicios
 ├── landing/               ← Astro static site
-├── docs/                  ← Arquitectura + fases
+├── docs/                  ← Arquitectura, piloto, legal
+├── skills/                ← Guías de trabajo del equipo
 └── scripts/               ← Utilidades
 ```
 
 ## Documentación
 
+Índice completo en [`docs/README.md`](docs/README.md). Lo principal:
+
 - `AGENTS.md` — instrucciones completas del proyecto (source of truth)
 - `docs/ARCHITECTURE.md` — arquitectura, DB schema, decisiones técnicas
 - `docs/DEV-GUIDE.md` — guía de desarrollo y setup local
-- `docs/piloto/` — kit operativo del piloto en Traiguén
+- `docs/negocio/` — plan de negocio segmentado en 11 partes
+- `docs/pmbok/` — documentación de gestión de proyecto para INACAP
+- `docs/piloto/` — plan y kit operativo del piloto en Traiguén
+- `docs/legal/` — política de privacidad y aviso de responsabilidad
+- `docs/historico/` — la postulación al Crea tal como se envió, congelada
+- `skills/` — cómo se trabaja acá (issues, branches, commits, tests, docs)
+- `SECURITY.md` — modelo de seguridad y cómo reportar vulnerabilidades
 
 ## Licencia
 
@@ -69,4 +80,4 @@ Ver `LICENSE` para el texto legal completo.
 
 ---
 
-Proyecto estudiantil para Desafío Crea INACAP 2026. INACAP Temuco, Ingeniería en Informática.
+Nacido como proyecto estudiantil para el Desafío Crea INACAP 2026 (INACAP Temuco, Ingeniería en Informática). Hoy es un producto desplegado, en preparación para el piloto de validación con productores reales en Traiguén.

@@ -169,12 +169,26 @@
 
     .notice { font-size: 12px; color: var(--muted); padding: 10px 14px; background: var(--bg); border-radius: 9px; border: 1px solid var(--line); }
 
+    /* Panel angosto + panel ancho. En telefono la columna fija de 288px
+       desbordaba la pagina, asi que se apilan (ver media query). */
+    /* minmax(0,1fr) y no 1fr: por defecto el track no baja del min-content del
+       hijo (el canvas del grafico), y la columna se estiraba a 850px igual. */
+    .split-grid { display: grid; grid-template-columns: 288px minmax(0, 1fr); gap: 18px; }
+
     @media (max-width: 900px) {
       .layout { grid-template-columns: 1fr; }
       .sidebar { position: relative; height: auto; flex-direction: row; flex-wrap: wrap; }
       .nav { flex-direction: row; flex-wrap: wrap; }
       .kpi-grid { grid-template-columns: repeat(2, 1fr); }
       .svc-grid { grid-template-columns: 1fr; }
+
+      /* Las tablas (consultas, precios ODEPA, cola de revision) miden ~720px y
+         en telefono empujaban la pagina entera: el panel scrolleaba en
+         horizontal y los KPI quedaban cortados. Como block scrollean dentro de
+         su propia caja y el resto del layout se queda quieto. El panel es PWA,
+         se usa desde el telefono en terreno. */
+      table { display: block; overflow-x: auto; }
+      .split-grid { grid-template-columns: minmax(0, 1fr); }
     }
   </style>
 </head>

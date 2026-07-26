@@ -38,7 +38,39 @@ class WhisperModel(Protocol):
         fp16: bool,
         task: str,
         verbose: bool,
+        initial_prompt: str,
+        temperature: tuple[float, ...],
     ) -> dict[str, object]: ...
+
+
+# Contexto que se le pasa a Whisper antes de transcribir. El decoder lo toma
+# como texto previo de la conversacion y sesga la busqueda hacia ese vocabulario.
+#
+# Sin esto, Whisper small confunde terminos del dominio con palabras comunes:
+# "va a llover manana" salia como "vaya chubes manana", y la consulta quedaba
+# sin clasificar. El productor no lee, asi que una transcripcion mala no se
+# puede corregir: es una consulta perdida.
+#
+# Se nombran los productos y mercados reales de ODEPA, las comunas del piloto y
+# los verbos tipicos de una consulta de precio o clima.
+_INITIAL_PROMPT = (
+    "Consulta de un agricultor chileno por WhatsApp. "
+    "Pregunta por precios de ODEPA o por el clima. "
+    "Productos: papa, tomate, cebolla, zanahoria, lechuga, choclo, zapallo, "
+    "ajo, poroto, arveja, betarraga, brócoli, coliflor, espinaca, manzana, trigo, avena. "
+    "Mercados: Lo Valledor, Vega Central, Mapocho, Macroferia de Talca, "
+    "Terminal La Palmera, Agro Chillán. "
+    "Lugares: Traiguén, Temuco, Araucanía, Victoria, Lautaro, Angol. "
+    "Frases: a cuánto está, cuánto vale, qué precio tiene, va a llover, "
+    "cómo está el clima, va a helar, cuántos grados, vendí, me pagaron, "
+    "avísame cuando, el kilo, el saco, la malla, la bandeja."
+)
+
+# Temperaturas del fallback de decodificacion. Whisper reintenta con
+# temperatura mas alta cuando la salida es de baja confianza (repeticiones o
+# logprob bajo). El default de openai-whisper ya es este; se explicita para que
+# quede claro que el fallback esta activo y no se pierda en un refactor.
+_TEMPERATURE_FALLBACK = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
 
 
 # Cache de modelos cargados: {model_name: WhisperModel}
@@ -202,6 +234,8 @@ class WhisperService:
                 fp16=self._device == "cuda",
                 task="transcribe",
                 verbose=False,
+                initial_prompt=_INITIAL_PROMPT,
+                temperature=_TEMPERATURE_FALLBACK,
             )
         except (RuntimeError, OSError, ValueError) as exc:
             elapsed = time.monotonic() - start
