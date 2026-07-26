@@ -327,10 +327,18 @@ textarea {
 .stat-cell {
   background: var(--color-bg);
   padding: 34px 30px;
+  /* Contexto de container query: la cifra escala con el ANCHO DE LA CELDA,
+     no con el viewport. Con vw pasaba lo contrario a lo intuitivo: mas
+     viewport -> mas columnas en el auto-fit -> celda mas angosta, pero
+     fuente mas grande. "205.000" se salia por 41px en desktop. */
+  container-type: inline-size;
 }
 
 .stat-number {
-  font-size: clamp(40px, 4.6vw, 62px);
+  /* 22cqi: la cifra mas larga ("205.000") ocupa ~87% del ancho util de la
+     celda. El tope de 56px evita que crezca de mas cuando el grid colapsa
+     a una sola columna en movil. */
+  font-size: clamp(34px, 22cqi, 56px);
   line-height: 1;
   font-weight: 800;
   letter-spacing: -0.03em;
@@ -627,10 +635,15 @@ textarea {
   background: var(--color-bg);
   border-radius: 20px;
   padding: 34px;
+  /* Mismo motivo que .stat-cell: la cifra escala con la tarjeta. */
+  container-type: inline-size;
 }
 
 .impact-number {
-  font-size: clamp(36px, 4.2vw, 56px);
+  /* 14cqi: "+$3.500.000" es la cadena mas larga del sitio (11 caracteres
+     con prefijo) y ocupa ~88% del ancho util de la tarjeta. Si se agrega
+     una cifra mas larga, bajar este valor. */
+  font-size: clamp(30px, 14cqi, 46px);
   line-height: 1;
   font-weight: 800;
   letter-spacing: -0.03em;
