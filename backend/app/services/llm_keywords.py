@@ -429,23 +429,35 @@ async def _force_corpus_search(query_text: str) -> str | None:
     Returns:
         Resultado textual de la busqueda, o None si no se detecta keyword.
     """
-    from app.services.rag_service import search_corpus_for_llm
-
     q = query_text.strip().lower()
 
-    # Detectar keywords de corpus/boletines.
-    if any(kw in q for kw in _CORPUS_KEYWORDS):
-        try:
-            result = search_corpus_for_llm(query_text)
-            if result:
-                logger.info(
-                    "Fallback tool forzado: search_corpus(query=%.100s) — query=%.100s",
-                    query_text,
-                    query_text,
-                )
-                return result
-        except (RuntimeError, ValueError, OSError) as exc:
-            logger.warning("Error en fallback corpus: %s", exc)
+    # Detectar keywords de corpus/boletines. El import va DENTRO del branch:
+    # rag_service arrastra scikit-learn, que es pesado y opcional. Importarlo
+    # arriba lo cargaba en cada consulta aunque no hubiera keywords de corpus.
+    if not any(kw in q for kw in _CORPUS_KEYWORDS):
+        return None
+
+    try:
+        # ImportError incluido a proposito: si falta scikit-learn (imagen sin
+        # reconstruir, deploy incompleto), el corpus deja de estar disponible
+        # pero el pipeline sigue respondiendo precio y clima. Sin este guard,
+        # un ModuleNotFoundError tumbaba la consulta entera.
+        from app.services.rag_service import search_corpus_for_llm
+
+        result = search_corpus_for_llm(query_text)
+        if result:
+            logger.info(
+                "Fallback tool forzado: search_corpus(query=%.100s) — query=%.100s",
+                query_text,
+                query_text,
+            )
+            return result
+    except ImportError:
+        logger.warning(
+            "Corpus RAG no disponible (falta dependencia) — se continua sin search_corpus"
+        )
+    except (RuntimeError, ValueError, OSError) as exc:
+        logger.warning("Error en fallback corpus: %s", exc)
 
     return None
 

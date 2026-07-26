@@ -21,6 +21,29 @@ from app.core.config import settings
 from app.services.tts_service import PiperModelNotFoundError
 
 
+@pytest.fixture(autouse=True)
+def _no_correr_pipeline_en_tests_de_endpoint(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Impide que los tests del ENDPOINT disparen el pipeline real en background.
+
+    Los ``test_webhook_*`` verifican HMAC y routing, no el procesamiento. Desde
+    que el webhook acepta mensajes de texto, esos payloads dejaron de ignorarse
+    y arrancaban Whisper y el LLM de verdad: el archivo paso de 0.3s a 113s.
+
+    Los ``test_audio_service_*`` llaman a los metodos directamente y si quieren
+    la implementacion real, asi que quedan fuera.
+    """
+    if not request.node.name.startswith("test_webhook_"):
+        return
+
+    async def _noop(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr("app.services.audio_service.AudioService.process_text", _noop)
+    monkeypatch.setattr("app.services.audio_service.AudioService.process_audio", _noop)
+
+
 def _load_fixture(name: str) -> dict[str, object]:
     """Carga un payload de prueba desde fixtures/openwa_webhook_payload.json."""
     fixture_path = Path(__file__).parent / "fixtures" / "openwa_webhook_payload.json"
@@ -167,10 +190,26 @@ async def test_webhook_firma_valida_voice_retorna_200(
 async def test_webhook_mensaje_texto_retorna_200_ignorado(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Mensaje de texto (type=text) debe ser ignorado (200 pero no procesa)."""
+    """Mensaje de texto (type=text) se procesa como consulta, no se ignora.
+
+    El productor no siempre puede mandar audio (lugar ruidoso, reunion, mala
+    senal), asi que el texto es una via de entrada de primera clase. Antes el
+    webhook lo descartaba con reason="mensaje_no_audio".
+    """
     from app.main import app
 
     monkeypatch.setattr(settings, "openwa_webhook_secret", "test-secret")
+
+    procesados: list[str] = []
+
+    async def fake_process_text(
+        _self: object, texto: str, chat_id: str, request_id: str
+    ) -> None:
+        procesados.append(texto)
+
+    monkeypatch.setattr(
+        "app.services.audio_service.AudioService.process_text", fake_process_text
+    )
 
     payload = _load_fixture("text_message")
     body = json.dumps(payload).encode("utf-8")
@@ -190,8 +229,8 @@ async def test_webhook_mensaje_texto_retorna_200_ignorado(
 
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "ignored"
-    assert data["reason"] == "mensaje_no_audio"
+    assert data["status"] == "received"
+    assert procesados == ["¿A cuanto esta la papa?"]
 
 
 @pytest.mark.asyncio
@@ -730,11 +769,14 @@ async def test_audio_service_process_audio_tts_success(
         request_id="test-tts-success",
     )
 
-    # Verificar que send_audio recibio el path del TTS, no hello.ogg
-    assert len(send_audio_calls) == 1
-    assert send_audio_calls[0][0] == "248069442560050@lid"
-    assert send_audio_calls[0][1] == tts_ogg_path
-    assert "hello.ogg" not in send_audio_calls[0][1]
+    # Con la DB aislada el productor es primer contacto, asi que el pipeline
+    # envia la bienvenida ademas de la respuesta. Lo que este test verifica es
+    # el envio de la RESPUESTA (el ultimo), y que ningun envio use hello.ogg.
+    assert send_audio_calls, "no se envio ningun audio"
+    target, audio_path = send_audio_calls[-1]
+    assert target == "248069442560050@lid"
+    assert audio_path == tts_ogg_path
+    assert all("hello.ogg" not in path for _, path in send_audio_calls)
 
     # Verificar limpieza: no quedan WAVs ni OGGs temporales
     wav_files = list(tmp_path.glob("*.wav"))

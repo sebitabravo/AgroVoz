@@ -600,7 +600,13 @@ class TestProcess:
         wav_path: Path,
         tts_ogg: str,
     ) -> None:
-        """Pipeline completo: Whisper → LLM → TTS con consulta de clima."""
+        """Pipeline completo: Whisper → LLM → TTS con consulta de clima.
+
+        Este test cubre la RUTA LLM. Una consulta de clima simple normalmente
+        toma el fast-path determinista, asi que se anula devolviendo None desde
+        _force_keyword_tool: es la condicion real en que el pipeline cae al LLM
+        (keywords sin match). El fast-path tiene sus propios tests.
+        """
 
         # Usar texto transcrito con keyword de clima
         def fake_transcribe_clima(_self: object, audio_path: str) -> dict[str, object]:
@@ -614,6 +620,13 @@ class TestProcess:
         monkeypatch.setattr(
             "app.services.pipeline_service.WhisperService.transcribe",
             fake_transcribe_clima,
+        )
+
+        async def sin_keyword_match(*_args: object, **_kwargs: object) -> None:
+            return None
+
+        monkeypatch.setattr(
+            "app.services.llm_keywords._force_keyword_tool", sin_keyword_match
         )
         _mock_llm_answer(monkeypatch, "En Traiguen hay 8 grados con lluvia ligera")
         _mock_tts_synthesize(monkeypatch, tts_ogg)
@@ -631,6 +644,60 @@ class TestProcess:
         assert result.intent == "clima"
         assert "grados" in result.text_response.lower()
         assert result.audio_path == tts_ogg
+
+    async def test_fast_path_responde_sin_invocar_al_llm(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        wav_path: Path,
+        tts_ogg: str,
+    ) -> None:
+        """Consulta simple de precio: responde con la tool y NO llama al LLM.
+
+        Es la razon de ser del fast-path — el LLM en CPU limitada se va casi
+        todo el presupuesto de latencia leyendo el prompt de tools.
+        """
+
+        def fake_transcribe(_self: object, audio_path: str) -> dict[str, object]:
+            return {
+                "text": "a cuanto esta la papa",
+                "language": "es",
+                "segments": [],
+                "duration_ms": 1200,
+            }
+
+        monkeypatch.setattr(
+            "app.services.pipeline_service.WhisperService.transcribe", fake_transcribe
+        )
+
+        async def keyword_tool(*_args: object, **_kwargs: object) -> str:
+            return "La papa está a 520 pesos el kilo, según ODEPA."
+
+        monkeypatch.setattr(
+            "app.services.llm_keywords._force_keyword_tool", keyword_tool
+        )
+
+        llamadas_llm: list[str] = []
+
+        async def llm_no_deberia_correr(*args: object, **_kwargs: object) -> str:
+            llamadas_llm.append(str(args[0]) if args else "")
+            return "respuesta del LLM"
+
+        monkeypatch.setattr("app.services.llm_service.answer", llm_no_deberia_correr)
+        _mock_tts_synthesize(monkeypatch, tts_ogg)
+        _mock_db_save(monkeypatch)
+
+        pipeline = AgroVozPipeline()
+        result = await pipeline.process(
+            wav_path=wav_path,
+            audio_duration_ms=2500,
+            message_id="test-msg-fast",
+            chat_id_hash="abc123def456",
+            request_id="req-fast",
+        )
+
+        assert llamadas_llm == [], "el fast-path no debe invocar al LLM"
+        assert result.intent == "precio"
+        assert "520 pesos" in result.text_response
 
     async def test_fallback_desconocido(
         self,

@@ -45,6 +45,10 @@ services:
       - ./backend/models:/app/models    # Modelos IA (persisten entre reinicios)
       - ./backend/models/whisper-cache:/home/agrovoz/.cache/whisper  # Cache Whisper (evita descargar 461MB cada vez)
       - ./backend/app:/app/app          # Hot reload: montar código fuente
+      # Migraciones montadas: sin esto la imagen queda con el set de migraciones
+      # del último build y el schema de la DB deriva del de los modelos
+      # (ej: "no such column: user_prefs.cultivos" con imagen vieja).
+      - ./backend/migrations:/app/migrations
     healthcheck:
       test:
         ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health?probe=liveness"]

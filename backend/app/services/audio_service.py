@@ -347,6 +347,13 @@ class AudioService:
                     # Limpiar archivo de bienvenida siempre (exito o fallo).
                     Path(pipeline_result.welcome_audio_path).unlink(missing_ok=True)
 
+            # Aviso de responsabilidad en texto, solo en el primer contacto.
+            # Fuera del bloque anterior a proposito: se manda aunque el audio de
+            # bienvenida falle o no se haya generado. Es requisito legal, no una
+            # cortesia. Ver docs/legal/aviso-responsabilidad.md.
+            if pipeline_result.es_primer_contacto:
+                await self._enviar_aviso_responsabilidad(openwa, chat_id, request_id)
+
             # Enviar respuesta de audio
             if response_ogg_path:
                 try:
@@ -414,3 +421,134 @@ class AudioService:
                 ogg_path.unlink(missing_ok=True)
             if wav_path is not None:
                 wav_path.unlink(missing_ok=True)
+
+    @staticmethod
+    async def _enviar_aviso_responsabilidad(
+        openwa: OpenWAService,
+        chat_id: str,
+        request_id: str,
+    ) -> None:
+        """Envia el aviso de responsabilidad por texto en el primer contacto.
+
+        Va como texto y no como audio a proposito: un descargo legal leido en voz
+        alta es inusable, y en texto el productor puede releerlo o mostrarselo a
+        un familiar. Se manda en los dos caminos (audio y texto).
+
+        No es critico para responder la consulta: si el envio falla se registra
+        y el pipeline sigue, pero queda el warning para detectarlo en el piloto.
+
+        Args:
+            openwa: Cliente de Open-WA ya construido por el caller.
+            chat_id: Chat ID de WhatsApp del productor.
+            request_id: ID del request para trazabilidad.
+        """
+        from app.services.pipeline_service import WELCOME_DISCLAIMER_TEXT
+
+        try:
+            await openwa.send_text(chat_id, WELCOME_DISCLAIMER_TEXT)
+            logger.info(
+                "Aviso de responsabilidad enviado — request_id=%s",
+                request_id,
+            )
+        except (httpx.HTTPError, OSError, RuntimeError):
+            logger.warning(
+                "Envio del aviso de responsabilidad fallo — request_id=%s",
+                request_id,
+            )
+
+    async def process_text(
+        self,
+        texto: str,
+        chat_id: str,
+        request_id: str,
+    ) -> None:
+        """Procesa una consulta escrita y responde por texto.
+
+        Mismo pipeline que el audio (alertas, resumen, fast-path, tool calling,
+        persistencia), pero sin Whisper ni Piper: la consulta ya viene en texto
+        y quien escribe puede leer la respuesta. Eso ademas saca del camino las
+        dos etapas mas caras en CPU limitada.
+
+        No todos los productores pueden mandar audio siempre (lugar ruidoso,
+        reunion, mala senal), asi que el texto es una via de entrada de primera
+        clase, no un fallback.
+
+        Args:
+            texto: Cuerpo del mensaje de WhatsApp.
+            chat_id: Chat ID de WhatsApp para responder.
+            request_id: ID del request para trazabilidad.
+        """
+        start_time = time.monotonic()
+        chat_id_hash = hash_phone(chat_id, settings.phone_hash_pepper) if chat_id else "sin_chat"
+        message_id = f"texto_{uuid.uuid4().hex[:8]}"
+
+        logger.info(
+            "Consulta de texto recibida — message_id=%s chat_id_hash=%s chars=%d request_id=%s",
+            message_id,
+            chat_id_hash,
+            len(texto),
+            request_id,
+        )
+
+        openwa = OpenWAService()
+        try:
+            # "typing" y no "recording": la respuesta va escrita, no es audio.
+            await openwa.send_typing_indicator(chat_id, "typing")
+
+            from app.services.pipeline_service import AgroVozPipeline
+
+            resultado = await AgroVozPipeline().process(
+                wav_path=None,
+                audio_duration_ms=0,
+                message_id=message_id,
+                chat_id_hash=chat_id_hash,
+                request_id=request_id,
+                chat_id=chat_id,
+                texto_directo=texto,
+                generar_audio=False,
+            )
+
+            # Aviso de responsabilidad ANTES de la primera respuesta, igual que
+            # en el camino de audio. Quien escribe no recibe bienvenida hablada,
+            # pero el aviso legal aplica igual.
+            if resultado.es_primer_contacto:
+                await self._enviar_aviso_responsabilidad(openwa, chat_id, request_id)
+
+            if resultado.text_response:
+                await openwa.send_text(chat_id, resultado.text_response)
+                logger.info(
+                    "Respuesta de texto enviada — message_id=%s chat_id_hash=%s "
+                    "intent=%s e2e_ms=%d request_id=%s",
+                    message_id,
+                    chat_id_hash,
+                    resultado.intent,
+                    int((time.monotonic() - start_time) * 1000),
+                    request_id,
+                )
+            else:
+                logger.warning(
+                    "Pipeline no genero respuesta para consulta de texto — message_id=%s request_id=%s",
+                    message_id,
+                    request_id,
+                )
+        except (httpx.HTTPError, OSError, ValueError, RuntimeError, TypeError):
+            logger.exception(
+                "Error procesando consulta de texto — message_id=%s chat_id_hash=%s "
+                "elapsed_ms=%d request_id=%s",
+                message_id,
+                chat_id_hash,
+                int((time.monotonic() - start_time) * 1000),
+                request_id,
+            )
+        except asyncio.CancelledError:
+            logger.warning(
+                "Procesamiento de texto cancelado — message_id=%s request_id=%s",
+                message_id,
+                request_id,
+            )
+            raise
+        finally:
+            try:
+                await openwa.send_typing_indicator(chat_id, "paused")
+            except (httpx.HTTPError, OSError, RuntimeError):
+                logger.debug("No se pudo limpiar indicador typing")

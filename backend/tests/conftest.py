@@ -112,6 +112,59 @@ async def client(tmp_path: Path) -> AsyncGenerator[AsyncClient, None]:
 
 
 @pytest.fixture(autouse=True)
+def _aislar_session_local(monkeypatch) -> Generator[None, None, None]:
+    """Redirige ``SessionLocal`` a una DB en memoria para TODOS los tests.
+
+    Las fixtures ``db`` y ``client`` solo aislan a los tests que las piden.
+    Varios servicios (``pipeline_service``, ``dataset_service``) abren su
+    propia sesion con ``SessionLocal()`` sin pasar por ``get_db``, asi que un
+    test que no pida ``db`` escribia en ``data/agrovoz.db`` de verdad: la suite
+    dejaba consultas basura en la DB de desarrollo y falseaba las metricas del
+    panel admin.
+
+    StaticPool + una sola conexion compartida hace que todas las sesiones del
+    mismo test vean la misma DB en memoria, y que se descarte al terminar.
+
+    El engine se crea PEREZOSAMENTE, en la primera sesion que se pida: la gran
+    mayoria de los tests nunca toca SessionLocal, y montar engine + create_all
+    en los ~1170 tests agregaba ~10s a la suite sin que nadie los usara.
+    """
+    from sqlalchemy.pool import StaticPool
+
+    import app.core.database as db_module
+
+    creados: list[object] = []
+
+    def session_local_perezoso(**kwargs: object) -> Session:
+        if not creados:
+            from app.core.database import Base
+            from app.models import (  # noqa: F401 — registra modelos en Base.metadata
+                Alert,
+                Consultation,
+                OdepaPrice,
+                UserPrefs,
+            )
+
+            engine = create_engine(
+                "sqlite://",
+                connect_args={"check_same_thread": False},
+                poolclass=StaticPool,
+            )
+            Base.metadata.create_all(engine)
+            creados.append(engine)
+            creados.append(sessionmaker(bind=engine))
+        factory = creados[1]
+        return factory(**kwargs)  # type: ignore[operator, no-any-return]
+
+    monkeypatch.setattr(db_module, "SessionLocal", session_local_perezoso)
+    try:
+        yield
+    finally:
+        if creados:
+            creados[0].dispose()  # type: ignore[attr-defined]
+
+
+@pytest.fixture(autouse=True)
 def _reset_global_rate_limiter() -> Generator[None, None, None]:
     """Resetea el RateLimitMiddleware global antes y despues de cada test.
 

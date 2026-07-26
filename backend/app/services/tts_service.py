@@ -37,6 +37,68 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# ── Normalizacion de texto para voz ────────────────────────────────
+#
+# El fonemizador de Piper (espeak-ng es_MX) deletrea las abreviaturas de unidad
+# en vez de leerlas. Verificado contra el modelo real es_MX-claude-high:
+#
+#   "4.6 m/s"     -> "cuatro punto seis EME BARRA ESE"
+#   "12 mm"       -> "doce EME EME"
+#   "20 km/h"     -> "veinte KA EME BARRA ACHE"
+#   "17/07/2026"  -> "diecisiete BARRA cero siete BARRA dos mil veintiseis"
+#
+# El productor escucha eso literal. Como no lee, el audio es la unica salida:
+# una unidad mal leida es un dato perdido. Estas sustituciones corren sobre TODO
+# texto que va al TTS (respuesta del LLM, tools deterministas y alertas).
+#
+# NO se tocan los casos que espeak ya resuelve bien (verificados): "83%" ->
+# "por ciento", "13.000" -> "trece mil", "12°C" -> "doce grados ce".
+_MESES_ES = (
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+)
+
+
+def _fecha_a_palabras(match: re.Match[str]) -> str:
+    """Convierte dd/mm/aaaa a "dd de <mes> de aaaa". Deja intacto lo invalido."""
+    dia, mes, anio = int(match.group(1)), int(match.group(2)), match.group(3)
+    if not 1 <= mes <= 12 or not 1 <= dia <= 31:
+        return match.group(0)
+    return f"{dia} de {_MESES_ES[mes - 1]} de {anio}"
+
+
+# Orden relevante: km/h antes que m/s y mm antes que m, para que el patron mas
+# largo gane. \b evita comerse palabras que terminan en la abreviatura.
+_SUSTITUCIONES_VOZ: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bkm/h\b", re.IGNORECASE), "kilómetros por hora"),
+    (re.compile(r"\bm/s\b", re.IGNORECASE), "metros por segundo"),
+    (re.compile(r"\bkm\b", re.IGNORECASE), "kilómetros"),
+    (re.compile(r"\bmm\b", re.IGNORECASE), "milímetros"),
+    (re.compile(r"\bkg\b", re.IGNORECASE), "kilos"),
+    # "ha" (hectarea) queda FUERA a proposito: es homografo del auxiliar "ha",
+    # muchisimo mas frecuente. Sustituirlo rompe frases normales
+    # ("no ha llovido" -> "no hectareas llovido"). Piper lee "ha" como el verbo,
+    # que es el caso comun; la unidad es rara en estas respuestas.
+)
+
+_RE_FECHA = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")
+
+
+def normalizar_para_voz(texto: str) -> str:
+    """Reescribe unidades y fechas para que Piper las lea en palabras.
+
+    Args:
+        texto: Texto tal como lo produjo el LLM o una tool.
+
+    Returns:
+        Texto equivalente, apto para sintesis.
+    """
+    texto = _RE_FECHA.sub(_fecha_a_palabras, texto)
+    for patron, reemplazo in _SUSTITUCIONES_VOZ:
+        texto = patron.sub(reemplazo, texto)
+    return texto
+
+
 # Maximo de caracteres por llamada a Piper (empirico).
 # ~500 caracteres generan ~20s de audio a 22kHz, suficiente margen
 # para evitar OOM en VPS con 16GB RAM.
@@ -429,6 +491,8 @@ class TTSService:
         text = text.strip()
         if not text:
             raise ValueError("El texto a sintetizar no puede estar vacio")
+
+        text = normalizar_para_voz(text)
 
         start = time.monotonic()
 

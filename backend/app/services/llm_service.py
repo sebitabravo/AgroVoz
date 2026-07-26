@@ -27,7 +27,7 @@ import os
 import re
 import threading
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import httpx
 from sqlalchemy.exc import SQLAlchemyError
@@ -75,11 +75,17 @@ WHITELIST_TOOLS = frozenset(
 MAX_TOOL_ITERATIONS = 3
 
 # Timeout de generación por llamada al LLM (segundos).
-# Aumentado a 60s porque:
-# - Cold start: el modelo tarda ~9s en cargarse en CPU
-# - Con CPU RTF ~2x en VPS CX43, primera generacion post-carga puede tomar 30s+
-# - Tool calling loop: cada iteracion necesita generar + ejecutar tool
-_GENERATION_TIMEOUT = 60.0
+#
+# Bajado de 60s a 25s. Con 60s el peor caso medido fue un pipeline de 86s
+# (Whisper + timeout completo del LLM + fallback), contra un objetivo de 15s:
+# el productor esperaba un minuto y medio para recibir "no te entendi". Mas
+# vale cortar antes y dejar que responda el fallback por keywords, que entrega
+# datos reales de ODEPA en vez de un mensaje generico.
+#
+# 25s sigue dando aire al cold start del modelo y a una vuelta del tool calling
+# loop. Lo que hace que el caso comun entre en presupuesto no es este timeout,
+# sino el fast-path deterministico y el cache de prompt.
+_GENERATION_TIMEOUT = 25.0
 
 # Contexto máximo del modelo (tokens). Con las 7 tools actuales (incluye
 # calculate_margin #91 y search_corpus #100), el system prompt + tools ya
@@ -97,9 +103,23 @@ _GENERATION_TIMEOUT = 60.0
 # prompt (menos tools/texto) en vez de, o ademas de, subir n_ctx.
 _N_CTX = 4096
 
-# Hilos para inferencia. Usar todos los nucleos disponibles del VPS CX43
-# (8 vCPU). cpu_count retorna None en entornos restringidos -> fallback 4.
-_N_THREADS: int = max(os.cpu_count() or 4, 4)
+# Hilos para inferencia: un hilo por nucleo REAL disponible, nunca mas.
+# El valor anterior era max(cpu_count, 4), que en el piso soportado de 1 vCPU
+# lanzaba 4 hilos sobre 1 core: los hilos se pelean el mismo core y la
+# inferencia va mas lenta que con 1 solo. El tope de 8 evita thrash de
+# scheduler en maquinas grandes sin beneficio real para un 3B en CPU.
+_N_THREADS: int = min(os.cpu_count() or 4, 8)
+
+# Tamano de lote para prompt eval. El prompt fijo (system + 9 tools) ronda los
+# 2700 tokens y se evalua en lotes: un batch mas grande procesa mas tokens por
+# pasada y reduce el overhead por lote, que es donde se va el tiempo cuando hay
+# poca CPU. Ver _preload_prompt_cache() para el otro lado del problema.
+_N_BATCH = 512
+
+# Capacidad del cache de prompt en RAM (384 MB). Acotado a proposito: el piso
+# soportado son 6 GB y el GGUF ya ocupa ~2 GB. Alcanza de sobra para el prefijo
+# fijo, que es el unico que se repite.
+_PROMPT_CACHE_BYTES = 384 * 1024 * 1024
 
 # ── Cache de resultados de tools ──────────────────────────────────
 # Los precios ODEPA se actualizan una vez al dia (cron 06:00 AM).
@@ -473,21 +493,46 @@ TOOLS: list[dict[str, object]] = [
     },
 ]
 
-# Generar _TOOLS_LINES desde TOOLS (una fuente de verdad).
-# Formato nativo Qwen2.5: cada tool como JSON individual para <tools>.
-_TOOLS_LINES = "\n".join([
-    json.dumps(tool_def, ensure_ascii=False)
-    for tool_def in TOOLS
-])
+# Subconjuntos de tools por tipo de consulta (TipoConsulta en schemas/variables).
+# Las 9 definiciones juntas pesan ~2000 tokens y se re-inyectan en cada consulta:
+# es el grueso del prompt y, con poca CPU, el grueso de la latencia. El pipeline
+# ya clasifica la consulta ANTES de llamar al LLM (_extract_variables), asi que
+# mandamos solo las tools del dominio consultado.
+#
+# "ambos" y "desconocido" reciben las 9: si no sabemos que pregunta, recortar
+# tools le sacaria capacidad al modelo. Solo recortamos cuando hay certeza.
+#
+# search_corpus va en ambos subconjuntos: responde dudas de contexto agricola
+# que pueden aparecer junto a una consulta de precio o de clima.
+_TOOLS_PRECIO = frozenset({
+    "get_price",
+    "get_price_history",
+    "get_price_spread",
+    "calculate_sale_value",
+    "calculate_margin",
+    "register_expense",
+    "search_corpus",
+})
+_TOOLS_CLIMA = frozenset({"get_weather", "get_clima_historico", "search_corpus"})
 
-# Sección de tools en formato nativo Qwen2.5 para inyectar en system prompt.
-# El modelo espera las definiciones dentro de <tools></tools>:
-#   <tools>
-#   {"type": "function", "function": {...}}
-#   {"type": "function", "function": {...}}
-#   </tools>
-# Y las llamadas como <tool_call>{"name": "...", "arguments": {...}}</tool_call>.
-_TOOLS_SECTION = f"""
+
+def _render_tools_section(nombres: frozenset[str] | None = None) -> str:
+    """Arma la sección <tools> del system prompt en formato nativo Qwen2.5.
+
+    Args:
+        nombres: Tools a incluir. None = todas (fuente única: ``TOOLS``).
+
+    Returns:
+        Bloque de texto listo para concatenar al system prompt.
+    """
+    definiciones = [
+        tool_def
+        for tool_def in TOOLS
+        if nombres is None
+        or str(cast("dict[str, object]", tool_def["function"])["name"]) in nombres
+    ]
+    lineas = "\n".join(json.dumps(tool_def, ensure_ascii=False) for tool_def in definiciones)
+    return f"""
 
 # Tools
 
@@ -495,7 +540,7 @@ You may call one or more functions to assist with the user query.
 
 You are provided with function signatures within <tools></tools> XML tags:
 <tools>
-{_TOOLS_LINES}
+{lineas}
 </tools>
 
 For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
@@ -504,6 +549,19 @@ For each function call, return a json object with function name and arguments wi
 </tool_call>
 
 When you receive a <tool_response>, use that data to answer the user in natural language."""
+
+
+_TOOLS_SECTION = _render_tools_section()
+
+# Precomputado por tipo: son strings constantes, asi el prefijo del prompt es
+# byte a byte estable y el cache KV puede reusarlo entre consultas del mismo
+# tipo. Generarlo por request romperia el cache.
+_TOOLS_SECTION_POR_TIPO: dict[str, str] = {
+    "precio": _render_tools_section(_TOOLS_PRECIO),
+    "clima": _render_tools_section(_TOOLS_CLIMA),
+    "ambos": _TOOLS_SECTION,
+    "desconocido": _TOOLS_SECTION,
+}
 
 # ── Singleton del modelo ───────────────────────────────────────────
 
@@ -524,6 +582,61 @@ def preload_model() -> None:
     queda en _model_error y answer() usara mock en desarrollo.
     """
     threading.Thread(target=_get_model, daemon=True, name="llm-preload").start()
+
+
+def _preload_cxx_runtime() -> None:
+    """Carga libstdc++ con RTLD_GLOBAL antes de importar llama_cpp.
+
+    Los wheels de llama-cpp-python 0.3.x para linux/arm64 publican
+    ``libggml-base.so`` sin la entrada DT_NEEDED a ``libstdc++.so.6``, asi que
+    el dlopen falla con ``undefined symbol:
+    _ZTVN10__cxxabiv117__class_type_infoE`` aunque la lib este instalada.
+    Cargarla antes en el namespace global deja los simbolos C++ resueltos.
+
+    Best-effort: si falla (ej. macOS, o build que si linkea bien), seguimos —
+    el import de llama_cpp decide.
+    """
+    import ctypes
+
+    for soname in ("libstdc++.so.6", "libc++.1.dylib"):
+        try:
+            ctypes.CDLL(soname, mode=ctypes.RTLD_GLOBAL)
+            return
+        except OSError:
+            continue
+    logger.debug("No se pudo precargar el runtime C++ — se intenta importar igual")
+
+
+def _enable_prompt_cache(model: Llama) -> None:
+    """Activa reuso del estado KV para el prefijo fijo del prompt.
+
+    El system prompt + las definiciones de las 9 tools son BYTE A BYTE
+    identicos en cada consulta y pesan ~2700 tokens. Sin cache, llama.cpp los
+    re-evalua enteros antes de generar el primer token: en 1 vCPU eso solo ya
+    supera el timeout de 60s. Con cache, el prefijo se evalua una vez y las
+    consultas siguientes arrancan desde ahi.
+
+    LlamaRAMCache guarda el estado por prefijo de tokens y hace match por el
+    prefijo comun mas largo, que es exactamente nuestro caso. La capacidad va
+    acotada porque el piso soportado son 6 GB de RAM y el modelo ya ocupa ~2 GB.
+
+    Best-effort: si la version de llama-cpp-python no expone el cache, se sigue
+    sin el (mas lento, pero funcional).
+    """
+    try:
+        # attr-defined: los stubs de llama-cpp-python no exportan LlamaRAMCache,
+        # pero existe en runtime desde 0.2.x (verificado en 0.3.34).
+        from llama_cpp import LlamaRAMCache  # type: ignore[attr-defined]
+    except ImportError:
+        logger.debug("LlamaRAMCache no disponible — sin cache de prompt")
+        return
+
+    try:
+        model.set_cache(LlamaRAMCache(capacity_bytes=_PROMPT_CACHE_BYTES))
+    except (AttributeError, TypeError, ValueError):
+        logger.warning("No se pudo activar el cache de prompt — se sigue sin el")
+        return
+    logger.info("Cache de prompt activo — capacidad=%d MB", _PROMPT_CACHE_BYTES // 1_048_576)
 
 
 def _get_model() -> Llama | None:
@@ -550,12 +663,18 @@ def _get_model() -> Llama | None:
         if _model_loaded:
             return _model
 
+        _preload_cxx_runtime()
+
         try:
             from llama_cpp import Llama
-        except ImportError:
-            _model_error = "llama-cpp-python no instalado"
+        except (ImportError, OSError, RuntimeError) as exc:
+            # RuntimeError/OSError: el wheel de llama-cpp-python no logra hacer
+            # dlopen de sus .so (ABI incompatible, libs de sistema faltantes).
+            # Sin este catch la excepcion mata el thread de preload y sube como
+            # 500 en el request path en vez de degradar a mock.
+            _model_error = f"llama-cpp-python no cargable: {exc}"
             _model_loaded = True  # Permanente: sin reinstalar no se arregla
-            logger.warning("llama-cpp-python no instalado — LLM funcionando en modo mock")
+            logger.warning("llama-cpp-python no cargable (%s) — LLM en modo mock", exc)
             return None
 
         model_path = settings.llm_model_path
@@ -574,10 +693,17 @@ def _get_model() -> Llama | None:
                 model_path=model_path,
                 n_ctx=_N_CTX,
                 n_threads=_N_THREADS,
+                n_batch=_N_BATCH,
                 verbose=False,
             )
+            _enable_prompt_cache(_model)
             _model_loaded = True  # Solo en exito
-            logger.info("Modelo LLM cargado — n_ctx=%d", _N_CTX)
+            logger.info(
+                "Modelo LLM cargado — n_ctx=%d n_threads=%d n_batch=%d",
+                _N_CTX,
+                _N_THREADS,
+                _N_BATCH,
+            )
         except Exception as exc:
             _model_error = f"Error al cargar modelo: {exc}"
             logger.exception(
@@ -904,6 +1030,7 @@ def _build_messages(
     history: list[dict[str, object]],
     cultivos: list[str] | None = None,
     system_tip: str | None = None,
+    consulta_tipo: str | None = None,
 ) -> list[dict[str, object]]:
     """Construye la lista de mensajes para el LLM.
 
@@ -925,8 +1052,16 @@ def _build_messages(
         history: Mensajes previos del diálogo.
         cultivos: Lista opcional de cultivos de interés del agricultor.
         system_tip: Instrucción adicional opcional para el system prompt.
+        consulta_tipo: Tipo detectado por el pipeline ("precio", "clima",
+                       "ambos", "desconocido"). Recorta el bloque de tools al
+                       dominio consultado. None o desconocido = las 9 tools.
     """
-    system_content = SYSTEM_PROMPT + _TOOLS_SECTION
+    # El bloque de tools va inmediatamente despues del system prompt para que el
+    # prefijo quede estable y reusable por el cache KV. Todo lo variable
+    # (cultivos, tip) se agrega DESPUES, nunca en el medio.
+    system_content = SYSTEM_PROMPT + _TOOLS_SECTION_POR_TIPO.get(
+        consulta_tipo or "desconocido", _TOOLS_SECTION
+    )
 
     # Personalización por cultivos de interés (issue #125).
     # Si el agricultor tiene cultivos registrados, se lo indicamos al LLM
@@ -956,6 +1091,7 @@ async def answer(
     phone_hash: str | None = None,
     cultivos: list[str] | None = None,
     system_tip: str | None = None,
+    consulta_tipo: str | None = None,
 ) -> str:
     """Genera una respuesta textual usando el LLM con Tool Calling.
 
@@ -977,6 +1113,9 @@ async def answer(
         system_tip: Instrucción adicional opcional para el system prompt.
                     Usado por pipeline_service para sugerir calculate_margin
                     cuando se detectan keywords de venta realizada (Issue #91).
+        consulta_tipo: Tipo detectado por el pipeline. Recorta el bloque de
+                       tools al dominio consultado para bajar el costo de
+                       prompt eval, que domina la latencia con poca CPU.
 
     Returns:
         Texto de respuesta en español chileno, listo para TTS.
@@ -990,7 +1129,13 @@ async def answer(
     if model is None:
         return _mock_answer(query_text)
 
-    messages = _build_messages(query_text.strip(), history, cultivos=cultivos, system_tip=system_tip)
+    messages = _build_messages(
+        query_text.strip(),
+        history,
+        cultivos=cultivos,
+        system_tip=system_tip,
+        consulta_tipo=consulta_tipo,
+    )
 
     try:
         for _iteration in range(MAX_TOOL_ITERATIONS):
