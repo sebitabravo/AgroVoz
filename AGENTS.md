@@ -8,7 +8,7 @@
 
 Problema: más de 205.000 agricultores INDAP pierden 40-60% del precio mayorista por asimetría de información. No tienen acceso a datos de mercado cuando negocian con intermediarios.
 
-Proyecto estudiantil para Desafío Crea INACAP 2026. Etapa actual: MVP implementado — pipeline E2E de voz (Whisper + LLM + TTS, 9 tools), landing page (Astro 7 + Tailwind 4), dashboard admin (Jinja2 + HTMX + PWA), y piloto de validación en Traiguén. Backend: 58 archivos en app/, 1077 tests.
+Nacido como proyecto estudiantil para Desafío Crea INACAP 2026, hoy es un producto en operación: pipeline E2E de voz (Whisper + LLM + TTS con Tool Calling sobre 9 tools), catálogo completo ODEPA (79 productos, 15 mercados), alertas proactivas de precio y clima, landing page (Astro 7 + Tailwind 4) y dashboard admin de 8 vistas (Jinja2 + HTMX + PWA). Backend: 65 archivos en `app/`, 1134 tests.
 
 ## Team
 
@@ -20,13 +20,13 @@ Proyecto estudiantil para Desafío Crea INACAP 2026. Etapa actual: MVP implement
 
 - **Institución:** INACAP Temuco, Ingeniería en Informática
 - **Competencia:** Desafío Crea INACAP 2026
-- **Etapa actual:** IDEA con arquitectura definida (sin código aún)
-- **Entregables esperados:** prototipo funcional MVP, pitch, demo en vivo, documentación técnica
+- **Etapa actual:** producto implementado y desplegado; foco en validación en terreno y endurecimiento operativo
+- **Entregables:** producto funcional, pitch, demo en vivo, documentación técnica
 - **Piloto de validación:** 3-5 productores reales en Traiguén, 4 semanas
 
 ## Main goals
 
-1. **MVP funcional (6 semanas):** pipeline end-to-end de voz en VPS Hetzner CX43
+1. **Latencia sostenida < 15 s end-to-end** incluso en hardware degradado (ver "Hard constraints"). Objetivo abierto: el LLM es el cuello de botella bajo CPU limitada.
 2. **Validación técnica:** precisión de Whisper small en español rural chileno, target WER < 15% en muestra piloto de Traiguén (stretch < 10%, a validar en piloto)
 3. **Piloto en Traiguén:** 3-5 productores reales, 4 semanas de uso
 4. **Dataset de voz rural chilena:** activo propietario para fine-tuning futuro
@@ -39,11 +39,12 @@ Proyecto estudiantil para Desafío Crea INACAP 2026. Etapa actual: MVP implement
 - **Sin IoT/sensores.** Solo el micrófono del teléfono.
 - **Sin recomendaciones agronómicas.** El LLM entrega datos de precio y clima, no interpreta.
 - **VPS Hetzner CX43** (8 vCPU, 16 GB RAM, 160 GB SSD) — EUR 12,49/mes (~CLP 13.000)
+- **Debe funcionar en hardware degradado.** El peor caso soportado es 1 vCPU / 6 GB RAM: si el producto no responde ahí, no sirve. Todo cambio de rendimiento se valida contra ese piso, no solo contra el VPS.
 - **Costo operativo:** CLP 100-150 por agricultor/mes (sin costos de API WhatsApp)
 - **Latencia:** <15 segundos end-to-end
-- **SQLite** (sin servidor DB separado para MVP)
-- **Procesamiento síncrono** (sin Celery/Redis para MVP)
-- **Sin autenticación de usuarios** en MVP. Número WhatsApp = identidad.
+- **SQLite.** Sin servidor de DB separado.
+- **Procesamiento síncrono.** Sin Celery/Redis: cada audio se procesa en el request del webhook.
+- **Sin autenticación de usuarios.** Número WhatsApp = identidad.
 - **Audio temporal:** eliminado del VPS en <24h. Transcripciones anonimizadas.
 - **Ley 21.719** (Protección de Datos, dic 2026) — auditoría formal pre-escalamiento.
 - **Código comentado en español** (contexto académico INACAP)
@@ -70,8 +71,8 @@ Proyecto estudiantil para Desafío Crea INACAP 2026. Etapa actual: MVP implement
 
 ### Admin Dashboard
 - Server-side rendering: Jinja2 + HTMX (parte del backend, sin build step)
-- Chart.js desde CDN
-- Auth: API key en header `X-Admin-Key`
+- Chart.js servido local desde `app/static/` (la CSP es `script-src 'self'`, no admite CDN)
+- Auth: cookie de sesión firmada para el dashboard HTML; API key en header `X-Admin-Key` para las APIs JSON
 
 ### Infra
 - VPS Hetzner CX43, Ubuntu 24.04 LTS
@@ -87,20 +88,23 @@ Proyecto estudiantil para Desafío Crea INACAP 2026. Etapa actual: MVP implement
 
 ## Product scope
 
-**MVP (piloto Traiguén):**
+**Implementado y en operación:**
 - WhatsApp audio → transcripción → consulta ODEPA/clima → respuesta de voz
-- Keyword matching inicial para intents (Tool Calling completo es stretch goal)
-- Solo precios de papa (primer producto), expandible a otros
-- Solo clima de Traiguén (coordenadas fijas: -38.23, -72.68)
-- Sin historial de consultas para el agricultor (solo métricas anonimizadas para el equipo)
+- **WhatsApp texto → misma consulta → respuesta escrita.** El productor no siempre puede mandar audio (lugar ruidoso, reunión, mala señal), así que el texto es una vía de entrada de primera clase. Salta Whisper y Piper: ~100 ms contra ~11 s del audio
+- Tool Calling con whitelist estricta de 9 tools: `get_price`, `get_price_history`, `calculate_sale_value`, `calculate_margin`, `get_price_spread`, `get_weather`, `get_clima_historico`, `search_corpus`, `register_expense`
+- Catálogo ODEPA completo: 79 productos, 15 mercados, ~41.000 filas de precios (verificado: 79/79 responden en `get_price`, `get_price_spread`, `calculate_sale_value` y `get_price_history`)
+- Clima actual e histórico, por comuna del productor (`user_prefs.comuna`), no coordenadas fijas
+- Alertas proactivas de precio y clima (helada, lluvia extrema) con rate limit
+- Historial de consultas con opt-in explícito (Ley 21.719) — `consultation_history`
+- Máquina de estados de conversación con transiciones y timeout
+- Dashboard admin de 8 vistas: dashboard, métricas, piloto, actividad, revisión, ODEPA, alertas, monitor
+- Landing page + demo interactiva web
 
-**Post-MVP (si hay tiempo en Crea INACAP):**
-- Tool Calling completo con whitelist
-- Múltiples productos y mercados ODEPA
-- Clima por coordenadas dinámicas (One-time location share de WhatsApp)
-- Historial simple: "¿cuál fue el precio de la papa la semana pasada?"
+**Backlog:**
+- Clima por coordenadas dinámicas (one-time location share de WhatsApp)
+- Cobertura de mercados fuera del catálogo ODEPA
 
-**Fuera de scope para MVP:**
+**Fuera de scope:**
 - Multi-idioma (solo español chileno)
 - App nativa iOS/Android
 - Dashboard para agricultores
@@ -172,9 +176,14 @@ AgroVoz/
 │   ├── package.json
 │   └── src/
 ├── docs/
+│   ├── README.md          ← Índice de toda la documentación
 │   ├── ARCHITECTURE.md
 │   ├── DEV-GUIDE.md
-│   └── piloto/            ← Kit operativo del piloto Traiguén
+│   ├── negocio/           ← Plan de negocio segmentado en 11 partes
+│   ├── pmbok/             ← Gestión de proyecto para evaluación INACAP
+│   ├── piloto/            ← Plan y kit operativo del piloto Traiguén
+│   ├── legal/             ← Privacidad y aviso de responsabilidad
+│   └── historico/         ← Postulación Crea congelada (NO editar)
 ├── scripts/               ← provision-vps.sh, smoke-test.sh
 └── skills/                ← Guías de trabajo del equipo (leer ANTES de codear)
     ├── issue-creation/SKILL.md   ← Crear issues (flujo issue-first)
@@ -217,19 +226,20 @@ Regla simple: **si tu tarea calza con una fila, esa skill es lectura obligatoria
 ### Límites de contexto
 
 - **Leer máximo 5 archivos por tarea atómica.**
-  - 1 archivo de fase (`docs/phases/XX-*.md`)
-  - Hasta 3 archivos de referencia (`AGENTS.md`, `docs/ARCHITECTURE.md`)
+  - 1 issue o descripción de la tarea
+  - Hasta 3 archivos de referencia (`AGENTS.md`, `docs/ARCHITECTURE.md`, la skill que corresponda)
   - 1 archivo de código a modificar
 - Si necesitai más contexto, **preguntar**, no leer "por si acaso".
 
-### Flujo por fase
+### Flujo de trabajo
 
 ```
-1. Leer docs/phases/XX-*.md           ← qué hay que hacer
-2. Leer archivos de contexto necesarios  ← solo los que la fase pide
-3. EJECUTAR (código, config, tests)
-4. Validar (tests pasan, linter limpio)
-5. Reportar: hecho + tests + next step
+1. Leer el issue                         ← qué hay que hacer
+2. Leer la skill que corresponde         ← cómo se hace acá
+3. Leer solo los archivos necesarios
+4. EJECUTAR (código, config, tests)
+5. Validar (tests pasan, linter y mypy limpios)
+6. Reportar: hecho + tests + riesgos + next step
 ```
 
 ## Coding conventions
@@ -301,12 +311,13 @@ git log origin/main..HEAD --oneline    # verificar: commits atómicos, sin WIP n
 - Si el cambio tocó Whisper, verificar precisión: `cd backend && uv run python scripts/eval_wer.py --model small --samples 5`
 - Si el cambio tocó el pipeline E2E, verificar logs: `docker compose logs backend | rg "Audio transcrito"`
 - Listar riesgos o trade-offs
-- Listar próximo paso (siguiente fase)
+- Listar próximo paso
 
-## Fases del proyecto (completadas)
+## Fases de construcción (completadas)
 
 Todas las fases del plan original (00–06) fueron implementadas entre mayo y julio 2026.
 El detalle de cada fase está en el historial de git y en los issues cerrados del repo.
+El trabajo ya no se organiza por fases: es mantención y evolución de un producto en operación.
 
 | # | Fase | Estado |
 |---|---|---|
@@ -319,3 +330,41 @@ El detalle de cada fase está en el historial de git y en los issues cerrados de
 | 06 | Deploy y puesta en marcha (VPS + Dokploy + CI/CD) | ✅ Completado |
 
 **Próximo hito**: piloto de validación con 3-5 productores en Traiguén (4 semanas).
+
+**Deuda abierta conocida** (detectada en auditoría del 24/07/2026):
+
+| Tema | Estado |
+|---|---|
+| Whisper `small` es el cuello del camino de voz: ~9 s de los ~11 s del pipeline en 1 vCPU (el camino de texto responde en ~100 ms) | Abierto — siguiente objetivo de latencia |
+| Consulta que nombra un mercado específico no toma el fast-path y cae al LLM (lento en 1 vCPU) | Abierto |
+| `_formatear_pesos` verbaliza centavos: "14.232 coma 14 pesos". El peso chileno no tiene centavos en circulación | Abierto — decisión de redondeo pendiente |
+| `success_rate` del panel mide clasificación de intent, no entrega efectiva. Una consulta con timeout de LLM y envío fallido figura como "✓ ok" | Abierto |
+| Log dice "Respuesta LLM generada" también cuando respondió el fast-path sin LLM | Abierto — cosmético |
+| El demo web llama al backend por mismo origen (`window.location.origin`): solo funciona detrás de reverse proxy. Además `demo_endpoint_enabled=False` por defecto | Abierto |
+| `<title>` y `meta description` no se traducen con el toggle ES/EN | Abierto — SEO |
+| Toggle de idioma sin `aria-pressed`; drawer mobile cerrado sigue siendo tabbable | Abierto — accesibilidad |
+| Textos de la página de alertas sin tildes ("minima", "mas", "maximo") | Abierto — ortografía |
+| Datos tabulares del admin renderizados como `div` y no `table` (`/admin/activity`, `/admin/odepa`) | Abierto — accesibilidad |
+
+**Resuelto en la auditoría del 24-26/07/2026:**
+
+| Tema | Fix |
+|---|---|
+| El sistema **solo aceptaba audio**: el webhook descartaba los mensajes escritos con `reason="mensaje_no_audio"` | `process_text()` + `_is_text_message()`. Mismo pipeline (alertas, resumen, fast-path, tool calling, persistencia) sin Whisper ni TTS: ~100 ms |
+| Whisper transcribía mal el vocabulario del dominio: "va a llover mañana" → "vaya chubes mañana", y la consulta quedaba sin clasificar | `initial_prompt` con productos, mercados, comunas y frases típicas + fallback de temperatura explícito. La frase ahora transcribe correcta |
+| Timeout del LLM en 60 s: el peor caso era esperar 70 s para recibir "no te entendí" | Bajado a 25 s; el fallback por keywords entrega datos reales de ODEPA en vez de un mensaje genérico |
+| Los tests del endpoint webhook empezaron a disparar el pipeline real al soportarse texto (el archivo pasó de 0,3 s a 113 s) | Fixture autouse que aísla los `test_webhook_*` del procesamiento en background |
+
+| Tema | Fix |
+|---|---|
+| Latencia: 86 s con timeout de LLM a 60 s | 11 s en caliente. Fast-path determinista + cache de prompt KV + subset de tools por intent + `n_threads` sin sobresuscribir |
+| `llama-cpp` no cargaba (`undefined symbol` de libstdc++): el LLM llevaba días en modo mock | Preload de libstdc++ con `RTLD_GLOBAL` + catch de `OSError`/`RuntimeError` |
+| Schema drift: `migrations/` no montado en dev, 500 en `/admin/users/{hash}` | Volumen `./backend/migrations:/app/migrations` |
+| La suite de tests escribía en `data/agrovoz.db`: ~83% de `consultations` era basura | Fixture autouse que aísla `SessionLocal` en todos los tests |
+| Piper deletreaba unidades: "eme barra ese" por `m/s`, "barra" en fechas | `normalizar_para_voz()` antes de sintetizar |
+| `scikit-learn` faltaba en la imagen: `search_corpus` nunca funcionó y una consulta de clima moría con `ModuleNotFoundError` | Rebuild de la imagen + guard de `ImportError` en `_force_corpus_search`, con el import dentro del branch de keywords |
+| El panel (PWA de terreno) scrolleaba en horizontal en teléfono: tablas y grids de columnas fijas empujaban la página | `table { display:block; overflow-x:auto }` en la media query, `.split-grid` con `minmax(0,1fr)`, contenedores scrollables en ODEPA y métricas |
+| `/demo` era inalcanzable: ningún enlace del sitio llevaba ahí | CTA "Probá la demo interactiva" en la sección `#demo` del landing |
+| 13 anclas muertas en `/demo`: la nav y el footer apuntaban a secciones que solo existen en el index | Anclas root-relative (`/#como`) en `Header.astro` y `Footer.astro` |
+| Skip link de accesibilidad roto en `/demo` (apuntaba a un `#top` inexistente) | `id="top"` en el `<main>` de `demo.astro` |
+| `/demo` sin tildes ("Proba", "Escribi", "Traiguen", "manana") | Ortografía corregida en toda la página |

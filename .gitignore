@@ -8,11 +8,6 @@
 credentials*.json
 service-account*.json
 
-# ── Docs de postulación con datos personales (RUT, teléfono, correos) ──
-# NUNCA al repo — Ley 21.719. Quedan solo en local.
-AgroVoz_Informe_Completo.md
-agrovoz-postulacion-crea2026.md
-
 # ── Docs de ideación local (no commiteables) ──
 IDEA.md
 
@@ -35,23 +30,17 @@ audio/
 *.ogg
 *.wav
 *.mp3
-# Archivos de audio estático comprometidos (respuestas pregrabadas)
 !/backend/app/static/*.ogg
-# Excepción: fixture de audio para tests E2E del pipeline de voz
 !/backend/tests/fixtures/sample_query.ogg
 
 # ── Imágenes — Sesión QR WhatsApp, screenshots, assets binarios ──
-# El proyecto usa SVG inline (Lucide). No debe tener PNG en el repo.
 *.png
 *.jpg
 *.jpeg
 *.gif
 *.ico
 *.webp
-# Excepción: og-image.png es requerido por Open Graph/Twitter (los
-# scrapers de redes sociales no soportan SVG). Fuente: landing/src/assets/og-image.svg.
 !landing/public/og-image.png
-# Excepción: iconos PWA del admin dashboard (manifest requiere PNG).
 !/backend/app/static/icon-192.png
 !/backend/app/static/icon-512.png
 
@@ -91,17 +80,8 @@ docker-compose.override.yml
 # ── Logs ──────────────────────────────
 *.log
 logs/
-
-# Playwright MCP - screenshots temporales
 .playwright-mcp/
-# Local Pi runtime state
 .atl/
-
-# ── CodeGraph index (generado local, regenerable) ──
 .codegraph/
-
-# ── SDD artifacts (locales, no commiteables) ──
 openspec/
-
-# Git worktrees locales (no commitear)
 .worktrees/

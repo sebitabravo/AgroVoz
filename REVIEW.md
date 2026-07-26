@@ -19,8 +19,9 @@ el source y el sink específicos.
 
 ## Severity calibration
 
-En el contexto de AgroVoz (asistente de voz para agricultores, sin auth en MVP,
-SQLite local, procesamiento síncrono):
+En el contexto de AgroVoz (asistente por voz y texto para agricultores, sin auth
+de usuarios por diseño, SQLite local, procesamiento síncrono, en producción con
+datos personales reales desde el piloto):
 
 - **P0 — Merge-Blocking (CRITICAL)**: secretos en código, SQL injection, XSS, command injection,
   auth bypass en admin, bug que rompe el pipeline WhatsApp→Whisper→LLM→TTS,

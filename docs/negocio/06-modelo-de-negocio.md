@@ -1,0 +1,51 @@
+# 6. Modelo de negocio
+
+> Parte del plan de negocio de AgroVoz. Índice en [`docs/negocio/README.md`](./README.md).
+> Área PMBOK relacionada: Costos (fuentes de ingreso)
+
+---
+
+## Recursos para la implementación real
+
+Para implementar AgroVoz a escala más allá del piloto del Crea INACAP, los recursos se agrupan en cuatro categorías.
+
+**Financiamiento para desarrollo y operación** (año 1: $25 a $40 millones CLP)
+
+| Recurso | Propósito | Costo mensual estimado |
+|---|---|---|
+| VPS (multiples instancias — Hetzner CX43 o superior) | Alta disponibilidad, balanceo de carga | EUR 35-70/mes (~CLP 37.000-74.000) |
+| WhatsApp Business API oficial vía BSP | Contingencia si Open-WA deja de operar, o si un contrato institucional exige la API oficial (ver riesgo en 8.3) | Por conversación de 24 h, tarifa según categoría. **Pendiente de verificar para Chile** |
+| Open-Meteo | Sin costo ni límite práctico. No requiere plan pago | CLP 0 |
+| Dominio + SSL + monitoreo | Producción | ~CLP 25.000/mes |
+| Fine-tuning Whisper | Mejorar precisión con español chileno rural | Tiempo de desarrollo |
+| Dedicación 2-3 desarrolladores full-time (8-12 meses) | Desarrollo escalado | $20-30M CLP año 1 |
+| Ingeniero agrónomo asesor part-time | Validar pertinencia técnica de recomendaciones | $3-5M CLP año 1 |
+
+**Mentorías y acompañamiento técnico-comercial**: modelos de negocio para sector público y AFC (CORFO, ProChile), acompañamiento legal para acuerdos institucionales con servicios públicos, y mentoría en transferencia tecnológica agrícola vía INIA.
+
+**Alianzas institucionales formalizadas**:
+
+- Convenio marco con INDAP Araucanía y nacional.
+- Acuerdo de colaboración técnica con INIA Carillanca para validación científica de recomendaciones agrometeorológicas.
+- Memorando con Subtel en el marco del Plan Nacional de Conectividad Digital Rural y Brecha Digital Cero.
+- Convenios con municipios rurales de La Araucanía, partiendo por Traiguén.
+
+**Acceso a fondos públicos de innovación**: postulación a FIA (Fondo de Innovación Agraria), CORFO Semilla, FONDEF de Aplicación Productiva, y al programa IICA-INDAP 2024-2028 (USD $12,3 millones) explícitamente orientado a modernización digital de la AFC.
+
+## Modelo de negocio: B2G + Freemium directo
+
+**Canal principal — Suscripción institucional vía INDAP/PRODESAL**
+
+INDAP invierte más de $93.748 millones anuales en créditos y $5.631 millones en inversiones para la AFC. PRODESAL atiende a 72.990 agricultores con 1.270 profesionales. AgroVoz se posiciona como herramienta complementaria al extensionismo presencial: INDAP paga una suscripción anual por "Agricultor Activo" a un precio de CLP 500-1.000 por agricultor/mes. Para el agricultor: gratis (subsidiado por el programa).
+
+**Nota sobre contratación pública (Mercado Público)**: La venta al Estado chileno —a través de INDAP o cualquier servicio público— requiere navegar el sistema de compras públicas. Contratos sobre 3 UTM (~CLP 200.000) deben licitarse mediante Mercado Público (mercadopublico.cl). AgroVoz necesitaría registrarse como proveedor del Estado (ChileProveedores), participar en licitaciones públicas o convenios marco, y competir contra otros oferentes. El proceso completo —desde el primer contacto institucional hasta un contrato firmado— puede tomar 18-24 meses. Esta complejidad se reconoce como parte del camino de escalamiento, no como barrera insalvable: programas como PROGYSO 2026 e IICA-INDAP abren ventanas de financiamiento específicas para innovación tecnológica en la AFC, que pueden acelerar el procurement mediante convenios de transferencia tecnológica.
+
+**Canal secundario — Freemium directo**
+
+- Gratis: 10 consultas/mes de precios y clima.
+- Premium (CLP 2.000/mes): consultas ilimitadas, alertas de precio, historial, pronóstico extendido.
+
+**Canal complementario — Convenios privados**
+
+Cooperativas, asociaciones gremiales y empresas con programas de proveedores AFC (CMPC ya tiene convenios marco con INDAP Araucanía) pueden financiar AgroVoz como parte de cadena de proveedores o RSE.
+

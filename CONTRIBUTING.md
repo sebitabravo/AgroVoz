@@ -36,7 +36,7 @@ completar módulo + ambiente/fase + severidad/prioridad + responsable.
 |---|---|---|---|
 | Módulo | ✅ | ✅ | Filtrar y enrutar (CODEOWNERS + label `mod:*`) |
 | Ambiente | ✅ | — | Dónde se reproduce (dev/VPS/Traiguén) |
-| Fase | ✅ | ✅ | En qué etapa del plan encaja (`fase:*`) |
+| Área | ✅ | ✅ | A qué frente pertenece (`area:*`) |
 | Severidad | ✅ | — | Priorizar bugs (Bloqueante → Baja) |
 | Prioridad MoSCoW | — | ✅ | Must / Should / Could / Won't |
 | Responsable | ✅ | ✅ | Quién lo toma (tentativo) |
@@ -47,12 +47,17 @@ completar módulo + ambiente/fase + severidad/prioridad + responsable.
 Los labels ya están creados en el repo. Si falta alguno, agregalo desde
 **Issues → Labels** o con `gh label create`.
 
-Set de labels: `mod:*` (módulo), `fase:*` (00–06 + post-mvp), `prio:*` (MoSCoW),
+Set de labels: `mod:*` (módulo), `area:*` (frente de trabajo), `prio:*` (MoSCoW),
 `status:*` (flujo issue-first), `bug`, `enhancement`, `documentation`, `refactor`,
 `chore`, `ci`, `security`.
 
-Regla: cada issue lleva **1 label de tipo** + **1 `mod:*`** + **1 `fase:*`** + **1 `prio:*`** (si aplica)
+Regla: cada issue lleva **1 label de tipo** + **1 `mod:*`** + **1 `area:*`** + **1 `prio:*`** (si aplica)
 + **1 `status:*`** (gestionado por el tech lead).
+
+> **Sobre las fases 00–06.** Las etiquetas `fase:*` correspondían al plan de construcción original,
+> que se completó entre junio y julio de 2026. El trabajo ya no se organiza por fases: es mantención
+> y evolución de un producto en operación. Los issues históricos conservan su `fase:*`; los nuevos
+> usan `area:*` (piloto, negocio, pmbok, legal, producto, infra).
 
 ### Ciclo de vida del issue (issue-first)
 
@@ -92,7 +97,7 @@ Mapean 1:1 con los dropdowns de las plantillas, así no hay que re-escribir dato
 |---|---|---|
 | Status | Single select | Backlog, Todo, In Progress, In Review, Done |
 | Módulo | Single select | backend, voz, openwa, landing, admin, infra, datos |
-| Fase | Single select | 00–06, post-mvp |
+| Área | Single select | piloto, negocio, pmbok, legal, producto, infra |
 | Prioridad | Single select | Must, Should, Could, Won't |
 | Severidad | Single select | Bloqueante, Alta, Media, Baja |
 | Responsable | Iteration/Assignee | Sebastián, Francisco, Matías |
@@ -100,7 +105,7 @@ Mapean 1:1 con los dropdowns de las plantillas, así no hay que re-escribir dato
 ### Vistas recomendadas
 
 - **Board por Status** (kanban general): agrupado por Status, ordenado por Prioridad.
-- **Board por Fase**: agrupado por Fase → ve el avance de cada etapa del plan.
+- **Board por Área**: agrupado por Área → ve el avance de cada frente (piloto, negocio, PMBOK, legal).
 - **Board por Responsable**: agrupado por Responsable → quién tiene qué.
 
 ### Automatización (Settings → Workflows / Automation)
