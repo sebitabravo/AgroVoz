@@ -22,6 +22,10 @@
 {# ── Productos ODEPA disponibles ─────────────────────────── #}
 <div class="card">
   <p style="font-size:15px;font-weight:700;letter-spacing:-.015em;margin-bottom:18px">Productos ODEPA disponibles</p>
+  {# Las columnas fijas suman ~408px y en telefono desbordaban la pagina entera.
+     Este contenedor las deja scrollear en horizontal dentro de la card. #}
+  <div style="overflow-x:auto">
+  <div style="min-width:520px">
   <div style="display:grid;grid-template-columns:1fr 108px 140px 148px;gap:12px;padding-bottom:10px;border-bottom:1px solid #e8e7e0">
     <span style="font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#7e827a">Producto</span>
     <span style="font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#7e827a">Registros</span>
@@ -48,5 +52,7 @@
   {% else %}
   <p class="notice">Sin productos con consultas en los últimos 30 días.</p>
   {% endif %}
+  </div>
+  </div>
 </div>
 {% endblock %}

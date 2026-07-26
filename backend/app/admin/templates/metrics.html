@@ -31,7 +31,8 @@
 </div>
 
 {# ── Intents + Productos ─────────────────────────────── #}
-<div style="display:grid;grid-template-columns:288px 1fr;gap:18px">
+{# .split-grid (base.html): 288px + resto en desktop, apilado en telefono. #}
+<div class="split-grid">
   {# Intents #}
   <div style="background:#fff;border:1px solid #e8e7e0;border-radius:16px;padding:24px">
     <p style="font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#7e827a;margin-bottom:20px">Distribución de intents</p>
@@ -114,6 +115,9 @@
     <span style="font-size:12px;color:#7e827a">intent = desconocido · últimos 20</span>
   </div>
   {% if errores.recent %}
+  {# Columnas fijas (~396px con gaps): scrollean dentro de la card en telefono. #}
+  <div style="overflow-x:auto">
+  <div style="min-width:460px">
   <div style="display:grid;grid-template-columns:140px 1fr 1fr 80px;gap:12px;padding-bottom:10px;border-bottom:1px solid #e8e7e0">
     <span style="font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#7e827a">Timestamp</span>
     <span style="font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#7e827a">Consulta</span>
@@ -128,6 +132,8 @@
     <span style="font-size:12px;font-weight:600;color:#c05252">{{ e.latency_ms }}ms</span>
   </div>
   {% endfor %}
+  </div>
+  </div>
   {% else %}
   <p class="notice">Sin errores registrados en el período.</p>
   {% endif %}

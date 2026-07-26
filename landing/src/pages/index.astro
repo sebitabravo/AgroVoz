@@ -362,6 +362,13 @@ const equipo = [
             <div style="margin-top:32px">
               <Waveform variant="mini" />
             </div>
+            {/* Enlace a la demo interactiva: sin esto /demo queda huerfana,
+                no habia forma de llegar desde el sitio. */}
+            <div style="margin-top:28px">
+              <a href="/demo" class="btn btn-secondary" data-i18n="demo.cta">
+                Probar la demo interactiva
+              </a>
+            </div>
           </div>
           <DemoPhone />
         </div>
@@ -636,6 +643,7 @@ const equipo = [
     "demo.title": "As simple as a voice message.",
     "demo.caption":
       "100% by voice. No apps, no reading or writing — like sending a voice note to a neighbor.",
+    "demo.cta": "Try the interactive demo",
     "demo.status": "online",
     "demo.m1": "How much is potato this week?",
     "demo.m2":
