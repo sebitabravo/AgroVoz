@@ -9,6 +9,8 @@ y _execute_tool con whitelist enforcement.
 Sin modelo real: todos los tests corren en CI sin llama-cpp-python ni GGUF.
 """
 
+import os
+
 import httpx
 import pytest
 
@@ -153,26 +155,28 @@ class TestLlmConfig:
             "2a vuelta). Medir tokens reales con el tokenizer antes de bajarlo."
         )
 
-    def test_n_threads_minimo_4(self) -> None:
-        """n_threads debe usar al menos 4 hilos para CPU moderna.
+    def test_n_threads_sigue_a_los_cores_sin_sobresuscribir(self) -> None:
+        """n_threads = un hilo por core real, nunca mas.
 
-        En VPS CX43 (8 vCPU), usar menos de 4 hilos desperdicia capacidad
-        de computo paralelo. cpu_count() puede retornar None en entornos
-        restringidos (Docker sin --cpuset-cpus), cayendo a fallback 4.
+        El contrato anterior forzaba un piso de 4, pero en el peor caso
+        soportado (1 vCPU) eso lanzaba 4 hilos sobre 1 core: se pelean el
+        mismo core y la inferencia va mas lenta que con 1 solo. Ahora sigue
+        a cpu_count(). cpu_count() puede ser None en entornos restringidos
+        (Docker sin --cpuset-cpus), cayendo a un fallback de 4.
         """
-        assert _N_THREADS >= 4, (
-            f"_N_THREADS={_N_THREADS} es menor a 4. "
-            "Pocos hilos incrementan latencia de decode en CPU."
+        esperado = min(os.cpu_count() or 4, 8)
+        assert esperado == _N_THREADS, (
+            f"_N_THREADS={_N_THREADS} deberia ser min(cpu_count, 8)={esperado}."
         )
 
-    def test_n_threads_no_excede_16(self) -> None:
-        """Limite superior para evitar oversubscription.
+    def test_n_threads_al_menos_1(self) -> None:
+        """Nunca cero hilos: llama.cpp necesita al menos uno."""
+        assert _N_THREADS >= 1
 
-        Mas hilos que nucleos fisicos causa contention y degrada
-        rendimiento. 16 es el doble de los 8 vCPU del CX43, margen
-        para hyperthreading.
-        """
-        assert _N_THREADS <= 16, (
+    def test_n_threads_no_excede_8(self) -> None:
+        """Tope de 8: mas hilos que los 8 vCPU del CX43 solo agrega
+        contention de scheduler sin beneficio para un 3B en CPU."""
+        assert _N_THREADS <= 8, (
             f"_N_THREADS={_N_THREADS} muy alto. "
             "Oversubscription de hilos degrada inferencia."
         )
