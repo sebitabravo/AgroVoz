@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -18,6 +19,7 @@ from app.models.odepa_price import OdepaPrice
 from app.services.alert_service import (
     MAX_ALERTAS_ACTIVAS,
     AlertServiceError,
+    _tiene_consentimiento_de_alertas,
     cancelar_alertas,
     create_clima_alert,
     create_price_alert,
@@ -428,13 +430,22 @@ class TestLimitesAlertas:
 
 
 class TestEnviarAlerta:
-    """Envio de audio proactivo."""
+    """Envio de audio proactivo.
+
+    Una alerta la inicia AgroVoz sin que el productor pregunte, asi que sale solo
+    con opt-in registrado (Ley 21.719, comunicacion no solicitada). El opt-in se
+    recoge en la seccion 7.3 del Acuerdo de Uso.
+    """
 
     @pytest.mark.asyncio
-    async def test_enviar_alerta_sintetiza_y_envia(
+    async def test_enviar_alerta_sintetiza_y_envia_con_consentimiento(
         self,
     ) -> None:
         with (
+            patch(
+                "app.services.alert_service._tiene_consentimiento_de_alertas",
+                return_value=True,
+            ),
             patch(
                 "app.services.alert_service.TTSService.synthesize",
                 return_value="/tmp/fake.ogg",
@@ -445,10 +456,70 @@ class TestEnviarAlerta:
             ) as mock_send,
             patch("app.services.alert_service.Path.unlink") as mock_unlink,
         ):
-            await enviar_alerta("56912345678@c.us", "Alerta de prueba")
+            await enviar_alerta("56912345678@c.us", "Alerta de prueba", "a" * 64)
 
         mock_send.assert_awaited_once()
         mock_unlink.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_sin_consentimiento_no_envia_ni_sintetiza(self) -> None:
+        """Sin opt-in no sale nada, y ni siquiera se gasta TTS en generarlo."""
+        with (
+            patch(
+                "app.services.alert_service._tiene_consentimiento_de_alertas",
+                return_value=False,
+            ),
+            patch(
+                "app.services.alert_service.TTSService.synthesize",
+                return_value="/tmp/fake.ogg",
+            ) as mock_tts,
+            patch(
+                "app.services.alert_service.OpenWAService.send_audio",
+                new_callable=AsyncMock,
+            ) as mock_send,
+        ):
+            await enviar_alerta("56912345678@c.us", "Alerta de prueba", "a" * 64)
+
+        mock_send.assert_not_awaited()
+        mock_tts.assert_not_called()
+
+    def test_consentimiento_falla_cerrado_si_la_db_revienta(self) -> None:
+        """Ante un error de DB se asume que NO hay permiso.
+
+        Es preferible perder una alerta a mandarla sin consentimiento.
+        """
+        with patch(
+            "app.services.alert_service.SessionLocal",
+            side_effect=SQLAlchemyError("db caida"),
+        ):
+            assert _tiene_consentimiento_de_alertas("a" * 64) is False
+
+    def test_sin_fila_de_preferencias_no_hay_consentimiento(self) -> None:
+        """Un numero que nunca paso por onboarding no recibe alertas."""
+        assert _tiene_consentimiento_de_alertas("f" * 64) is False
+
+    @pytest.mark.asyncio
+    async def test_gate_usa_el_hash_guardado_no_uno_rederivado(self) -> None:
+        """Regresion: el chequeo de consentimiento recibe el HMAC almacenado.
+
+        El bug original re-derivaba el hash con ``_hash_chat_id`` (SHA-256 corto),
+        distinto del HMAC de 64 chars con que se guarda ``user_prefs.phone_hash``.
+        Nunca matcheaban, asi que NINGUNA alerta se enviaba, sin error visible.
+        Este test fija que ``enviar_alerta`` pasa al gate el phone_hash que recibe.
+        """
+        recibido: list[str] = []
+
+        def espia_consentimiento(phone_hash: str) -> bool:
+            recibido.append(phone_hash)
+            return False  # corta antes de TTS/envio
+
+        with patch(
+            "app.services.alert_service._tiene_consentimiento_de_alertas",
+            espia_consentimiento,
+        ):
+            await enviar_alerta("56912345678@c.us", "Alerta", "b" * 64)
+
+        assert recibido == ["b" * 64], "el gate debe recibir el HMAC guardado, no uno re-derivado del chat_id"
 
 
 class TestPipelineAlertCommands:

@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.constants import (
@@ -32,8 +33,10 @@ from app.core.constants import (
     TipoAlerta,
     UmbralClima,
 )
+from app.core.database import SessionLocal
 from app.models.alert import Alert
 from app.models.odepa_price import OdepaPrice
+from app.models.user_prefs import UserPrefs
 from app.services.odepa_service import (
     _es_unidad_kilo,
     _kilos_por_unidad,
@@ -259,7 +262,7 @@ async def evaluar_alertas_precio(
         if _cumple_condicion(precio_por_kg, cast(CondicionPrecio, alerta.condicion or ">"), umbral):
             mensaje = _mensaje_alerta_precio(alerta, registro, precio_por_kg)
             if alerta.wa_chat_id:
-                await enviar_alerta(alerta.wa_chat_id, mensaje)
+                await enviar_alerta(alerta.wa_chat_id, mensaje, alerta.phone_hash)
                 alerta.last_triggered_at = datetime.datetime.now()
                 session.commit()
                 enviados.append(alerta.phone_hash)
@@ -319,7 +322,7 @@ async def evaluar_alertas_clima(
             continue
         mensaje = _mensaje_alerta_clima(cast(UmbralClima | None, alerta.umbral_clima), dia)
         if alerta.wa_chat_id:
-            await enviar_alerta(alerta.wa_chat_id, mensaje)
+            await enviar_alerta(alerta.wa_chat_id, mensaje, alerta.phone_hash)
             alerta.last_triggered_at = datetime.datetime.now()
             session.commit()
             enviados.append(alerta.phone_hash)
@@ -331,8 +334,40 @@ async def evaluar_alertas_clima(
     return enviados
 
 
-async def enviar_alerta(wa_chat_id: str, mensaje: str) -> None:
+def _tiene_consentimiento_de_alertas(phone_hash: str) -> bool:
+    """Indica si el productor autorizó recibir alertas proactivas.
+
+    Una alerta la inicia AgroVoz sin que el productor pregunte, así que necesita
+    su propia base de licitud, distinta de la consulta que él mismo dispara. El
+    opt-in se recoge en la sección 7.3 del Acuerdo de Uso (docs/piloto/06).
+
+    Falla cerrado: si la consulta a la DB revienta, se asume que NO hay
+    consentimiento. Es preferible no enviar una alerta a enviarla sin permiso.
+
+    Args:
+        phone_hash: HMAC del número del productor.
+
+    Returns:
+        True solo si hay una fila de preferencias con ``alert_consent`` activo.
+    """
+    try:
+        with SessionLocal() as session:
+            prefs = session.query(UserPrefs).filter(UserPrefs.phone_hash == phone_hash).one_or_none()
+            return bool(prefs and prefs.alert_consent)
+    except SQLAlchemyError:
+        logger.exception(
+            "No se pudo verificar consentimiento de alertas — no se envía — phone_hash=%s",
+            phone_hash[:8],
+        )
+        return False
+
+
+async def enviar_alerta(wa_chat_id: str, mensaje: str, phone_hash: str) -> None:
     """Genera TTS del mensaje y lo envia como audio por Open-WA con retry.
+
+    Antes de enviar verifica el opt-in de alertas del productor: sin
+    consentimiento registrado no sale nada (Ley 21.719, comunicación no
+    solicitada). Ver docs/legal/aviso-responsabilidad.md.
 
     Reintenta 3 veces (1s, 2s, 4s backoff) solo en el envío.
     Si tras 3 intentos falla, loguea ERROR y continúa sin interrumpir.
@@ -340,7 +375,19 @@ async def enviar_alerta(wa_chat_id: str, mensaje: str) -> None:
     Args:
         wa_chat_id: Chat ID de WhatsApp destino.
         mensaje: Texto de la alerta.
+        phone_hash: HMAC del número (``hash_phone``), el MISMO valor con que se
+            guardó ``user_prefs.phone_hash``. Se usa para el chequeo de
+            consentimiento. NO derivar aquí desde ``wa_chat_id``: ``_hash_chat_id``
+            es un SHA-256 corto para logs, distinto del HMAC almacenado, y usarlo
+            haría que el gate nunca matchee y ninguna alerta se envíe.
     """
+    if not await asyncio.to_thread(_tiene_consentimiento_de_alertas, phone_hash):
+        logger.info(
+            "Alerta NO enviada: sin consentimiento de alertas — chat_id_hash=%s",
+            _hash_chat_id(wa_chat_id),
+        )
+        return
+
     tts = TTSService()
     audio_path = ""
     try:

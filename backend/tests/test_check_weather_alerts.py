@@ -123,7 +123,7 @@ class TestEvaluarAlertasClima:
         _crear_alerta_clima(db, umbral_clima="helada")
         enviados_reales: list[str] = []
 
-        async def mock_enviar(wa_chat_id: str, mensaje: str) -> None:
+        async def mock_enviar(wa_chat_id: str, mensaje: str, phone_hash: str = "") -> None:
             enviados_reales.append(wa_chat_id)
 
         with (
@@ -142,7 +142,7 @@ class TestEvaluarAlertasClima:
         _crear_alerta_clima(db, umbral_clima="lluvia_extrema")
         enviados_reales: list[str] = []
 
-        async def mock_enviar(wa_chat_id: str, mensaje: str) -> None:
+        async def mock_enviar(wa_chat_id: str, mensaje: str, phone_hash: str = "") -> None:
             enviados_reales.append(wa_chat_id)
 
         with (
@@ -198,7 +198,7 @@ class TestEvaluarAlertasClima:
         _crear_alerta_clima(db, umbral_clima="helada", last_triggered_at=ayer)
         enviados_reales: list[str] = []
 
-        async def mock_enviar(wa_chat_id: str, mensaje: str) -> None:
+        async def mock_enviar(wa_chat_id: str, mensaje: str, phone_hash: str = "") -> None:
             enviados_reales.append(wa_chat_id)
 
         with (
@@ -227,7 +227,7 @@ class TestEvaluarAlertasClima:
         _crear_alerta_clima(db, umbral_clima="helada", wa_chat_id=None)
         enviados_reales: list[str] = []
 
-        async def mock_enviar(wa_chat_id: str, mensaje: str) -> None:
+        async def mock_enviar(wa_chat_id: str, mensaje: str, phone_hash: str = "") -> None:
             enviados_reales.append(wa_chat_id)
 
         with (
@@ -262,7 +262,7 @@ class TestEvaluarAlertasClima:
 
         enviados_reales: list[str] = []
 
-        async def mock_enviar(wa_chat_id: str, mensaje: str) -> None:
+        async def mock_enviar(wa_chat_id: str, mensaje: str, phone_hash: str = "") -> None:
             enviados_reales.append(wa_chat_id)
 
         # Forecast con helada pero sin lluvia extrema
@@ -283,7 +283,7 @@ class TestEvaluarAlertasClima:
         alerta = _crear_alerta_clima(db, umbral_clima="helada", last_triggered_at=None)
         original_id = alerta.id
 
-        async def mock_enviar(wa_chat_id: str, mensaje: str) -> None:
+        async def mock_enviar(wa_chat_id: str, mensaje: str, phone_hash: str = "") -> None:
             pass
 
         with (
