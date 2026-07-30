@@ -1,0 +1,35 @@
+# Override de apoyo para el smoke del hardware piso (#215).
+#
+# No convierte una máquina potente en evidencia equivalente a un VPS de
+# 1 vCPU/6 GB: el kernel, la arquitectura y la competencia entre contenedores
+# siguen siendo distintos. La aceptación final debe ejecutarse en un host real
+# con esas características.
+#
+# Uso en el host de validación:
+#   docker compose -f docker-compose.prod.yml \
+#     -f docker-compose.floor.yml config
+#   docker compose -f docker-compose.prod.yml \
+#     -f docker-compose.floor.yml up -d
+
+services:
+  backend:
+    cpus: "1.0"
+    mem_limit: 4864m
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 4864M
+        reservations:
+          cpus: "0.75"
+          memory: 4G
+
+  openwa:
+    cpus: "0.25"
+    mem_limit: 768m
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 768M
+

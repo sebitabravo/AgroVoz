@@ -15,6 +15,7 @@ import datetime
 import pathlib
 from types import SimpleNamespace
 
+import httpx
 import psutil
 import pytest
 
@@ -332,6 +333,29 @@ class TestReloadLlm:
         assert llm_service._model_error is None
         assert result["status"] == "ok"
 
+    def test_reload_no_expone_mensaje_de_excepcion(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El dashboard recibe una clase cerrada, nunca paths del runtime."""
+        from app.services import llm_service
+        from app.services.monitor_service import reload_llm
+
+        secret_path = "/ruta/privada/modelo-secreto.gguf"
+        llm_service._model = None
+        llm_service._model_loaded = False
+        llm_service._model_error = None
+
+        def _failed_preload() -> None:
+            raise OSError(secret_path)
+
+        monkeypatch.setattr(llm_service, "preload_model", _failed_preload)
+        result = reload_llm()
+
+        assert result["status"] == "error"
+        assert "OSError" in str(result["detail"])
+        assert secret_path not in str(result["detail"])
+
 
 class TestCheckOpenwaNow:
     """Verificación manual de Open-WA."""
@@ -426,3 +450,36 @@ class TestCheckOpenwaHttpStatus:
         result = await monitor_service._check_openwa()
         assert result.ok is False
         assert "HTTP 500" in result.detail
+
+    async def test_error_de_red_no_expone_url(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Los detalles del monitor no filtran URLs ni mensajes de httpx."""
+        from app.services import monitor_service
+
+        secret_url = "https://usuario:secreto@host-interno.invalid"
+
+        class _FailingClient:
+            def __init__(self, **kwargs: object) -> None:
+                pass
+
+            async def __aenter__(self) -> "_FailingClient":
+                return self
+
+            async def __aexit__(self, *exc: object) -> None:
+                return None
+
+            async def get(
+                self,
+                url: str,
+                headers: dict[str, str],
+            ) -> object:
+                raise httpx.ConnectError(secret_url)
+
+        monkeypatch.setattr(monitor_service.httpx, "AsyncClient", _FailingClient)
+        result = await monitor_service._check_openwa()
+
+        assert result.ok is False
+        assert "ConnectError" in result.detail
+        assert secret_url not in result.detail

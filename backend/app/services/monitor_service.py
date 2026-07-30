@@ -36,6 +36,11 @@ _STARTED_AT = datetime.datetime.now(tz=datetime.UTC)
 _DISK_PATH = "/"
 
 
+def _safe_error_detail(prefix: str, exc: BaseException) -> str:
+    """Construye detalle operacional sin filtrar mensajes, paths ni URLs."""
+    return f"{prefix} · error={type(exc).__name__}"
+
+
 @dataclass(frozen=True)
 class SystemStats:
     """Métricas de hardware del VPS en el instante de la consulta."""
@@ -108,7 +113,11 @@ def _check_whisper() -> ServiceCheck:
     try:
         svc = WhisperService()
     except (RuntimeError, OSError, ImportError) as exc:
-        return ServiceCheck("Whisper STT", False, f"error: {exc}")
+        return ServiceCheck(
+            "Whisper STT",
+            False,
+            _safe_error_detail("no disponible", exc),
+        )
     if svc.is_loaded:
         return ServiceCheck("Whisper STT", True, f"{svc.model_name} · en memoria")
     return ServiceCheck("Whisper STT", False, f"{svc.model_name} · lazy (sin cargar)")
@@ -126,7 +135,11 @@ def _check_llm() -> ServiceCheck:
         loaded = llm_service._model is not None and llm_service._model_loaded
         error = llm_service._model_error
     except (AttributeError, ImportError) as exc:
-        return ServiceCheck("LLM Qwen 2.5", False, f"error: {exc}")
+        return ServiceCheck(
+            "LLM Qwen 2.5",
+            False,
+            _safe_error_detail("no disponible", exc),
+        )
     if loaded:
         return ServiceCheck("LLM Qwen 2.5", True, "3B Q4 · en memoria")
     if error:
@@ -146,7 +159,11 @@ def _check_tts() -> ServiceCheck:
     try:
         svc = TTSService()
     except (RuntimeError, OSError, ImportError) as exc:
-        return ServiceCheck("Piper TTS", False, f"error: {exc}")
+        return ServiceCheck(
+            "Piper TTS",
+            False,
+            _safe_error_detail("no disponible", exc),
+        )
     if svc.is_loaded:
         return ServiceCheck("Piper TTS", True, f"{svc.voice_name} · en memoria")
     if not Path(svc.model_path).exists():
@@ -160,7 +177,11 @@ def _check_sqlite() -> ServiceCheck:
     try:
         db.execute(text("SELECT 1"))
     except SQLAlchemyError as exc:
-        return ServiceCheck("SQLite", False, f"error: {exc}")
+        return ServiceCheck(
+            "SQLite",
+            False,
+            _safe_error_detail("consulta fallida", exc),
+        )
     finally:
         db.close()
     return ServiceCheck("SQLite", True, "agrovoz.db · ok")
@@ -183,7 +204,11 @@ def _check_odepa_data() -> ServiceCheck:
         ultima_fecha = db.query(func.max(OdepaPrice.fecha)).scalar()
         total = db.query(func.count(OdepaPrice.fecha)).scalar() or 0
     except SQLAlchemyError as exc:
-        return ServiceCheck("ODEPA Datos", False, f"error: {exc}")
+        return ServiceCheck(
+            "ODEPA Datos",
+            False,
+            _safe_error_detail("consulta fallida", exc),
+        )
     finally:
         db.close()
 
@@ -229,7 +254,11 @@ async def _check_openwa() -> ServiceCheck:
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(f"{base}/api/sessions", headers=headers)
     except (httpx.HTTPError, OSError) as exc:
-        return ServiceCheck("Open-WA", False, f"sin conexión: {exc}")
+        return ServiceCheck(
+            "Open-WA",
+            False,
+            _safe_error_detail("sin conexión", exc),
+        )
     if 200 <= resp.status_code < 300:
         return ServiceCheck("Open-WA", True, f":{puerto} · sesión activa")
     if resp.status_code in (401, 403):
@@ -318,7 +347,7 @@ def clear_audio_temp_files() -> int:
                 f.unlink()
                 deleted += 1
             except OSError:
-                logger.warning("No se pudo eliminar archivo temporal: %s", f)
+                logger.warning("No se pudo eliminar un archivo temporal")
 
     return deleted
 
@@ -363,7 +392,11 @@ def reload_llm() -> dict[str, object]:
         # preload_model() solo hace Thread.start(); acotamos a lo que puede
         # lanzar esa llamada en runtime (creacion de thread / OS), sin
         # tragar programming bugs que deberian propagar.
-        return {"status": "error", "detail": f"Error al iniciar carga del LLM: {exc}", "was_loaded": False}
+        return {
+            "status": "error",
+            "detail": _safe_error_detail("No se pudo iniciar la carga del LLM", exc),
+            "was_loaded": False,
+        }
 
     return {"status": "ok", "detail": "Carga del modelo LLM iniciada en segundo plano.", "was_loaded": False}
 

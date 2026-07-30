@@ -4,12 +4,12 @@ Todas las consultas se hacen sobre el modelo Consultation. Los datos son
 anonimizados (phone_hash, no hay PII directamente identificable).
 
 Definiciones de negocio (acordadas con el diseño del mockup):
-- "Éxito" = intent IN (precio, clima). "Error" = intent desconocido.
-  No hay campo status en el modelo MVP; el intent no clasificado es
-  el proxy de fallo del pipeline.
-- "Producto consultado" = match keyword de un producto ODEPA conocido
-  dentro del query_text de consultas con intent "precio". Heurístico:
-  el MVP no normaliza el producto en una columna propia.
+- "Éxito" = respuesta principal aceptada por Open-WA (`delivered`).
+  Los fallos confirmados usan `failed`; registros históricos sin evidencia
+  permanecen `pending` y no entran al denominador.
+- "Producto consultado" = valor estructurado de Consultation.producto,
+  normalizado contra el catálogo ODEPA. Las métricas no inspeccionan
+  query_text ni response_text.
 - Períodos en días calendario locales. VPS Hetzner por defecto UTC,
   consistente con func.now() de SQLite.
 
@@ -19,20 +19,17 @@ api/admin/metrics.py las serializa a JSON.
 
 import datetime
 import logging
-import re
 from dataclasses import dataclass, field
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session
 
 from app.models.consultation import Consultation
 from app.models.odepa_price import OdepaPrice
+from app.models.user_prefs import UserPrefs
 from app.services.odepa_service import list_products
 
 logger = logging.getLogger(__name__)
-
-# Intents considerados éxito (pipeline clasificó correctamente la consulta).
-_INTENTS_OK = ("precio", "clima")
 
 # Días por defecto para las ventanas de métricas.
 _DEFAULT_WINDOW_DAYS = 30
@@ -79,11 +76,13 @@ class IntentDistribution:
 
     precio: int
     clima: int
+    credito: int
     desconocido: int
 
     @property
     def total(self) -> int:
-        return self.precio + self.clima + self.desconocido
+        """Total de los cuatro intents operativos representados."""
+        return self.precio + self.clima + self.credito + self.desconocido
 
 
 @dataclass(frozen=True)
@@ -164,6 +163,22 @@ class DashboardKpis:
     trend_pct: float | None  # variación porcentual 14d vs 14d previos
     sparkline: list[int]  # conteos diarios de los últimos 14 días
     intents: IntentDistribution
+
+
+@dataclass(frozen=True, slots=True)
+class ProdesalGroupMetrics:
+    """Métricas agregadas de un grupo, sin identificar a sus integrantes."""
+
+    group_label: str
+    comuna: str | None
+    localidad: str | None
+    total_consultations: int
+    delivered: int
+    failed: int
+    pending: int
+    delivery_rate: float
+    avg_latency_ms: float
+    last_activity: str | None
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -302,11 +317,7 @@ def get_stage_stats(db: Session, days: int = _DEFAULT_WINDOW_DAYS) -> StageStats
             func.count(Consultation.id),
         )
         .where(Consultation.created_at >= cutoff, Consultation.is_test.is_(False))
-        .where(
-            (Consultation.whisper_ms > 0)
-            | (Consultation.llm_ms > 0)
-            | (Consultation.tts_ms > 0)
-        )
+        .where((Consultation.whisper_ms > 0) | (Consultation.llm_ms > 0) | (Consultation.tts_ms > 0))
     )
     w_val, llm_val, t_val, n = db.execute(stmt).one()
     if not n:
@@ -335,66 +346,67 @@ def get_intent_distribution(db: Session, days: int = _DEFAULT_WINDOW_DAYS) -> In
     return IntentDistribution(
         precio=conteos.get("precio", 0),
         clima=conteos.get("clima", 0),
+        credito=conteos.get("credito", 0),
+        # Corpus, resumen, alerta y cualquier otro intent conservan su
+        # identidad: no se presentan como consultas desconocidas.
         desconocido=conteos.get("desconocido", 0),
     )
 
 
-def _contar_productos_en_textos(textos: list[str], productos: list[str]) -> dict[str, int]:
-    """Cuenta cuántas consultas mencionan cada producto ODEPA (una por consulta).
+def _normalizar_producto(producto: str) -> str:
+    """Normaliza mayúsculas y espacios sin alterar el nombre visible."""
+    return " ".join(producto.split()).casefold()
 
-    Match por word-boundary (no substring): 'papa' no cuenta en 'papaya', ni
-    'trigo' en 'trigésimo'. re.escape por si el nombre trae caracteres
-    especiales; \\b es Unicode-aware en Python 3 (ñ, acentos). Una consulta
-    cuenta para el primer producto que matchea (orden A-Z), por eso el break.
 
-    re.IGNORECASE: aunque hoy los callers lowercasean el texto y
-    list_products() ya retorna nombres en minúsculas (vía func.lower), hacer
-    el match case-insensitive vuelve al helper autocontenido — no depende del
-    contrato implícito de que las entradas vengan normalizadas.
+def _contar_productos_estructurados(
+    db: Session,
+    cutoff: datetime.datetime,
+    productos: list[str],
+) -> dict[str, int]:
+    """Cuenta Consultation.producto sin acceder al contenido libre.
 
-    Compartido por get_top_products y get_all_odepa_products para que ambas
-    vistas del dashboard muestren conteos consistentes.
+    Solo considera consultas de precio, no sintéticas y dentro de la ventana.
+    Los valores nulos o compuestos únicamente por espacios se excluyen en SQL.
+    Las variantes de mayúsculas y espacios se agrupan bajo el nombre canónico
+    del catálogo ODEPA; valores ajenos al catálogo no se publican.
     """
-    patrones = {
-        prod: re.compile(rf"\b{re.escape(prod)}\b", re.IGNORECASE) for prod in productos
-    }
+    catalogo = {_normalizar_producto(producto): producto for producto in productos}
+    stmt = (
+        select(Consultation.producto, func.count(Consultation.id))
+        .where(
+            Consultation.created_at >= cutoff,
+            Consultation.intent == "precio",
+            Consultation.is_test.is_(False),
+            Consultation.producto.is_not(None),
+            func.trim(Consultation.producto) != "",
+        )
+        .group_by(Consultation.producto)
+    )
     conteos: dict[str, int] = {}
-    for texto in textos:
-        for prod, patron in patrones.items():
-            if patron.search(texto):
-                conteos[prod] = conteos.get(prod, 0) + 1
-                break
+    for producto, total in db.execute(stmt).all():
+        nombre = catalogo.get(_normalizar_producto(producto))
+        if nombre is not None:
+            conteos[nombre] = conteos.get(nombre, 0) + int(total)
     return conteos
 
 
-def get_top_products(
-    db: Session, days: int = _DEFAULT_WINDOW_DAYS, limit: int = 10
-) -> list[ProductStat]:
-    """Top productos mencionados en consultas de precio.
+def get_top_products(db: Session, days: int = _DEFAULT_WINDOW_DAYS, limit: int = 10) -> list[ProductStat]:
+    """Top productos registrados en consultas de precio.
 
-    Heurístico: match keyword del nombre del producto ODEPA en el query_text.
+    Usa exclusivamente Consultation.producto, normalizado contra ODEPA.
     El pct es relativo al producto más consultado (para escalar las barras).
     """
     cutoff = _days_ago(days)
-    stmt = select(Consultation.query_text).where(
-        Consultation.created_at >= cutoff,
-        Consultation.intent == "precio",
-        Consultation.is_test.is_(False),
-    )
-    textos = [t.lower() for (t,) in db.execute(stmt).all()]
     productos = list_products(db)
 
-    conteos = _contar_productos_en_textos(textos, productos)
+    conteos = _contar_productos_estructurados(db, cutoff, productos)
 
     # Obtener registros ODEPA y fecha última actualización por producto
-    stmt_records = (
-        select(
-            OdepaPrice.producto,
-            func.count(OdepaPrice.id).label("cnt"),
-            func.max(OdepaPrice.created_at).label("last"),
-        )
-        .group_by(OdepaPrice.producto)
-    )
+    stmt_records = select(
+        OdepaPrice.producto,
+        func.count(OdepaPrice.id).label("cnt"),
+        func.max(OdepaPrice.created_at).label("last"),
+    ).group_by(OdepaPrice.producto)
     odepa_data: dict[str, tuple[int, str]] = {
         prod: (cnt, last.isoformat(timespec="seconds") if last else "")
         for (prod, cnt, last) in db.execute(stmt_records).all()
@@ -417,18 +429,24 @@ def get_top_products(
 def get_error_stats(db: Session, days: int = _DEFAULT_WINDOW_DAYS, limit: int = 20) -> ErrorStats:
     """Tasa de error (intent desconocido) + últimos errores."""
     cutoff = _days_ago(days)
-    total = db.scalar(
-        select(func.count(Consultation.id)).where(
-            Consultation.created_at >= cutoff, Consultation.is_test.is_(False)
+    total = (
+        db.scalar(
+            select(func.count(Consultation.id)).where(
+                Consultation.created_at >= cutoff, Consultation.is_test.is_(False)
+            )
         )
-    ) or 0
-    errores = db.scalar(
-        select(func.count(Consultation.id)).where(
-            Consultation.created_at >= cutoff,
-            Consultation.intent == "desconocido",
-            Consultation.is_test.is_(False),
+        or 0
+    )
+    errores = (
+        db.scalar(
+            select(func.count(Consultation.id)).where(
+                Consultation.created_at >= cutoff,
+                Consultation.intent == "desconocido",
+                Consultation.is_test.is_(False),
+            )
         )
-    ) or 0
+        or 0
+    )
     rate = errores / total if total else 0.0
 
     stmt = (
@@ -470,14 +488,19 @@ def get_recent_queries(db: Session, hours: int = 24, limit: int = 20) -> list[Re
     now = datetime.datetime.now()
     resultado: list[RecentQuery] = []
     for c in db.scalars(stmt).all():
-        ok = c.intent in _INTENTS_OK
+        ok = c.delivery_status == "delivered"
+        status_text = {
+            "delivered": "ok",
+            "failed": "error",
+            "pending": "pendiente",
+        }.get(c.delivery_status, "pendiente")
         resultado.append(
             RecentQuery(
                 text=c.query_text,
                 intent=c.intent,
                 latency_s=round(c.latency_ms / 1000, 1),
                 ok=ok,
-                status_text="ok" if ok else "error",
+                status_text=status_text,
                 ago=_time_ago(c.created_at, now),
                 ts=c.created_at.isoformat(timespec="seconds"),
             )
@@ -490,18 +513,24 @@ def get_dashboard_kpis(db: Session) -> DashboardKpis:
     hoy_inicio = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     ayer_inicio = hoy_inicio - datetime.timedelta(days=1)
 
-    today = db.scalar(
-        select(func.count(Consultation.id)).where(
-            Consultation.created_at >= hoy_inicio, Consultation.is_test.is_(False)
+    today = (
+        db.scalar(
+            select(func.count(Consultation.id)).where(
+                Consultation.created_at >= hoy_inicio, Consultation.is_test.is_(False)
+            )
         )
-    ) or 0
-    yesterday = db.scalar(
-        select(func.count(Consultation.id)).where(
-            Consultation.created_at >= ayer_inicio,
-            Consultation.created_at < hoy_inicio,
-            Consultation.is_test.is_(False),
+        or 0
+    )
+    yesterday = (
+        db.scalar(
+            select(func.count(Consultation.id)).where(
+                Consultation.created_at >= ayer_inicio,
+                Consultation.created_at < hoy_inicio,
+                Consultation.is_test.is_(False),
+            )
         )
-    ) or 0
+        or 0
+    )
 
     if yesterday > 0:
         today_trend_pct = round((today - yesterday) / yesterday * 100, 1)
@@ -512,20 +541,42 @@ def get_dashboard_kpis(db: Session) -> DashboardKpis:
 
     lat_hoy = get_latency_stats(db, days=1)
     intents_24h = get_intent_distribution(db, days=1)
-    total_24h = intents_24h.total
-    success_rate = (intents_24h.precio + intents_24h.clima) / total_24h if total_24h else 0.0
+    cutoff_24h = datetime.datetime.now() - datetime.timedelta(days=1)
+    delivery_counts = {
+        delivery_status: int(count)
+        for delivery_status, count in db.execute(
+            select(Consultation.delivery_status, func.count(Consultation.id))
+            .where(
+                Consultation.created_at >= cutoff_24h,
+                Consultation.is_test.is_(False),
+                Consultation.delivery_status.in_(("delivered", "failed")),
+            )
+            .group_by(Consultation.delivery_status)
+        ).all()
+    }
+    delivered = delivery_counts.get("delivered", 0)
+    delivery_attempts = delivered + delivery_counts.get("failed", 0)
+    # ``pending`` incluye filas históricas cuya entrega no puede probarse.
+    # Excluirlas evita presentar ausencia de evidencia como éxito o fracaso.
+    success_rate = delivered / delivery_attempts if delivery_attempts else 0.0
 
-    active_7d = db.scalar(
-        select(func.count(func.distinct(Consultation.phone_hash))).where(
-            Consultation.created_at >= hoy_inicio - datetime.timedelta(days=6),
-            Consultation.is_test.is_(False),
+    active_7d = (
+        db.scalar(
+            select(func.count(func.distinct(Consultation.phone_hash))).where(
+                Consultation.created_at >= hoy_inicio - datetime.timedelta(days=6),
+                Consultation.is_test.is_(False),
+            )
         )
-    ) or 0
-    farmers_today = db.scalar(
-        select(func.count(func.distinct(Consultation.phone_hash))).where(
-            Consultation.created_at >= hoy_inicio, Consultation.is_test.is_(False)
+        or 0
+    )
+    farmers_today = (
+        db.scalar(
+            select(func.count(func.distinct(Consultation.phone_hash))).where(
+                Consultation.created_at >= hoy_inicio, Consultation.is_test.is_(False)
+            )
         )
-    ) or 0
+        or 0
+    )
 
     diario_30 = get_daily_counts(db, days=30)
     last30 = sum(d.count for d in diario_30)
@@ -547,7 +598,7 @@ def get_dashboard_kpis(db: Session) -> DashboardKpis:
         p95=round(lat_hoy.p95 / 1000, 1) if lat_hoy.count else 0.0,
         p99=round(lat_hoy.p99 / 1000, 1) if lat_hoy.count else 0.0,
         success_rate=round(success_rate, 3),
-        error_count_24h=intents_24h.desconocido,
+        error_count_24h=delivery_counts.get("failed", 0),
         active_farmers_7d=int(active_7d),
         farmers_today=int(farmers_today),
         last14=last14,
@@ -558,14 +609,110 @@ def get_dashboard_kpis(db: Session) -> DashboardKpis:
     )
 
 
+def get_prodesal_group_metrics(
+    db: Session,
+    days: int = _DEFAULT_WINDOW_DAYS,
+) -> list[ProdesalGroupMetrics]:
+    """Agrupa actividad reciente por identidad colectiva PRODESAL.
+
+    La consulta parte desde ``UserPrefs`` y usa LEFT JOIN para conservar grupos
+    existentes sin actividad. Los filtros temporales y ``is_test`` viven en el
+    ``ON``: moverlos al ``WHERE`` convertiría el join en interno y ocultaría
+    esos grupos. La tasa usa solo estados confirmados (delivered + failed).
+
+    Args:
+        db: Sesión SQLAlchemy activa.
+        days: Ventana exacta hacia atrás en días.
+
+    Returns:
+        Grupos ordenados, sin hashes, textos ni detalle de integrantes.
+    """
+    cutoff = datetime.datetime.now() - datetime.timedelta(days=days)
+    join_condition = and_(
+        Consultation.phone_hash == UserPrefs.phone_hash,
+        Consultation.created_at >= cutoff,
+        Consultation.is_test.is_(False),
+    )
+    stmt = (
+        select(
+            UserPrefs.group_label,
+            UserPrefs.comuna,
+            UserPrefs.localidad,
+            func.count(Consultation.id).label("total_consultations"),
+            func.sum(
+                case(
+                    (Consultation.delivery_status == "delivered", 1),
+                    else_=0,
+                )
+            ).label("delivered"),
+            func.sum(
+                case(
+                    (Consultation.delivery_status == "failed", 1),
+                    else_=0,
+                )
+            ).label("failed"),
+            func.sum(
+                case(
+                    (Consultation.delivery_status == "pending", 1),
+                    else_=0,
+                )
+            ).label("pending"),
+            func.avg(Consultation.latency_ms).label("avg_latency_ms"),
+            func.max(Consultation.created_at).label("last_activity"),
+        )
+        .select_from(UserPrefs)
+        .outerjoin(Consultation, join_condition)
+        .where(
+            UserPrefs.identity_type == "prodesal_group",
+            UserPrefs.group_label.is_not(None),
+            func.length(func.trim(UserPrefs.group_label)) > 0,
+        )
+        .group_by(
+            UserPrefs.group_label,
+            UserPrefs.comuna,
+            UserPrefs.localidad,
+        )
+        .order_by(
+            func.lower(UserPrefs.group_label),
+            func.lower(UserPrefs.comuna),
+            func.lower(UserPrefs.localidad),
+        )
+    )
+
+    groups: list[ProdesalGroupMetrics] = []
+    for row in db.execute(stmt):
+        delivered = int(row.delivered or 0)
+        failed = int(row.failed or 0)
+        confirmed = delivered + failed
+        last_activity: datetime.datetime | None = row.last_activity
+        groups.append(
+            ProdesalGroupMetrics(
+                group_label=str(row.group_label).strip(),
+                comuna=str(row.comuna).strip() if row.comuna else None,
+                localidad=str(row.localidad).strip() if row.localidad else None,
+                total_consultations=int(row.total_consultations or 0),
+                delivered=delivered,
+                failed=failed,
+                pending=int(row.pending or 0),
+                delivery_rate=round(delivered / confirmed, 3) if confirmed else 0.0,
+                avg_latency_ms=round(float(row.avg_latency_ms or 0.0), 1),
+                last_activity=(last_activity.isoformat(timespec="seconds") if last_activity is not None else None),
+            )
+        )
+    return groups
+
+
 def get_total_30d(db: Session) -> int:
     """Total de consultas procesadas en los últimos 30 días."""
     cutoff = datetime.datetime.now() - datetime.timedelta(days=30)
-    return db.scalar(
-        select(func.count(Consultation.id)).where(
-            Consultation.created_at >= cutoff, Consultation.is_test.is_(False)
+    return (
+        db.scalar(
+            select(func.count(Consultation.id)).where(
+                Consultation.created_at >= cutoff, Consultation.is_test.is_(False)
+            )
         )
-    ) or 0
+        or 0
+    )
 
 
 def get_audio_avg(db: Session, days: int = 30) -> float:
@@ -585,30 +732,20 @@ def get_all_odepa_products(db: Session, days: int = 30) -> list[ProductStat]:
     A diferencia de get_top_products, esta función retorna TODOS los productos
     disponibles en ODEPA, incluso si no tienen consultas en el período.
     """
-    # Obtener consultas por producto
     cutoff = _days_ago(days)
-    stmt = select(Consultation.query_text).where(
-        Consultation.created_at >= cutoff,
-        Consultation.intent == "precio",
-        Consultation.is_test.is_(False),
-    )
-    textos = [t.lower() for (t,) in db.execute(stmt).all()]
 
     # Cacheamos la lista de productos UNA vez fuera del loop para evitar N+1:
-    # antes se consultaba la DB por cada texto de consulta.
+    # antes se consultaba la DB por cada consulta.
     productos_cache = list_products(db)
 
-    conteos = _contar_productos_en_textos(textos, productos_cache)
+    conteos = _contar_productos_estructurados(db, cutoff, productos_cache)
 
     # Obtener registros ODEPA y fecha última actualización por producto
-    stmt_records = (
-        select(
-            OdepaPrice.producto,
-            func.count(OdepaPrice.id).label("cnt"),
-            func.max(OdepaPrice.created_at).label("last"),
-        )
-        .group_by(OdepaPrice.producto)
-    )
+    stmt_records = select(
+        OdepaPrice.producto,
+        func.count(OdepaPrice.id).label("cnt"),
+        func.max(OdepaPrice.created_at).label("last"),
+    ).group_by(OdepaPrice.producto)
     odepa_data: dict[str, tuple[int, str]] = {
         prod: (cnt, last.isoformat(timespec="seconds") if last else "")
         for (prod, cnt, last) in db.execute(stmt_records).all()
@@ -697,58 +834,58 @@ def get_piloto_metrics(db: Session) -> PilotoMetrics:
         .group_by(Consultation.phone_hash)
         .having(func.count(Consultation.id) >= 3)
     ).subquery()
-    productores_activos = db.scalar(
-        select(func.count()).select_from(subq)
-    ) or 0
+    productores_activos = db.scalar(select(func.count()).select_from(subq)) or 0
 
     # 2. Consultas por productor: AVG de consultas por phone_hash.
     stmt_por_productor = (
-        select(func.count(Consultation.id))
-        .where(Consultation.is_test.is_(False))
-        .group_by(Consultation.phone_hash)
+        select(func.count(Consultation.id)).where(Consultation.is_test.is_(False)).group_by(Consultation.phone_hash)
     )
     conteos = [int(c) for c in db.execute(stmt_por_productor).scalars().all()]
     consultas_por_productor = round(sum(conteos) / len(conteos), 1) if conteos else 0.0
 
     # 3. % útiles: feedback="util" / feedback IS NOT NULL * 100.
-    total_con_feedback = db.scalar(
-        select(func.count(Consultation.id)).where(
-            Consultation.feedback.is_not(None), Consultation.is_test.is_(False)
+    total_con_feedback = (
+        db.scalar(
+            select(func.count(Consultation.id)).where(
+                Consultation.feedback.is_not(None), Consultation.is_test.is_(False)
+            )
         )
-    ) or 0
-    total_feedback_util = db.scalar(
-        select(func.count(Consultation.id)).where(
-            Consultation.feedback == "util", Consultation.is_test.is_(False)
-        )
-    ) or 0
-    total_feedback_no_util = db.scalar(
-        select(func.count(Consultation.id)).where(
-            Consultation.feedback == "no_util", Consultation.is_test.is_(False)
-        )
-    ) or 0
-    pct_utiles = (
-        round(total_feedback_util / total_con_feedback * 100, 1)
-        if total_con_feedback > 0
-        else 0.0
+        or 0
     )
+    total_feedback_util = (
+        db.scalar(
+            select(func.count(Consultation.id)).where(Consultation.feedback == "util", Consultation.is_test.is_(False))
+        )
+        or 0
+    )
+    total_feedback_no_util = (
+        db.scalar(
+            select(func.count(Consultation.id)).where(
+                Consultation.feedback == "no_util", Consultation.is_test.is_(False)
+            )
+        )
+        or 0
+    )
+    pct_utiles = round(total_feedback_util / total_con_feedback * 100, 1) if total_con_feedback > 0 else 0.0
 
     # 4. Latencia promedio.
-    latencia_promedio = db.scalar(
-        select(func.avg(Consultation.latency_ms)).where(Consultation.is_test.is_(False))
-    ) or 0.0
+    latencia_promedio = (
+        db.scalar(select(func.avg(Consultation.latency_ms)).where(Consultation.is_test.is_(False))) or 0.0
+    )
 
     # 5. Decisiones productivas.
-    decisiones = db.scalar(
-        select(func.count(Consultation.id)).where(
-            Consultation.decision_productiva == True,  # noqa: E712
-            Consultation.is_test.is_(False),
+    decisiones = (
+        db.scalar(
+            select(func.count(Consultation.id)).where(
+                Consultation.decision_productiva == True,  # noqa: E712
+                Consultation.is_test.is_(False),
+            )
         )
-    ) or 0
+        or 0
+    )
 
     # Total de consultas.
-    total = db.scalar(
-        select(func.count(Consultation.id)).where(Consultation.is_test.is_(False))
-    ) or 0
+    total = db.scalar(select(func.count(Consultation.id)).where(Consultation.is_test.is_(False))) or 0
 
     return PilotoMetrics(
         productores_activos=int(productores_activos),
@@ -808,9 +945,7 @@ def toggle_decision_productiva(db: Session, consultation_id: int) -> bool | None
     Retorna el nuevo valor de decision_productiva si se encontró y actualizó,
     None si no se encontró la consulta.
     """
-    consulta = db.scalars(
-        select(Consultation).where(Consultation.id == consultation_id)
-    ).first()
+    consulta = db.scalars(select(Consultation).where(Consultation.id == consultation_id)).first()
     if consulta is None:
         return None
     consulta.decision_productiva = not consulta.decision_productiva

@@ -10,6 +10,7 @@ Cubre:
 - Logout: borra cookie + redirect.
 """
 
+import json
 from contextlib import suppress
 from decimal import Decimal
 from types import SimpleNamespace
@@ -93,6 +94,240 @@ class TestPaginasProtegidas:
         assert resp.status_code == 303
         assert resp.headers["location"] == "/admin/login"
 
+    async def test_actividad_explica_contenido_redactado(
+        self,
+        client: AsyncClient,
+    ) -> None:
+        """El log conserva métricas útiles sin dejar una celda ambigua."""
+        from app.core.database import get_db as original_get_db
+        from app.main import app
+        from app.models.consultation import Consultation
+
+        session_gen = app.dependency_overrides[original_get_db]()
+        session = next(session_gen)
+        try:
+            session.add(
+                Consultation(
+                    phone_hash="a" * 64,
+                    intent="precio",
+                    producto="papa",
+                    query_text="",
+                    response_text="",
+                    delivery_status="delivered",
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+            with suppress(StopIteration):
+                next(session_gen)
+
+        _autenticar(client)
+        response = await client.get("/admin/activity")
+
+        assert response.status_code == 200
+        assert "Contenido no conservado" in response.text
+
+    async def test_credito_aparece_en_contexto_donut_y_barras(
+        self,
+        client: AsyncClient,
+    ) -> None:
+        """Crédito usa conteo propio y el total operativo como denominador."""
+        from app.core.database import get_db as original_get_db
+        from app.main import app
+        from app.models.consultation import Consultation
+
+        session_gen = app.dependency_overrides[original_get_db]()
+        session = next(session_gen)
+        try:
+            intents = ("precio", "clima", "credito", "credito", "desconocido", "corpus")
+            for index, intent in enumerate(intents):
+                session.add(
+                    Consultation(
+                        phone_hash=f"{index:064x}",
+                        intent=intent,
+                        query_text=f"consulta {intent}",
+                        response_text="respuesta",
+                        audio_duration_ms=0,
+                        latency_ms=10,
+                        delivery_status="delivered",
+                    )
+                )
+            # Esta fila sintética no puede alterar conteos ni porcentajes.
+            session.add(
+                Consultation(
+                    phone_hash="f" * 64,
+                    intent="credito",
+                    query_text="consulta sintética",
+                    response_text="respuesta",
+                    audio_duration_ms=0,
+                    latency_ms=1,
+                    delivery_status="delivered",
+                    is_test=True,
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+            with suppress(StopIteration):
+                next(session_gen)
+
+        _autenticar(client)
+        metrics_response = await client.get("/admin/metrics?days=1")
+        assert metrics_response.status_code == 200
+
+        marker = '<script type="application/json" id="metrics-data">'
+        json_start = metrics_response.text.index(marker) + len(marker)
+        json_end = metrics_response.text.index("</script>", json_start)
+        chart_data = json.loads(metrics_response.text[json_start:json_end])
+        assert chart_data["intents"] == {
+            "precio": 1,
+            "clima": 1,
+            "credito": 2,
+            "desconocido": 1,
+            "total": 5,
+        }
+
+        compact_metrics = " ".join(metrics_response.text.split())
+        assert "Crédito" in compact_metrics
+        assert "2 · 40%" in compact_metrics
+        assert "#6d28d9" in metrics_response.text
+
+        dashboard_response = await client.get("/admin/")
+        assert dashboard_response.status_code == 200
+        assert "Crédito" in dashboard_response.text
+        assert "width:40.0%;background:#6d28d9" in dashboard_response.text
+        assert 'class="badge badge-credito"' in dashboard_response.text
+
+
+# ── Métricas grupales PRODESAL ────────────────────────────────────
+
+
+class TestMetricasGrupales:
+    """Tabla SSR agregada, accesible y sin datos de integrantes."""
+
+    async def test_renderiza_tabla_semantica_sin_pii(
+        self,
+        client: AsyncClient,
+    ) -> None:
+        """Grupo e individuo comparten DB, pero solo sale el agregado grupal."""
+        from app.core.database import get_db as original_get_db
+        from app.main import app
+        from app.models.consultation import Consultation
+        from app.models.user_prefs import UserPrefs
+
+        group_hash = "a1" * 32
+        individual_hash = "b2" * 32
+        group_query = "consulta grupal confidencial"
+        group_response = "respuesta grupal confidencial"
+        individual_query = "consulta individual confidencial"
+        session_gen = app.dependency_overrides[original_get_db]()
+        session = next(session_gen)
+        try:
+            session.add_all(
+                [
+                    UserPrefs(
+                        phone_hash=group_hash,
+                        identity_type="prodesal_group",
+                        group_label="PRODESAL-TRG-01",
+                        comuna="Traiguén",
+                        localidad="Quino",
+                    ),
+                    UserPrefs(
+                        phone_hash=individual_hash,
+                        identity_type="individual",
+                        comuna="Comuna individual confidencial",
+                    ),
+                ]
+            )
+            for status, latency_ms in (
+                ("delivered", 1_000),
+                ("failed", 3_000),
+                ("pending", 5_000),
+            ):
+                session.add(
+                    Consultation(
+                        phone_hash=group_hash,
+                        intent="precio",
+                        query_text=group_query,
+                        response_text=group_response,
+                        latency_ms=latency_ms,
+                        delivery_status=status,
+                    )
+                )
+            session.add(
+                Consultation(
+                    phone_hash=individual_hash,
+                    intent="precio",
+                    query_text=individual_query,
+                    response_text="respuesta individual confidencial",
+                    latency_ms=99_000,
+                    delivery_status="delivered",
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+            with suppress(StopIteration):
+                next(session_gen)
+
+        _autenticar(client)
+        response = await client.get("/admin/metrics?days=7")
+        compact = " ".join(response.text.split())
+
+        assert response.status_code == 200
+        assert '<section aria-labelledby="group-metrics-title"' in response.text
+        assert '<table id="group-metrics-table"' in response.text
+        assert "<caption" in response.text
+        for header in (
+            "Código de grupo",
+            "Comuna",
+            "Localidad",
+            "Consultas",
+            "Entregadas",
+            "Fallidas",
+            "Pendientes",
+            "Tasa entrega",
+            "Latencia media",
+            "Última actividad",
+        ):
+            assert header in response.text
+        assert response.text.count('scope="col"') >= 10
+        assert 'scope="row"' in response.text
+
+        row_start = compact.index("PRODESAL-TRG-01")
+        row_end = compact.index("</tr>", row_start)
+        group_row = compact[row_start:row_end]
+        assert "Traiguén" in group_row
+        assert "Quino" in group_row
+        assert ">3</td>" in group_row
+        assert ">1</td>" in group_row
+        assert "50.0%" in group_row
+        assert "3000 ms" in group_row
+
+        for forbidden in (
+            group_hash,
+            individual_hash,
+            group_query,
+            group_response,
+            individual_query,
+            "respuesta individual confidencial",
+            "Comuna individual confidencial",
+        ):
+            assert forbidden not in response.text
+
+    async def test_sin_grupos_muestra_estado_vacio(
+        self,
+        client: AsyncClient,
+    ) -> None:
+        """La ausencia de identidades colectivas se explica sin tabla vacía."""
+        _autenticar(client)
+        response = await client.get("/admin/metrics?days=7")
+
+        assert response.status_code == 200
+        assert "Sin grupos PRODESAL registrados para mostrar." in response.text
+        assert 'id="group-metrics-table"' not in response.text
+
 
 # ── Partials HTMX ──────────────────────────────────────────────────
 
@@ -127,9 +362,7 @@ class TestPartialsHtmx:
         # El wrapper HTMX debe autopollear cada 30s.
         assert "every 30s" in resp.text
 
-    async def test_monitor_distingue_lazy_de_caido(
-        self, client: AsyncClient, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_monitor_distingue_lazy_de_caido(self, client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
         """Un servicio lazy (sin cargar aún) no debe mostrarse como 'Caído'.
 
         Regresión: Whisper/LLM/TTS con lazy loading devuelven ok=False antes
@@ -145,8 +378,13 @@ class TestPartialsHtmx:
                 started_at=__import__("datetime").datetime.now(),
                 uptime_seconds=42.0,
                 system=SimpleNamespace(
-                    cpu_percent=10.0, ram_percent=50.0, ram_used_mb=8000, ram_total_mb=16000,
-                    disk_percent=60.0, disk_used_gb=80, disk_total_gb=160,
+                    cpu_percent=10.0,
+                    ram_percent=50.0,
+                    ram_used_mb=8000,
+                    ram_total_mb=16000,
+                    disk_percent=60.0,
+                    disk_used_gb=80,
+                    disk_total_gb=160,
                 ),
                 services=[
                     ServiceCheck("Whisper STT", False, "small · lazy (sin cargar)"),

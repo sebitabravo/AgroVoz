@@ -70,9 +70,7 @@ async def review_client(review_db: Session) -> AsyncGenerator[AsyncClient, None]
 
     app.dependency_overrides[get_db] = override_get_db
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://testserver"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as c:
         # Set cookie de autenticación.
         c.cookies.set(COOKIE_NAME, create_session_cookie())
         try:
@@ -206,9 +204,7 @@ class TestShouldMarkForReview:
 class TestPipelineReviewFlag:
     """Verifica que el pipeline guarda requires_review en la DB."""
 
-    def test_save_consultation_with_review_flag(
-        self, review_db: Session, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_save_consultation_with_review_flag(self, review_db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
         """_save_consultation persiste requires_review=True."""
         import app.core.database as db_mod
 
@@ -236,9 +232,7 @@ class TestPipelineReviewFlag:
         finally:
             db_mod.SessionLocal = original  # type: ignore[assignment]
 
-    def test_save_consultation_without_review_flag(
-        self, review_db: Session, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_save_consultation_without_review_flag(self, review_db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
         """_save_consultation persiste requires_review=False por defecto."""
         import app.core.database as db_mod
 
@@ -273,9 +267,7 @@ class TestRevisionView:
     """Tests para la vista /admin/revision."""
 
     @pytest.mark.asyncio
-    async def test_revision_page_shows_pending(
-        self, review_client: AsyncClient, review_db: Session
-    ) -> None:
+    async def test_revision_page_shows_pending(self, review_client: AsyncClient, review_db: Session) -> None:
         """Vista de revisión muestra consultas pendientes."""
         _create_consultation(review_db, requires_review=True, resuelto=False)
         _create_consultation(review_db, intent="precio", requires_review=False)
@@ -286,13 +278,9 @@ class TestRevisionView:
         assert "pendiente" in body.lower() or "⏳" in body
 
     @pytest.mark.asyncio
-    async def test_revision_page_filter_resolved(
-        self, review_client: AsyncClient, review_db: Session
-    ) -> None:
+    async def test_revision_page_filter_resolved(self, review_client: AsyncClient, review_db: Session) -> None:
         """Filtro 'resolved' muestra solo consultas resueltas."""
-        _create_consultation(
-            review_db, requires_review=True, resuelto=True, revisado_por="admin"
-        )
+        _create_consultation(review_db, requires_review=True, resuelto=True, revisado_por="admin")
         _create_consultation(review_db, requires_review=True, resuelto=False)
 
         resp = await review_client.get("/admin/revision?status=resolved")
@@ -301,9 +289,7 @@ class TestRevisionView:
         assert "resuelta" in body.lower() or "✓" in body
 
     @pytest.mark.asyncio
-    async def test_revision_page_filter_all(
-        self, review_client: AsyncClient, review_db: Session
-    ) -> None:
+    async def test_revision_page_filter_all(self, review_client: AsyncClient, review_db: Session) -> None:
         """Filtro 'all' muestra todas las consultas marcadas."""
         _create_consultation(review_db, requires_review=True, resuelto=True)
         _create_consultation(review_db, requires_review=True, resuelto=False)
@@ -312,9 +298,7 @@ class TestRevisionView:
         assert resp.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_revision_excludes_unmarked(
-        self, review_client: AsyncClient, review_db: Session
-    ) -> None:
+    async def test_revision_excludes_unmarked(self, review_client: AsyncClient, review_db: Session) -> None:
         """Consultas sin requires_review NO aparecen en la cola."""
         _create_consultation(review_db, requires_review=False)
 
@@ -331,9 +315,7 @@ class TestResolveConsultation:
     """Tests para POST /admin/consultations/{id}/resolve."""
 
     @pytest.mark.asyncio
-    async def test_resolve_toggles_to_resolved(
-        self, review_client: AsyncClient, review_db: Session
-    ) -> None:
+    async def test_resolve_toggles_to_resolved(self, review_client: AsyncClient, review_db: Session) -> None:
         """POST resolve marca la consulta como resuelta."""
         c = _create_consultation(review_db, requires_review=True, resuelto=False)
 
@@ -351,30 +333,20 @@ class TestResolveConsultation:
         assert c.nota_revision == "fallback por producto no mapeado"
 
     @pytest.mark.asyncio
-    async def test_resolve_toggles_back_to_pending(
-        self, review_client: AsyncClient, review_db: Session
-    ) -> None:
+    async def test_resolve_toggles_back_to_pending(self, review_client: AsyncClient, review_db: Session) -> None:
         """POST resolve en consulta ya resuelta la reabre (toggle)."""
-        c = _create_consultation(
-            review_db, requires_review=True, resuelto=True, revisado_por="admin"
-        )
+        c = _create_consultation(review_db, requires_review=True, resuelto=True, revisado_por="admin")
 
-        resp = await review_client.post(
-            f"/admin/consultations/{c.id}/resolve", data={}
-        )
+        resp = await review_client.post(f"/admin/consultations/{c.id}/resolve", data={})
         assert resp.status_code == 200
 
         review_db.refresh(c)
         assert c.resuelto is False
 
     @pytest.mark.asyncio
-    async def test_resolve_nonexistent_returns_404(
-        self, review_client: AsyncClient
-    ) -> None:
+    async def test_resolve_nonexistent_returns_404(self, review_client: AsyncClient) -> None:
         """POST resolve con ID inexistente retorna 404."""
-        resp = await review_client.post(
-            "/admin/consultations/99999/resolve", data={}
-        )
+        resp = await review_client.post("/admin/consultations/99999/resolve", data={})
         assert resp.status_code == 404
 
 
@@ -385,10 +357,8 @@ class TestPrivacy:
     """Verifica que datos sensibles se truncan en la vista."""
 
     @pytest.mark.asyncio
-    async def test_phone_hash_truncated_in_view(
-        self, review_client: AsyncClient, review_db: Session
-    ) -> None:
-        """El phone_hash se muestra truncado (8 chars + '...') en la vista."""
+    async def test_phone_hash_truncated_in_view(self, review_client: AsyncClient, review_db: Session) -> None:
+        """La vista no muestra ni siquiera un prefijo correlacionable."""
         _create_consultation(review_db, requires_review=True)
 
         resp = await review_client.get("/admin/revision?status=pending")
@@ -396,13 +366,11 @@ class TestPrivacy:
         body = resp.text
         # El hash completo (64 'a') NO debe aparecer.
         assert "a" * 64 not in body
-        # La versión truncada (8 chars + ...) debe aparecer.
-        assert "aaaaaaaa..." in body
+        assert "aaaaaaaa..." not in body
+        assert "protegida" in body
 
     @pytest.mark.asyncio
-    async def test_query_text_truncated_in_view(
-        self, review_client: AsyncClient, review_db: Session
-    ) -> None:
+    async def test_query_text_truncated_in_view(self, review_client: AsyncClient, review_db: Session) -> None:
         """query_text se trunca a 80 caracteres en la tabla."""
         long_text = "x" * 200
         c = Consultation(
@@ -425,3 +393,22 @@ class TestPrivacy:
         # El title attribute tiene el texto completo, pero la celda visible
         # tiene el truncado. Verificamos que el truncado aparece.
         assert "xxx..." in resp.text
+        assert long_text not in resp.text
+
+    @pytest.mark.asyncio
+    async def test_contenido_redactado_muestra_estado_explicito(
+        self, review_client: AsyncClient, review_db: Session
+    ) -> None:
+        """Una fila minimizada no se confunde con un fallo de render."""
+        consultation = _create_consultation(
+            review_db,
+            response_text="",
+            requires_review=True,
+        )
+        consultation.query_text = ""
+        review_db.commit()
+
+        resp = await review_client.get("/admin/revision?status=pending")
+
+        assert resp.status_code == 200
+        assert resp.text.count("Contenido no conservado") >= 2

@@ -2,9 +2,9 @@
 
 Provee SlidingWindowRateLimiter: una ventana deslizante por IP, thread-safe,
 reutilizada para /api/v1/weather (protege la cuota de OpenMeteo) y
-/api/v1/demo/preguntar (protege LLM/TTS de abuso). Cada instancia recibe un
-getter del límite para leerlo desde settings en cada check(), así un cambio
-de configuración (o un monkeypatch en tests) aplica sin recrear el limiter.
+/api/v1/demo/preguntar (protege LLM/TTS de abuso). MCP usa una instancia
+dedicada con límite fijo de 5 solicitudes por minuto e IP. Cada instancia
+recibe un getter del límite para leerlo en cada check().
 
 A diferencia de RateLimitMiddleware (global, 60/min/IP), estos rate limiters
 son específicos por recurso y usan ventanas más restrictivas.
@@ -109,6 +109,7 @@ class SlidingWindowRateLimiter:
 # No usa slowapi/redis para mantener MVP sin dependencias externas.
 _weather_limiter = SlidingWindowRateLimiter(lambda: settings.weather_rate_limit_per_minute)
 _demo_limiter = SlidingWindowRateLimiter(lambda: settings.demo_rate_limit_per_minute)
+_mcp_limiter = SlidingWindowRateLimiter(lambda: 5)
 
 
 async def check_weather_rate_limit(request: Request) -> None:
@@ -129,7 +130,7 @@ async def check_weather_rate_limit(request: Request) -> None:
     ip = _get_client_ip(request)
     retry_after = _weather_limiter.check(ip)
     if retry_after is not None:
-        logger.warning("Rate limit excedido para /weather — IP=%s", ip)
+        logger.warning("Rate limit excedido — recurso=weather")
         raise HTTPException(
             status_code=429,
             detail="Demasiadas consultas de clima. Intenta de nuevo en un minuto.",
@@ -154,9 +155,37 @@ async def check_demo_rate_limit(request: Request) -> None:
     ip = _get_client_ip(request)
     retry_after = _demo_limiter.check(ip)
     if retry_after is not None:
-        logger.warning("Rate limit excedido para /demo/preguntar — IP=%s", ip)
+        logger.warning("Rate limit excedido — recurso=demo")
         raise HTTPException(
             status_code=429,
             detail="Demasiadas consultas de demo. Intenta de nuevo en un minuto.",
             headers={"Retry-After": str(int(retry_after))},
         )
+
+
+async def check_mcp_rate_limit(request: Request) -> None:
+    """Aplica el límite compartido de 5 solicitudes MCP por minuto e IP.
+
+    Ambas rutas MCP consumen el mismo bucket para impedir que una IP duplique
+    su cuota alternando endpoints. El limiter es independiente de clima, demo
+    y de los buckets pertenecientes a otras IP.
+
+    Raises:
+        HTTPException 429: Límite MCP por IP excedido.
+    """
+    from app.core.security import _get_client_ip
+
+    ip = _get_client_ip(request)
+    retry_after = _mcp_limiter.check(ip)
+    if retry_after is not None:
+        logger.warning("Rate limit excedido — recurso=mcp")
+        raise HTTPException(
+            status_code=429,
+            detail="Demasiadas solicitudes MCP. Intenta de nuevo en un minuto.",
+            headers={"Retry-After": str(int(retry_after))},
+        )
+
+
+def reset_mcp_rate_limiter() -> None:
+    """Reinicia los buckets MCP para aislar pruebas determinísticas."""
+    _mcp_limiter.reset()

@@ -6,8 +6,10 @@ Cobertura:
   - Integracion: 31 requests al endpoint -> ultimo retorna 429 con Retry-After.
 """
 
+import logging
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.core.config import settings
@@ -150,8 +152,12 @@ class TestWeatherSlidingWindow:
 class TestWeatherRateLimitIntegration:
     """Tests de integracion: rate limiter en el endpoint real."""
 
-    async def test_30_requests_permitidos_31_bloqueado(self) -> None:
+    async def test_30_requests_permitidos_31_bloqueado(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
         """30 requests -> 200 OK. El 31 -> 429 con Retry-After."""
+        caplog.set_level(logging.WARNING, logger="app.core.rate_limiter")
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://testserver"
         ) as client:
@@ -174,3 +180,6 @@ class TestWeatherRateLimitIntegration:
                 assert "Retry-After" in response.headers
                 retry_after = int(response.headers["Retry-After"])
                 assert retry_after > 0
+                assert "127.0.0.1" not in caplog.text
+                assert "IP=" not in caplog.text
+                assert "recurso=weather" in caplog.text

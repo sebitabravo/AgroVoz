@@ -13,7 +13,7 @@
   Chart.defaults.font.family = 'system-ui, sans-serif';
   Chart.defaults.color = '#7e827a';
 
-  var ACCENT = '#4f7d5a', INFO = '#2a5f90';
+  var ACCENT = '#4f7d5a', INFO = '#2a5f90', CREDIT = '#6d28d9';
 
   // ── Diario (line) ──────────────────────────────
   new Chart(document.getElementById('chart-daily'), {
@@ -39,10 +39,15 @@
   new Chart(document.getElementById('chart-intents'), {
     type: 'doughnut',
     data: {
-      labels: ['Precio', 'Clima', 'Desconocido'],
+      labels: ['Precio', 'Clima', 'Crédito', 'Desconocido'],
       datasets: [{
-        data: [data.intents.precio, data.intents.clima, data.intents.desconocido],
-        backgroundColor: [ACCENT, INFO, '#c8c7bf'],
+        data: [
+          data.intents.precio,
+          data.intents.clima,
+          data.intents.credito,
+          data.intents.desconocido,
+        ],
+        backgroundColor: [ACCENT, INFO, CREDIT, '#c8c7bf'],
         borderWidth: 0,
       }]
     },

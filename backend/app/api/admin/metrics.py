@@ -103,3 +103,12 @@ def recent(
 ) -> list[dict[str, object]]:
     """Consultas más recientes para la tabla del dashboard."""
     return [asdict(r) for r in metrics_service.get_recent_queries(db, hours=hours, limit=limit)]
+
+
+@router.get("/groups")
+def groups(
+    db: Session = Depends(get_db),  # noqa: B008
+    days: Days = 30,
+) -> list[dict[str, object]]:
+    """Métricas agregadas de grupos PRODESAL, sin datos de integrantes."""
+    return [asdict(group) for group in metrics_service.get_prodesal_group_metrics(db, days=days)]
