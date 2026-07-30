@@ -244,7 +244,7 @@ reviewer según la ruta tocada:
   - Webhook: HMAC + rate limit + hash de número.
   - Sin `eval`/`exec`/`system` con strings dinámicos.
   - Sin secrets en código (`.env`, vault).
-  - Audio temporal <24h; transcripciones anonimizadas (Ley 21.719).
+  - Audio temporal <24h; transcripciones minimizadas y seudonimizadas (Ley 21.719).
 - **Calidad**: type hints, async, DRY a escala módulo, funciones cortas, early returns.
 - **Tests**: cubren happy path + edge cases + errores. Bug fix con test de regresión.
 - **Sin drive-by refactors**: el PR toca solo lo que el issue pide.

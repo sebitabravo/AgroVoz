@@ -63,7 +63,7 @@ make clean            # Limpiar temporales
 - Sin recomendaciones agronómicas: el LLM entrega datos, no interpreta.
 - Latencia target: <15s end-to-end.
 - Sin autenticación de usuarios en MVP: número WhatsApp = identidad.
-- Audio temporal eliminado en <24h, transcripciones anonimizadas (Ley 21.719).
+- Audio temporal eliminado en <24h, transcripciones minimizadas y seudonimizadas (Ley 21.719).
 - Código comentado en español (contexto académico INACAP).
 - LLM cuantizado ≤3B params, 4-bit (Qwen2.5-3B-Instruct Q4_K_M) vía llama-cpp-python en CPU.
 - Whisper model `small` para transcripción; Piper TTS para síntesis de voz.

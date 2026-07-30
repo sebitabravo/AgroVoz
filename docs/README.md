@@ -8,7 +8,9 @@
 |---|---|
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Arquitectura, esquema de base de datos, decisiones técnicas |
 | [`DEV-GUIDE.md`](./DEV-GUIDE.md) | Guía de desarrollo y setup local |
+| [`humanizacion-voz.md`](./humanizacion-voz.md) | Decisión por propuesta de humanización para el canal WhatsApp |
 | [`spike-kapso.md`](./spike-kapso.md) | Evaluación de Kapso como alternativa de gateway |
+| [`spike-ivr.md`](./spike-ivr.md) | Prueba local Asterisk y decisión de costo PSTN |
 
 ## Negocio
 
@@ -25,7 +27,8 @@ PMBOK.
 |---|---|
 | [`pmbok/`](./pmbok/) | Documentación PMBOK para la evaluación de INACAP |
 
-Hoy contiene solo el plan; los documentos están por escribirse.
+Contiene 11 documentos de gestión y un informe de defensa redactados; siguen
+pendientes la revisión del equipo y la aceptación académica.
 
 ## Piloto
 
@@ -41,6 +44,7 @@ instructivo impreso y el acuerdo de consentimiento.
 | Documento | Contenido |
 |---|---|
 | [`legal/politica-privacidad.md`](./legal/politica-privacidad.md) | Tratamiento de datos, derechos, Ley 21.719 |
+| [`legal/auditoria-tecnica-ley-21719.md`](./legal/auditoria-tecnica-ley-21719.md) | Matriz técnica, brechas y bloqueos previos al piloto; no es asesoría legal |
 | [`legal/aviso-responsabilidad.md`](./legal/aviso-responsabilidad.md) | Descargo que se envía en el primer contacto |
 
 ## Histórico

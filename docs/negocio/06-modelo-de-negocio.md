@@ -32,20 +32,18 @@ Para implementar AgroVoz a escala más allá del piloto del Crea INACAP, los rec
 
 **Acceso a fondos públicos de innovación**: postulación a FIA (Fondo de Innovación Agraria), CORFO Semilla, FONDEF de Aplicación Productiva, y al programa IICA-INDAP 2024-2028 (USD $12,3 millones) explícitamente orientado a modernización digital de la AFC.
 
-## Modelo de negocio: B2G + Freemium directo
+## Modelo de negocio: suscripción institucional B2G
 
 **Canal principal — Suscripción institucional vía INDAP/PRODESAL**
 
-INDAP invierte más de $93.748 millones anuales en créditos y $5.631 millones en inversiones para la AFC. PRODESAL atiende a 72.990 agricultores con 1.270 profesionales. AgroVoz se posiciona como herramienta complementaria al extensionismo presencial: INDAP paga una suscripción anual por "Agricultor Activo" a un precio de CLP 500-1.000 por agricultor/mes. Para el agricultor: gratis (subsidiado por el programa).
+INDAP invierte más de $93.748 millones anuales en créditos y $5.631 millones en inversiones para la AFC. PRODESAL atiende a 72.990 agricultores con 1.270 profesionales. AgroVoz se posiciona como herramienta complementaria al extensionismo presencial: INDAP o PRODESAL financia una suscripción institucional anual por "Agricultor Activo", con un valor referencial de CLP 500-1.000 por agricultor/mes. Para el agricultor, el acceso es gratuito y financiado por el programa.
 
 **Nota sobre contratación pública (Mercado Público)**: La venta al Estado chileno —a través de INDAP o cualquier servicio público— requiere navegar el sistema de compras públicas. Contratos sobre 3 UTM (~CLP 200.000) deben licitarse mediante Mercado Público (mercadopublico.cl). AgroVoz necesitaría registrarse como proveedor del Estado (ChileProveedores), participar en licitaciones públicas o convenios marco, y competir contra otros oferentes. El proceso completo —desde el primer contacto institucional hasta un contrato firmado— puede tomar 18-24 meses. Esta complejidad se reconoce como parte del camino de escalamiento, no como barrera insalvable: programas como PROGYSO 2026 e IICA-INDAP abren ventanas de financiamiento específicas para innovación tecnológica en la AFC, que pueden acelerar el procurement mediante convenios de transferencia tecnológica.
 
-**Canal secundario — Freemium directo**
+**Acceso para agricultores — Gratuito y sin planes de pago**
 
-- Gratis: 10 consultas/mes de precios y clima.
-- Premium (CLP 2.000/mes): consultas ilimitadas, alertas de precio, historial, pronóstico extendido.
+AgroVoz no vende suscripciones directamente a los agricultores. El productor accede sin cobros, cuotas mensuales ni funciones bloqueadas por un plan comercial; el financiamiento y la cobertura se acuerdan con INDAP, PRODESAL u otra institución patrocinadora.
 
-**Canal complementario — Convenios privados**
+**Canal complementario — Convenios institucionales y privados**
 
-Cooperativas, asociaciones gremiales y empresas con programas de proveedores AFC (CMPC ya tiene convenios marco con INDAP Araucanía) pueden financiar AgroVoz como parte de cadena de proveedores o RSE.
-
+Cooperativas, asociaciones gremiales y empresas con programas de proveedores AFC (CMPC ya tiene convenios marco con INDAP Araucanía) pueden financiar el acceso de los productores a AgroVoz como parte de su cadena de proveedores o de iniciativas de RSE. En estos convenios, el agricultor tampoco paga por usar el servicio.

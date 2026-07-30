@@ -67,7 +67,7 @@ Esta es la barrera de entrada más defendible de AgroVoz. Construir este dataset
 
 **3. Stack 100% open-source con procesamiento en infraestructura propia**
 
-Whisper, LLM y TTS corren localmente en VPS bajo control del equipo, sin dependencia de APIs pagas de OpenAI, Anthropic o Google para la inferencia. Esto desacopla el costo del modelo del crecimiento de usuarios y minimiza la exposición de datos de los agricultores a terceros. Los audios se transmiten cifrados a través de WhatsApp (Meta), se transcriben en el VPS, y se eliminan del servidor en un plazo máximo de 24 horas tras la verificación de la respuesta. Las transcripciones anonimizadas se retienen únicamente para mejora continua del modelo de reconocimiento de voz en español rural chileno. El cumplimiento total con la Ley 21.719 de Protección de Datos Personales (vigente desde diciembre 2026) requerirá una auditoría formal de privacidad, planificada como hito previo al escalamiento.
+Whisper, LLM y TTS corren localmente en VPS bajo control del equipo, sin dependencia de APIs pagas de OpenAI, Anthropic o Google para la inferencia. Esto desacopla el costo del modelo del crecimiento de usuarios y minimiza la exposición de datos de los agricultores a terceros. Los audios se transmiten cifrados a través de WhatsApp (Meta), se transcriben en el VPS, y se eliminan del servidor en un plazo máximo de 24 horas tras la verificación de la respuesta. Solo con consentimiento específico, las transcripciones minimizadas y seudonimizadas pueden retenerse para mejorar el reconocimiento de voz en español rural chileno. El cumplimiento total con la Ley 21.719 de Protección de Datos Personales (vigente desde diciembre de 2026) requerirá una auditoría formal de privacidad, planificada como hito previo al escalamiento.
 
 **4. Tool Calling con fuentes oficiales: respuestas verificables, no opiniones del modelo**
 
@@ -121,4 +121,3 @@ Ningún competidor actual (Miido, InstaCrops, Wiagro, AgroGPT) tiene este activo
 | Llamar a conocido en el mercado | Depende de que alguien conteste y sepa el precio. No escala. |
 
 ---
-
