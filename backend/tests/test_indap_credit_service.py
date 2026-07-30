@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from app.services.indap_credit_service import get_indap_credit_referral
+from app.services.indap_credit_service import get_corpus_metadata, get_indap_credit_referral
 
 _VERIFICATION_DATE = date(2026, 7, 29)
 
@@ -205,3 +205,41 @@ def test_resumen_con_monto_o_solicitud_de_pii_falla_cerrado(
     assert "información financiera desactualizada" in response
     assert "200 UF" not in response
     assert "RUT" not in response
+
+
+class TestGetCorpusMetadata:
+    """Metadata de vigencia para monitoreo (#136 A4): sin la gate estricta."""
+
+    def test_corpus_valido_retorna_fechas(self, tmp_path: Path) -> None:
+        catalog_path = tmp_path / "indap_creditos.yaml"
+        _write_catalog(catalog_path, source_url="https://www.indap.gob.cl/credito")
+
+        metadata = get_corpus_metadata(corpus_path=catalog_path)
+
+        assert metadata == (date(2026, 7, 29), date(2026, 8, 28))
+
+    def test_corpus_ya_vencido_igual_retorna_fechas(self, tmp_path: Path) -> None:
+        """A diferencia de _load_catalog, no falla cerrado: el monitoreo
+        necesita las fechas incluso cuando el corpus ya no es seguro
+        para servir respuestas, para poder calcular hace cuanto vencio."""
+        catalog_path = tmp_path / "indap_creditos.yaml"
+        _write_catalog(catalog_path, source_url="https://www.indap.gob.cl/credito", review_before="2000-01-01")
+
+        metadata = get_corpus_metadata(corpus_path=catalog_path)
+
+        assert metadata == (date(2026, 7, 29), date(2000, 1, 1))
+
+    def test_archivo_inexistente_retorna_none(self, tmp_path: Path) -> None:
+        assert get_corpus_metadata(corpus_path=tmp_path / "no-existe.yaml") is None
+
+    def test_yaml_corrupto_retorna_none(self, tmp_path: Path) -> None:
+        catalog_path = tmp_path / "indap_creditos.yaml"
+        catalog_path.write_text("esto: [no es yaml valido", encoding="utf-8")
+
+        assert get_corpus_metadata(corpus_path=catalog_path) is None
+
+    def test_sin_campos_de_vigencia_retorna_none(self, tmp_path: Path) -> None:
+        catalog_path = tmp_path / "indap_creditos.yaml"
+        catalog_path.write_text("version: 1\ndocumentos: []\n", encoding="utf-8")
+
+        assert get_corpus_metadata(corpus_path=catalog_path) is None

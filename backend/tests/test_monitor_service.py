@@ -68,9 +68,7 @@ def _mockear_psutil(
     monkeypatch.setattr(
         psutil,
         "virtual_memory",
-        lambda: SimpleNamespace(
-            percent=ram_percent, used=8 * 1024 * 1024 * 1024, total=16 * 1024 * 1024 * 1024
-        ),
+        lambda: SimpleNamespace(percent=ram_percent, used=8 * 1024 * 1024 * 1024, total=16 * 1024 * 1024 * 1024),
     )
     monkeypatch.setattr(
         psutil,
@@ -114,9 +112,7 @@ class TestGetUptime:
 class TestGetMonitorSnapshot:
     """Ensamblado del snapshot completo (sin I/O real)."""
 
-    async def test_snapshot_contiene_system_y_services(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_snapshot_contiene_system_y_services(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _mockear_psutil(monkeypatch, cpu=15.0)
         monkeypatch.setattr(
             monitor_service,
@@ -132,9 +128,7 @@ class TestGetMonitorSnapshot:
         assert snap.queue_depth == 0
         assert snap.uptime_seconds >= 0
 
-    async def test_snapshot_propaga_servicio_caido(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_snapshot_propaga_servicio_caido(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _mockear_psutil(monkeypatch, cpu=15.0)
         monkeypatch.setattr(
             monitor_service,
@@ -199,9 +193,15 @@ class TestClearWeatherCache:
         _clear_cache()
 
         wd = WeatherData(
-            lat=-38.23, lon=-72.68, location="Traiguén",
-            temperature_c=18.0, feels_like_c=17.0, humidity=65,
-            description="nublado", wind_speed_ms=3.6, rain_1h_mm=None,
+            lat=-38.23,
+            lon=-72.68,
+            location="Traiguén",
+            temperature_c=18.0,
+            feels_like_c=17.0,
+            humidity=65,
+            description="nublado",
+            wind_speed_ms=3.6,
+            rain_1h_mm=None,
             texto="En Traiguén ahora: 18°C, nublado.",
         )
         _cache_set(-38.23, -72.68, wd)
@@ -217,7 +217,9 @@ class TestClearAudioTempFiles:
     """Limpieza de archivos de audio temporal."""
 
     def test_clear_devuelve_cero_si_directorio_no_existe(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: pathlib.Path,
     ) -> None:
 
         from app.services.monitor_service import clear_audio_temp_files
@@ -230,7 +232,9 @@ class TestClearAudioTempFiles:
         assert clear_audio_temp_files() == 0
 
     def test_clear_elimina_solo_wav_y_ogg(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: pathlib.Path,
     ) -> None:
 
         from app.services.monitor_service import (
@@ -258,7 +262,9 @@ class TestClearAudioTempFiles:
         assert (audio_dir / "notas.txt").exists()
 
     def test_get_audio_temp_count_devuelve_cero_sin_directorio(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: pathlib.Path,
     ) -> None:
 
         from app.services.monitor_service import get_audio_temp_count
@@ -312,7 +318,8 @@ class TestReloadLlm:
         assert result["was_loaded"] is False
 
     def test_reload_limpia_error_previo_y_reintenta(
-        self, monkeypatch: pytest.MonkeyPatch,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from app.services import llm_service
         from app.services.monitor_service import reload_llm
@@ -483,3 +490,72 @@ class TestCheckOpenwaHttpStatus:
         assert result.ok is False
         assert "ConnectError" in result.detail
         assert secret_url not in result.detail
+
+
+class TestCheckIndapCorpus:
+    """Alerta temprana de vigencia del corpus de derivación INDAP (#136 A4)."""
+
+    def test_corpus_vigente_y_lejos_de_vencer_esta_ok(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "app.services.indap_credit_service.get_corpus_metadata",
+            lambda: (datetime.date(2026, 7, 1), datetime.date(2026, 12, 31)),
+        )
+
+        result = monitor_service._check_indap_corpus(today=datetime.date(2026, 7, 29))
+
+        assert result.ok is True
+        assert "2026-12-31" in result.detail
+
+    def test_corpus_a_menos_de_una_semana_de_vencer_esta_degradado(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Alerta temprana: el equipo debe reaccionar antes del fail-closed real."""
+        monkeypatch.setattr(
+            "app.services.indap_credit_service.get_corpus_metadata",
+            lambda: (datetime.date(2026, 7, 1), datetime.date(2026, 8, 5)),
+        )
+
+        result = monitor_service._check_indap_corpus(today=datetime.date(2026, 7, 29))
+
+        assert result.ok is False
+        assert "vence en 7d" in result.detail
+
+    def test_corpus_ya_vencido_esta_degradado(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "app.services.indap_credit_service.get_corpus_metadata",
+            lambda: (datetime.date(2026, 6, 1), datetime.date(2026, 7, 20)),
+        )
+
+        result = monitor_service._check_indap_corpus(today=datetime.date(2026, 7, 29))
+
+        assert result.ok is False
+        assert "vencido hace 9d" in result.detail
+
+    def test_corpus_ilegible_esta_degradado_sin_lanzar(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "app.services.indap_credit_service.get_corpus_metadata",
+            lambda: None,
+        )
+
+        result = monitor_service._check_indap_corpus(today=datetime.date(2026, 7, 29))
+
+        assert result.ok is False
+        assert "ilegible" in result.detail
+
+    async def test_check_services_incluye_indap(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """El check nuevo aparece en el snapshot que consume el dashboard."""
+
+        async def _openwa_ok() -> ServiceCheck:
+            return ServiceCheck("Open-WA", True, "ok")
+
+        monkeypatch.setattr(
+            "app.services.indap_credit_service.get_corpus_metadata",
+            lambda: (datetime.date(2026, 7, 1), datetime.date(2026, 12, 31)),
+        )
+        monkeypatch.setattr(monitor_service, "_check_openwa", _openwa_ok)
+
+        checks = await monitor_service.check_services()
+
+        nombres = [c.name for c in checks]
+        assert "Corpus INDAP" in nombres

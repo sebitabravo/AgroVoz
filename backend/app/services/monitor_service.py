@@ -35,6 +35,12 @@ _STARTED_AT = datetime.datetime.now(tz=datetime.UTC)
 # "/" cubre DB, audio temporal y logs. Hardcodeado deliberadamente.
 _DISK_PATH = "/"
 
+# Alerta temprana del corpus INDAP (#136 A4): el servicio ya falla cerrado
+# el día que vence, pero eso es tarde para el equipo. A 7 días de
+# "revisar_antes_de" se marca degradado para dar tiempo a re-verificar antes
+# del corte real.
+_INDAP_REVIEW_WARNING_DAYS = 7
+
 
 def _safe_error_detail(prefix: str, exc: BaseException) -> str:
     """Construye detalle operacional sin filtrar mensajes, paths ni URLs."""
@@ -132,6 +138,7 @@ def _check_llm() -> ServiceCheck:
     # tirar toda la página de monitor (que se polled cada 30s vía HTMX).
     try:
         from app.services import llm_service
+
         loaded = llm_service._model is not None and llm_service._model_loaded
         error = llm_service._model_error
     except (AttributeError, ImportError) as exc:
@@ -222,12 +229,42 @@ def _check_odepa_data() -> ServiceCheck:
     # Alerta temprana: sync no corrió en >3 días (#176).
     try:
         from app.jobs.sync_odepa import get_sync_stale_hours
+
         stale = get_sync_stale_hours()
         if stale is not None and stale > 72:
             return ServiceCheck("ODEPA Datos", False, f"{detalle} · sync {stale:.0f}h atrasado")
     except ImportError:
         pass
     return ServiceCheck("ODEPA Datos", True, detalle)
+
+
+def _check_indap_corpus(*, today: datetime.date | None = None) -> ServiceCheck:
+    """Verifica la vigencia del corpus de derivación crediticia INDAP.
+
+    El servicio de derivación (indap_credit_service) ya falla cerrado el día
+    que el corpus vence, respondiendo con un mensaje seguro en vez de datos
+    obsoletos. Este check adelanta esa señal al dashboard para que el equipo
+    re-verifique la fuente ANTES del corte, no después.
+
+    Args:
+        today: Fecha inyectable para tests deterministas.
+    """
+    from app.services.indap_credit_service import get_corpus_metadata
+
+    metadata = get_corpus_metadata()
+    if metadata is None:
+        return ServiceCheck("Corpus INDAP", False, "corpus ilegible o corrupto")
+
+    _verified_on, review_before = metadata
+    effective_today = today or datetime.date.today()
+    dias_restantes = (review_before - effective_today).days
+    detalle = f"vigente hasta {review_before.isoformat()}"
+
+    if dias_restantes < 0:
+        return ServiceCheck("Corpus INDAP", False, f"{detalle} · vencido hace {-dias_restantes}d")
+    if dias_restantes <= _INDAP_REVIEW_WARNING_DAYS:
+        return ServiceCheck("Corpus INDAP", False, f"{detalle} · vence en {dias_restantes}d")
+    return ServiceCheck("Corpus INDAP", True, detalle)
 
 
 async def _check_openwa() -> ServiceCheck:
@@ -262,9 +299,7 @@ async def _check_openwa() -> ServiceCheck:
     if 200 <= resp.status_code < 300:
         return ServiceCheck("Open-WA", True, f":{puerto} · sesión activa")
     if resp.status_code in (401, 403):
-        return ServiceCheck(
-            "Open-WA", False, f":{puerto} · sesión NO autenticada (HTTP {resp.status_code})"
-        )
+        return ServiceCheck("Open-WA", False, f":{puerto} · sesión NO autenticada (HTTP {resp.status_code})")
     return ServiceCheck("Open-WA", False, f"HTTP {resp.status_code}")
 
 
@@ -283,7 +318,8 @@ async def check_services() -> list[ServiceCheck]:
     # monitoreo (cada 30s vía HTMX), que compite con requests del pipeline.
     sqlite_check = await asyncio.to_thread(_check_sqlite)
     odepa_check = await asyncio.to_thread(_check_odepa_data)
-    checks = [_check_whisper(), _check_llm(), _check_tts(), sqlite_check, odepa_check]
+    indap_check = await asyncio.to_thread(_check_indap_corpus)
+    checks = [_check_whisper(), _check_llm(), _check_tts(), sqlite_check, odepa_check, indap_check]
     checks.append(await _check_openwa())
     return checks
 
