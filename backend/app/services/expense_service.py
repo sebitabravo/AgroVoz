@@ -36,17 +36,54 @@ _MAX_EXPENSE_CLP = 1_000_000_000
 # Números hablados sin tilde: Whisper transcribe "treinta mil" en palabras y el
 # LLM no siempre los normaliza a dígitos antes de llamar la tool.
 _SPOKEN_NUMBERS: dict[str, int] = {
-    "un": 1, "uno": 1, "una": 1, "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5,
-    "seis": 6, "siete": 7, "ocho": 8, "nueve": 9, "diez": 10, "once": 11,
-    "doce": 12, "trece": 13, "catorce": 14, "quince": 15, "dieciseis": 16,
-    "diecisiete": 17, "dieciocho": 18, "diecinueve": 19, "veinte": 20,
-    "veintiun": 21, "veintiuno": 21, "veintidos": 22, "veintitres": 23,
-    "veinticuatro": 24, "veinticinco": 25, "veintiseis": 26, "veintisiete": 27,
-    "veintiocho": 28, "veintinueve": 29, "treinta": 30, "cuarenta": 40,
-    "cincuenta": 50, "sesenta": 60, "setenta": 70, "ochenta": 80,
-    "noventa": 90, "cien": 100, "ciento": 100, "doscientos": 200,
-    "trescientos": 300, "cuatrocientos": 400, "quinientos": 500,
-    "seiscientos": 600, "setecientos": 700, "ochocientos": 800,
+    "un": 1,
+    "uno": 1,
+    "una": 1,
+    "dos": 2,
+    "tres": 3,
+    "cuatro": 4,
+    "cinco": 5,
+    "seis": 6,
+    "siete": 7,
+    "ocho": 8,
+    "nueve": 9,
+    "diez": 10,
+    "once": 11,
+    "doce": 12,
+    "trece": 13,
+    "catorce": 14,
+    "quince": 15,
+    "dieciseis": 16,
+    "diecisiete": 17,
+    "dieciocho": 18,
+    "diecinueve": 19,
+    "veinte": 20,
+    "veintiun": 21,
+    "veintiuno": 21,
+    "veintidos": 22,
+    "veintitres": 23,
+    "veinticuatro": 24,
+    "veinticinco": 25,
+    "veintiseis": 26,
+    "veintisiete": 27,
+    "veintiocho": 28,
+    "veintinueve": 29,
+    "treinta": 30,
+    "cuarenta": 40,
+    "cincuenta": 50,
+    "sesenta": 60,
+    "setenta": 70,
+    "ochenta": 80,
+    "noventa": 90,
+    "cien": 100,
+    "ciento": 100,
+    "doscientos": 200,
+    "trescientos": 300,
+    "cuatrocientos": 400,
+    "quinientos": 500,
+    "seiscientos": 600,
+    "setecientos": 700,
+    "ochocientos": 800,
     "novecientos": 900,
 }
 # Tokens que acompañan al número sin aportar valor propio.
@@ -113,9 +150,7 @@ def _parse_spoken_amount(text: str) -> Decimal | None:
     cantidades de sacos con pesos.
     """
     tokens = [token for token in re.split(r"[\s-]+", _strip_accents(text)) if token]
-    multiplier_positions = [
-        index for index, token in enumerate(tokens) if _MULTIPLIER_WORDS.fullmatch(token)
-    ]
+    multiplier_positions = [index for index, token in enumerate(tokens) if _MULTIPLIER_WORDS.fullmatch(token)]
     if len(multiplier_positions) != 1:
         # "dos mil lucas" y similares no tienen lectura única.
         return None
@@ -205,14 +240,7 @@ def _parse_expense_date(raw_date: str) -> datetime.date | None:
 
 def _has_expense_consent(session: Session, phone_hash: str) -> bool:
     """Comprueba el opt-in específico sin cargar otros datos personales."""
-    return (
-        session.scalar(
-            select(UserPrefs.expense_consent).where(
-                UserPrefs.phone_hash == phone_hash
-            )
-        )
-        is True
-    )
+    return session.scalar(select(UserPrefs.expense_consent).where(UserPrefs.phone_hash == phone_hash)) is True
 
 
 def register_expense_for_llm(
@@ -237,20 +265,11 @@ def register_expense_for_llm(
         Confirmación o explicación de por qué no se guardó.
     """
     if not settings.expense_tracking_enabled:
-        return (
-            "El registro de gastos todavía no está habilitado. "
-            "No guardé el monto que indicaste."
-        )
+        return "El registro de gastos todavía no está habilitado. No guardé el monto que indicaste."
     if not validate_phone_hash(phone_hash):
-        return (
-            "No pude asociar el gasto de forma segura. "
-            "No guardé el monto que indicaste."
-        )
+        return "No pude asociar el gasto de forma segura. No guardé el monto que indicaste."
     if not _has_expense_consent(session, phone_hash):
-        return (
-            "No tengo tu consentimiento para guardar gastos. "
-            "No guardé el monto que indicaste."
-        )
+        return "No tengo tu consentimiento para guardar gastos. No guardé el monto que indicaste."
 
     normalized_product = _normalize_required_text(producto, max_length=100)
     normalized_concept = _normalize_required_text(concepto, max_length=120)
@@ -266,9 +285,7 @@ def register_expense_for_llm(
     if occurred_on is None:
         return "No entendí la fecha del gasto o está en el futuro. ¿Podrías repetirla?"
 
-    expires_at = _utcnow_naive() + datetime.timedelta(
-        days=settings.expense_retention_days
-    )
+    expires_at = _utcnow_naive() + datetime.timedelta(days=settings.expense_retention_days)
     session.add(
         Expense(
             phone_hash=phone_hash,

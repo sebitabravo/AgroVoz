@@ -204,9 +204,7 @@ class TestWhisperServiceTranscribe:
         """Debe lanzar RuntimeError si Whisper falla."""
         caplog.set_level(logging.ERROR, logger="app.services.whisper_service")
         mock_model = MagicMock()
-        mock_model.transcribe.side_effect = RuntimeError(
-            f"secreto-whisper consulta privada ruta={wav_path}"
-        )
+        mock_model.transcribe.side_effect = RuntimeError(f"secreto-whisper consulta privada ruta={wav_path}")
         # Sobrescribir el return_value de load_model dentro del mock
         import_mock = cast(Mock, WhisperService._import_whisper)
         import_mock.return_value.load_model.return_value = mock_model

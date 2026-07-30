@@ -58,9 +58,7 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = build_system_prompt()
 
 # Texto de fallback cuando el LLM intenta una tool fuera del whitelist.
-FALLBACK_TEXT = (
-    "No tengo ese dato, pero puedo consultarte el precio en ODEPA o el clima."
-)
+FALLBACK_TEXT = "No tengo ese dato, pero puedo consultarte el precio en ODEPA o el clima."
 
 # Texto cuando el LLM no genera respuesta.
 NO_RESPONSE_TEXT = "No entendí tu consulta. ¿Podrías reformularla?"
@@ -97,9 +95,7 @@ MAX_TOOL_ITERATIONS = 3
 # sino el fast-path deterministico y el cache de prompt.
 _GENERATION_TIMEOUT = 25.0
 _LLM_CIRCUIT_COOLDOWN_SECONDS = 90.0
-_LLM_BUSY_TEXT = (
-    "Estoy procesando otra consulta ahora. ¿Podrías intentar de nuevo en un momento?"
-)
+_LLM_BUSY_TEXT = "Estoy procesando otra consulta ahora. ¿Podrías intentar de nuevo en un momento?"
 
 # Contexto máximo del modelo (tokens). Con las 10 tools actuales, el system
 # prompt completo + tools ya
@@ -161,6 +157,7 @@ class ToolResultCache:
     def get(self, tool_name: str, **params: object) -> str | None:
         """Retorna resultado cacheado si existe y no expiro."""
         import time as _t
+
         entry = self._cache.get(self._key(tool_name, params))
         if entry is None:
             return None
@@ -177,6 +174,7 @@ class ToolResultCache:
     def set(self, tool_name: str, result: str, **params: object) -> None:
         """Guarda resultado en cache con timestamp."""
         import time as _t
+
         self._cache[self._key(tool_name, params)] = (_t.monotonic(), result)
 
     def clear(self) -> None:
@@ -559,15 +557,17 @@ TOOLS: list[dict[str, object]] = [
 #
 # search_corpus va en ambos subconjuntos: responde dudas de contexto agricola
 # que pueden aparecer junto a una consulta de precio o de clima.
-_TOOLS_PRECIO = frozenset({
-    "get_price",
-    "get_price_history",
-    "get_price_spread",
-    "calculate_sale_value",
-    "calculate_margin",
-    "register_expense",
-    "search_corpus",
-})
+_TOOLS_PRECIO = frozenset(
+    {
+        "get_price",
+        "get_price_history",
+        "get_price_spread",
+        "calculate_sale_value",
+        "calculate_margin",
+        "register_expense",
+        "search_corpus",
+    }
+)
 _TOOLS_CLIMA = frozenset({"get_weather", "get_pronostico", "get_clima_historico", "search_corpus"})
 
 
@@ -706,18 +706,12 @@ def _get_model() -> LlmWorkerManager | None:
             _model = None
             _model_loaded = False
             _model_error = "model_not_found"
-            logger.warning(
-                "Modelo LLM no encontrado — LLM en modo mock; "
-                "se reintentara en el proximo request"
-            )
+            logger.warning("Modelo LLM no encontrado — LLM en modo mock; se reintentara en el proximo request")
             return None
 
         if _worker_manager is None:
             _worker_manager = LlmWorkerManager(_worker_config(model_path))
-        if (
-            not _worker_manager.is_healthy()
-            and _is_llm_circuit_open()
-        ):
+        if not _worker_manager.is_healthy() and _is_llm_circuit_open():
             # No recargar ~2 GB para una request que el circuit breaker
             # rechazará inmediatamente; el primer request post-cooldown reinicia.
             return _worker_manager
@@ -729,9 +723,7 @@ def _get_model() -> LlmWorkerManager | None:
 
         _model = None
         _model_loaded = False
-        _model_error = (
-            _worker_manager.health().last_error_code or "worker_unavailable"
-        )
+        _model_error = _worker_manager.health().last_error_code or "worker_unavailable"
         logger.warning(
             "LLM worker no disponible — error=%s; se reintentara",
             _model_error,
@@ -892,9 +884,7 @@ def _filter_handler_args(
     return {k: v for k, v in arguments.items() if k in params}
 
 
-async def _execute_tool(
-    name: str, arguments: dict[str, object], phone_hash: str | None = None
-) -> str:
+async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str | None = None) -> str:
     """Ejecuta una tool del whitelist y retorna el resultado como texto.
 
     Args:
@@ -916,20 +906,29 @@ async def _execute_tool(
     # Evita TypeError cuando el LLM inventa params que el handler no acepta.
     # Inyectar phone_hash: tools de precio (Issue #89: mercado cercano) y
     # register_expense (Issue #170: scoping de gastos por agricultor).
-    if name in (
-        "get_price",
-        "get_price_history",
-        "calculate_margin",
-        "register_expense",
-    ) and phone_hash:
+    if (
+        name
+        in (
+            "get_price",
+            "get_price_history",
+            "calculate_margin",
+            "register_expense",
+        )
+        and phone_hash
+    ):
         arguments = {**arguments, "phone_hash": phone_hash}
     valid_args = _filter_handler_args(handler, arguments)
 
     # Cache de resultados: evita llamadas redundantes al LLM + DB para
     # la misma consulta repetida (precios ODEPA solo cambian 1 vez al dia).
-    cacheable = frozenset({
-        "get_price", "get_price_history", "get_weather", "get_clima_historico",
-    })
+    cacheable = frozenset(
+        {
+            "get_price",
+            "get_price_history",
+            "get_weather",
+            "get_clima_historico",
+        }
+    )
     # search_corpus es tan rapido (<2ms) que no necesita cache.
     if name in cacheable:
         cached = _tool_cache.get(name, **valid_args)
@@ -939,54 +938,37 @@ async def _execute_tool(
     try:
         # Las tools de precio necesitan session de DB. Se la pasamos como kwarg.
         if name in (
-            "get_price", "get_price_history", "calculate_sale_value",
-            "calculate_margin", "register_expense",
+            "get_price",
+            "get_price_history",
+            "calculate_sale_value",
+            "calculate_margin",
+            "register_expense",
         ):
             from app.core.database import SessionLocal
 
             # Completar defaults para argumentos vacios que el LLM no especifico.
             # Si el producto esta vacio, no podemos consultar nada -> fallback.
             if not valid_args.get("producto") or not str(valid_args.get("producto", "")).strip():
-                return (
-                    "No entendi que producto queres consultar. "
-                    "¿Podrias repetir el nombre del producto?"
-                )
+                return "No entendi que producto queres consultar. ¿Podrias repetir el nombre del producto?"
             # calculate_sale_value requiere cantidad_kg; sin ella no hay calculo.
-            if name == "calculate_sale_value" and not str(
-                valid_args.get("cantidad_kg", "")
-            ).strip():
-                return (
-                    "No entendi cuantos kilos vas a vender. "
-                    "¿Podrias repetir la cantidad?"
-                )
+            if name == "calculate_sale_value" and not str(valid_args.get("cantidad_kg", "")).strip():
+                return "No entendi cuantos kilos vas a vender. ¿Podrias repetir la cantidad?"
             # calculate_margin requiere cantidad, unidad y precio_total.
             if name == "calculate_margin":
                 if not str(valid_args.get("cantidad", "")).strip():
-                    return (
-                        "No entendi cuantos vendiste. "
-                        "¿Podrias repetir la cantidad?"
-                    )
+                    return "No entendi cuantos vendiste. ¿Podrias repetir la cantidad?"
                 if not str(valid_args.get("unidad", "")).strip():
                     return (
                         "No entendi la unidad de medida. "
                         "¿Podrias repetir si son kilos, sacos, mallas, cajas o toneladas?"
                     )
                 if not str(valid_args.get("precio_total", "")).strip():
-                    return (
-                        "No entendi el monto total que recibiste. "
-                        "¿Podrias repetir cuanto te pagaron en total?"
-                    )
+                    return "No entendi el monto total que recibiste. ¿Podrias repetir cuanto te pagaron en total?"
             if name == "register_expense":
                 if not str(valid_args.get("concepto", "")).strip():
-                    return (
-                        "No entendí en qué gastaste. "
-                        "¿Podrías repetir el concepto?"
-                    )
+                    return "No entendí en qué gastaste. ¿Podrías repetir el concepto?"
                 if not str(valid_args.get("monto", "")).strip():
-                    return (
-                        "No entendí el monto gastado. "
-                        "¿Podrías repetir cuánto fue?"
-                    )
+                    return "No entendí el monto gastado. ¿Podrías repetir cuánto fue?"
             # Mercado/dias son opcionales: cada handler aplica su default.
 
             session = SessionLocal()
@@ -1127,12 +1109,14 @@ def _parse_text_tool_calls(content: str) -> list[dict[str, object]]:
             logger.warning("Tool call descartada — codigo=invalid_tool_name")
             continue
 
-        tool_calls.append({
-            "function": {
-                "name": name,
-                "arguments": json.dumps(arguments, ensure_ascii=False),
-            },
-        })
+        tool_calls.append(
+            {
+                "function": {
+                    "name": name,
+                    "arguments": json.dumps(arguments, ensure_ascii=False),
+                },
+            }
+        )
 
     return tool_calls
 
@@ -1164,10 +1148,6 @@ def _strip_tool_tags(text: str) -> str:
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
     return cleaned
-
-
-
-
 
 
 # ── Construccion de mensajes ─────────────────────────────────────────
@@ -1207,19 +1187,14 @@ def _build_messages(
     # El bloque de tools va inmediatamente despues del system prompt para que el
     # prefijo quede estable y reusable por el cache KV. Todo lo variable
     # (cultivos, tip) se agrega DESPUES, nunca en el medio.
-    system_content = SYSTEM_PROMPT + _TOOLS_SECTION_POR_TIPO.get(
-        consulta_tipo or "desconocido", _TOOLS_SECTION
-    )
+    system_content = SYSTEM_PROMPT + _TOOLS_SECTION_POR_TIPO.get(consulta_tipo or "desconocido", _TOOLS_SECTION)
 
     # Personalización por cultivos de interés (issue #125).
     # Si el agricultor tiene cultivos registrados, se lo indicamos al LLM
     # para que pueda asumir el producto cuando no se especifique explícitamente.
     if cultivos:
         cultivos_str = ", ".join(cultivos)
-        system_content += (
-            f"\n\nEl agricultor cultiva: {cultivos_str}. "
-            "Si no especifica producto, asume uno de estos."
-        )
+        system_content += f"\n\nEl agricultor cultiva: {cultivos_str}. Si no especifica producto, asume uno de estos."
 
     # Tip adicional para el LLM (issue #91: sugerir calculate_margin).
     if system_tip:
@@ -1296,10 +1271,12 @@ async def answer(
             content = _parse_content(response)
             if not content:
                 # Si el LLM no genero contenido, reintentar con instruccion directa.
-                messages.append({
-                    "role": "system",
-                    "content": "Responde al usuario en español chileno con frases cortas.",
-                })
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": "Responde al usuario en español chileno con frases cortas.",
+                    }
+                )
                 continue
 
             # Intentar extraer tool calls del texto (formato nativo Qwen2.5).
@@ -1316,28 +1293,30 @@ async def answer(
                         if forced:
                             # Inyectar el tool call + respuesta para que
                             # el LLM lo formatee en la siguiente iteracion.
-                            messages.append({
-                                "role": "assistant",
-                                "content": content,
-                            })
-                            messages.append({
-                                "role": "user",
-                                "content": (
-                                    "<tool_response>\n"
-                                    f"{forced}\n"
-                                    "</tool_response>"
-                                ),
-                            })
+                            messages.append(
+                                {
+                                    "role": "assistant",
+                                    "content": content,
+                                }
+                            )
+                            messages.append(
+                                {
+                                    "role": "user",
+                                    "content": (f"<tool_response>\n{forced}\n</tool_response>"),
+                                }
+                            )
                             continue
                     return cleaned
                 continue
 
             # El LLM quiere ejecutar herramientas.
             # Agregar mensaje del asistente con el tool call (como texto).
-            messages.append({
-                "role": "assistant",
-                "content": content,
-            })
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": content,
+                }
+            )
 
             for tc in tool_calls:
                 fn_info_raw = tc.get("function", {})
@@ -1348,13 +1327,13 @@ async def answer(
 
                 # Whitelist enforcement: solo tools permitidas.
                 if fn_name not in WHITELIST_TOOLS:
-                    logger.warning(
-                        "Tool rechazada — codigo=not_whitelisted; enviando fallback"
+                    logger.warning("Tool rechazada — codigo=not_whitelisted; enviando fallback")
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": f"<tool_response>\n{FALLBACK_TEXT}\n</tool_response>",
+                        }
                     )
-                    messages.append({
-                        "role": "user",
-                        "content": f"<tool_response>\n{FALLBACK_TEXT}\n</tool_response>",
-                    })
                     continue
 
                 # Parsear argumentos JSON.
@@ -1371,10 +1350,12 @@ async def answer(
                 tool_result = await _execute_tool(fn_name, fn_args, phone_hash=phone_hash)
 
                 # Envolver resultado en <tool_response> (formato nativo Qwen2.5).
-                messages.append({
-                    "role": "user",
-                    "content": f"<tool_response>\n{tool_result}\n</tool_response>",
-                })
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"<tool_response>\n{tool_result}\n</tool_response>",
+                    }
+                )
 
         # Si llegamos aca, se agotaron las iteraciones.
         logger.warning(
@@ -1382,13 +1363,14 @@ async def answer(
             MAX_TOOL_ITERATIONS,
         )
         # Ultimo intento: forzar respuesta sin tools.
-        messages.append({
-            "role": "system",
-            "content": (
-                "Genera una respuesta final en español chileno "
-                "con los datos disponibles. Maximo 3 oraciones."
-            ),
-        })
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "Genera una respuesta final en español chileno con los datos disponibles. Maximo 3 oraciones."
+                ),
+            }
+        )
         try:
             final_response = await _run_llm_completion(model, messages, max_tokens=128)
             content = _parse_content(final_response)
@@ -1512,11 +1494,13 @@ async def answer_via_openrouter(
                     if name in WHITELIST_TOOLS
                     else FALLBACK_TEXT
                 )
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": call.get("id", ""),
-                    "content": result,
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.get("id", ""),
+                        "content": result,
+                    }
+                )
 
         logger.warning("OpenRouter Tool Calling loop agoto %d iteraciones", MAX_TOOL_ITERATIONS)
         return None
@@ -1534,8 +1518,19 @@ def _mock_answer(query_text: str) -> str:
     q = query_text.strip().lower()
 
     # Detección de keywords de clima
-    clima_keywords = ["clima", "tiempo", "temperatura", "lluvia", "lloviendo",
-                      "frio", "calor", "humedad", "viento", "pronóstico", "pronostico"]
+    clima_keywords = [
+        "clima",
+        "tiempo",
+        "temperatura",
+        "lluvia",
+        "lloviendo",
+        "frio",
+        "calor",
+        "humedad",
+        "viento",
+        "pronóstico",
+        "pronostico",
+    ]
     if any(kw in q for kw in clima_keywords):
         return (
             "Modo de prueba: clima simulado en Traiguén, 18 grados, nublado, "
@@ -1544,8 +1539,7 @@ def _mock_answer(query_text: str) -> str:
         )
 
     # Detección de keywords de precio
-    precio_keywords = ["precio", "cuánto", "cuanto", "cuesta", "vale",
-                       "está", "esta", "cómo está", "como esta"]
+    precio_keywords = ["precio", "cuánto", "cuanto", "cuesta", "vale", "está", "esta", "cómo está", "como esta"]
     if any(kw in q for kw in precio_keywords):
         return (
             "Modo de prueba: precio simulado de papa, 1.200 pesos el kilo "
@@ -1559,10 +1553,7 @@ def _mock_answer(query_text: str) -> str:
 def is_model_available() -> bool:
     """Indica si el proceso LLM está vivo y listo para inferencia."""
     with _model_lock:
-        return (
-            _worker_manager is not None
-            and _worker_manager.is_healthy()
-        )
+        return _worker_manager is not None and _worker_manager.is_healthy()
 
 
 def get_model_error() -> str | None:

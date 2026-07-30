@@ -1,6 +1,7 @@
 """Regresiones de gastos consentidos, TTL, borrado y formato chileno."""
 
 import datetime
+from decimal import Decimal
 from unittest.mock import MagicMock
 
 import pytest
@@ -12,8 +13,11 @@ from app.core.config import settings
 from app.models.expense import Expense
 from app.models.user_prefs import UserPrefs
 from app.services.expense_service import (
+    _MAX_EXPENSE_CLP,
     ExpenseOperationError,
+    _finalize_amount,
     _parse_amount_clp,
+    _parse_expense_date,
     delete_expenses_for_subject,
     get_active_expense_total,
     purge_expired_expenses,
@@ -112,6 +116,79 @@ def test_parse_amount_clp_numeros_hablados(raw_amount: str, expected: int) -> No
 def test_parse_amount_clp_rechaza_valores_inseguros(raw_amount: str) -> None:
     """No acepta montos ausentes, no numéricos, ambiguos o fuera del dominio."""
     assert _parse_amount_clp(raw_amount) is None
+
+
+class TestFinalizeAmount:
+    """Regresión directa de _finalize_amount: redondeo y límites del dominio.
+
+    Encontrado por mutation testing: sin un caso de mitad exacta, remover
+    ``rounding=ROUND_HALF_UP`` no rompía ningún test; sin probar los bordes
+    exactos 1 y _MAX_EXPENSE_CLP, ``<= 0``/``<= 1`` y ``> límite``/``>= límite``
+    eran indistinguibles.
+    """
+
+    def test_mitad_exacta_redondea_hacia_arriba(self) -> None:
+        assert _finalize_amount(Decimal("1200.5")) == 1201
+
+    def test_un_peso_es_el_minimo_valido(self) -> None:
+        assert _finalize_amount(Decimal("1")) == 1
+
+    def test_cero_es_invalido(self) -> None:
+        assert _finalize_amount(Decimal("0")) is None
+
+    def test_el_limite_maximo_es_valido(self) -> None:
+        assert _finalize_amount(Decimal(_MAX_EXPENSE_CLP)) == _MAX_EXPENSE_CLP
+
+    def test_sobre_el_limite_maximo_es_invalido(self) -> None:
+        assert _finalize_amount(Decimal(_MAX_EXPENSE_CLP + 1)) is None
+
+
+class TestParseExpenseDate:
+    """Regresión directa de _parse_expense_date, sin diluirse en el promedio
+    tolerante del corpus de extracción (test_expense_extraction_accuracy.py).
+
+    Encontrado por mutation testing (mutmut): 15 mutantes sobrevivían en esta
+    función porque el corpus de precisión tolera hasta 10% de fallos — un caso
+    de fecha roto no baja el promedio lo suficiente para que ese test falle.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _fijar_hoy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("app.services.expense_service._today_santiago", lambda: _TODAY)
+
+    def test_vacio_es_hoy(self) -> None:
+        assert _parse_expense_date("") == _TODAY
+
+    def test_hoy_es_hoy(self) -> None:
+        assert _parse_expense_date("hoy") == _TODAY
+
+    def test_hoy_no_distingue_mayusculas(self) -> None:
+        assert _parse_expense_date("HOY") == _TODAY
+
+    def test_ayer_es_un_dia_antes(self) -> None:
+        assert _parse_expense_date("ayer") == _TODAY - datetime.timedelta(days=1)
+
+    def test_formato_iso(self) -> None:
+        assert _parse_expense_date("2026-07-20") == datetime.date(2026, 7, 20)
+
+    def test_formato_dd_mm_aaaa_con_barra(self) -> None:
+        assert _parse_expense_date("20/07/2026") == datetime.date(2026, 7, 20)
+
+    def test_formato_dd_mm_aaaa_con_guion(self) -> None:
+        """Solo coincide con el tercer formato de la lista: si un mutante
+        detiene la búsqueda en el primer intento fallido en vez de probar el
+        siguiente, esta fecha deja de reconocerse."""
+        assert _parse_expense_date("20-07-2026") == datetime.date(2026, 7, 20)
+
+    def test_hoy_explicito_por_formato_no_se_rechaza_como_futuro(self) -> None:
+        """La fecha de hoy escrita en ISO debe aceptarse: no es futuro."""
+        assert _parse_expense_date("2026-07-29") == _TODAY
+
+    def test_manana_se_rechaza_como_futuro(self) -> None:
+        assert _parse_expense_date("2026-07-30") is None
+
+    def test_fecha_no_reconocida_retorna_none(self) -> None:
+        assert _parse_expense_date("fecha rara") is None
 
 
 def test_gate_apagado_no_guarda(db: Session) -> None:
@@ -268,6 +345,117 @@ def test_totales_aislan_identidad_producto_y_vencimiento(
     assert total == 50_000
 
 
+class TestGetActiveExpenseTotalGates:
+    """Regresión directa de get_active_expense_total, sin diluirse en el
+    happy path de test_totales_aislan_identidad_producto_y_vencimiento.
+
+    Encontrado por mutation testing: la condición de gate encadenaba tres
+    ``or``, y un mutante que la cambiaba a ``and`` seguía pasando porque
+    ningún test aislaba el gate/consentimiento del resto de la query.
+    """
+
+    def test_retorna_cero_sin_expenses_del_sujeto(self, db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Sin filas para el sujeto/producto, el total es exactamente 0, no None ni 1."""
+        _enable_expenses(db, monkeypatch, phone_hash=_PHONE_HASH_A)
+
+        total = get_active_expense_total(db, _PHONE_HASH_A, "papa", as_of=_TODAY, now=_NOW)
+
+        assert total == 0
+
+    def test_retorna_cero_con_gate_apagado_aunque_haya_expenses(
+        self,
+        db: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Apagar el gate bloquea la lectura aunque consentimiento y hash sean válidos."""
+        _enable_expenses(db, monkeypatch, phone_hash=_PHONE_HASH_A)
+        db.add(
+            Expense(
+                phone_hash=_PHONE_HASH_A,
+                producto="papa",
+                concepto="semilla",
+                amount_clp=50_000,
+                occurred_on=_TODAY,
+                expires_at=_NOW + datetime.timedelta(days=10),
+            )
+        )
+        db.commit()
+        monkeypatch.setattr(settings, "expense_tracking_enabled", False)
+
+        total = get_active_expense_total(db, _PHONE_HASH_A, "papa", as_of=_TODAY, now=_NOW)
+
+        assert total == 0
+
+    def test_retorna_cero_sin_consentimiento_aunque_gate_este_prendido(
+        self,
+        db: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Revocar el consentimiento bloquea la lectura con gate prendido y hash válido.
+
+        Distingue el AND del OR en la condición de gate: un mutante que
+        cambia ``or`` por ``and`` solo falla si gate y consentimiento se
+        prueban por separado.
+        """
+        _enable_expenses(db, monkeypatch, phone_hash=_PHONE_HASH_A, consent=False)
+        db.add(
+            Expense(
+                phone_hash=_PHONE_HASH_A,
+                producto="papa",
+                concepto="semilla",
+                amount_clp=50_000,
+                occurred_on=_TODAY,
+                expires_at=_NOW + datetime.timedelta(days=10),
+            )
+        )
+        db.commit()
+
+        total = get_active_expense_total(db, _PHONE_HASH_A, "papa", as_of=_TODAY, now=_NOW)
+
+        assert total == 0
+
+    def test_retorna_cero_con_hash_invalido(self, db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Un phone_hash mal formado nunca debe llegar a consultar la tabla."""
+        _enable_expenses(db, monkeypatch, phone_hash=_PHONE_HASH_A)
+
+        total = get_active_expense_total(db, "no-es-un-hash-valido", "papa", as_of=_TODAY, now=_NOW)
+
+        assert total == 0
+
+    def test_excluye_gastos_posteriores_a_as_of(self, db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Un gasto ocurrido después de la fecha de referencia no debe sumarse.
+
+        Sin este filtro, un gasto futuro se contaría contra un margen de una
+        venta pasada, inflando el descuento sin relación con esa venta.
+        """
+        _enable_expenses(db, monkeypatch, phone_hash=_PHONE_HASH_A)
+        db.add_all(
+            [
+                Expense(
+                    phone_hash=_PHONE_HASH_A,
+                    producto="papa",
+                    concepto="semilla",
+                    amount_clp=50_000,
+                    occurred_on=_TODAY,
+                    expires_at=_NOW + datetime.timedelta(days=10),
+                ),
+                Expense(
+                    phone_hash=_PHONE_HASH_A,
+                    producto="papa",
+                    concepto="fertilizante",
+                    amount_clp=20_000,
+                    occurred_on=_TODAY + datetime.timedelta(days=5),
+                    expires_at=_NOW + datetime.timedelta(days=10),
+                ),
+            ]
+        )
+        db.commit()
+
+        total = get_active_expense_total(db, _PHONE_HASH_A, "papa", as_of=_TODAY, now=_NOW)
+
+        assert total == 50_000
+
+
 def test_borrado_funciona_aunque_gate_este_apagado(
     db: Session,
     monkeypatch: pytest.MonkeyPatch,
@@ -335,9 +523,7 @@ def test_error_db_no_filtra_detalle(
 ) -> None:
     """Un fallo de commit responde amigable y sanea el log."""
     session = MagicMock(spec=Session)
-    session.commit.side_effect = SQLAlchemyError(
-        "INSERT amount=50000 phone=secret"
-    )
+    session.commit.side_effect = SQLAlchemyError("INSERT amount=50000 phone=secret")
     monkeypatch.setattr(settings, "expense_tracking_enabled", True)
     monkeypatch.setattr(
         "app.services.expense_service._has_expense_consent",

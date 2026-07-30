@@ -56,6 +56,9 @@ dist/
 .venv/
 venv/
 .uv/
+htmlcov/
+/backend/mutants/
+/backend/.mutmut-cache
 
 # ── Node ──────────────────────────────
 node_modules/

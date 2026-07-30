@@ -161,9 +161,7 @@ class WhisperService:
         try:
             self._import_faster_whisper()
         except ImportError:
-            logger.warning(
-                "faster-whisper no disponible — se usa openai-whisper como respaldo"
-            )
+            logger.warning("faster-whisper no disponible — se usa openai-whisper como respaldo")
             return "openai"
         return "faster"
 

@@ -198,9 +198,7 @@ class TestLlmConfig:
         (Docker sin --cpuset-cpus), cayendo a un fallback de 4.
         """
         esperado = min(os.cpu_count() or 4, 8)
-        assert esperado == _N_THREADS, (
-            f"_N_THREADS={_N_THREADS} deberia ser min(cpu_count, 8)={esperado}."
-        )
+        assert esperado == _N_THREADS, f"_N_THREADS={_N_THREADS} deberia ser min(cpu_count, 8)={esperado}."
 
     def test_n_threads_al_menos_1(self) -> None:
         """Nunca cero hilos: llama.cpp necesita al menos uno."""
@@ -209,10 +207,7 @@ class TestLlmConfig:
     def test_n_threads_no_excede_8(self) -> None:
         """Tope de 8: mas hilos que los 8 vCPU del CX43 solo agrega
         contention de scheduler sin beneficio para un 3B en CPU."""
-        assert _N_THREADS <= 8, (
-            f"_N_THREADS={_N_THREADS} muy alto. "
-            "Oversubscription de hilos degrada inferencia."
-        )
+        assert _N_THREADS <= 8, f"_N_THREADS={_N_THREADS} muy alto. Oversubscription de hilos degrada inferencia."
 
     def test_system_prompt_char_count_razonable(self) -> None:
         """El system prompt estructurado debe ser compacto (Issue #190).
@@ -250,8 +245,7 @@ class TestLlmConfig:
         """
         total_chars = len(SYSTEM_PROMPT) + len(_TOOLS_SECTION)
         assert total_chars <= 10400, (
-            f"Prompt total={total_chars} chars demasiado grande "
-            f"para n_ctx={_N_CTX}. Reduce o aumenta n_ctx."
+            f"Prompt total={total_chars} chars demasiado grande para n_ctx={_N_CTX}. Reduce o aumenta n_ctx."
         )
 
 
@@ -419,9 +413,9 @@ class TestParseTextToolCalls:
     def test_tool_call_simple(self) -> None:
         """Extrae un tool_call basico del texto."""
         content = (
-            '<tool_call>\n'
+            "<tool_call>\n"
             '{"name": "get_price", "arguments": {"producto": "papa", "mercado": "Lo Valledor"}}\n'
-            '</tool_call>'
+            "</tool_call>"
         )
         result = _parse_text_tool_calls(content)
         assert len(result) == 1
@@ -431,11 +425,11 @@ class TestParseTextToolCalls:
     def test_tool_call_con_texto_adyacente(self) -> None:
         """Ignora texto alrededor del tool_call."""
         content = (
-            'Voy a consultar el precio para ti.\n'
-            '<tool_call>\n'
+            "Voy a consultar el precio para ti.\n"
+            "<tool_call>\n"
             '{"name": "get_price", "arguments": {"producto": "tomate", "mercado": "La Vega"}}\n'
-            '</tool_call>\n'
-            'Un momento por favor.'
+            "</tool_call>\n"
+            "Un momento por favor."
         )
         result = _parse_text_tool_calls(content)
         assert len(result) == 1
@@ -456,11 +450,7 @@ class TestParseTextToolCalls:
     ) -> None:
         """JSON inválido se descarta sin registrar su fragmento."""
         secret = "rut-secreto-11.111.111-1"
-        content = (
-            '<tool_call>\n'
-            f'{{"name": "get_price", "arguments": {{"nota": "{secret}"}},}}\n'
-            '</tool_call>'
-        )
+        content = f'<tool_call>\n{{"name": "get_price", "arguments": {{"nota": "{secret}"}},}}\n</tool_call>'
         caplog.set_level(logging.WARNING, logger="app.services.llm_service")
 
         result = _parse_text_tool_calls(content)
@@ -472,12 +462,12 @@ class TestParseTextToolCalls:
     def test_multiple_tool_calls(self) -> None:
         """Soporta multiples tool calls en un mismo texto."""
         content = (
-            '<tool_call>\n'
+            "<tool_call>\n"
             '{"name": "get_price", "arguments": {"producto": "papa", "mercado": "Lo Valledor"}}\n'
-            '</tool_call>\n'
-            '<tool_call>\n'
+            "</tool_call>\n"
+            "<tool_call>\n"
             '{"name": "get_weather", "arguments": {"lat": -38.23, "lon": -72.68}}\n'
-            '</tool_call>'
+            "</tool_call>"
         )
         result = _parse_text_tool_calls(content)
         assert len(result) == 2
@@ -498,7 +488,7 @@ class TestStripToolTags:
 
     def test_strip_tool_response_tag(self) -> None:
         """Elimina bloque <tool_response> completo."""
-        text = '<tool_response>42</tool_response> La respuesta es 42'
+        text = "<tool_response>42</tool_response> La respuesta es 42"
         result = _strip_tool_tags(text)
         assert "<tool_response>" not in result
         assert "respuesta" in result
@@ -511,7 +501,7 @@ class TestStripToolTags:
 
     def test_strip_im_start_end(self) -> None:
         """Elimina tokens <|im_start|> y <|im_end|>."""
-        text = '<|im_start|>assistant\nHola<|im_end|>'
+        text = "<|im_start|>assistant\nHola<|im_end|>"
         result = _strip_tool_tags(text)
         assert "<|im_start|>" not in result
         assert "<|im_end|>" not in result
@@ -728,15 +718,7 @@ class TestAnswerGuardasLlm:
                 timeout_seconds: float,
             ) -> dict[str, object]:
                 captured_messages.append(messages)
-                return {
-                    "choices": [
-                        {
-                            "message": {
-                                "content": "Respuesta segura desde worker."
-                            }
-                        }
-                    ]
-                }
+                return {"choices": [{"message": {"content": "Respuesta segura desde worker."}}]}
 
         monkeypatch.setattr(
             "app.services.llm_service._get_model",
@@ -776,9 +758,7 @@ class TestAnswerGuardasLlm:
         assert exception_secret not in caplog.text
         assert "timeout_seconds" in caplog.text
 
-    async def test_llm_ocupado_responde_sin_colgar(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_llm_ocupado_responde_sin_colgar(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Si la guarda detecta LLM ocupado, retorna mensaje rápido sin esperar."""
 
         async def _raise_busy(*args: object, **kwargs: object) -> object:
@@ -882,9 +862,7 @@ class TestAnswerGuardasLlm:
                 {
                     "function": {
                         "name": "get_price",
-                        "arguments": (
-                            f'{{"producto": "papa", "nota": "{arguments_secret}"'
-                        ),
+                        "arguments": (f'{{"producto": "papa", "nota": "{arguments_secret}"'),
                     }
                 }
             ]
@@ -926,11 +904,7 @@ class TestAnswerGuardasLlm:
         async def _completion(*args: object, **kwargs: object) -> object:
             nonlocal completion_count
             completion_count += 1
-            content = (
-                "tool-call-generado"
-                if completion_count <= MAX_TOOL_ITERATIONS
-                else "respuesta final segura"
-            )
+            content = "tool-call-generado" if completion_count <= MAX_TOOL_ITERATIONS else "respuesta final segura"
             return {"choices": [{"message": {"content": content}}]}
 
         def _tool_calls(content: str) -> list[dict[str, object]]:
@@ -940,11 +914,7 @@ class TestAnswerGuardasLlm:
                 {
                     "function": {
                         "name": "get_price",
-                        "arguments": (
-                            '{"producto": "papa", '
-                            f'"nota": "{arguments_secret}"'
-                            "}"
-                        ),
+                        "arguments": (f'{{"producto": "papa", "nota": "{arguments_secret}"}}'),
                     }
                 }
             ]
@@ -1252,16 +1222,12 @@ class TestForceKeywordToolVenta:
             )
 
         monkeypatch.setattr(db_module, "SessionLocal", lambda: _FakeSession())
-        monkeypatch.setattr(
-            odepa_service, "calculate_sale_value_for_llm", _capture_sale
-        )
+        monkeypatch.setattr(odepa_service, "calculate_sale_value_for_llm", _capture_sale)
 
         result = await _force_keyword_tool("voy a vender 30 kilos de papa")
         assert result is not None
         assert "25.500 pesos" in result
-        assert calls == [
-            {"producto": "papa", "cantidad_kg": "30", "mercado": ""}
-        ]
+        assert calls == [{"producto": "papa", "cantidad_kg": "30", "mercado": ""}]
 
     async def test_venta_kg_abreviatura(self, monkeypatch) -> None:
         """'30 kg de tomate' tambien enruta a calculate_sale_value."""
@@ -1282,9 +1248,7 @@ class TestForceKeywordToolVenta:
             )
 
         monkeypatch.setattr(db_module, "SessionLocal", lambda: _FakeSession())
-        monkeypatch.setattr(
-            odepa_service, "calculate_sale_value_for_llm", _capture_sale
-        )
+        monkeypatch.setattr(odepa_service, "calculate_sale_value_for_llm", _capture_sale)
 
         result = await _force_keyword_tool("30 kg de tomate")
         assert result is not None
@@ -1383,12 +1347,20 @@ class TestCalculateMarginDb:
     parchea SessionLocal para que las funciones internas la usen.
     """
 
-    def _insertar_precio(self, db, producto="papa", precio_kg=850, mercado="Mercado Mayorista Lo Valledor de Santiago",
-                         unidad="kg", fecha=None):
+    def _insertar_precio(
+        self,
+        db,
+        producto="papa",
+        precio_kg=850,
+        mercado="Mercado Mayorista Lo Valledor de Santiago",
+        unidad="kg",
+        fecha=None,
+    ):
         """Helper: inserta un precio ODEPA de prueba."""
         import datetime
 
         from app.models.odepa_price import OdepaPrice
+
         if fecha is None:
             fecha = datetime.date(2026, 7, 15)
         reg = OdepaPrice(
@@ -1741,10 +1713,8 @@ class TestCalculateMarginDb:
         from app.services.odepa_service import calculate_margin_for_llm
 
         # Dos mercados, precio diferente.
-        self._insertar_precio(db, producto="papa", precio_kg=850,
-                              mercado="Mercado Mayorista Lo Valledor de Santiago")
-        self._insertar_precio(db, producto="papa", precio_kg=700,
-                              mercado="Vega Modelo de Temuco")
+        self._insertar_precio(db, producto="papa", precio_kg=850, mercado="Mercado Mayorista Lo Valledor de Santiago")
+        self._insertar_precio(db, producto="papa", precio_kg=700, mercado="Vega Modelo de Temuco")
 
         result = calculate_margin_for_llm(
             session=db,
@@ -1764,8 +1734,7 @@ class TestCalculateMarginDb:
         from app.services.odepa_service import calculate_margin_for_llm
 
         # ODEPA con unidad no convertible (docena de atados).
-        self._insertar_precio(db, producto="lechuga", precio_kg=1200,
-                              unidad="$/docena de atados")
+        self._insertar_precio(db, producto="lechuga", precio_kg=1200, unidad="$/docena de atados")
 
         result = calculate_margin_for_llm(
             session=db,
@@ -1788,6 +1757,7 @@ class TestToolResultCache:
     def test_cache_hit_retorna_resultado(self) -> None:
         """Segundo get con mismos params retorna el valor cacheado."""
         from app.services.llm_service import ToolResultCache
+
         cache = ToolResultCache(ttl_seconds=60)
         cache.set("get_price", "450 pesos el kilo", producto="papa", mercado="lo valledor")
         result = cache.get("get_price", producto="papa", mercado="lo valledor")
@@ -1796,12 +1766,14 @@ class TestToolResultCache:
     def test_cache_miss_retorna_none(self) -> None:
         """Params distintos retornan None."""
         from app.services.llm_service import ToolResultCache
+
         cache = ToolResultCache(ttl_seconds=60)
         assert cache.get("get_price", producto="tomate") is None
 
     def test_cache_expirado_retorna_none(self) -> None:
         """TTL vencido retorna None."""
         from app.services.llm_service import ToolResultCache
+
         # TTL=-1: expira inmediatamente (cualquier monotonic() > stored_at - 1)
         cache = ToolResultCache(ttl_seconds=-1)
         cache.set("get_weather", "10 grados", lat=-38.23, lon=-72.68)
@@ -1810,6 +1782,7 @@ class TestToolResultCache:
     def test_clear_tool_result_cache_vacia_singleton(self) -> None:
         """Clear del singleton elimina todas las entradas."""
         from app.services.llm_service import _tool_cache
+
         _tool_cache.set("get_price", "850 pesos", producto="cebolla")
         assert _tool_cache.get("get_price", producto="cebolla") == "850 pesos"
         _tool_cache.clear()
@@ -1892,9 +1865,7 @@ class TestToolResultCache:
 # ── answer_via_openrouter (fallback LLM remoto) ─────────────────
 
 
-def _install_openrouter_mock(
-    monkeypatch: pytest.MonkeyPatch, responses: list[dict[str, object]]
-) -> None:
+def _install_openrouter_mock(monkeypatch: pytest.MonkeyPatch, responses: list[dict[str, object]]) -> None:
     """Instala un cliente HTTP mockeado que retorna `responses` en orden,
     una por cada llamada a chat_completion_with_tools (simula el loop)."""
     calls = {"n": 0}
@@ -1912,17 +1883,13 @@ def _install_openrouter_mock(
 class TestAnswerViaOpenrouter:
     """Fallback de 2a capa: responde via OpenRouter cuando el LLM local falla."""
 
-    async def test_sin_api_key_retorna_none_sin_llamar_red(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_sin_api_key_retorna_none_sin_llamar_red(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Sin OPENROUTER_API_KEY, el fallback esta deshabilitado."""
         monkeypatch.setattr(settings, "openrouter_api_key", "")
         result = await answer_via_openrouter("a cuanto esta la papa")
         assert result is None
 
-    async def test_respuesta_directa_sin_tool_call(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_respuesta_directa_sin_tool_call(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """El modelo responde texto sin necesitar tools — se retorna tal cual."""
         monkeypatch.setattr(settings, "openrouter_api_key", "sk-or-test")
         _install_openrouter_mock(
@@ -1932,9 +1899,7 @@ class TestAnswerViaOpenrouter:
         result = await answer_via_openrouter("hola")
         assert result == "Hola, en que te ayudo?"
 
-    async def test_tool_call_ejecuta_handler_y_retorna_respuesta_final(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_tool_call_ejecuta_handler_y_retorna_respuesta_final(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """1a respuesta pide get_price; se ejecuta el handler; 2a respuesta da el texto final."""
         monkeypatch.setattr(settings, "openrouter_api_key", "sk-or-test")
 
@@ -1950,20 +1915,24 @@ class TestAnswerViaOpenrouter:
             monkeypatch,
             [
                 {
-                    "choices": [{
-                        "message": {
-                            "role": "assistant",
-                            "content": None,
-                            "tool_calls": [{
-                                "id": "call_1",
-                                "type": "function",
-                                "function": {
-                                    "name": "get_price",
-                                    "arguments": '{"producto": "papa"}',
-                                },
-                            }],
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [
+                                    {
+                                        "id": "call_1",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "get_price",
+                                            "arguments": '{"producto": "papa"}',
+                                        },
+                                    }
+                                ],
+                            }
                         }
-                    }]
+                    ]
                 },
                 {"choices": [{"message": {"role": "assistant", "content": "La papa esta a 850 pesos el kilo."}}]},
             ],
@@ -1971,26 +1940,28 @@ class TestAnswerViaOpenrouter:
         result = await answer_via_openrouter("a cuanto esta la papa")
         assert result == "La papa esta a 850 pesos el kilo."
 
-    async def test_tool_no_whitelisteada_usa_fallback_text(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_tool_no_whitelisteada_usa_fallback_text(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Si el modelo pide una tool fuera de whitelist, se inyecta FALLBACK_TEXT y sigue el loop."""
         monkeypatch.setattr(settings, "openrouter_api_key", "sk-or-test")
         _install_openrouter_mock(
             monkeypatch,
             [
                 {
-                    "choices": [{
-                        "message": {
-                            "role": "assistant",
-                            "content": None,
-                            "tool_calls": [{
-                                "id": "call_1",
-                                "type": "function",
-                                "function": {"name": "borrar_base_datos", "arguments": "{}"},
-                            }],
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [
+                                    {
+                                        "id": "call_1",
+                                        "type": "function",
+                                        "function": {"name": "borrar_base_datos", "arguments": "{}"},
+                                    }
+                                ],
+                            }
                         }
-                    }]
+                    ]
                 },
                 {"choices": [{"message": {"role": "assistant", "content": "No puedo hacer eso."}}]},
             ],
@@ -2019,9 +1990,7 @@ class TestAnswerViaOpenrouter:
         result = await answer_via_openrouter("a cuanto esta la papa")
         assert result is None
 
-    async def test_loop_agota_iteraciones_retorna_none(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_loop_agota_iteraciones_retorna_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Si el modelo SIEMPRE pide tools sin dar respuesta final, se agota el loop."""
         monkeypatch.setattr(settings, "openrouter_api_key", "sk-or-test")
         monkeypatch.setattr(
@@ -2029,17 +1998,21 @@ class TestAnswerViaOpenrouter:
             lambda: {"get_price": lambda **kw: "850 pesos"},
         )
         tool_call_response = {
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [{
-                        "id": "call_1",
-                        "type": "function",
-                        "function": {"name": "get_price", "arguments": '{"producto": "papa"}'},
-                    }],
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {"name": "get_price", "arguments": '{"producto": "papa"}'},
+                            }
+                        ],
+                    }
                 }
-            }]
+            ]
         }
 
         def handler(request: httpx.Request) -> httpx.Response:
