@@ -19,24 +19,17 @@ from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.models.consultation import Consultation
 from app.schemas.mcp import JsonValue
-from app.services import metrics_service, odepa_service
+from app.services import delivery_service, metrics_service, odepa_service
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PAGE_SIZE = 20
 _MAX_PAGE_SIZE = 50
 _SAFE_DELIVERY_STATUSES = frozenset({"pending", "delivered", "failed"})
-_SAFE_DELIVERY_ERROR_CODES = frozenset(
-    {
-        "pipeline_no_response",
-        "openwa_auth_error",
-        "openwa_connection_error",
-        "openwa_http_error",
-        "openwa_invalid_response",
-        "openwa_timeout",
-        "openwa_unexpected_error",
-    }
-)
+# Se deriva de delivery_service en vez de repetir la lista: mantener dos copias
+# hacía que un código válido al escribir ("openwa_send_failed", "openwa_rejected",
+# "openwa_request_error") se leyera como "delivery_error_unknown" desde MCP.
+_SAFE_DELIVERY_ERROR_CODES = delivery_service.ALLOWED_DELIVERY_ERROR_CODES
 _CONVERSATION_COLUMNS = (
     Consultation.id,
     Consultation.intent,
