@@ -4,24 +4,35 @@ Usa mocks para evitar descargar el modelo (~500MB) en cada ejecucion de test.
 Usa audio sintetico generado con el modulo `wave` de la stdlib.
 """
 
+import logging
 from collections.abc import Generator
 from pathlib import Path
+from types import ModuleType
 from typing import cast
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
+from app.core.config import settings
 from app.services.whisper_service import WhisperService, clear_model_cache
 
 
 @pytest.fixture(autouse=True)
-def _mock_whisper_import(mock_whisper: Mock) -> Generator[None, None, None]:
+def _mock_whisper_import(
+    mock_whisper: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[None, None, None]:
     """Auto-mockea WhisperService._import_whisper para que CI corra sin openai-whisper.
 
     Crea un modulo whisper simulado con load_model() que retorna mock_whisper.
     Tests individuales pueden sobrescribir el return_value de load_model
     accediendo via WhisperService._import_whisper.return_value.load_model.
+
+    Fija el backend en "openai" de forma explicita: sin esto la clase sigue el
+    default de produccion y estos tests pasarian solo mientras faster-whisper
+    no este instalado en el entorno.
     """
+    monkeypatch.setattr(settings, "whisper_backend", "openai")
     mock_module = MagicMock()
     mock_module.load_model.return_value = mock_whisper
     with patch.object(WhisperService, "_import_whisper", return_value=mock_module):
@@ -182,23 +193,30 @@ class TestWhisperServiceTranscribe:
     ) -> None:
         """Debe lanzar ValueError si el archivo esta vacio."""
         service = WhisperService()
-        with pytest.raises(ValueError, match="vacio"):
+        with pytest.raises(ValueError, match="vacío"):
             service.transcribe(str(empty_wav_path))
 
     def test_transcribe_error_whisper(
         self,
         wav_path: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Debe lanzar RuntimeError si Whisper falla."""
+        caplog.set_level(logging.ERROR, logger="app.services.whisper_service")
         mock_model = MagicMock()
-        mock_model.transcribe.side_effect = RuntimeError("Whisper crash")
+        mock_model.transcribe.side_effect = RuntimeError(
+            f"secreto-whisper consulta privada ruta={wav_path}"
+        )
         # Sobrescribir el return_value de load_model dentro del mock
         import_mock = cast(Mock, WhisperService._import_whisper)
         import_mock.return_value.load_model.return_value = mock_model
 
         service = WhisperService()
-        with pytest.raises(RuntimeError, match="Error de transcripcion"):
+        with pytest.raises(RuntimeError, match="Error de transcripción"):
             service.transcribe(str(wav_path))
+        assert "secreto-whisper" not in caplog.text
+        assert "consulta privada" not in caplog.text
+        assert str(wav_path) not in caplog.text
 
     def test_transcribe_texto_vacio(
         self,
@@ -310,3 +328,131 @@ class TestWhisperServiceLoadModel:
         import_mock = cast(Mock, WhisperService._import_whisper)
         assert import_mock.call_count == 2
         assert import_mock.return_value.load_model.call_count == 2
+
+
+class _FakeSegment:
+    """Segmento con la forma que devuelve faster-whisper."""
+
+    def __init__(self, start: float, end: float, text: str) -> None:
+        self.start = start
+        self.end = end
+        self.text = text
+
+
+class _FakeInfo:
+    """Metadatos de transcripcion de faster-whisper."""
+
+    def __init__(self, language: str = "es") -> None:
+        self.language = language
+
+
+@pytest.fixture
+def faster_backend(monkeypatch: pytest.MonkeyPatch) -> Mock:
+    """Activa el backend faster-whisper con un modulo simulado."""
+    clear_model_cache()
+    monkeypatch.setattr(settings, "whisper_backend", "faster")
+    monkeypatch.setattr(settings, "whisper_compute_type", "int8")
+
+    model = MagicMock()
+    model.transcribe.return_value = (
+        iter(
+            [
+                _FakeSegment(0.0, 1.2, "a cuánto está la papa"),
+                _FakeSegment(1.2, 2.0, " en Traiguén"),
+            ]
+        ),
+        _FakeInfo("es"),
+    )
+    module = MagicMock()
+    module.WhisperModel.return_value = model
+    monkeypatch.setattr(
+        WhisperService,
+        "_import_faster_whisper",
+        staticmethod(lambda: module),
+    )
+    return module
+
+
+class TestFasterWhisperBackend:
+    """Camino faster-whisper INT8: es el que corre en produccion."""
+
+    def test_backend_activo_es_faster(self, faster_backend: Mock) -> None:
+        """El default de produccion no debe caer silenciosamente a openai."""
+        assert WhisperService().backend == "faster"
+
+    def test_carga_el_modelo_cuantizado_sin_sobresuscribir_cpu(
+        self,
+        faster_backend: Mock,
+    ) -> None:
+        """INT8 y un tope de hilos son lo que hace rendir el piso de 1 vCPU."""
+        WhisperService(model_name="small")._load_model()
+
+        kwargs = faster_backend.WhisperModel.call_args.kwargs
+        assert faster_backend.WhisperModel.call_args.args[0] == "small"
+        assert kwargs["compute_type"] == "int8"
+        assert 1 <= kwargs["cpu_threads"] <= 4
+
+    def test_transcribe_normaliza_la_salida(
+        self,
+        faster_backend: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """El resto del pipeline no debe notar el cambio de backend."""
+        audio = _generate_synthetic_wav(tmp_path / "consulta.wav")
+
+        result = WhisperService().transcribe(audio)
+
+        assert result["text"] == "a cuánto está la papa en Traiguén"
+        assert result["language"] == "es"
+        assert len(cast(list, result["segments"])) == 2
+        assert isinstance(result["duration_ms"], int)
+
+    def test_conserva_prompt_de_dominio_y_fallback_de_temperatura(
+        self,
+        faster_backend: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """Sin el prompt de dominio Whisper vuelve a inventar palabras (#136)."""
+        audio = _generate_synthetic_wav(tmp_path / "consulta.wav")
+
+        WhisperService().transcribe(audio)
+
+        kwargs = faster_backend.WhisperModel.return_value.transcribe.call_args.kwargs
+        assert "papa" in kwargs["initial_prompt"]
+        assert "Traiguén" in kwargs["initial_prompt"]
+        assert kwargs["language"] == "es"
+        assert len(kwargs["temperature"]) > 1
+
+    def test_cache_separa_backends_del_mismo_modelo(
+        self,
+        faster_backend: Mock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """faster y openai cargan objetos incompatibles del mismo 'small'."""
+        faster_service = WhisperService(model_name="small")
+        faster_service._load_model()
+        assert faster_service.is_loaded
+
+        monkeypatch.setattr(settings, "whisper_backend", "openai")
+        openai_service = WhisperService(model_name="small")
+
+        assert openai_service.backend == "openai"
+        assert not openai_service.is_loaded
+
+    def test_sin_libreria_instalada_degrada_a_openai(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Un despliegue sin faster-whisper no puede quedarse mudo."""
+        monkeypatch.setattr(settings, "whisper_backend", "faster")
+
+        def _missing() -> ModuleType:
+            raise ImportError("No module named 'faster_whisper'")
+
+        monkeypatch.setattr(
+            WhisperService,
+            "_import_faster_whisper",
+            staticmethod(_missing),
+        )
+
+        assert WhisperService().backend == "openai"

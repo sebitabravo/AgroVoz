@@ -8,6 +8,10 @@ sqlalchemy==2.0.51
 alembic==1.18.5
 pydantic-settings==2.14.2
 httpx==0.28.1
+# Backend de transcripción por defecto: CTranslate2 INT8, sin torch.
+faster-whisper==1.2.1
+# Camino de respaldo (WHISPER_BACKEND=openai). Se retira cuando faster-whisper
+# quede validado en el VPS y en el piso de 1 vCPU.
 openai-whisper==20250625
 piper-tts==1.4.2
 llama-cpp-python>=0.3.34
