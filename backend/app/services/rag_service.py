@@ -99,12 +99,12 @@ def _load_corpus_from_yaml(corpus_dir: Path) -> list[dict[str, str]]:
     """
     chunks: list[dict[str, str]] = []
     if not corpus_dir.is_dir():
-        logger.warning("Directorio de corpus no encontrado: %s", corpus_dir)
+        logger.warning("Directorio de corpus no encontrado")
         return chunks
 
     yaml_files = sorted(corpus_dir.glob("*.yaml"))
     if not yaml_files:
-        logger.warning("No se encontraron archivos YAML en %s", corpus_dir)
+        logger.warning("No se encontraron archivos YAML en el corpus")
         return chunks
 
     for path in yaml_files:
@@ -112,7 +112,10 @@ def _load_corpus_from_yaml(corpus_dir: Path) -> list[dict[str, str]]:
             with open(path, encoding="utf-8") as f:
                 data = yaml.safe_load(f)
         except (yaml.YAMLError, OSError, UnicodeDecodeError) as exc:
-            logger.warning("Error leyendo corpus %s: %s", path.name, exc)
+            logger.warning(
+                "Error leyendo corpus — error=%s",
+                type(exc).__name__,
+            )
             continue
 
         if not isinstance(data, dict):
@@ -200,7 +203,10 @@ class RAGCorpus:
                 self._tfidf_matrix.shape[1],
             )
         except (ValueError, TypeError) as exc:
-            logger.error("Error indexando corpus TF-IDF: %s", exc)
+            logger.error(
+                "Error indexando corpus TF-IDF — error=%s",
+                type(exc).__name__,
+            )
             self._chunks = []
             self._vectorizer = None
 
@@ -258,13 +264,17 @@ class RAGCorpus:
                 })
 
             logger.debug(
-                "RAG search — query=%.100s top_k=%d results=%d",
-                query, top_k, len(results),
+                "RAG search — top_k=%d results=%d",
+                top_k,
+                len(results),
             )
             return results
 
         except (ValueError, TypeError, AttributeError) as exc:
-            logger.warning("Error en busqueda RAG: %s", exc)
+            logger.warning(
+                "Error en búsqueda RAG — error=%s",
+                type(exc).__name__,
+            )
             return []
 
     def reload(self) -> None:

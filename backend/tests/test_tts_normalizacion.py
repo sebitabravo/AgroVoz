@@ -44,6 +44,30 @@ class TestFechas:
         assert normalizar_para_voz("codigo 45/99/2026") == "codigo 45/99/2026"
 
 
+class TestUrls:
+    """Los enlaces se reemplazan antes de llegar al fonemizador."""
+
+    def test_url_https_indap_se_vuelve_fuente_hablable(self) -> None:
+        texto = "Fuente: https://www.indap.gob.cl/plataforma-de-servicios/credito-corto-plazo."
+        salida = normalizar_para_voz(texto)
+
+        assert salida == "Fuente: la página oficial de INDAP."
+        assert "https://" not in salida
+        assert "/" not in salida
+
+    def test_url_externa_se_vuelve_referencia_neutra(self) -> None:
+        salida = normalizar_para_voz("Más datos en https://example.com/privado?usuario=123.")
+
+        assert salida == "Más datos en la referencia web indicada."
+        assert "example.com" not in salida
+        assert "123" not in salida
+
+    def test_http_indap_no_se_presenta_como_fuente_oficial(self) -> None:
+        salida = normalizar_para_voz("Fuente: http://www.indap.gob.cl/credito")
+
+        assert salida == "Fuente: la referencia web indicada"
+
+
 class TestLoQueNoSeDebeTocar:
     """Regresiones: Piper ya resuelve bien estos casos."""
 

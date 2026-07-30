@@ -1,17 +1,29 @@
 ---
 // Mockup de telefono con conversacion de WhatsApp (#demo).
 // Los mensajes aparecen en cascada via JS cuando entra en viewport.
+//
+// IMPORTANTE: las respuestas de abajo son las que entrega el sistema REAL,
+// verificadas ejecutando las tools contra la base ODEPA y OpenMeteo. Si se
+// cambia el formato de salida de get_price o get_pronostico, hay que
+// actualizarlas aca. Un demo que promete algo que el producto no hace se cae
+// en la primera prueba de un evaluador.
+//
+// Dos cosas que el sistema real SIEMPRE hace y el demo debe reflejar:
+//   1. Cita la fuente ("segun ODEPA" / "segun OpenMeteo"). Es el diferencial
+//      frente a un LLM que inventa: el dato es verificable.
+//   2. Da la fecha del precio. ODEPA publica con rezago; ocultarlo seria
+//      hacer pasar un precio de hace dias por el de hoy.
 const messages = [
   {
     side: "sent",
     time: "0:05",
-    text: "¿A cuánto está la papa esta semana?",
+    text: "¿A cuánto está la papa?",
     i18n: "demo.m1",
   },
   {
     side: "received",
     time: "0:08",
-    text: "En Lo Valledor la papa está a $480 el kilo esta semana. Subió un 6% respecto a la semana pasada.",
+    text: "Papa está a 1.200 pesos el kilo en Lo Valledor, según ODEPA, precio del 20/06/2026.",
     i18n: "demo.m2",
   },
   {
@@ -23,7 +35,7 @@ const messages = [
   {
     side: "received",
     time: "0:07",
-    text: "En Traiguén se esperan 12 mm de lluvia mañana, con máxima de 14°C y mínima de 6°C.",
+    text: "Mañana en Traiguén: máxima de 14 grados y mínima de 9, 23,9 milímetros de lluvia. Según OpenMeteo.",
     i18n: "demo.m4",
   },
 ];

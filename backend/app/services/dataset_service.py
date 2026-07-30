@@ -65,7 +65,7 @@ def has_dataset_consent(phone_hash: str, db: Session | None = None) -> bool:
     if not phone_hash or phone_hash == "sin_chat":
         return False
     if not validate_phone_hash(phone_hash):
-        logger.warning("phone_hash invalido — no se retiene audio: %s", phone_hash[:8])
+        logger.warning("Dataset de voz omitido — estado=identificador_invalido")
         return False
 
     from sqlalchemy import select
@@ -78,10 +78,13 @@ def has_dataset_consent(phone_hash: str, db: Session | None = None) -> bool:
     try:
         prefs = session.scalar(select(UserPrefs).where(UserPrefs.phone_hash == phone_hash))
         return bool(prefs is not None and prefs.dataset_consent)
-    except SQLAlchemyError:
+    except SQLAlchemyError as exc:
         # Fail-closed: ante error de DB se asume sin consentimiento (privacidad
         # por defecto). Otros errores son bugs y deben propagarse.
-        logger.exception("Error consultando dataset_consent — phone_hash=%s", phone_hash[:8])
+        logger.error(
+            "Dataset de voz omitido — estado=consentimiento_no_verificado error_type=%s",
+            type(exc).__name__,
+        )
         return False
     finally:
         if own_session:
@@ -115,11 +118,11 @@ def retain_audio(
     # Defensa en profundidad: phone_hash forma parte de la ruta en disco.
     # has_dataset_consent tambien valida, pero este guard es independiente.
     if not validate_phone_hash(phone_hash):
-        logger.warning("phone_hash invalido en retain_audio — no se retiene: %s", phone_hash[:8])
+        logger.warning("Dataset de voz omitido — estado=identificador_invalido")
         return None
 
     if not has_dataset_consent(phone_hash, db=db):
-        logger.debug("Sin consentimiento — no se retiene audio: phone_hash=%s", phone_hash[:8])
+        logger.debug("Dataset de voz omitido — estado=sin_consentimiento")
         return None
 
     directory = dataset_dir or get_dataset_dir()
@@ -132,8 +135,11 @@ def retain_audio(
 
     try:
         shutil.copy2(wav_path, dest_path)
-    except (OSError, shutil.Error):
-        logger.exception("Error copiando audio al dataset — phone_hash=%s", phone_hash[:8])
+    except (OSError, shutil.Error) as exc:
+        logger.error(
+            "Dataset de voz no retenido — estado=error_copia error_type=%s",
+            type(exc).__name__,
+        )
         return None
 
     entry = {
@@ -153,16 +159,15 @@ def retain_audio(
         try:
             with open(manifest_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        except OSError:
-            logger.exception("Error escribiendo manifest.jsonl — phone_hash=%s", phone_hash[:8])
+        except OSError as exc:
+            logger.error(
+                "Dataset de voz no retenido — estado=error_manifest error_type=%s",
+                type(exc).__name__,
+            )
             dest_path.unlink(missing_ok=True)
             return None
 
-    logger.info(
-        "Audio retenido en dataset — phone_hash=%s sample=%s",
-        phone_hash[:8],
-        dest_path.name,
-    )
+    logger.info("Dataset de voz actualizado — estado=audio_retenido count=1")
     return dest_path
 
 
@@ -188,6 +193,9 @@ def load_manifest_entries(dataset_dir: Path | None = None) -> list[dict[str, obj
                 continue
             try:
                 entries.append(json.loads(line))
-            except json.JSONDecodeError:
-                logger.warning("Linea corrupta en manifest.jsonl: %s", line[:80])
+            except json.JSONDecodeError as exc:
+                logger.warning(
+                    "Dataset de voz parcialmente cargado — estado=linea_corrupta error_type=%s",
+                    type(exc).__name__,
+                )
     return entries

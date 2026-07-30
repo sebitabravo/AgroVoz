@@ -31,6 +31,19 @@ from app.services.pipeline_service import AgroVozPipeline
 from app.services.weather_service import ForecastDay
 
 
+def _assert_logs_sin_datos_sensibles(
+    caplog: pytest.LogCaptureFixture,
+    *valores_sensibles: str,
+) -> None:
+    """Verifica que observabilidad no exponga datos ni identificadores."""
+    texto_logs = caplog.text
+    for valor in valores_sensibles:
+        assert valor not in texto_logs
+    assert "phone_hash=" not in texto_logs
+    assert "chat_id_hash=" not in texto_logs
+    assert "mensaje=" not in texto_logs
+
+
 @pytest.fixture
 def phone_hash() -> str:
     """Hash de ejemplo para tests."""
@@ -117,7 +130,9 @@ class TestCreatePriceAlert:
         db: Session,
         phone_hash: str,
         wa_chat_id: str,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
+        caplog.set_level("INFO", logger="app.services.alert_service")
         mensaje = await create_price_alert(
             db,
             phone_hash,
@@ -137,6 +152,15 @@ class TestCreatePriceAlert:
         assert alerta.umbral == Decimal("10000")
         assert alerta.activa is True
         assert alerta.wa_chat_id == wa_chat_id
+        assert "estado=creada" in caplog.text
+        _assert_logs_sin_datos_sensibles(
+            caplog,
+            phone_hash,
+            phone_hash[:8],
+            wa_chat_id,
+            "papa",
+            "10000",
+        )
 
     @pytest.mark.asyncio
     async def test_condicion_invalida(
@@ -434,13 +458,19 @@ class TestEnviarAlerta:
 
     Una alerta la inicia AgroVoz sin que el productor pregunte, asi que sale solo
     con opt-in registrado (Ley 21.719, comunicacion no solicitada). El opt-in se
-    recoge en la seccion 7.3 del Acuerdo de Uso.
+    recoge en la seccion 7.4 del Acuerdo de Uso.
     """
 
     @pytest.mark.asyncio
     async def test_enviar_alerta_sintetiza_y_envia_con_consentimiento(
         self,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
+        phone_hash = "a" * 64
+        wa_chat_id = "56912345678@c.us"
+        mensaje = "Alerta privada: token=secreto-exito"
+        caplog.set_level("INFO", logger="app.services.alert_service")
+
         with (
             patch(
                 "app.services.alert_service._tiene_consentimiento_de_alertas",
@@ -456,10 +486,66 @@ class TestEnviarAlerta:
             ) as mock_send,
             patch("app.services.alert_service.Path.unlink") as mock_unlink,
         ):
-            await enviar_alerta("56912345678@c.us", "Alerta de prueba", "a" * 64)
+            await enviar_alerta(wa_chat_id, mensaje, phone_hash)
 
         mock_send.assert_awaited_once()
         mock_unlink.assert_called_once()
+        assert "estado=enviada" in caplog.text
+        _assert_logs_sin_datos_sensibles(
+            caplog,
+            phone_hash,
+            phone_hash[:8],
+            wa_chat_id,
+            mensaje,
+            "secreto-exito",
+        )
+
+    @pytest.mark.asyncio
+    async def test_error_envio_no_expone_datos_sensibles(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Los reintentos informan solo estado y clase del error."""
+        phone_hash = "b" * 64
+        wa_chat_id = "56987654321@c.us"
+        mensaje = "Mensaje privado del productor"
+        secreto_error = "OPENWA_TOKEN=secreto-error"
+        caplog.set_level("WARNING", logger="app.services.alert_service")
+
+        with (
+            patch(
+                "app.services.alert_service._tiene_consentimiento_de_alertas",
+                return_value=True,
+            ),
+            patch(
+                "app.services.alert_service.TTSService.synthesize",
+                return_value="/tmp/fake.ogg",
+            ),
+            patch(
+                "app.services.alert_service.OpenWAService.send_audio",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError(f"{secreto_error} {wa_chat_id}"),
+            ) as mock_send,
+            patch(
+                "app.services.alert_service.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
+            patch("app.services.alert_service.Path.unlink"),
+        ):
+            await enviar_alerta(wa_chat_id, mensaje, phone_hash)
+
+        assert mock_send.await_count == 3
+        assert "estado=retry" in caplog.text
+        assert "estado=error" in caplog.text
+        assert "error_type=RuntimeError" in caplog.text
+        _assert_logs_sin_datos_sensibles(
+            caplog,
+            phone_hash,
+            phone_hash[:8],
+            wa_chat_id,
+            mensaje,
+            secreto_error,
+        )
 
     @pytest.mark.asyncio
     async def test_sin_consentimiento_no_envia_ni_sintetiza(self) -> None:

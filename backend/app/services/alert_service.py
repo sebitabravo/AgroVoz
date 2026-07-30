@@ -14,7 +14,6 @@ Reglas de negocio:
 
 import asyncio
 import datetime
-import hashlib
 import logging
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -34,6 +33,7 @@ from app.core.constants import (
     UmbralClima,
 )
 from app.core.database import SessionLocal
+from app.core.formato import formatear_pesos
 from app.models.alert import Alert
 from app.models.odepa_price import OdepaPrice
 from app.models.user_prefs import UserPrefs
@@ -115,13 +115,7 @@ async def create_price_alert(
     )
     session.add(alerta)
     session.commit()
-    logger.info(
-        "Alerta de precio creada — phone_hash=%s producto=%s condicion=%s umbral=%s",
-        phone_hash[:8],
-        producto_norm,
-        condicion,
-        umbral,
-    )
+    logger.info("Alerta creada — tipo=precio estado=creada")
     return f"Listo, te avisare cuando {producto_norm} {condicion} {_formatear_pesos(umbral)} el kilo."
 
 
@@ -162,11 +156,7 @@ async def create_clima_alert(
     )
     session.add(alerta)
     session.commit()
-    logger.info(
-        "Alerta de clima creada — phone_hash=%s umbral=%s",
-        phone_hash[:8],
-        umbral_norm,
-    )
+    logger.info("Alerta creada — tipo=clima estado=creada")
     if umbral_norm == "helada":
         return "Listo, te avisare si se espera helada: minima bajo 2 grados en Traiguen."
     return "Listo, te avisare si se espera lluvia extrema: mas de 50 milimetros en 24 horas en Traiguen."
@@ -199,9 +189,7 @@ async def cancelar_alertas(
         alerta.activa = False
     session.commit()
     logger.info(
-        "Alertas canceladas — phone_hash=%s tipo=%s count=%d",
-        phone_hash[:8],
-        tipo or "todas",
+        "Alertas actualizadas — estado=canceladas count=%d",
         len(alertas),
     )
     return len(alertas)
@@ -250,12 +238,7 @@ async def evaluar_alertas_precio(
 
         precio_por_kg = _calcular_precio_por_kg(registro)
         if precio_por_kg is None:
-            logger.info(
-                "Alerta precio omitida — unidad no convertible phone_hash=%s producto=%s unidad=%s",
-                alerta.phone_hash[:8],
-                alerta.producto,
-                registro.unidad,
-            )
+            logger.info("Alerta omitida — tipo=precio estado=unidad_no_convertible")
             continue
 
         umbral = alerta.umbral or Decimal(0)
@@ -266,11 +249,7 @@ async def evaluar_alertas_precio(
                 alerta.last_triggered_at = datetime.datetime.now()
                 session.commit()
                 enviados.append(alerta.phone_hash)
-                logger.info(
-                    "Alerta de precio disparada — phone_hash=%s producto=%s",
-                    alerta.phone_hash[:8],
-                    alerta.producto,
-                )
+                logger.info("Alerta procesada — tipo=precio estado=disparada")
     return enviados
 
 
@@ -310,7 +289,10 @@ async def evaluar_alertas_clima(
     try:
         forecast = await get_weather_forecast_daily(DEFAULT_LAT, DEFAULT_LON)
     except (ConnectionError, RuntimeError, OSError) as exc:
-        logger.warning("No se pudo obtener pronostico para alertas de clima: %s", exc)
+        logger.warning(
+            "Evaluacion de alertas fallida — tipo=clima estado=pronostico_no_disponible error_type=%s",
+            type(exc).__name__,
+        )
         return []
 
     enviados: list[str] = []
@@ -326,11 +308,7 @@ async def evaluar_alertas_clima(
             alerta.last_triggered_at = datetime.datetime.now()
             session.commit()
             enviados.append(alerta.phone_hash)
-            logger.info(
-                "Alerta de clima disparada — phone_hash=%s umbral=%s",
-                alerta.phone_hash[:8],
-                alerta.umbral_clima,
-            )
+            logger.info("Alerta procesada — tipo=clima estado=disparada")
     return enviados
 
 
@@ -339,7 +317,7 @@ def _tiene_consentimiento_de_alertas(phone_hash: str) -> bool:
 
     Una alerta la inicia AgroVoz sin que el productor pregunte, así que necesita
     su propia base de licitud, distinta de la consulta que él mismo dispara. El
-    opt-in se recoge en la sección 7.3 del Acuerdo de Uso (docs/piloto/06).
+    opt-in se recoge en la sección 7.4 del Acuerdo de Uso (docs/piloto/06).
 
     Falla cerrado: si la consulta a la DB revienta, se asume que NO hay
     consentimiento. Es preferible no enviar una alerta a enviarla sin permiso.
@@ -352,12 +330,14 @@ def _tiene_consentimiento_de_alertas(phone_hash: str) -> bool:
     """
     try:
         with SessionLocal() as session:
-            prefs = session.query(UserPrefs).filter(UserPrefs.phone_hash == phone_hash).one_or_none()
+            prefs = session.scalar(
+                select(UserPrefs).where(UserPrefs.phone_hash == phone_hash)
+            )
             return bool(prefs and prefs.alert_consent)
-    except SQLAlchemyError:
-        logger.exception(
-            "No se pudo verificar consentimiento de alertas — no se envía — phone_hash=%s",
-            phone_hash[:8],
+    except SQLAlchemyError as exc:
+        logger.error(
+            "Alerta no enviada — tipo=alerta estado=consentimiento_no_verificado error_type=%s",
+            type(exc).__name__,
         )
         return False
 
@@ -377,15 +357,11 @@ async def enviar_alerta(wa_chat_id: str, mensaje: str, phone_hash: str) -> None:
         mensaje: Texto de la alerta.
         phone_hash: HMAC del número (``hash_phone``), el MISMO valor con que se
             guardó ``user_prefs.phone_hash``. Se usa para el chequeo de
-            consentimiento. NO derivar aquí desde ``wa_chat_id``: ``_hash_chat_id``
-            es un SHA-256 corto para logs, distinto del HMAC almacenado, y usarlo
-            haría que el gate nunca matchee y ninguna alerta se envíe.
+            consentimiento. No se debe derivar otro identificador desde
+            ``wa_chat_id`` porque no coincidiría con el HMAC almacenado.
     """
     if not await asyncio.to_thread(_tiene_consentimiento_de_alertas, phone_hash):
-        logger.info(
-            "Alerta NO enviada: sin consentimiento de alertas — chat_id_hash=%s",
-            _hash_chat_id(wa_chat_id),
-        )
+        logger.info("Alerta no enviada — tipo=alerta estado=sin_consentimiento")
         return
 
     tts = TTSService()
@@ -400,33 +376,33 @@ async def enviar_alerta(wa_chat_id: str, mensaje: str, phone_hash: str) -> None:
         for intento in range(1, max_intentos + 1):
             try:
                 await openwa.send_audio(wa_chat_id, audio_path)
-                logger.info(
-                    "Alerta enviada — chat_id_hash=%s mensaje=%.80s...",
-                    _hash_chat_id(wa_chat_id),
-                    mensaje,
-                )
+                logger.info("Alerta procesada — tipo=alerta estado=enviada")
                 return
             except (ConnectionError, OSError, RuntimeError) as exc:
                 if intento < max_intentos:
                     espera_s = 2 ** (intento - 1)  # 1s, 2s, 4s
                     logger.warning(
-                        "Reintento %d/%d envio alerta (esperando %ds): %s",
+                        "Reintento de alerta — "
+                        "tipo=alerta estado=retry intento=%d max_intentos=%d "
+                        "espera_s=%d error_type=%s",
                         intento,
                         max_intentos,
                         espera_s,
-                        exc,
+                        type(exc).__name__,
                     )
                     await asyncio.sleep(espera_s)
                 else:
                     # Tras 3 intentos, loguear ERROR pero no abortar.
                     logger.error(
-                        "Error enviando alerta tras %d intentos — chat_id_hash=%s: %s",
+                        "Alerta no enviada — tipo=alerta estado=error intentos=%d error_type=%s",
                         max_intentos,
-                        _hash_chat_id(wa_chat_id),
-                        exc,
+                        type(exc).__name__,
                     )
-    except Exception:
-        logger.exception("Error inesperado en envio de alerta — chat_id_hash=%s", _hash_chat_id(wa_chat_id))
+    except Exception as exc:
+        logger.error(
+            "Alerta no procesada — tipo=alerta estado=error_inesperado error_type=%s",
+            type(exc).__name__,
+        )
     finally:
         if audio_path:
             Path(audio_path).unlink(missing_ok=True)
@@ -535,12 +511,9 @@ def _mensaje_alerta_clima(umbral_clima: UmbralClima | None, dia: ForecastDay) ->
 def _formatear_pesos(valor: Decimal) -> str:
     """Formatea un Decimal como pesos chilenos hablados.
 
-    Ejemplo: 10000 -> "10.000 pesos".
+    Delega en ``app.core.formato.formatear_pesos``. Esta version truncaba con
+    ``int()``, asi que un umbral de 14.999,9 se anunciaba como "14.999 pesos"
+    en vez de "15.000": en una alerta de precio ese peso de diferencia es
+    justo el que define si se cumplio la condicion.
     """
-    entero = int(valor)
-    return f"{entero:,}".replace(",", ".") + " pesos"
-
-
-def _hash_chat_id(chat_id: str) -> str:
-    """Hash corto del chat_id para logs, sin exponer el numero completo."""
-    return hashlib.sha256(chat_id.encode()).hexdigest()[:8]
+    return formatear_pesos(valor)

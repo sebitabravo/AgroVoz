@@ -9,6 +9,7 @@ Cubre:
 """
 
 import datetime
+import logging
 from collections.abc import Generator
 from decimal import Decimal
 from pathlib import Path
@@ -236,10 +237,17 @@ class TestFormatPriceText:
         assert "20/06/2026" in texto
         assert "$" not in texto
 
-    def test_precio_con_decimales(self, db: Session) -> None:
+    def test_precio_con_decimales_se_redondea_al_peso(self, db: Session) -> None:
+        """El peso chileno no tiene centavos en circulacion.
+
+        ODEPA publica precios con decimales porque son promedios calculados,
+        no porque exista esa moneda. Decir "1.150 coma 50 pesos" por voz no
+        significa nada para el productor y suena a error del sistema.
+        """
         registro = _insertar_precio(db, precio_kg=Decimal("1150.50"))
         texto = format_price_text(registro)
-        assert "1.150 coma 50 pesos" in texto
+        assert "1.151 pesos" in texto
+        assert "coma" not in texto
         assert "$" not in texto
 
     def test_precio_entero_sin_decimales(self, db: Session) -> None:
@@ -301,7 +309,7 @@ class TestFormatPriceTextUnidades:
         )
         texto = format_price_text(registro)
         assert texto == (
-            "Papa está a 8.833 coma 33 pesos por saco de 25 kilos en Lo Valledor, "
+            "Papa está a 8.833 pesos por saco de 25 kilos en Lo Valledor, "
             "unos 353 pesos el kilo, según ODEPA, precio del 03/07/2026."
         )
 
@@ -607,9 +615,15 @@ class TestMercadoCercano:
     se usa el mercado ODEPA más cercano en vez de Lo Valledor.
     """
 
-    def test_comuna_traiguen_devuelve_vega_modelo_temuco(self, db: Session) -> None:
+    def test_comuna_traiguen_devuelve_vega_modelo_temuco(
+        self,
+        db: Session,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
         """Traiguén → Vega Modelo de Temuco (mercado regional)."""
-        _insertar_user_prefs(db, phone_hash="hash_traiguen", comuna="Traiguén")
+        caplog.set_level(logging.INFO, logger="app.services.odepa_service")
+        secreto_hash = "hash_traiguen_secreto"
+        _insertar_user_prefs(db, phone_hash=secreto_hash, comuna="Traiguén")
         _insertar_precio(
             db, mercado="Vega Modelo de Temuco",
             precio_kg=Decimal("900"), fecha=datetime.date(2026, 7, 10),
@@ -618,9 +632,12 @@ class TestMercadoCercano:
             db, mercado="Mercado Mayorista Lo Valledor de Santiago",
             precio_kg=Decimal("1200"), fecha=datetime.date(2026, 7, 10),
         )
-        texto = get_price_for_llm(db, "papa", "", phone_hash="hash_traiguen")
+        texto = get_price_for_llm(db, "papa", "", phone_hash=secreto_hash)
         assert "Temuco" in texto
         assert "900" in texto
+        assert secreto_hash not in caplog.text
+        assert "Traiguén" not in caplog.text
+        assert "Vega Modelo" not in caplog.text
 
     def test_comuna_traiguen_menciona_ambos_mercados(self, db: Session) -> None:
         """Cuando el mercado cercano NO es Lo Valledor, menciona ambos."""
@@ -730,7 +747,7 @@ class TestGetPriceHistoryForLlm:
             fecha=datetime.date(2026, 7, 3),
         )
         texto = get_price_history_for_llm(db, "papa", dias=7)
-        assert "8.833 coma 33 pesos por saco de 25 kilos" in texto
+        assert "8.833 pesos por saco de 25 kilos" in texto
         assert "Hace 7 días estaba a 10.000 pesos" in texto
         assert "ha bajado un 11 coma 7 por ciento" in texto
 

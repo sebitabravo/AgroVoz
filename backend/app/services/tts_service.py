@@ -54,8 +54,18 @@ logger = logging.getLogger(__name__)
 # NO se tocan los casos que espeak ya resuelve bien (verificados): "83%" ->
 # "por ciento", "13.000" -> "trece mil", "12°C" -> "doce grados ce".
 _MESES_ES = (
-    "enero", "febrero", "marzo", "abril", "mayo", "junio",
-    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+    "enero",
+    "febrero",
+    "marzo",
+    "abril",
+    "mayo",
+    "junio",
+    "julio",
+    "agosto",
+    "septiembre",
+    "octubre",
+    "noviembre",
+    "diciembre",
 )
 
 
@@ -82,10 +92,24 @@ _SUSTITUCIONES_VOZ: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 _RE_FECHA = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")
+_RE_URL = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+_URL_TRAILING_PUNCTUATION = ".,;:!?)]}"
+
+
+def _url_a_palabras(match: re.Match[str]) -> str:
+    """Reemplaza URLs por una referencia hablable y conserva puntuación final."""
+    raw_url = match.group(0)
+    url = raw_url.rstrip(_URL_TRAILING_PUNCTUATION)
+    suffix = raw_url[len(url) :]
+
+    from app.services.indap_credit_service import is_official_indap_url
+
+    replacement = "la página oficial de INDAP" if is_official_indap_url(url) else "la referencia web indicada"
+    return replacement + suffix
 
 
 def normalizar_para_voz(texto: str) -> str:
-    """Reescribe unidades y fechas para que Piper las lea en palabras.
+    """Reescribe URLs, unidades y fechas para que Piper las lea en palabras.
 
     Args:
         texto: Texto tal como lo produjo el LLM o una tool.
@@ -93,6 +117,7 @@ def normalizar_para_voz(texto: str) -> str:
     Returns:
         Texto equivalente, apto para sintesis.
     """
+    texto = _RE_URL.sub(_url_a_palabras, texto)
     texto = _RE_FECHA.sub(_fecha_a_palabras, texto)
     for patron, reemplazo in _SUSTITUCIONES_VOZ:
         texto = patron.sub(reemplazo, texto)
@@ -185,16 +210,15 @@ class TTSService:
             model_file = Path(self._model_path)
             if not model_file.exists():
                 raise PiperModelNotFoundError(
-                    f"Modelo Piper no encontrado en {self._model_path}. "
-                    "Descarguelo con scripts/download_models.sh"
+                    "Modelo Piper no encontrado. Descárguelo con "
+                    "scripts/download_models.sh"
                 )
 
             # Lazy import: evita que CI falle si piper-tts no esta instalado.
             from piper import PiperVoice
 
             logger.info(
-                "Cargando modelo Piper — path=%s voice=%s",
-                self._model_path,
+                "Cargando modelo Piper — voice=%s",
                 self._voice_name,
             )
             start = time.monotonic()
@@ -320,9 +344,7 @@ class TTSService:
         channels = chunks[0].sample_channels
 
         # Concatenar arrays float32 de todos los chunks
-        audio_float = np.concatenate(
-            [chunk.audio_float_array for chunk in chunks]
-        )
+        audio_float = np.concatenate([chunk.audio_float_array for chunk in chunks])
 
         # Convertir float32 [-1, 1] a int16 PCM con clip para evitar
         # overflow/underflow audible si Piper produce valores fuera de rango
@@ -335,12 +357,10 @@ class TTSService:
             wav_file.writeframes(audio_int16.tobytes())
 
         logger.debug(
-            "Fragmento TTS sintetizado — text_len=%d sample_rate=%d "
-            "samples=%d output=%s",
+            "Fragmento TTS sintetizado — text_len=%d sample_rate=%d samples=%d",
             len(text),
             sample_rate,
             len(audio_int16),
-            output_path.name,
         )
         return output_path
 
@@ -369,37 +389,29 @@ class TTSService:
             "-i",
             str(wav_path),
             "-acodec",
-            "libopus",   # Codec Opus
+            "libopus",  # Codec Opus
             "-ar",
-            "16000",     # 16kHz (WhatsApp optimiza a esto)
+            "16000",  # 16kHz (WhatsApp optimiza a esto)
             "-ac",
-            "1",         # Mono
+            "1",  # Mono
             "-b:a",
-            "24k",       # Bitrate 24 kbps (buena relacion calidad/tamano para voz)
+            "24k",  # Bitrate 24 kbps (buena relacion calidad/tamano para voz)
             "-application",
             "lowdelay",  # Optimizado para voz (menor latencia que audio)
             "-fs",
             str(25 * 1024 * 1024),  # Limite 25 MB — decompression bomb
             str(ogg_path),
         ]
-        logger.info(
-            "Convirtiendo a .ogg — input=%s output=%s",
-            wav_path.name,
-            ogg_path.name,
-        )
+        logger.info("Convirtiendo audio TTS a .ogg — estado=iniciado")
         try:
             subprocess.run(cmd, capture_output=True, check=True, timeout=30)
         except subprocess.TimeoutExpired:
-            logger.error(
-                "ffmpeg timeout (30s) — input=%s",
-                wav_path.name,
-            )
+            logger.error("ffmpeg timeout TTS — timeout_seconds=30")
             raise
         except subprocess.CalledProcessError as exc:
             logger.error(
-                "ffmpeg fallo al convertir a .ogg — input=%s stderr=%s",
-                wav_path.name,
-                exc.stderr.decode("utf-8", errors="replace") if exc.stderr else "(sin stderr)",
+                "ffmpeg falló al convertir TTS — returncode=%d",
+                exc.returncode,
             )
             raise
 
@@ -437,19 +449,23 @@ class TTSService:
         cmd = [
             "ffmpeg",
             "-y",
-            "-f", "concat",
-            "-safe", "0",
-            "-i", str(list_path),
-            "-c", "copy",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(list_path),
+            "-c",
+            "copy",
             str(output_path),
         ]
         try:
             subprocess.run(cmd, capture_output=True, check=True, timeout=30)
         except subprocess.CalledProcessError as exc:
             logger.error(
-                "ffmpeg fallo al concatenar audios — n_files=%d stderr=%s",
+                "ffmpeg falló al concatenar audios — n_files=%d returncode=%d",
                 len(wav_paths),
-                exc.stderr.decode("utf-8", errors="replace") if exc.stderr else "(sin stderr)",
+                exc.returncode,
             )
             raise
         except subprocess.TimeoutExpired:
@@ -498,9 +514,7 @@ class TTSService:
 
         # Determinar directorio de salida
         if output_dir is None:
-            output_dir = (
-                Path(__file__).resolve().parent.parent.parent / "data" / "audio_temp"
-            )
+            output_dir = Path(__file__).resolve().parent.parent.parent / "data" / "audio_temp"
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -516,11 +530,9 @@ class TTSService:
                 safe_chunks.append(c)
             else:
                 logger.warning(
-                    "_split_text devolvio chunk de %d chars > max %d — "
-                    "forzando subdivision (texto=%s...)",
+                    "_split_text devolvió chunk mayor al límite — chars=%d max=%d",
                     len(c),
                     _MAX_PIPER_CHARS,
-                    c[:_MAX_PIPER_CHARS],
                 )
                 for j in range(0, len(c), _MAX_PIPER_CHARS):
                     sub = c[j : j + _MAX_PIPER_CHARS].strip()
@@ -554,20 +566,19 @@ class TTSService:
                     p.unlink(missing_ok=True)
                 raise
             except (RuntimeError, OSError, ValueError) as exc:
-                logger.exception(
-                    "Error sintetizando fragmento %d/%d — text_len=%d",
+                logger.error(
+                    "Error sintetizando fragmento — index=%d total=%d text_len=%d error=%s",
                     i + 1,
                     len(chunks),
                     len(chunk),
+                    type(exc).__name__,
                 )
                 # Cleanup: eliminar WAV parcial (si _synthesize_wav creo
                 # el archivo pero fallo en writeframes) + WAVs previos
                 wav_path.unlink(missing_ok=True)
                 for p in wav_paths:
                     p.unlink(missing_ok=True)
-                raise RuntimeError(
-                    f"Error al sintetizar fragmento {i + 1}/{len(chunks)}"
-                ) from exc
+                raise RuntimeError(f"Error al sintetizar fragmento {i + 1}/{len(chunks)}") from exc
 
         # Concatenar fragmentos y convertir a .ogg
         final_wav_path = output_dir / f"tts_{file_tag}_final.wav"
@@ -587,17 +598,15 @@ class TTSService:
             ogg_path.unlink(missing_ok=True)  # Limpiar OGG parcial si ffmpeg creo el archivo antes de fallar
             if isinstance(exc, OSError):
                 logger.error(
-                    "ffmpeg no está instalado — tag=%s error=%s",
-                    file_tag,
-                    exc,
+                    "ffmpeg no está instalado — error=%s",
+                    type(exc).__name__,
                 )
             else:
                 logger.error(
-                    "ffmpeg fallo en síntesis — tag=%s error=%s",
-                    file_tag,
-                    exc,
+                    "ffmpeg falló en síntesis — error=%s",
+                    type(exc).__name__,
                 )
-            raise RuntimeError(f"ffmpeg fallo: {exc}") from exc
+            raise RuntimeError("ffmpeg falló durante la síntesis") from exc
         finally:
             # Garantizar cleanup incluso si ffmpeg falla (P2)
             for p in wav_paths:
@@ -607,12 +616,11 @@ class TTSService:
         elapsed = time.monotonic() - start
         ogg_size = ogg_path.stat().st_size
         logger.info(
-            "Audio sintetizado — text_len=%d chunks=%d ogg_size=%d elapsed_ms=%d path=%s",
+            "Audio sintetizado — text_len=%d chunks=%d ogg_size=%d elapsed_ms=%d",
             len(text),
             len(chunks),
             ogg_size,
             int(elapsed * 1000),
-            ogg_path,
         )
 
         return str(ogg_path)

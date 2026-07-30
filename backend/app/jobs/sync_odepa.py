@@ -59,8 +59,11 @@ async def _ejecutar() -> int:
             enviados = await evaluar_alertas_precio(session, settings)
             if enviados:
                 logger.info("Alertas de precio disparadas: %d productores notificados", len(enviados))
-        except Exception:
-            logger.exception("Error evaluando alertas de precio (no interrumpe sync)")
+        except Exception as exc:
+            logger.error(
+                "Error evaluando alertas de precio — error=%s",
+                type(exc).__name__,
+            )
         finally:
             session.close()
 
@@ -68,12 +71,15 @@ async def _ejecutar() -> int:
         _registrar_resultado_sync(exito=True)
         return 0
     except OdepaSyncError as exc:
-        logger.error("Sync ODEPA falló: %s", exc)
+        logger.error("Sync ODEPA falló — error=%s", type(exc).__name__)
         _registrar_resultado_sync(exito=False)
         return 1
     except (sqlalchemy.exc.SQLAlchemyError, OSError, ValueError) as exc:
         # No se usa except Exception por convención del proyecto.
-        logger.exception("Sync ODEPA falló con error inesperado: %s", exc)
+        logger.error(
+            "Sync ODEPA falló con error inesperado — error=%s",
+            type(exc).__name__,
+        )
         _registrar_resultado_sync(exito=False)
         return 1
 
@@ -122,9 +128,8 @@ def _registrar_resultado_sync(*, exito: bool) -> int:
 
     if nuevo_conteo >= _FALLOS_CONSECUTIVOS_PARA_ALERTA:
         logger.error(
-            "ALERTA EQUIPO: sync ODEPA lleva %d fallos consecutivos. Revisar %s.",
+            "ALERTA EQUIPO: sync ODEPA lleva %d fallos consecutivos.",
             nuevo_conteo,
-            settings.odepa_csv_url,
         )
     return nuevo_conteo
 

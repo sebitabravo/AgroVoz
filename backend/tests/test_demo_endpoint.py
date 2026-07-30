@@ -4,6 +4,8 @@ Issue #119 — cubre happy path, rate limiting y flag de deshabilitacion.
 No requiere modelos reales: todos los servicios se mockean.
 """
 
+import logging
+
 import pytest
 from httpx import AsyncClient
 
@@ -165,3 +167,28 @@ async def test_demo_status_rechaza_cuando_disabled(
     response = await client.get("/api/v1/demo/status")
 
     assert response.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_demo_no_registra_consulta_ni_error_llm(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Una caída del LLM no expone la consulta ni el mensaje de excepción."""
+    from app.services.demo_service import _generate_demo_response
+
+    consulta = "SECRETO-DEMO mi dato privado"
+    caplog.set_level(logging.INFO, logger="app.services.demo_service")
+
+    async def answer_falla(*_args: object, **_kwargs: object) -> str:
+        raise RuntimeError(f"error con {consulta} teléfono 56912345678")
+
+    monkeypatch.setattr("app.services.demo_service.answer", answer_falla)
+
+    response, intent = await _generate_demo_response(consulta)
+
+    assert "problema" in response
+    assert intent == "desconocido"
+    assert "SECRETO-DEMO" not in caplog.text
+    assert "dato privado" not in caplog.text
+    assert "56912345678" not in caplog.text

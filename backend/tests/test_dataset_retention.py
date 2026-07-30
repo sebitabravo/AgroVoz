@@ -29,6 +29,18 @@ from app.services.pipeline_service import AgroVozPipeline
 _VALID_HASH = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
 
 
+def _assert_logs_sin_datos_sensibles(
+    caplog: pytest.LogCaptureFixture,
+    *valores_sensibles: str,
+) -> None:
+    """Verifica que los eventos no expongan contenido ni identificadores."""
+    texto_logs = caplog.text
+    for valor in valores_sensibles:
+        assert valor not in texto_logs
+    assert "phone_hash=" not in texto_logs
+    assert "transcripcion" not in texto_logs.lower()
+
+
 def _create_user_prefs(
     db: Any,
     phone_hash: str,
@@ -77,9 +89,24 @@ class TestHasDatasetConsent:
         _create_user_prefs(db, _VALID_HASH, consent=True)
         assert has_dataset_consent(_VALID_HASH, db=db) is True
 
-    def test_phone_hash_invalido_retorna_false(self, db: Any) -> None:
+    def test_phone_hash_invalido_retorna_false(
+        self,
+        db: Any,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
         """Hash con formato inválido nunca retiene."""
-        assert has_dataset_consent("no-es-un-hash", db=db) is False
+        identificador_invalido = "+56912345678-token-secreto"
+        caplog.set_level("WARNING", logger="app.services.dataset_service")
+
+        assert has_dataset_consent(identificador_invalido, db=db) is False
+        assert "estado=identificador_invalido" in caplog.text
+        _assert_logs_sin_datos_sensibles(
+            caplog,
+            identificador_invalido,
+            identificador_invalido[:8],
+            "+56912345678",
+            "token-secreto",
+        )
 
     def test_sin_chat_retorna_false(self, db: Any) -> None:
         """chat_id_hash='sin_chat' no retiene."""
@@ -97,14 +124,17 @@ class TestRetainAudio:
         db: Any,
         dataset_dir: Path,
         sample_wav: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Con dataset_consent=True se copia el wav y se registra en manifest."""
+        transcripcion = "Precio privado +56912345678 token=secreto-exito"
+        caplog.set_level("INFO", logger="app.services.dataset_service")
         _create_user_prefs(db, _VALID_HASH, consent=True)
 
         retained = retain_audio(
             sample_wav,
             _VALID_HASH,
-            "precio de la papa",
+            transcripcion,
             2500,
             dataset_dir=dataset_dir,
             db=db,
@@ -118,12 +148,21 @@ class TestRetainAudio:
         entries = load_manifest_entries(dataset_dir)
         assert len(entries) == 1
         entry = entries[0]
-        assert entry["transcripcion_whisper"] == "precio de la papa"
+        assert entry["transcripcion_whisper"] == transcripcion
         assert entry["duracion_ms"] == 2500
         assert entry["phone_hash"] == _VALID_HASH
         assert entry["transcripcion_verificada"] is None
         assert "fecha" in entry
         assert "audio_path" in entry
+        assert "estado=audio_retenido" in caplog.text
+        _assert_logs_sin_datos_sensibles(
+            caplog,
+            _VALID_HASH,
+            _VALID_HASH[:8],
+            "+56912345678",
+            transcripcion,
+            "secreto-exito",
+        )
 
     def test_no_retiene_sin_consentimiento(
         self,
@@ -153,8 +192,12 @@ class TestRetainAudio:
         dataset_dir: Path,
         sample_wav: Path,
         monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Si el manifest no se puede escribir, no queda audio huérfano (atomicidad)."""
+        transcripcion = "Audio privado +56987654321"
+        secreto_error = "STORAGE_KEY=secreto-error"
+        caplog.set_level("ERROR", logger="app.services.dataset_service")
         _create_user_prefs(db, _VALID_HASH, consent=True)
 
         import builtins
@@ -163,7 +206,7 @@ class TestRetainAudio:
 
         def fake_open(file: Any, *args: Any, **kwargs: Any) -> Any:
             if "manifest.jsonl" in str(file):
-                raise OSError("disco lleno")
+                raise OSError(f"disco lleno {secreto_error} +56987654321")
             return original_open(file, *args, **kwargs)
 
         monkeypatch.setattr(builtins, "open", fake_open)
@@ -171,7 +214,7 @@ class TestRetainAudio:
         retained = retain_audio(
             sample_wav,
             _VALID_HASH,
-            "precio de la papa",
+            transcripcion,
             2500,
             dataset_dir=dataset_dir,
             db=db,
@@ -182,6 +225,16 @@ class TestRetainAudio:
         # quedar muestra en disco (quedaría invisible para eval_wer/export).
         sample_subdir = dataset_dir / _VALID_HASH
         assert not sample_subdir.exists() or not any(sample_subdir.glob("*.wav"))
+        assert "estado=error_manifest" in caplog.text
+        assert "error_type=OSError" in caplog.text
+        _assert_logs_sin_datos_sensibles(
+            caplog,
+            _VALID_HASH,
+            _VALID_HASH[:8],
+            "+56987654321",
+            transcripcion,
+            secreto_error,
+        )
 
     def test_no_retiene_sin_user_prefs(
         self,
@@ -224,6 +277,30 @@ class TestRetainAudio:
         assert retained is not None
         assert _VALID_HASH in str(retained)
         assert numero_real not in str(retained)
+
+    def test_manifest_corrupto_no_expone_contenido(
+        self,
+        dataset_dir: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Una línea inválida informa la clase del error, no su contenido."""
+        contenido_sensible = '{"transcripcion":"+56999999999 token=secreto-manifest"'
+        dataset_dir.mkdir(parents=True)
+        (dataset_dir / "manifest.jsonl").write_text(
+            contenido_sensible,
+            encoding="utf-8",
+        )
+        caplog.set_level("WARNING", logger="app.services.dataset_service")
+
+        assert load_manifest_entries(dataset_dir) == []
+        assert "estado=linea_corrupta" in caplog.text
+        assert "error_type=JSONDecodeError" in caplog.text
+        _assert_logs_sin_datos_sensibles(
+            caplog,
+            contenido_sensible,
+            "+56999999999",
+            "secreto-manifest",
+        )
 
 
 # ── Pipeline integration ───────────────────────────────────────────
