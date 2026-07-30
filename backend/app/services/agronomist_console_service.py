@@ -14,6 +14,7 @@ panel del agricultor.
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import hmac
 import json
@@ -40,6 +41,11 @@ class AgronomistLinkError(RuntimeError):
 def validate_group_label(group_label: str) -> bool:
     """Valida el mismo formato de slug que exige ComunaRequest."""
     return bool(_GROUP_LABEL_PATTERN.fullmatch(group_label))
+
+
+def _utcnow_naive() -> datetime.datetime:
+    """Entrega UTC sin tzinfo, mismo formato que usa parcela_service en SQLite."""
+    return datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
 
 
 def _get_link_secret() -> str:
@@ -131,6 +137,9 @@ def get_group_summary(session: Session, group_label: str) -> list[FarmerSummary]
     Returns:
         ``None`` si no hay ningún contacto con ese group_label.
     """
+    if not settings.agronomist_console_enabled:
+        return None
+
     contactos = session.scalars(
         select(UserPrefs).where(
             UserPrefs.identity_type == "prodesal_group",
@@ -153,7 +162,14 @@ def get_group_summary(session: Session, group_label: str) -> list[FarmerSummary]
 
         parcelas: list[dict[str, Any]] = []
         if settings.parcela_tracking_enabled and prefs.parcela_consent:
-            rows = session.scalars(select(Parcela).where(Parcela.phone_hash == prefs.phone_hash)).all()
+            # Solo parcelas vigentes: el agrónomo tampoco puede ver una fila
+            # vencida que la purga programada todavía no borró.
+            rows = session.scalars(
+                select(Parcela).where(
+                    Parcela.phone_hash == prefs.phone_hash,
+                    Parcela.expires_at > _utcnow_naive(),
+                )
+            ).all()
             parcelas = [
                 {
                     "cultivo": row.cultivo,

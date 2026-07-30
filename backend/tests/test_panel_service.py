@@ -26,9 +26,10 @@ _NOW = 1_800_000_000
 
 @pytest.fixture(autouse=True)
 def _configure_panel(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fija una clave de firma segura y un TTL determinista para cada test."""
+    """Fija una clave de firma segura, un TTL determinista y el gate encendido."""
     monkeypatch.setattr(settings, "panel_link_secret", SecretStr("x" * 32))
     monkeypatch.setattr(settings, "panel_link_ttl_hours", 24)
+    monkeypatch.setattr(settings, "farmer_panel_enabled", True)
 
 
 class TestGenerateAndVerifyToken:
@@ -170,6 +171,57 @@ class TestGetPanelSummary:
         assert summary is not None
         assert summary.cultivos == ["papa", "trigo"]
         assert summary.parcelas == [{"cultivo": "papa", "superficie_ha": 2.5, "comuna": "traiguén"}]
+
+    def test_parcela_vencida_no_aparece_en_el_panel(
+        self,
+        db: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Una fila vencida no debe verse aunque la purga programada no haya pasado."""
+        monkeypatch.setattr(settings, "parcela_tracking_enabled", True)
+        db.add(
+            UserPrefs(
+                phone_hash=_PHONE_HASH,
+                comuna="Traiguén",
+                parcela_consent=True,
+            )
+        )
+        db.add(
+            Parcela(
+                phone_hash=_PHONE_HASH,
+                cultivo="papa",
+                superficie_ha=2.5,
+                comuna="traiguén",
+                expires_at=datetime.datetime.now() - datetime.timedelta(seconds=1),
+            )
+        )
+        db.add(
+            Parcela(
+                phone_hash=_PHONE_HASH,
+                cultivo="trigo",
+                superficie_ha=1.0,
+                comuna="traiguén",
+                expires_at=datetime.datetime.now() + datetime.timedelta(days=300),
+            )
+        )
+        db.commit()
+
+        summary = get_panel_summary(db, _PHONE_HASH)
+
+        assert summary is not None
+        assert summary.parcelas == [{"cultivo": "trigo", "superficie_ha": 1.0, "comuna": "traiguén"}]
+
+    def test_resumen_vacio_si_el_gate_del_panel_esta_apagado(
+        self,
+        db: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El servicio corta por su cuenta, sin depender del router."""
+        monkeypatch.setattr(settings, "farmer_panel_enabled", False)
+        db.add(UserPrefs(phone_hash=_PHONE_HASH, comuna="Traiguén"))
+        db.commit()
+
+        assert get_panel_summary(db, _PHONE_HASH) is None
 
     def test_parcelas_ocultas_si_gate_apagado_aunque_haya_consentimiento(
         self,

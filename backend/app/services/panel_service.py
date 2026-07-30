@@ -13,6 +13,7 @@ inmediato, sin cambios en este servicio.
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import hmac
 import json
@@ -37,6 +38,11 @@ _TOKEN_SEPARATOR = "."
 
 class PanelLinkError(RuntimeError):
     """El link no pudo generarse o el secreto no está configurado de forma segura."""
+
+
+def _utcnow_naive() -> datetime.datetime:
+    """Entrega UTC sin tzinfo, mismo formato que usa parcela_service en SQLite."""
+    return datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
 
 
 def _get_link_secret() -> str:
@@ -148,6 +154,9 @@ def get_panel_summary(session: Session, phone_hash: str) -> PanelSummary | None:
     Returns:
         ``None`` si el phone_hash no tiene preferencias registradas.
     """
+    if not settings.farmer_panel_enabled:
+        return None
+
     prefs = session.scalar(select(UserPrefs).where(UserPrefs.phone_hash == phone_hash))
     if prefs is None:
         return None
@@ -163,7 +172,12 @@ def get_panel_summary(session: Session, phone_hash: str) -> PanelSummary | None:
 
     parcelas: list[dict[str, Any]] = []
     if settings.parcela_tracking_enabled and prefs.parcela_consent:
-        parcela_rows = session.scalars(select(Parcela).where(Parcela.phone_hash == phone_hash)).all()
+        # Solo parcelas vigentes: una fila vencida ya no debe mostrarse aunque la
+        # purga programada todavía no haya pasado. Mismo criterio que
+        # parcela_service.get_parcelas_for_llm.
+        parcela_rows = session.scalars(
+            select(Parcela).where(Parcela.phone_hash == phone_hash, Parcela.expires_at > _utcnow_naive())
+        ).all()
         parcelas = [
             {
                 "cultivo": parcela.cultivo,
