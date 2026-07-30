@@ -13,7 +13,7 @@ from urllib.parse import quote
 import httpx
 
 from app.core.config import settings
-from app.core.phone_hash import hash_phone, normalizar_e164
+from app.core.phone_hash import normalizar_e164
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +159,7 @@ class OpenWAService:
             if session.get("status") in ("ready", "active"):
                 session_id = str(session["id"])
                 OpenWAService._cached_session_id = session_id
-                logger.info("Sesion Open-WA resuelta — id=%s", session_id)
+                logger.info("Sesion Open-WA resuelta — estado=lista")
                 return session_id
 
         raise RuntimeError("No hay sesiones listas en Open-WA. Escanee el QR para iniciar sesion.")
@@ -197,24 +197,16 @@ class OpenWAService:
             phone = data.get("phone")
             if phone:
                 phone_str = str(phone)
-                logger.info(
-                    "LID resuelto a telefono — contact_id_hash=%s phone_hash=%s",
-                    _hash_phone_for_log(contact_id),
-                    _hash_phone_for_log(phone_str),
-                )
+                logger.info("LID resuelto a telefono — estado=ok")
                 return phone_str
             else:
-                logger.warning(
-                    "LID no pudo resolverse (retorno null) — contact_id_hash=%s",
-                    _hash_phone_for_log(contact_id),
-                )
+                logger.warning("LID no pudo resolverse — estado=sin_resultado")
                 return None
 
         except (httpx.HTTPError, RuntimeError, ValueError) as exc:
             logger.warning(
-                "Error resolviendo LID (fallback al @lid original) — contact_id_hash=%s error=%s",
-                _hash_phone_for_log(contact_id),
-                exc,
+                "Error resolviendo LID — estado=fallback error=%s",
+                type(exc).__name__,
             )
             return None
 
@@ -240,8 +232,7 @@ class OpenWAService:
             response = await client.get(url, headers=self._headers())
             response.raise_for_status()
             logger.info(
-                "Audio descargado — message_id=%s size_bytes=%d",
-                safe_id,
+                "Audio descargado — size_bytes=%d",
                 len(response.content),
             )
             return response.content
@@ -268,15 +259,10 @@ class OpenWAService:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.post(url, headers=self._headers(), json=payload)
                 response.raise_for_status()
-                logger.debug(
-                    "Typing indicator %s — target_hash=%s",
-                    state,
-                    _hash_phone_for_log(target),
-                )
+                logger.debug("Typing indicator actualizado — state=%s", state)
         except (httpx.HTTPError, OSError, RuntimeError, ValueError):
             logger.warning(
-                "Typing indicator fallo (no critico) — target_hash=%s state=%s",
-                _hash_phone_for_log(target),
+                "Typing indicator fallo (no critico) — state=%s",
                 state,
             )
 
@@ -305,10 +291,7 @@ class OpenWAService:
                 if resolved_phone:
                     final_target = f"{resolved_phone}@c.us"
                 else:
-                    logger.warning(
-                        "No se pudo resolver LID; intentando con @lid original — target_hash=%s",
-                        _hash_phone_for_log(target),
-                    )
+                    logger.warning("No se pudo resolver LID — estado=fallback_original")
 
             session_id = await self._resolve_session_id()
             url = f"{self._base_url}/api/sessions/{session_id}/messages/send-text"
@@ -318,16 +301,14 @@ class OpenWAService:
                 response = await client.post(url, headers=self._headers(), json=payload)
                 response.raise_for_status()
                 logger.info(
-                    "Texto enviado — phone_hash=%s size_chars=%d",
-                    _hash_phone_for_log(target),
+                    "Texto enviado — size_chars=%d",
                     len(message),
                 )
                 return dict(response.json())
         except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
             logger.error(
-                "Error enviando texto — target_hash=%s error=%s",
-                _hash_phone_for_log(target),
-                exc,
+                "Error enviando texto — error=%s",
+                type(exc).__name__,
             )
             raise
 
@@ -357,10 +338,7 @@ class OpenWAService:
                 if resolved_phone:
                     final_target = f"{resolved_phone}@c.us"
                 else:
-                    logger.warning(
-                        "No se pudo resolver LID; intentando con @lid original — target_hash=%s",
-                        _hash_phone_for_log(target),
-                    )
+                    logger.warning("No se pudo resolver LID — estado=fallback_original")
                     # Fallback: intentar con el @lid original, aunque es probable que falle
 
             session_id = await self._resolve_session_id()
@@ -377,36 +355,11 @@ class OpenWAService:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 response = await client.post(url, headers=self._headers(), json=payload)
                 response.raise_for_status()
-                # P2-4: Loguear solo el nombre del archivo, no el path completo.
-                # El path completo puede leakear la estructura del sistema de archivos.
-                audio_filename = Path(audio_path).name
-                logger.info(
-                    "Audio enviado — target_hash=%s file=%s",
-                    _hash_phone_for_log(target),
-                    audio_filename,
-                )
+                logger.info("Audio enviado — estado=ok")
                 return dict(response.json())
         except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
             logger.error(
-                "Error enviando audio — target_hash=%s error=%s",
-                _hash_phone_for_log(target),
-                exc,
+                "Error enviando audio — error=%s",
+                type(exc).__name__,
             )
             raise
-
-
-def _hash_phone_for_log(phone: str) -> str:
-    """Hash corto del número para logging (sin PII en claro).
-
-    Delega en hash_phone() de app.core.phone_hash para consistencia
-    entre módulos (mismo hash en logs del webhook y del servicio).
-    Trunca a 8 caracteres para legibilidad.
-
-    Nunca lanza excepción: si el pepper está vacío o hash_phone falla,
-    retorna 'unknown' en vez de interrumpir la operación que se está logueando.
-    """
-    try:
-        full = hash_phone(phone, settings.phone_hash_pepper)
-        return full[:8]
-    except (ValueError, AttributeError):
-        return "unknown"
