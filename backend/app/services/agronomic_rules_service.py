@@ -18,9 +18,12 @@ from typing import cast
 
 import yaml
 
+from app.core.config import settings
+
 _CORPUS_PATH = Path(__file__).resolve().parents[2] / "corpus" / "reglas_agronomicas.yaml"
 
 _LIMITS_TEXT = "Esto es información pública de INIA, no un diagnóstico personalizado."
+_GATE_OFF_TEXT = "El motor de reglas agronómicas todavía no está habilitado."
 _SAFE_FALLBACK = (
     "No tengo una regla verificada para eso. Para no darte un dato "
     f"desactualizado, prefiero no improvisarlo. {_LIMITS_TEXT}"
@@ -36,6 +39,7 @@ class _Regla:
     cultivo: str
     sintomas: tuple[str, ...]
     fuente: str
+    fuente_url: str
     fecha: str
     diagnostico: str
     siguiente_paso: str | None
@@ -93,6 +97,7 @@ def _parse_regla(raw_regla: object) -> _Regla:
         cultivo=_normalizar(_required_text(regla, "cultivo")),
         sintomas=_required_str_list(regla, "sintomas"),
         fuente=_required_text(regla, "fuente"),
+        fuente_url=_required_text(regla, "fuente_url"),
         fecha=_required_text(regla, "fecha"),
         diagnostico=_required_text(regla, "diagnostico"),
         siguiente_paso=siguiente_paso,
@@ -127,7 +132,10 @@ def _format_regla(regla: _Regla, verified_on: date) -> str:
     """Construye una respuesta factual con fuente y límites explícitos."""
     verified = verified_on.strftime("%d/%m/%Y")
     siguiente = f" {regla.siguiente_paso}" if regla.siguiente_paso else ""
-    return f"{regla.diagnostico} {_LIMITS_TEXT}{siguiente} Fuente verificada el {verified}: {regla.fuente}."
+    return (
+        f"{regla.diagnostico} {_LIMITS_TEXT}{siguiente} Fuente verificada el "
+        f"{verified}: {regla.fuente}, {regla.fuente_url}"
+    )
 
 
 def get_agronomic_rule_for_llm(
@@ -150,6 +158,8 @@ def get_agronomic_rule_for_llm(
         Diagnóstico citado, mensaje de "sin regla" o derivación segura si el
         corpus está vencido o corrupto. Nunca inventa una recomendación.
     """
+    if not settings.agronomic_rules_enabled:
+        return _GATE_OFF_TEXT
     if not sintoma.strip():
         return "No entendí qué problema o pregunta tienes sobre tu cultivo. ¿Podrías repetirlo?"
 

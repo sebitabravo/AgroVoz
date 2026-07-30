@@ -8,6 +8,14 @@
 #
 # Formato de vigencia igual al de indap_creditos.yaml: verificado_el /
 # revisar_antes_de. Si el snapshot vence, el motor falla cerrado.
+#
+# Auditoría de contenido 30/07/2026: re-verificado contra fuentes primarias
+# (enfermedadespapa.inia.cl para tizón; INIA/CIREN para época de siembra
+# regional; ODEPA/INE para rendimiento) tras detectar que la transcripción
+# original tenía el rango de temperatura del tizón incorrecto, síntomas
+# tempranos faltantes, la ventana de siembra temprana de Araucanía costera
+# ausente, y una cita de fuente sin URL rastreable. `fuente_url` ahora es
+# obligatorio en cada regla — nunca más una fuente sin cómo verificarla.
 version: 1
 verificado_el: "2026-07-30"
 revisar_antes_de: "2027-01-30"
@@ -21,13 +29,25 @@ reglas:
       - "pudre el tuberculo"
       - "se pudre la papa"
       - "hojas manchadas"
-    fuente: "INIA Chile — Ficha técnica: Cultivo de la papa"
-    fecha: "2024"
+      - "manchas verde oscuro en las hojas"
+      - "manchas acuosas en las hojas"
+      - "borde amarillo en las hojas"
+      - "halo amarillo en la mancha"
+      - "pelusa blanca bajo la hoja"
+    fuente: "INIA Chile — Enfermedades de la papa: Tizón tardío"
+    fuente_url: "https://enfermedadespapa.inia.cl/tizonTardio.php"
+    fecha: "2026-07-30"
     diagnostico: >
       Según INIA, el tizón tardío (Phytophthora infestans) es la enfermedad
-      más importante del cultivo de papa en Chile. Se presenta en
-      condiciones de alta humedad y temperaturas entre 10°C y 25°C. Los
-      síntomas incluyen manchas marrones en hojas y pudrición del tubérculo.
+      más importante del cultivo de papa en Chile. Es una enfermedad
+      policíclica que se presenta con humedad relativa sobre 80% y
+      temperaturas entre 15°C y 25°C, con máxima velocidad de avance cerca
+      de 21°C. Los primeros síntomas aparecen en los bordes de las hojas
+      inferiores como manchas acuosas de color verde oscuro a café,
+      limitadas por un halo amarillo pálido; con humedad alta se expanden
+      formando zonas café atizonadas irregulares y pueden pudrir el
+      tubérculo. Ningún fungicida cura una infección ya establecida: las
+      aplicaciones son preventivas.
     siguiente_paso: "Consulta a tu agrónomo PRODESAL o a INDAP para definir un tratamiento."
 
   - id: "papa_epoca_siembra"
@@ -38,14 +58,16 @@ reglas:
       - "epoca de siembra"
       - "epoca de plantacion"
       - "cuando puedo sembrar"
-    fuente: "INIA Chile — Ficha técnica: Cultivo de la papa"
-    fecha: "2024"
+    fuente: "INIA Chile — Manual del cultivo de la Papa en Chile"
+    fuente_url: "https://biblioteca.inia.cl/handle/20.500.14001/6706"
+    fecha: "2026-07-30"
     diagnostico: >
-      Según ficha técnica INIA, la papa requiere suelos profundos, bien
-      drenados y con pH entre 5.0 y 6.5. La preparación del suelo incluye
-      aradura y rastraje. La época de plantación en la zona centro-sur de
-      Chile es entre agosto y noviembre, dependiendo de la variedad y la
-      altitud.
+      Según INIA, en la Región de La Araucanía se distinguen tres épocas de
+      plantación de papa: temprana (julio a agosto, en las comunas de
+      Carahue y Saavedra y el borde costero, bajo condición de secano),
+      media estación (agosto) y la época principal, de primavera (fines de
+      septiembre a noviembre). La papa requiere suelos profundos, bien
+      drenados y con pH entre 5.0 y 6.5.
     siguiente_paso: null
 
   - id: "papa_rotacion_cultivos"
@@ -55,8 +77,9 @@ reglas:
       - "que sembre antes"
       - "despues de que cultivo"
       - "que cultivo va antes"
-    fuente: "INIA Chile — Ficha técnica: Cultivo de la papa"
-    fecha: "2024"
+    fuente: "INIA Chile — Manual del cultivo de la Papa en Chile"
+    fuente_url: "https://biblioteca.inia.cl/handle/20.500.14001/6706"
+    fecha: "2026-07-30"
     diagnostico: >
       INIA recomienda rotación de cultivos cada 3-4 años para prevenir
       enfermedades del suelo. Los cultivos que anteceden a la papa no deben
@@ -71,11 +94,14 @@ reglas:
       - "esta lista la papa"
       - "cuando se cosecha"
       - "cuando sacar la papa"
-    fuente: "INIA Chile — Ficha técnica: Cultivo de la papa"
-    fecha: "2024"
+    fuente: "INIA Chile — Manual del cultivo de la Papa en Chile"
+    fuente_url: "https://biblioteca.inia.cl/handle/20.500.14001/6706"
+    fecha: "2026-07-30"
     diagnostico: >
-      La cosecha de papa, según ficha INIA, se realiza cuando el follaje se
-      ha secado completamente, aproximadamente 90 a 150 días después de la
-      plantación. El rendimiento promedio nacional es de 25 a 35 toneladas
-      por hectárea en secano y hasta 50 toneladas bajo riego.
+      La cosecha de papa se realiza cuando el follaje se ha secado
+      completamente. En la Región de La Araucanía, la papa temprana de
+      secano (borde costero) tiene un ciclo de 110 a 120 días con
+      rendimientos de 15 a 25 toneladas por hectárea. El rendimiento
+      promedio nacional (INE/ODEPA) es de 29,2 toneladas por hectárea; con
+      riego tecnificado puede llegar hasta 80 toneladas por hectárea.
     siguiente_paso: null
