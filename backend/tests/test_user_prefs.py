@@ -88,19 +88,26 @@ class TestUserPrefsModel:
         assert result is not None
         assert result.dataset_consent is True
 
-    def test_repr_muestra_phone_hash_truncado_y_comuna(self) -> None:
-        """__repr__ no leakea el phone_hash completo y muestra la comuna."""
-        prefs = UserPrefs(phone_hash="0123456789abcdef" * 4, comuna="Traiguén")
+    def test_repr_no_expone_hash_ni_comuna(self) -> None:
+        """__repr__ omite identificadores y preferencias sensibles."""
+        prefs = UserPrefs(
+            phone_hash="0123456789abcdef" * 4,
+            identity_type="individual",
+            comuna="Traiguén",
+        )
         repr_str = repr(prefs)
-        assert "phone_hash='01234567..." in repr_str
-        assert "comuna='Traiguén'" in repr_str
+        assert "01234567" not in repr_str
+        assert "Traiguén" not in repr_str
+        assert "identity_type" not in repr_str
         assert "dataset_consent=False" in repr_str
+        assert "alert_consent=False" in repr_str
+        assert "history_consent=False" in repr_str
 
     def test_repr_sin_comuna(self) -> None:
-        """__repr__ muestra 'sin_comuna' cuando comuna es None."""
+        """__repr__ tampoco agrega placeholders de ubicación."""
         prefs = UserPrefs(phone_hash="0123456789abcdef" * 4)
         repr_str = repr(prefs)
-        assert "comuna='sin_comuna'" in repr_str
+        assert "comuna" not in repr_str
 
 
 class TestUserPrefsCultivos:
@@ -158,19 +165,20 @@ class TestUserPrefsCultivos:
         assert json.loads(result.cultivos) == ["papa"]
 
     def test_repr_con_cultivos(self) -> None:
-        """__repr__ incluye cultivos cuando existen."""
+        """__repr__ no expone cultivos cuando existen."""
         prefs = UserPrefs(
             phone_hash="0123456789abcdef" * 4,
             cultivos=json.dumps(["papa", "trigo"]),
         )
         repr_str = repr(prefs)
-        assert "cultivos='[\"papa\", \"trigo\"]'" in repr_str
+        assert "papa" not in repr_str
+        assert "trigo" not in repr_str
 
     def test_repr_sin_cultivos(self) -> None:
-        """__repr__ muestra 'sin_cultivos' cuando cultivos es None."""
+        """__repr__ no agrega placeholders de cultivos."""
         prefs = UserPrefs(phone_hash="0123456789abcdef" * 4)
         repr_str = repr(prefs)
-        assert "cultivos='sin_cultivos'" in repr_str
+        assert "cultivos" not in repr_str
 
 
 class TestUserPrefsSchema:
@@ -188,6 +196,10 @@ class TestUserPrefsSchema:
             created_at=datetime.datetime(2026, 6, 15, 10, 30, 0),
         )
         assert response.cultivos == ["papa", "trigo"]
+        assert response.identity_type == "individual"
+        assert response.group_label is None
+        assert response.localidad is None
+        assert response.history_consent is False
 
     def test_user_prefs_response_cultivos_none(self) -> None:
         """UserPrefsResponse con cultivos=None se serializa como None."""
@@ -276,6 +288,85 @@ class TestUserPrefsSchema:
 
         with pytest.raises(ValidationError):
             ComunaRequest(comuna="Traiguén", cultivos=[f"cultivo_{i}" for i in range(30)])
+
+    def test_comuna_request_grupo_valido_y_localidad_limpia(self) -> None:
+        """Acepta un código operacional y limpia la localidad."""
+        from app.schemas.user_prefs import ComunaRequest
+
+        request = ComunaRequest(
+            comuna="Traiguén",
+            identity_type="prodesal_group",
+            group_label="prodesal-traiguen-norte",
+            localidad="  Quilquén  ",
+        )
+
+        assert request.identity_type == "prodesal_group"
+        assert request.group_label == "prodesal-traiguen-norte"
+        assert request.localidad == "Quilquén"
+
+    @pytest.mark.parametrize(
+        "group_label",
+        [
+            "grupo-traiguen",
+            "Prodesal-traiguen",
+            "prodesal-grupo norte",
+            "prodesal-../norte",
+            "prodesal-56912345678",
+            "prodesal-juan pérez",
+            f"prodesal-{'x' * 92}",
+        ],
+    )
+    def test_comuna_request_rechaza_etiqueta_insegura(
+        self,
+        group_label: str,
+    ) -> None:
+        """Rechaza texto libre, teléfonos, traversal y tamaños abusivos."""
+        from pydantic import ValidationError
+
+        from app.schemas.user_prefs import ComunaRequest
+
+        with pytest.raises(ValidationError):
+            ComunaRequest(
+                comuna="Traiguén",
+                identity_type="prodesal_group",
+                group_label=group_label,
+            )
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"identity_type": "prodesal_group"},
+            {
+                "identity_type": "individual",
+                "group_label": "prodesal-traiguen-norte",
+            },
+            {"identity_type": None},
+        ],
+    )
+    def test_comuna_request_rechaza_identidad_incoherente(
+        self,
+        payload: dict[str, object],
+    ) -> None:
+        """Una transición explícita debe producir un estado válido."""
+        from pydantic import ValidationError
+
+        from app.schemas.user_prefs import ComunaRequest
+
+        with pytest.raises(ValidationError):
+            ComunaRequest(comuna="Traiguén", **payload)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("localidad", ["   ", "x" * 121])
+    def test_comuna_request_rechaza_localidad_invalida(
+        self,
+        localidad: str,
+    ) -> None:
+        """La localidad limpia debe tener entre 1 y 120 caracteres."""
+        from pydantic import ValidationError
+
+        from app.schemas.user_prefs import ComunaRequest
+
+        with pytest.raises(ValidationError):
+            ComunaRequest(comuna="Traiguén", localidad=localidad)
 
 
 class TestUserPrefsAPI:

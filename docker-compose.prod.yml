@@ -41,8 +41,21 @@ services:
       # Sin esto el backend arranca con default y validate_admin_keys_not_default
       # bloquea el arranque en producción.
       - ADMIN_SESSION_SECRET=${ADMIN_SESSION_SECRET}
+      # ── Features post-MVP (fail-closed) ──
+      - MCP_ENABLED=${MCP_ENABLED:-false}
+      - MCP_API_KEY=${MCP_API_KEY:-}
+      - MCP_ADMIN_KEY=${MCP_ADMIN_KEY:-}
+      - USE_CONVERSATION_STATE=${USE_CONVERSATION_STATE:-false}
+      - CONVERSATION_TIMEOUT_MINUTES=${CONVERSATION_TIMEOUT_MINUTES:-30}
+      - CONSULTATION_HISTORY_ENABLED=${CONSULTATION_HISTORY_ENABLED:-false}
+      - CONSULTATION_HISTORY_TTL_DAYS=${CONSULTATION_HISTORY_TTL_DAYS:-28}
+      - CONSULTATION_HISTORY_AUDIT_KEY=${CONSULTATION_HISTORY_AUDIT_KEY:-}
+      - EXPENSE_TRACKING_ENABLED=${EXPENSE_TRACKING_ENABLED:-false}
+      - EXPENSE_RETENTION_DAYS=${EXPENSE_RETENTION_DAYS:-180}
       # ── Modelos IA (paths dentro del contenedor) ──
       - WHISPER_MODEL=${WHISPER_MODEL:-small}
+      - WHISPER_BACKEND=${WHISPER_BACKEND:-faster}
+      - WHISPER_COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8}
       - LLM_MODEL_PATH=${LLM_MODEL_PATH:-/app/models/qwen2.5-3b-q4_k_m.gguf}
       - PIPER_VOICE=${PIPER_VOICE:-es_MX-claude-high}
       - PIPER_MODEL_PATH=${PIPER_MODEL_PATH:-/app/models/es_MX-claude-high.onnx}
@@ -91,8 +104,10 @@ services:
     logging:
       driver: json-file
       options:
-        max-size: "50m"
-        max-file: "5"
+        # Tope de disco, no TTL temporal: la política de conservación y su
+        # verificación operativa siguen pendientes de aprobación.
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
         limits:
@@ -147,8 +162,10 @@ services:
     logging:
       driver: json-file
       options:
-        max-size: "50m"
-        max-file: "5"
+        # Open-WA es un tercero local: limitar también sus logs aunque su
+        # contenido exacto dependa de la imagen desplegada.
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
         limits:

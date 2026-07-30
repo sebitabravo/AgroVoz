@@ -7,6 +7,7 @@ import warnings
 from pathlib import Path
 from typing import Literal
 
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Path absoluto a data/ para que la DB no dependa del CWD desde donde se lance uvicorn.
@@ -83,6 +84,13 @@ class Settings(BaseSettings):
     # ── Modelos IA ───────────────────────
     whisper_model: str = "small"
     whisper_model_path: str = ""  # Directorio para modelos Whisper (vacio = default ~/.cache/whisper/)
+    # Backend de transcripción. "faster" usa faster-whisper sobre CTranslate2,
+    # que en CPU corre el mismo modelo varias veces más rápido y sin torch.
+    # "openai" conserva el camino original como salida de emergencia.
+    whisper_backend: Literal["faster", "openai"] = "faster"
+    # Cuantización de faster-whisper en CPU. int8 es la que hace rendir el piso
+    # de 1 vCPU; float32 queda disponible si se detecta pérdida de calidad.
+    whisper_compute_type: Literal["int8", "int8_float16", "float16", "float32"] = "int8"
     llm_model_path: str = "models/qwen2.5-3b-q4_k_m.gguf"
     piper_voice: str = "es_MX-claude-high"
 
@@ -94,8 +102,11 @@ class Settings(BaseSettings):
     admin_session_secret: str = "agrovoz-dev-session-secret"
     # Tiempo de vida de la cookie de sesión admin (segundos). 8h por defecto.
     admin_session_ttl: int = 8 * 60 * 60
-    # API keys para MCP server (issue #193). Post-MVP.
-    # Vacías por defecto: MCP server está desactivado hasta que se configuren.
+    # RPC administrativa interna tipo MCP (issue #200). No se expone por
+    # defecto: el router solo puede montarse cuando este gate esté activo.
+    mcp_enabled: bool = False
+    # Claves separadas para operaciones de lectura y administración.
+    # Se mantienen como str por compatibilidad con el router MCP existente.
     mcp_api_key: str = ""
     mcp_admin_key: str = ""
 
@@ -152,6 +163,19 @@ class Settings(BaseSettings):
     # Activar state machine de conversación multi-turno.
     # Issue #192. Default false: pipeline opera en modo stateless.
     use_conversation_state: bool = False
+    conversation_timeout_minutes: int = Field(default=30, ge=1, le=1440)
+    # Historial de consultas (#201). Debe seguir apagado hasta completar
+    # retención, auditoría de borrado y revisión legal pre-producción.
+    consultation_history_enabled: bool = False
+    consultation_history_ttl_days: int = Field(default=28, ge=1)
+    # Secreto dedicado para seudonimizar sujetos en la auditoría de borrados.
+    consultation_history_audit_key: SecretStr = SecretStr("")
+    # Registro de gastos por voz (#170). Aunque la persistencia tenga TTL y
+    # consentimiento separado, queda fail-closed hasta revisión operativa/legal.
+    expense_tracking_enabled: bool = False
+    # Retención técnica máxima provisional: un ciclo agrícola corto. La
+    # revisión legal puede reducirla antes de habilitar el feature gate.
+    expense_retention_days: int = Field(default=180, ge=1, le=365)
 
     # ── Logging ──────────────────────────
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
@@ -297,11 +321,72 @@ class Settings(BaseSettings):
                     )
                 if self.app_env != "development":
                     warnings.warn(
-                        f"{campo} es el valor default público o está vacío. "
-                        "Cámbielo antes de desplegar a producción.",
+                        f"{campo} es el valor default público o está vacío. Cámbielo antes de desplegar a producción.",
                         RuntimeWarning,
                         stacklevel=2,
                     )
+
+    def validate_consultation_history_security(self) -> None:
+        """Valida la clave de auditoría cuando se activa el historial.
+
+        El feature gate apagado no exige configurar un secreto todavía. Si se
+        activa en producción, una clave débil bloquea el arranque para evitar
+        auditorías seudonimizadas con material predecible.
+        """
+        if not self.consultation_history_enabled:
+            return
+
+        audit_key = self.consultation_history_audit_key.get_secret_value().strip()
+        if len(audit_key) >= 32:
+            return
+
+        message = (
+            "CONSULTATION_HISTORY_AUDIT_KEY debe tener al menos 32 caracteres "
+            "cuando CONSULTATION_HISTORY_ENABLED está activo."
+        )
+        if self.app_env == "production":
+            raise ValueError(message)
+        warnings.warn(message, RuntimeWarning, stacklevel=2)
+
+    def validate_mcp_security(self) -> None:
+        """Valida las credenciales de la RPC administrativa interna tipo MCP.
+
+        El gate apagado permite claves vacías para mantener la superficie
+        administrativa fuera de servicio por defecto. Al activarlo, la
+        validación es fail-fast en cualquier entorno: ambas claves deben ser
+        largas, distintas y no pueden ser placeholders obvios.
+        """
+        if not self.mcp_enabled:
+            return
+
+        keys = {
+            "MCP_API_KEY": self.mcp_api_key.strip(),
+            "MCP_ADMIN_KEY": self.mcp_admin_key.strip(),
+        }
+        for field_name, key in keys.items():
+            if len(key) < 32:
+                raise ValueError(f"{field_name} debe tener al menos 32 caracteres cuando MCP_ENABLED está activo.")
+            if self._is_obvious_mcp_placeholder(key):
+                raise ValueError(f"{field_name} no puede usar un placeholder obvio cuando MCP_ENABLED está activo.")
+
+        if keys["MCP_API_KEY"] == keys["MCP_ADMIN_KEY"]:
+            raise ValueError("MCP_API_KEY y MCP_ADMIN_KEY deben ser distintas cuando MCP_ENABLED está activo.")
+
+    @staticmethod
+    def _is_obvious_mcp_placeholder(value: str) -> bool:
+        """Detecta valores de ejemplo previsibles sin registrar el secreto."""
+        normalized = "".join(character for character in value.lower() if character.isalnum())
+        placeholder_fragments = (
+            "changeme",
+            "placeholder",
+            "replaceme",
+            "yourkey",
+            "examplekey",
+            "devmcp",
+            "mcpapikey",
+            "mcpadminkey",
+        )
+        return len(set(normalized)) <= 2 or any(fragment in normalized for fragment in placeholder_fragments)
 
 
 settings = Settings()
@@ -309,3 +394,5 @@ settings.validate_webhook_secret_not_default()
 settings.validate_pepper_not_default()
 settings.validate_admin_keys_not_default()
 settings.validate_api_keys_in_dev()
+settings.validate_consultation_history_security()
+settings.validate_mcp_security()

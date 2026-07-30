@@ -12,22 +12,21 @@ batch completo solo falla si faltan columnas requeridas (schema roto).
 import csv
 import datetime
 import io
-import json
 import logging
 import re
-import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
-from pathlib import Path
 
 import httpx
 from sqlalchemy import func, select
 from sqlalchemy import tuple_ as sa_tuple
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.formato import formatear_pesos
 from app.models.odepa_price import OdepaPrice
 from app.models.user_prefs import UserPrefs
 
@@ -200,7 +199,10 @@ async def download_csv_with_fallback(timeout: float = _TIMEOUT_SEGUNDOS) -> str:
     try:
         return await download_csv(settings.odepa_csv_url, timeout=timeout)
     except OdepaSyncError as exc_primaria:
-        logger.warning("URL primaria ODEPA falló (%s). Probando fallback CKAN.", exc_primaria)
+        logger.warning(
+            "URL primaria ODEPA falló — error=%s fallback=ckan",
+            type(exc_primaria).__name__,
+        )
         try:
             return await _download_csv_via_ckan(settings.odepa_fallback_urls, timeout=timeout)
         except OdepaSyncError as exc_fallback:
@@ -409,7 +411,11 @@ def parse_csv(
             precio = _parsear_precio(fila.get(col_precio, ""))
             fecha = _parsear_fecha(fila.get(col_fecha, ""))
         except ValueError as exc:
-            logger.warning("Fila %d omitida: %s", num_fila, exc)
+            logger.warning(
+                "Fila ODEPA omitida — row=%d error=%s",
+                num_fila,
+                type(exc).__name__,
+            )
             continue
 
         unidad = (fila.get(col_unidad) or "").strip() or "kg"
@@ -664,17 +670,14 @@ def _unidad_hablada(unidad: str) -> str:
 def _formatear_pesos(precio: Decimal) -> str:
     """Formatea un Decimal como pesos hablados: 1200 -> '1.200 pesos'.
 
-    Usa punto como separador de miles (convención chilena) y "coma" para
-    decimales significativos. Usa "pesos" en vez de "$" para que el LLM no
-    hable de "dólares" al leer el resultado de la tool antes de pasarlo a TTS.
+    Delega en ``app.core.formato.formatear_pesos``, que es la fuente unica.
+    Antes esta version verbalizaba los decimales que trae ODEPA y decia
+    "14.232 coma 14 pesos": el peso chileno no tiene centavos en circulacion,
+    asi que eso no significa nada para el productor.
+
+    Se conserva el nombre privado porque lo usan varias funciones del modulo.
     """
-    if precio == precio.to_integral_value():
-        parte_entera = f"{int(precio):,}".replace(",", ".")
-        return f"{parte_entera} pesos"
-    entero, dec = str(precio).split(".")
-    parte_entera = f"{int(entero):,}".replace(",", ".")
-    dec = dec.ljust(2, "0")[:2]
-    return f"{parte_entera} coma {dec} pesos"
+    return formatear_pesos(precio)
 
 
 def format_price_text(record: OdepaPrice) -> str:
@@ -734,9 +737,11 @@ def _resolve_mercado_cercano(session: Session, phone_hash: str) -> str | None:
         return None
 
     try:
-        user = session.query(UserPrefs).filter_by(phone_hash=phone_hash.strip()).first()
-    except Exception:
-        logger.warning("Error consultando UserPrefs para phone_hash=%s", phone_hash[:8])
+        user = session.scalar(
+            select(UserPrefs).where(UserPrefs.phone_hash == phone_hash.strip())
+        )
+    except SQLAlchemyError:
+        logger.warning("Error consultando preferencias para mercado cercano")
         return None
 
     if not user or not user.comuna or not user.comuna.strip():
@@ -745,18 +750,9 @@ def _resolve_mercado_cercano(session: Session, phone_hash: str) -> str | None:
     comuna_lower = user.comuna.strip().lower()
     mercado = COMUNA_TO_MERCADO.get(comuna_lower)
     if mercado:
-        logger.info(
-            "Comuna '%s' → mercado cercano '%s' (phone_hash=%s)",
-            user.comuna,
-            mercado,
-            phone_hash[:8],
-        )
+        logger.info("Mercado cercano resuelto — estado=ok")
     else:
-        logger.info(
-            "Comuna '%s' no está en el mapeo — usando default (phone_hash=%s)",
-            user.comuna,
-            phone_hash[:8],
-        )
+        logger.info("Mercado cercano no resuelto — estado=default")
     return mercado
 
 
@@ -838,8 +834,9 @@ def get_price_for_llm(
         # Fallback: Lo Valledor (comportamiento original, Issue #83).
         return format_price_text(_select_registro_referencia(precios_por_mercado))
 
+    # Mercado hablado ("vega central", "valledor"): exacto o substring.
     try:
-        record: OdepaPrice | None = query_latest_price(session, producto, mercado)
+        record = _obtener_registro_referencia(session, producto, mercado)
     except ValueError:
         return "No entendí el producto o mercado. ¿Podrías repetirlo?"
 
@@ -901,6 +898,11 @@ def _obtener_registro_referencia(session: Session, producto: str, mercado: str =
     (Lo Valledor si existe, vía _select_registro_referencia); si no, busca
     el mercado específico.
 
+    Con mercado nombrado, primero intenta match exacto y si falla usa
+    substring (el productor dice "valledor" o "vega central"; ODEPA
+    guarda nombres largos como "Mercado Mayorista Lo Valledor de Santiago").
+    Sin ese fallback el fast-path no puede resolver mercados hablados.
+
     Lanza ValueError si producto está vacío (propagada de query_latest_*),
     para que el caller genere el mensaje de fallback adecuado.
 
@@ -911,7 +913,15 @@ def _obtener_registro_referencia(session: Session, producto: str, mercado: str =
         if not precios_por_mercado:
             return None
         return _select_registro_referencia(precios_por_mercado)
-    return query_latest_price(session, producto, mercado)
+
+    exacto = query_latest_price(session, producto, mercado)
+    if exacto is not None:
+        return exacto
+
+    precios_por_mercado = query_latest_by_product(session, producto)
+    if not precios_por_mercado:
+        return None
+    return _find_market_record(precios_por_mercado, mercado)
 
 
 def calculate_sale_value_for_llm(session: Session, producto: str, cantidad_kg: str, mercado: str = "") -> str:
@@ -1097,13 +1107,15 @@ def calculate_margin_for_llm(
     unidad: str,
     precio_total: str,
     mercado: str = "",
+    phone_hash: str = "",
 ) -> str:
     """Tool function para el LLM: calcula el margen de venta contra referencia ODEPA.
 
     Compara el precio TOTAL recibido por el agricultor contra el precio
-    de referencia mayorista ODEPA para la misma cantidad. Responde con
-    diferencia absoluta y porcentual, SIN almacenar los montos del
-    agricultor (cumplimiento Ley 21.719 — solo retorna texto).
+    de referencia mayorista ODEPA para la misma cantidad. Cuando #170 está
+    habilitado y consentido, agrega el total de gastos vigentes de ese producto
+    y calcula el remanente de la venta. Esta función no persiste el monto de
+    venta.
 
     Flujo:
     1. Valida que precio_total y cantidad sean numeros validos (>0).
@@ -1114,8 +1126,9 @@ def calculate_margin_for_llm(
     4. Calcula el precio de referencia total:
        precio_por_kilo_odepa * cantidad_en_kilos.
     5. Calcula diferencia absoluta y porcentual.
-    6. Retorna texto en espanol chileno con fuente ODEPA. Sin
-       persistencia de datos financieros del agricultor.
+    6. Si existe identidad consentida, suma gastos vigentes del producto.
+    7. Retorna texto en español chileno con fuente ODEPA y, cuando aplica,
+       el remanente después de gastos registrados.
 
     Args:
         session: Sesion de SQLAlchemy (inyectada por _execute_tool).
@@ -1124,6 +1137,7 @@ def calculate_margin_for_llm(
         unidad: Unidad de medida (kilo, saco, malla, caja, tonelada).
         precio_total: Monto TOTAL recibido en pesos chilenos (ej: "250000").
         mercado: Mercado opcional (ej: "Lo Valledor").
+        phone_hash: Identidad seudonimizada para consultar gastos consentidos.
 
     Returns:
         Texto en espanol chileno con el analisis de margen, listo para TTS.
@@ -1248,6 +1262,24 @@ def calculate_margin_for_llm(
         pct_dec = pct_dec.rstrip("0") or "0"
         pct_str = f"{pct_entero} coma {pct_dec}"
 
+    expense_note = ""
+    if phone_hash:
+        from app.services.expense_service import get_active_expense_total
+
+        expenses_total = get_active_expense_total(
+            session,
+            phone_hash,
+            producto,
+        )
+        if expenses_total > 0:
+            net_after_expenses = precio_total_dec - Decimal(expenses_total)
+            expense_note = (
+                f" Además, tienes {_formatear_pesos(Decimal(expenses_total))} "
+                f"en gastos vigentes registrados para {producto.strip()}. "
+                f"Al descontarlos de esta venta quedan "
+                f"{_formatear_pesos(net_after_expenses)} antes de otros costos."
+            )
+
     return (
         f"{producto_str}: segun ODEPA, el precio de referencia mayorista "
         f"es de {_formatear_pesos(precio_por_kilo)} el kilo "
@@ -1255,59 +1287,7 @@ def calculate_margin_for_llm(
         f"Para la cantidad que vendiste, la referencia son "
         f"{_formatear_pesos(precio_referencia_total)}. "
         f"{mensaje_diferencia}, un {pct_str} por ciento {direccion} "
-        f"del precio de referencia."
-    )
-
-
-_GASTOS_LOCK = threading.Lock()
-_GASTOS_FILE = Path(__file__).resolve().parent.parent.parent / "data" / "gastos.jsonl"
-
-
-def register_expense_for_llm(
-    session: Session,
-    producto: str,
-    concepto: str,
-    monto: str,
-    phone_hash: str = "",
-) -> str:
-    """Tool function: registra un gasto del agricultor para seguimiento (#170).
-
-    Usado cuando el agricultor reporta un gasto por voz: compra de insumos,
-    semillas, fertilizantes, transporte, etc. Almacena en archivo JSON lines
-    para MVP (sin DB separada). ``phone_hash`` scoped por agricultor —
-    ver inyección en ``_execute_tool`` (llm_service.py).
-
-    Retorna confirmacion en espanol chileno listo para TTS.
-    """
-    try:
-        monto_dec = Decimal(str(monto).strip().replace(",", ".").replace("$", "").replace(" ", ""))
-    except InvalidOperation:
-        return "No entendí el monto gastado. ¿Podrías repetir cuánto fue?"
-    if monto_dec <= 0:
-        return "El monto tiene que ser mayor a cero. ¿Podrías repetir cuánto gastaste?"
-
-    gasto: dict[str, object] = {
-        "phone_hash": phone_hash or "anonimo",
-        "producto": producto.strip(),
-        "concepto": concepto.strip(),
-        "monto": str(monto_dec),
-        "fecha": datetime.datetime.now().isoformat(),
-    }
-
-    try:
-        with _GASTOS_LOCK:
-            _GASTOS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            existe = _GASTOS_FILE.exists()
-            with open(_GASTOS_FILE, "a", encoding="utf-8") as f:
-                f.write(json.dumps(gasto, ensure_ascii=False) + "\n")
-            if not existe:
-                _GASTOS_FILE.chmod(0o600)
-    except OSError:
-        return "Tuve un problema al guardar el gasto. ¿Probamos de nuevo?"
-
-    return (
-        f"Listo. Registré {concepto.strip()} por {monto_dec} pesos "
-        f"para {producto.strip()}. Tus gastos quedan guardados."
+        f"del precio de referencia.{expense_note}"
     )
 
 
