@@ -31,6 +31,7 @@ from app.api.admin.odepa_admin import router as admin_odepa_router
 from app.api.admin.user_admin import router as admin_user_router
 from app.api.demo import router as demo_router
 from app.api.health import router as health_router
+from app.api.panel import router as panel_router
 from app.api.prices import router as prices_router
 from app.api.weather import router as weather_router
 from app.api.webhooks import router as webhooks_router
@@ -41,6 +42,7 @@ from app.core.security import (
     RateLimitMiddleware,
     SecurityHeadersMiddleware,
 )
+from app.panel_web import router as panel_web_router
 
 logger = logging.getLogger(__name__)
 
@@ -453,6 +455,8 @@ app.include_router(prices_router, prefix="/api/v1")
 app.include_router(weather_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(demo_router, prefix="/api/v1")
+app.include_router(panel_router, prefix="/api/v1")
+app.include_router(panel_web_router)  # prefix "/panel" va en el router
 # Admin — APIs JSON (autenticadas con X-Admin-Key) + dashboard HTML (cookie).
 app.include_router(admin_metrics_router, prefix="/api/v1")
 app.include_router(admin_odepa_router, prefix="/api/v1")

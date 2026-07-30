@@ -153,6 +153,22 @@ class Settings(BaseSettings):
     # En producción debe estar deshabilitado (False) para evitar abuso del LLM/TTS.
     demo_endpoint_enabled: bool = False
 
+    # ── Panel PWA del agricultor (C3) ────
+    # Complemento opcional a WhatsApp: nunca lo reemplaza ni lo exige. El
+    # agricultor pide "mandame mi resumen" y recibe un link firmado, de
+    # duración corta, sin login ni contraseña (mismo espíritu que "sin
+    # autenticación de usuarios": es una capacidad de un solo uso, no una
+    # cuenta). Apagado por defecto hasta validar el flujo con productores.
+    farmer_panel_enabled: bool = False
+    # Clave dedicada para firmar los links del panel. Nunca reusar el pepper
+    # de teléfono ni la clave de auditoría de historial: un link filtrado no
+    # debe comprometer ningún otro secreto.
+    panel_link_secret: SecretStr = SecretStr("")
+    panel_link_ttl_hours: int = Field(default=24, ge=1, le=168)
+    # URL pública del panel (ej: https://app.agrovoz.cl/panel). Vacío por
+    # defecto: sin dominio configurado, la tool no ofrece el link.
+    panel_base_url: str = ""
+
     # ── Versión ──────────────────────────
     app_version: str = "0.1.0-dev"
 
