@@ -22,6 +22,7 @@ from app.core.config import settings
 from app.models.user_prefs import UserPrefs
 from app.services.consultation_history_service import HistoryOperationError
 from app.services.expense_service import ExpenseOperationError
+from app.services.parcela_service import ParcelaOperationError
 
 _ADMIN_HEADERS = {"X-Admin-Key": settings.admin_api_key}
 
@@ -781,6 +782,140 @@ class TestExpenseConsent:
             assert prefs.expense_consent is False
 
 
+class TestParcelaConsent:
+    """Upsert y revocación del consentimiento de parcelas (C5)."""
+
+    async def test_otorgar_consentimiento_persiste_y_no_borra(
+        self,
+        client: AsyncClient,
+        tmp_path: Path,
+    ) -> None:
+        """Conceder el opt-in nunca dispara limpieza."""
+        with patch("app.api.admin.user_admin.delete_parcelas_for_subject") as delete_mock:
+            resp = await client.put(
+                f"/api/v1/admin/users/{_VALID_HASH}/comuna",
+                json={"comuna": "Traiguén", "parcela_consent": True},
+                headers=_ADMIN_HEADERS,
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["parcela_consent"] is True
+        delete_mock.assert_not_called()
+        with next(_session_test_db(tmp_path)) as db:
+            prefs = db.scalar(select(UserPrefs).where(UserPrefs.phone_hash == _VALID_HASH))
+            assert prefs is not None
+            assert prefs.parcela_consent is True
+
+    async def test_revocacion_borra_parcelas_del_sujeto(
+        self,
+        client: AsyncClient,
+        tmp_path: Path,
+    ) -> None:
+        """El servicio observa el consentimiento ya revocado en SQLite."""
+        with next(_session_test_db(tmp_path)) as db:
+            db.add(
+                UserPrefs(
+                    phone_hash=_VALID_HASH,
+                    comuna="Traiguén",
+                    parcela_consent=True,
+                )
+            )
+            db.commit()
+
+        def assert_revoked_before_cleanup(phone_hash: str) -> int:
+            assert phone_hash == _VALID_HASH
+            with next(_session_test_db(tmp_path)) as verification_db:
+                prefs = verification_db.scalar(select(UserPrefs).where(UserPrefs.phone_hash == _VALID_HASH))
+                assert prefs is not None
+                assert prefs.parcela_consent is False
+            return 0
+
+        with patch(
+            "app.api.admin.user_admin.delete_parcelas_for_subject",
+            side_effect=assert_revoked_before_cleanup,
+        ) as delete_mock:
+            resp = await client.put(
+                f"/api/v1/admin/users/{_VALID_HASH}/comuna",
+                json={"comuna": "Traiguén", "parcela_consent": False},
+                headers=_ADMIN_HEADERS,
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["parcela_consent"] is False
+        delete_mock.assert_called_once_with(_VALID_HASH)
+
+    async def test_revocacion_borra_aunque_el_gate_este_apagado(
+        self,
+        client: AsyncClient,
+    ) -> None:
+        """Apagar las escrituras nuevas no exime de borrar lo ya registrado."""
+        with (
+            patch.object(settings, "parcela_tracking_enabled", False),
+            patch("app.api.admin.user_admin.delete_parcelas_for_subject") as delete_mock,
+        ):
+            resp = await client.put(
+                f"/api/v1/admin/users/{_VALID_HASH}/comuna",
+                json={"comuna": "Traiguén", "parcela_consent": False},
+                headers=_ADMIN_HEADERS,
+            )
+
+        assert resp.status_code == 200
+        delete_mock.assert_called_once_with(_VALID_HASH)
+
+    async def test_omitir_consentimiento_no_borra_parcelas(
+        self,
+        client: AsyncClient,
+    ) -> None:
+        """La ausencia del campo no se interpreta como revocación."""
+        with patch("app.api.admin.user_admin.delete_parcelas_for_subject") as delete_mock:
+            resp = await client.put(
+                f"/api/v1/admin/users/{_VALID_HASH}/comuna",
+                json={"comuna": "Traiguén"},
+                headers=_ADMIN_HEADERS,
+            )
+
+        assert resp.status_code == 200
+        delete_mock.assert_not_called()
+
+    async def test_fallo_de_limpieza_conserva_revocacion_y_respuesta_estable(
+        self,
+        client: AsyncClient,
+        tmp_path: Path,
+    ) -> None:
+        """Un fallo parcial no reactiva consentimiento ni filtra detalles."""
+        with next(_session_test_db(tmp_path)) as db:
+            db.add(
+                UserPrefs(
+                    phone_hash=_VALID_HASH,
+                    comuna="Traiguén",
+                    parcela_consent=True,
+                )
+            )
+            db.commit()
+
+        private_error = "detalle-interno-con-datos-sensibles"
+        with patch(
+            "app.api.admin.user_admin.delete_parcelas_for_subject",
+            side_effect=ParcelaOperationError(private_error),
+        ):
+            resp = await client.put(
+                f"/api/v1/admin/users/{_VALID_HASH}/comuna",
+                json={"comuna": "Traiguén", "parcela_consent": False},
+                headers=_ADMIN_HEADERS,
+            )
+
+        assert resp.status_code == 503
+        assert resp.json() == {
+            "detail": ("Consentimiento revocado; limpieza de parcelas pendiente. Reintente la solicitud.")
+        }
+        assert _VALID_HASH not in resp.text
+        assert private_error not in resp.text
+        with next(_session_test_db(tmp_path)) as verification_db:
+            prefs = verification_db.scalar(select(UserPrefs).where(UserPrefs.phone_hash == _VALID_HASH))
+            assert prefs is not None
+            assert prefs.parcela_consent is False
+
+
 # ── GET /admin/users/{phone_hash} ───────────────────────────────────
 
 
@@ -836,6 +971,7 @@ class TestPrivacidad:
             "dataset_consent",
             "history_consent",
             "expense_consent",
+            "parcela_consent",
             "identity_type",
             "group_label",
             "localidad",

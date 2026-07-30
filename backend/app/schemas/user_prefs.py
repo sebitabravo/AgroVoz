@@ -52,6 +52,13 @@ class ComunaRequest(BaseModel):
             "existentes. None = no modificar el valor actual."
         ),
     )
+    parcela_consent: bool | None = Field(
+        default=None,
+        description=(
+            "Opt-in específico para registrar parcelas (cultivo, superficie, comuna). Revocarlo con false "
+            "borra las parcelas existentes. None = no modificar el valor actual."
+        ),
+    )
     cultivos: list[str] | None = Field(
         default=None,
         max_length=20,
@@ -135,6 +142,7 @@ class ComunaRequest(BaseModel):
                     "dataset_consent": True,
                     "history_consent": True,
                     "expense_consent": False,
+                    "parcela_consent": False,
                     "cultivos": ["papa", "trigo", "tomate"],
                     "identity_type": "prodesal_group",
                     "group_label": "prodesal-traiguen-norte",
@@ -161,6 +169,7 @@ class UserPrefsResponse(BaseModel):
     expense_consent: bool = Field(
         default=False, description="Consentimiento específico para retener gastos declarados (#170)"
     )
+    parcela_consent: bool = Field(default=False, description="Consentimiento específico para registrar parcelas (C5)")
     identity_type: IdentityType = Field(
         default="individual",
         description="Identidad individual o contacto compartido PRODESAL",
@@ -204,6 +213,7 @@ class UserPrefsResponse(BaseModel):
                     "dataset_consent": True,
                     "history_consent": True,
                     "expense_consent": False,
+                    "parcela_consent": False,
                     "identity_type": "prodesal_group",
                     "group_label": "prodesal-traiguen-norte",
                     "localidad": "Quilquén",

@@ -176,6 +176,12 @@ class Settings(BaseSettings):
     # Retención técnica máxima provisional: un ciclo agrícola corto. La
     # revisión legal puede reducirla antes de habilitar el feature gate.
     expense_retention_days: int = Field(default=180, ge=1, le=365)
+    # Registro de parcelas del agricultor (C5, #35). Alimenta el motor de
+    # reglas agronómicas y el clima por parcela. Fail-closed hasta revisión
+    # operativa/legal, mismo patrón que gastos e historial.
+    parcela_tracking_enabled: bool = False
+    # Retención técnica: un ciclo agrícola completo (temporada a temporada).
+    parcela_retention_days: int = Field(default=365, ge=1, le=730)
 
     # ── Logging ──────────────────────────
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"

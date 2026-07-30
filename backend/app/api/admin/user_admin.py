@@ -34,6 +34,10 @@ from app.services.expense_service import (
     ExpenseOperationError,
     delete_expenses_for_subject,
 )
+from app.services.parcela_service import (
+    ParcelaOperationError,
+    delete_parcelas_for_subject,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +109,12 @@ def _apply_prefs_fields(
         logger.info(
             "expense_consent actualizado — consent=%s",
             prefs.expense_consent,
+        )
+    if body.parcela_consent is not None:
+        prefs.parcela_consent = body.parcela_consent
+        logger.info(
+            "parcela_consent actualizado — consent=%s",
+            prefs.parcela_consent,
         )
     if body.cultivos is not None:
         prefs.cultivos = _serializar_cultivos(body.cultivos)
@@ -199,6 +209,30 @@ def _delete_expenses_after_consent_revocation(
         ) from None
 
 
+def _delete_parcelas_after_consent_revocation(
+    phone_hash: str,
+    parcela_consent: bool | None,
+) -> None:
+    """Borra las parcelas registradas después de una revocación explícita (C5).
+
+    A diferencia del historial, la limpieza no depende del feature gate: si el
+    gate se apagó después de haber registrado parcelas, la revocación igual debe
+    dejar la tabla sin datos del sujeto. Un fallo no revierte el consentimiento:
+    responde 503 para que el cliente reintente la misma solicitud.
+    """
+    if parcela_consent is not False:
+        return
+
+    try:
+        delete_parcelas_for_subject(phone_hash)
+    except ParcelaOperationError:
+        logger.error("Consentimiento revocado; limpieza de parcelas pendiente")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=("Consentimiento revocado; limpieza de parcelas pendiente. Reintente la solicitud."),
+        ) from None
+
+
 @router.put("/{phone_hash}/comuna", response_model=UserPrefsResponse)
 def set_comuna(
     phone_hash: str = Path(
@@ -270,6 +304,10 @@ def set_comuna(
         phone_hash,
         body.expense_consent,
     )
+    _delete_parcelas_after_consent_revocation(
+        phone_hash,
+        body.parcela_consent,
+    )
 
     return UserPrefsResponse(
         phone_hash=prefs.phone_hash,
@@ -277,6 +315,7 @@ def set_comuna(
         dataset_consent=prefs.dataset_consent,
         history_consent=prefs.history_consent,
         expense_consent=prefs.expense_consent,
+        parcela_consent=prefs.parcela_consent,
         identity_type=cast("IdentityType", prefs.identity_type),
         group_label=prefs.group_label,
         localidad=prefs.localidad,
@@ -311,6 +350,7 @@ def get_user_prefs(
         dataset_consent=prefs.dataset_consent,
         history_consent=prefs.history_consent,
         expense_consent=prefs.expense_consent,
+        parcela_consent=prefs.parcela_consent,
         identity_type=cast("IdentityType", prefs.identity_type),
         group_label=prefs.group_label,
         localidad=prefs.localidad,
