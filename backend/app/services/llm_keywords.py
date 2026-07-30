@@ -46,13 +46,14 @@ _COMMON_PRODUCTS = [
     "maíz", "maiz", "trigo", "arroz",
 ]
 
-# Regex determinista para detección de venta (Issue #104): captura "N kilos de
-# <producto>" sin depender del LLM. El "de" tras kilos reduce falsos positivos
-# ("tengo 30 kilos" sin intención de venta no matchea). El producto se valida
-# aparte contra _COMMON_PRODUCTS via _extract_product_from_query.
-# La cantidad va acotada (\d{1,7}) por la misma razón que _CANT_UNIDAD_RE (ReDoS).
+# Regex determinista para detección de venta (Issue #104): captura "N kilos"
+# con producto cercano. El "de" es opcional: "50 kilos de papa" y
+# "cuanto vale 50 kilos papa" deben ambos disparar calculate_sale_value.
+# El producto se valida aparte contra _COMMON_PRODUCTS via
+# _extract_product_from_query. La cantidad va acotada (\d{1,7}) por la
+# misma razón que _CANT_UNIDAD_RE (ReDoS).
 _VENTA_KILOS_RE = re.compile(
-    r"(\d{1,7})\s*(?:kilos?|kg)\s+de\s+",
+    r"(\d{1,7})\s*(?:kilos?|kg)(?:\s+de)?\s+",
     re.IGNORECASE,
 )
 
@@ -82,6 +83,35 @@ FALLBACK_SALE_MESSAGES = {
     "parsing_error": "No entendí",
     "invalid_quantity": "La cantidad tiene que ser",
 }
+
+# Marcas temporales compartidas por los fallbacks de precio y clima.
+_PRECIO_HISTORIA_KW = (
+    "estaba",
+    "semana pasada",
+    "ayer",
+    "hace ",
+    "valia",
+    "valía",
+    "ha subido",
+    "ha bajado",
+    "subio",
+    "subió",
+    "bajo el precio",
+    "bajó",
+    "antes",
+)
+_CLIMA_FUTURO_KW = (
+    "mañana",
+    "manana",
+    "pronóstico",
+    "pronostico",
+    "proximos",
+    "próximos",
+    "va a ",
+    "vendra",
+    "vendrá",
+    "semana que viene",
+)
 
 # Keywords que indican consulta sobre documentos oficiales ODEPA.
 # Activan el fallback search_corpus cuando el LLM no genera tool call.
@@ -187,6 +217,102 @@ def _is_generic_response(text: str) -> bool:
     return any(p in lower for p in _GENERIC_RESPONSE_PATTERNS)
 
 
+# Palabras comunes del castellano que NUNCA deben resolverse a un producto por
+# similitud. El fuzzy match existe para tolerar typos ("celga" -> "acelga"), no
+# para adivinar productos donde no se nombro ninguno.
+#
+# El caso que motivo la lista: "¿va a llover mañana?" respondia el precio de la
+# MANZANA. "mañana" contra "manzana" da 0.769 y "manana" (como suele transcribir
+# Whisper, sin tilde) da 0.923 — mas alto que typos legitimos como "celga"
+# (0.909). Subir el cutoff no arregla el falso positivo sin romper los typos
+# reales, asi que la unica salida limpia es excluir estas palabras del fuzzy.
+#
+# Solo afecta al paso fuzzy: si el productor escribe "manzana" de verdad, el
+# substring exacto la detecta antes de llegar aca.
+_PALABRAS_NO_PRODUCTO = frozenset(
+    {
+        "manana",
+        "mañana",
+        "semana",
+        "ventana",
+        "campana",
+        "montana",
+        "montaña",
+        "temprano",
+        "cuanto",
+        "cuánto",
+        "para",
+        "habla",
+        "ahora",
+        "tarde",
+        "noche",
+    }
+)
+
+# Alias hablados → substring para buscar el mercado ODEPA.
+# Ordenados del más largo al más corto para que "lo valledor" gane a "valledor"
+# y "vega central" no se confunda con un "vega" suelto.
+# El substring se pasa a get_price_for_llm / _find_market_record.
+_MERCADO_ALIASES: tuple[tuple[str, str], ...] = (
+    ("vega central", "vega central"),
+    ("lo valledor", "valledor"),
+    ("vega modelo", "vega modelo"),
+    ("puerto montt", "puerto montt"),
+    ("la serena", "la serena"),
+    ("la calera", "la calera"),
+    ("valledor", "valledor"),
+    ("femacal", "femacal"),
+    ("mapocho", "mapocho"),
+    ("macroferia", "macroferia"),
+    ("lagunitas", "lagunitas"),
+    ("palmera", "palmera"),
+    ("limarí", "limar"),
+    ("limari", "limar"),
+    ("chillán", "chillán"),
+    ("chillan", "chillan"),
+    ("temuco", "temuco"),
+    ("talca", "talca"),
+    ("arica", "arica"),
+)
+
+
+def _extract_mercado_from_query(query: str) -> str | None:
+    """Extrae un mercado ODEPA nombrado en la consulta.
+
+    Si el productor dice "papa en la Vega Central", retorna el substring
+    "vega central" para que get_price_for_llm lo resuelva por match exacto
+    o por substring contra el nombre completo en la base.
+
+    Args:
+        query: Texto de la consulta del agricultor.
+
+    Returns:
+        Substring de mercado, o None si no nombra uno específico.
+    """
+    q = query.strip().lower()
+    for alias, substring in _MERCADO_ALIASES:
+        if alias in q:
+            return substring
+    return None
+
+
+def _extract_comuna_from_query(query: str) -> str | None:
+    """Extrae una comuna conocida de la consulta climática.
+
+    Reutiliza el diccionario de weather_service. Preferir el match más largo
+    ("padre las casas" antes que un falso positivo parcial).
+
+    Args:
+        query: Texto de la consulta.
+
+    Returns:
+        Nombre canónico de comuna, o None si no aparece ninguna.
+    """
+    from app.services.weather_service import extraer_comuna_de_consulta
+
+    return extraer_comuna_de_consulta(query)
+
+
 def _extract_product_from_query(query: str) -> str | None:
     """Extrae el nombre de un producto agrícola de la consulta por keyword.
 
@@ -214,8 +340,10 @@ def _extract_product_from_query(query: str) -> str | None:
     # 2. Fuzzy match como fallback: detectar typos sin strict substring match.
     # Tokenizar la consulta en palabras y comparar cada una contra productos.
     # Cutoff 0.75 evita falsos positivos en palabras cortas.
-    tokens = re.split(r'[\s,;.!?]+', query_lower)
-    tokens = [t for t in tokens if t and len(t) > 2]  # Ignorar palabras muy cortas.
+    tokens = re.split(r"[\s,;.!?¿¡]+", query_lower)
+    # Se ignoran palabras muy cortas y las del castellano comun: sin este filtro
+    # "¿va a llover mañana?" resolvia a "manzana" y devolvia un precio.
+    tokens = [t for t in tokens if t and len(t) > 2 and t not in _PALABRAS_NO_PRODUCTO]
 
     for token in tokens:
         # Buscar el producto más similar usando difflib.
@@ -226,12 +354,7 @@ def _extract_product_from_query(query: str) -> str | None:
             cutoff=0.75,  # Umbral para evitar falsos positivos.
         )
         if matches:
-            logger.debug(
-                "Fuzzy match detectado — token=%s → producto=%s query=%.100s",
-                token,
-                matches[0],
-                query,
-            )
+            logger.debug("Fuzzy match detectado — dominio=producto estado=found")
             return matches[0]
 
     return None
@@ -264,6 +387,7 @@ async def _force_sale_value_tool(query_text: str) -> str | None:
         return None
 
     cantidad = venta_match.group(1)
+    mercado = _extract_mercado_from_query(q) or ""
     session = SessionLocal()
     try:
         result = await asyncio.to_thread(
@@ -271,6 +395,7 @@ async def _force_sale_value_tool(query_text: str) -> str | None:
             session,
             producto=product,
             cantidad_kg=cantidad,
+            mercado=mercado,
         )
         # Retornar salvo que sea un mensaje de error conocido
         # (en ese caso cae al bloque de precio/clima).
@@ -282,17 +407,14 @@ async def _force_sale_value_tool(query_text: str) -> str | None:
                 FALLBACK_SALE_MESSAGES["invalid_quantity"],
             ]
         ):
-            logger.info(
-                "Fallback tool forzado: calculate_sale_value"
-                "(producto=%s, cantidad=%s) — query=%.100s",
-                product,
-                cantidad,
-                query_text,
-            )
+            logger.info("Fallback tool forzado — tool=calculate_sale_value")
             return result
     except SQLAlchemyError as exc:
         # Fire-and-forget: un error de DB no rompe el pipeline.
-        logger.warning("Error DB en fallback venta: %s", exc)
+        logger.warning(
+            "Error DB en fallback venta — error=%s",
+            type(exc).__name__,
+        )
     finally:
         session.close()
 
@@ -402,15 +524,13 @@ async def _force_margin_tool(query_text: str) -> str | None:
                 FALLBACK_SALE_MESSAGES["parsing_error"],
             ]
         ):
-            logger.info(
-                "Fallback tool forzado: calculate_margin"
-                "(producto=%s, cantidad=%s, unidad=%s, precio_total=%s)"
-                " — query=%.100s",
-                product, cantidad, unidad, precio_total_str, query_text,
-            )
+            logger.info("Fallback tool forzado — tool=calculate_margin")
             return result
     except SQLAlchemyError as exc:
-        logger.warning("Error DB en fallback margin: %s", exc)
+        logger.warning(
+            "Error DB en fallback margen — error=%s",
+            type(exc).__name__,
+        )
     finally:
         session.close()
 
@@ -446,25 +566,125 @@ async def _force_corpus_search(query_text: str) -> str | None:
 
         result = search_corpus_for_llm(query_text)
         if result:
-            logger.info(
-                "Fallback tool forzado: search_corpus(query=%.100s) — query=%.100s",
-                query_text,
-                query_text,
-            )
+            logger.info("Fallback tool forzado — tool=search_corpus")
             return result
     except ImportError:
-        logger.warning(
-            "Corpus RAG no disponible (falta dependencia) — se continua sin search_corpus"
-        )
+        logger.warning("Corpus RAG no disponible (falta dependencia) — se continua sin search_corpus")
     except (RuntimeError, ValueError, OSError) as exc:
-        logger.warning("Error en fallback corpus: %s", exc)
+        logger.warning(
+            "Error en fallback corpus — error=%s",
+            type(exc).__name__,
+        )
 
     return None
 
 
-async def _force_keyword_tool(
-    query_text: str, phone_hash: str | None = None
-) -> str | None:
+async def _compound_price_block(
+    query_text: str,
+    phone_hash: str | None,
+) -> tuple[str | None, str]:
+    """Obtiene el bloque ODEPA de una consulta compuesta."""
+    from app.core.database import SessionLocal
+    from app.services.odepa_service import (
+        get_price_for_llm,
+        get_price_history_for_llm,
+    )
+
+    product = _extract_product_from_query(query_text)
+    if product is None:
+        return None, "Necesito que me indiques qué producto quieres consultar."
+
+    session = None
+    try:
+        session = SessionLocal()
+        mercado = _extract_mercado_from_query(query_text) or ""
+        if any(kw in query_text for kw in _PRECIO_HISTORIA_KW):
+            result = await asyncio.to_thread(
+                get_price_history_for_llm,
+                session,
+                producto=product,
+            )
+        else:
+            result = await asyncio.to_thread(
+                get_price_for_llm,
+                session,
+                producto=product,
+                mercado=mercado,
+                phone_hash=phone_hash,
+            )
+        if result.startswith(FALLBACK_SALE_MESSAGES["no_data"]):
+            return None, result
+        return result, ""
+    except (SQLAlchemyError, TimeoutError, RuntimeError, OSError, ValueError) as exc:
+        logger.warning(
+            "Error en precio de consulta compuesta — error=%s",
+            type(exc).__name__,
+        )
+        return None, "No pude obtener el precio en este momento."
+    finally:
+        if session is not None:
+            session.close()
+
+
+async def _compound_weather_block(query_text: str) -> tuple[str | None, str]:
+    """Obtiene el bloque OpenMeteo de una consulta compuesta."""
+    from app.services.weather_service import (
+        get_pronostico,
+        get_weather,
+        resolver_comuna,
+    )
+
+    comuna = _extract_comuna_from_query(query_text) or "Traiguén"
+    try:
+        if any(kw in query_text for kw in _CLIMA_FUTURO_KW):
+            result = await get_pronostico(comuna, dias=2)
+        else:
+            coords = resolver_comuna(comuna) or (-38.23, -72.68)
+            result = await get_weather(lat=coords[0], lon=coords[1])
+        if result:
+            return str(result), ""
+        return None, "OpenMeteo no entregó datos para esa consulta."
+    except (TimeoutError, RuntimeError, OSError, ValueError) as exc:
+        logger.warning(
+            "Error en clima de consulta compuesta — error=%s",
+            type(exc).__name__,
+        )
+        return None, "No pude obtener el clima en este momento."
+
+
+async def _force_compound_keyword_tools(
+    query_text: str,
+    phone_hash: str | None = None,
+) -> str:
+    """Responde precio y clima sin LLM, conservando resultados parciales.
+
+    ODEPA y OpenMeteo se consultan de forma independiente. Así, una fuente
+    caída no oculta el dato válido de la otra y el agricultor recibe un aviso
+    explícito por el bloque que no se pudo completar.
+    """
+    q = query_text.strip().lower()
+    price_result, weather_result = await asyncio.gather(
+        _compound_price_block(q, phone_hash),
+        _compound_weather_block(q),
+    )
+    price_data, price_notice = price_result
+    weather_data, weather_notice = weather_result
+
+    price_text = price_data or price_notice
+    weather_text = weather_data or weather_notice
+    blocks = (
+        f"ODEPA — Precio:\n{price_text}",
+        f"OpenMeteo — Clima:\n{weather_text}",
+    )
+    if price_data is None and weather_data is None:
+        return (
+            "No pude completar ninguno de los dos datos solicitados.\n\n"
+            + "\n\n".join(blocks)
+        )
+    return "\n\n".join(blocks)
+
+
+async def _force_keyword_tool(query_text: str, phone_hash: str | None = None) -> str | None:
     """Orquestador de fallback por keywords: venta → precio → clima.
 
     Cuando el LLM no genera <tool_call>, detectamos keywords en la consulta
@@ -510,37 +730,37 @@ async def _force_keyword_tool(
     if product:
         # Keywords de precio pasado: "estaba", "semana pasada", "ayer", etc.
         # -> historial en vez de precio actual.
-        historia_kw = [
-            "estaba", "semana pasada", "ayer", "hace ", "valia", "valía",
-            "ha subido", "ha bajado", "subio", "subió", "bajo el precio",
-            "bajó", "antes",
-        ]
-        es_historia = any(kw in q for kw in historia_kw)
+        es_historia = any(kw in q for kw in _PRECIO_HISTORIA_KW)
 
         session = SessionLocal()
         try:
             # Llamada en thread pool: las tools de precio son síncronas
             # (query SQLite) y no deben bloquear el event loop.
+            mercado = _extract_mercado_from_query(q) or ""
             if es_historia:
-                result = await asyncio.to_thread(
-                    get_price_history_for_llm, session, producto=product
-                )
+                result = await asyncio.to_thread(get_price_history_for_llm, session, producto=product)
             else:
                 result = await asyncio.to_thread(
-                    get_price_for_llm, session, producto=product, phone_hash=phone_hash
+                    get_price_for_llm,
+                    session,
+                    producto=product,
+                    mercado=mercado,
+                    phone_hash=phone_hash,
                 )
             # Solo retornar si encontró datos reales (no "No tengo datos...").
             if not result.startswith(FALLBACK_SALE_MESSAGES["no_data"]):
                 logger.info(
-                    "Fallback tool forzado: %s(producto=%s) — query=%.100s",
+                    "Fallback tool forzado — tool=%s",
                     "get_price_history" if es_historia else "get_price",
-                    product, query_text,
                 )
                 return result
         except SQLAlchemyError as exc:
             # Fire-and-forget: un error de DB (database is locked, disk I/O)
             # no debe romper el pipeline. Se loguea y se cae al bloque de clima.
-            logger.warning("Error DB en fallback precio: %s", exc)
+            logger.warning(
+                "Error DB en fallback precio — error=%s",
+                type(exc).__name__,
+            )
         finally:
             session.close()
 
@@ -550,24 +770,67 @@ async def _force_keyword_tool(
         return corpus_result
 
     # 3. Detectar keywords de clima.
+    # Se incluyen las formas VERBALES ademas de los sustantivos: la manera mas
+    # natural de preguntar es "¿va a llover?", y sin el verbo la consulta no
+    # matcheaba ninguna keyword y terminaba en el LLM (lento y con timeout).
     clima_kw = [
-        "clima", "tiempo", "temperatura", "lluvia", "lloviendo",
-        "frio", "calor", "humedad", "viento", "pronóstico", "pronostico",
-        "nublado", "despejado",
+        "clima",
+        "tiempo",
+        "temperatura",
+        "lluvia",
+        "lloviendo",
+        "llover",
+        "llueve",
+        "lloverá",
+        "llovera",
+        "frio",
+        "frío",
+        "calor",
+        "humedad",
+        "viento",
+        "pronóstico",
+        "pronostico",
+        "nublado",
+        "despejado",
+        "helada",
+        "helar",
+        "granizo",
+        "nieve",
     ]
     if any(kw in q for kw in clima_kw):
-        from app.services.weather_service import get_weather
+        from app.services.weather_service import get_pronostico, get_weather
+
+        # "¿va a llover MANANA?" pide pronostico, no el clima de ahora.
+        # Antes solo existia get_weather (clima actual) y la respuesta no
+        # contestaba la pregunta: decia como esta ahora, no como estara.
+        es_futuro = any(kw in q for kw in _CLIMA_FUTURO_KW)
 
         try:
-            # Traiguén como default si no hay coordenadas en la consulta.
-            result = await get_weather(lat=-38.23, lon=-72.68)
+            comuna = _extract_comuna_from_query(q) or "Traiguén"
+            if es_futuro:
+                result = await get_pronostico(comuna, dias=2)
+                herramienta = "get_pronostico"
+            else:
+                from app.services.weather_service import resolver_comuna
+
+                coords = resolver_comuna(comuna)
+                if coords is None:
+                    # Traiguén: default del piloto si la comuna no está mapeada.
+                    lat, lon = -38.23, -72.68
+                else:
+                    lat, lon = coords
+                result = await get_weather(lat=lat, lon=lon)
+                herramienta = "get_weather"
             if result:
                 logger.info(
-                    "Fallback tool forzado: get_weather(lat=-38.23, lon=-72.68) — query=%.100s",
-                    query_text,
+                    "Fallback tool forzado — tool=%s",
+                    herramienta,
                 )
                 return str(result)
         except (RuntimeError, ValueError, OSError) as exc:
-            logger.warning("Error en fallback clima: %s", exc)
+            logger.warning(
+                "Error en fallback clima — error=%s",
+                type(exc).__name__,
+            )
 
     return None

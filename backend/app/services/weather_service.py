@@ -65,12 +65,29 @@ DEFAULT_LON = -72.68
 _TRAIGUEN_THRESHOLD = 0.05
 
 # Diccionario simple de comunas chilenas a coordenadas para la tool
-# get_clima_historico(). Sin API de geocoding para mantener el MVP simple.
-# Issue #124: cobertura inicial Traiguén, Temuco, Santiago.
+# get_clima_historico() y el fast-path de clima. Sin API de geocoding
+# para mantener el MVP simple. Cobertura: piloto Traiguén + Araucanía
+# cercana + Santiago (referencia).
 _COMUNAS: dict[str, tuple[float, float]] = {
+    # Piloto Traiguén y alrededores (mismas coords aproximadas)
     "traiguen": (-38.23, -72.68),
     "traiguén": (-38.23, -72.68),
+    "lumaco": (-38.15, -72.90),
+    "galvarino": (-38.41, -72.78),
+    "cholchol": (-38.60, -72.84),
+    # Temuco y conurbación
     "temuco": (-38.74, -72.59),
+    "padre las casas": (-38.77, -72.61),
+    "lautaro": (-38.53, -72.43),
+    "nueva imperial": (-38.74, -72.95),
+    "villarrica": (-39.28, -72.23),
+    "pucón": (-39.28, -71.95),
+    "pucon": (-39.28, -71.95),
+    "angol": (-37.80, -72.71),
+    "collipulli": (-37.96, -72.43),
+    "pitrufquén": (-38.98, -72.64),
+    "pitrufquen": (-38.98, -72.64),
+    # Referencia nacional
     "santiago": (-33.45, -70.65),
 }
 
@@ -153,7 +170,7 @@ def _ttl_get[V](
     ts, value = entry
     if time.monotonic() - ts > ttl_seconds:
         return None
-    logger.debug("Cache hit (%s) para %s", label, key)
+    logger.debug("Cache hit — tipo=%s", label)
     return value
 
 
@@ -164,7 +181,7 @@ def _evict_oldest_if_full[V](
     if len(cache) > max_size:
         oldest_key = min(cache, key=lambda k: cache[k][0])
         del cache[oldest_key]
-        logger.debug("Cache evictado (%s, oldest): %s", label, oldest_key)
+        logger.debug("Cache evictado — tipo=%s estrategia=oldest", label)
 
 
 def _cache_key(lat: float, lon: float) -> str:
@@ -322,12 +339,16 @@ async def _close_http_client() -> None:
 def _location_name(lat: float, lon: float) -> str:
     """Determina el nombre de ubicación según las coordenadas.
 
-    OpenMeteo no devuelve nombre de ciudad, así que usamos un
-    nombre genérico. Si las coordenadas están cerca de Traiguén
-    (default MVP), lo llamamos por su nombre.
+    OpenMeteo no devuelve nombre de ciudad. Buscamos en ``_COMUNAS``
+    (piloto Traiguén + Araucanía). Si no hay match, nombre genérico.
     """
-    if abs(lat - DEFAULT_LAT) < _TRAIGUEN_THRESHOLD and abs(lon - DEFAULT_LON) < _TRAIGUEN_THRESHOLD:
-        return "Traiguén"
+    for _nombre, (clat, clon) in _COMUNAS.items():
+        if abs(lat - clat) < _TRAIGUEN_THRESHOLD and abs(lon - clon) < _TRAIGUEN_THRESHOLD:
+            bonita = max(
+                (n for n in _COMUNAS if _COMUNAS[n] == (clat, clon)),
+                key=lambda n: (any(c in n for c in "áéíóúñ"), len(n)),
+            )
+            return " ".join(parte.capitalize() for parte in bonita.split())
     return "la zona consultada"
 
 
@@ -499,7 +520,7 @@ async def get_weather_full(
 
     wd = _parse_openmeteo_response(data, lat, lon)
     _cache_set(lat, lon, wd)
-    logger.info("Clima obtenido para (%.4f, %.4f): %s", lat, lon, wd.location)
+    logger.info("Clima obtenido — estado=ok")
     logger.debug(
         "OpenMeteo raw — temp=%s hum=%s code=%s wind=%s rain=%s",
         wd.temperature_c,
@@ -548,7 +569,10 @@ async def _fetch_weather_data(lat: float, lon: float) -> dict[str, object]:
         logger.warning("OpenMeteo respondió HTTP %s", exc.response.status_code)
         raise RuntimeError(f"OpenMeteo respondió HTTP {exc.response.status_code}") from exc
     except httpx.RequestError as exc:
-        logger.warning("Error de red al consultar OpenMeteo: %s", exc)
+        logger.warning(
+            "Error de red al consultar OpenMeteo — error=%s",
+            type(exc).__name__,
+        )
         raise ConnectionError("Error de red al consultar OpenMeteo") from exc
     except ValueError as exc:
         # Captura json.JSONDecodeError
@@ -666,10 +690,16 @@ async def get_weather(
         wd = await get_weather_full(lat, lon)
         return wd.texto
     except ConnectionError as exc:
-        logger.warning("Error de red al consultar clima: %s", exc)
+        logger.warning(
+            "Error de red al consultar clima — error=%s",
+            type(exc).__name__,
+        )
         return "No pude consultar el clima ahora. ¿Probamos más tarde?"
     except RuntimeError as exc:
-        logger.warning("Error de API al consultar clima: %s", exc)
+        logger.warning(
+            "Error de API al consultar clima — error=%s",
+            type(exc).__name__,
+        )
         return "El servicio de clima no está disponible en este momento."
 
 
@@ -731,7 +761,10 @@ async def get_weather_forecast_daily(
         logger.warning("OpenMeteo respondio HTTP %s", exc.response.status_code)
         raise RuntimeError(f"OpenMeteo respondio HTTP {exc.response.status_code}") from exc
     except httpx.RequestError as exc:
-        logger.warning("Error de red al consultar OpenMeteo: %s", exc)
+        logger.warning(
+            "Error de red al consultar OpenMeteo — error=%s",
+            type(exc).__name__,
+        )
         raise ConnectionError("Error de red al consultar OpenMeteo") from exc
     except ValueError as exc:
         raise RuntimeError(f"Respuesta de OpenMeteo malformada: {exc}") from exc
@@ -816,6 +849,37 @@ def _resolver_comuna(comuna: str) -> tuple[float, float] | None:
     return _COMUNAS.get(comuna.strip().lower())
 
 
+def resolver_comuna(comuna: str) -> tuple[float, float] | None:
+    """API pública: resuelve comuna a (lat, lon). Ver ``_resolver_comuna``."""
+    return _resolver_comuna(comuna)
+
+
+def extraer_comuna_de_consulta(query: str) -> str | None:
+    """Busca una comuna conocida dentro del texto de la consulta.
+
+    Preferir el match más largo ("padre las casas" antes que un token
+    parcial). Si hay variantes con/sin tilde, usa la forma con tilde
+    para que el TTS diga "Traiguén" y no "traiguen".
+
+    Args:
+        query: Texto de la consulta del productor.
+
+    Returns:
+        Nombre de comuna capitalizado, o None si no aparece ninguna.
+    """
+    q = query.strip().lower()
+    for nombre in sorted(_COMUNAS.keys(), key=len, reverse=True):
+        if nombre not in q:
+            continue
+        coords = _COMUNAS[nombre]
+        bonita = max(
+            (n for n in _COMUNAS if _COMUNAS[n] == coords),
+            key=lambda n: (any(c in n for c in "áéíóúñ"), len(n)),
+        )
+        return " ".join(parte.capitalize() for parte in bonita.split())
+    return None
+
+
 async def fetch_historico(
     lat: float = DEFAULT_LAT,
     lon: float = DEFAULT_LON,
@@ -870,8 +934,10 @@ async def fetch_historico(
 
     _historical_cache_set(lat, lon, years, summaries)
     logger.info(
-        "Histórico obtenido para (%.4f, %.4f): %d años (%d-%d)",
-        lat, lon, len(summaries), start_year, end_year,
+        "Histórico obtenido — years_count=%d rango_inicio=%d rango_fin=%d",
+        len(summaries),
+        start_year,
+        end_year,
     )
     return summaries
 
@@ -913,7 +979,10 @@ async def _fetch_historical_data(
         logger.warning("OpenMeteo Archive respondió HTTP %s", exc.response.status_code)
         raise RuntimeError(f"OpenMeteo Archive respondió HTTP {exc.response.status_code}") from exc
     except httpx.RequestError as exc:
-        logger.warning("Error de red al consultar OpenMeteo Archive: %s", exc)
+        logger.warning(
+            "Error de red al consultar OpenMeteo Archive — error=%s",
+            type(exc).__name__,
+        )
         raise ConnectionError("Error de red al consultar OpenMeteo Archive") from exc
     except ValueError as exc:
         raise RuntimeError(f"Respuesta de OpenMeteo Archive malformada: {exc}") from exc
@@ -1068,6 +1137,101 @@ def _format_historico_text(
     return texto
 
 
+def _format_pronostico_text(dias: list[ForecastDay], comuna: str) -> str:
+    """Arma el texto hablado del pronostico para el LLM y el TTS.
+
+    Formato pensado para voz: sin tablas ni simbolos que Piper deletree.
+    La lluvia se menciona solo si se espera algo, para no llenar la respuesta
+    de "0 milimetros" cuando no viene agua.
+
+    SOLO INFORMA. No dice si regar, sembrar ni cosechar.
+
+    Args:
+        dias: Pronostico diario ya consultado, ordenado por fecha.
+        comuna: Nombre de la comuna para nombrarla en la respuesta.
+
+    Returns:
+        Texto natural en espanol chileno.
+    """
+    if not dias:
+        return f"No tengo pronóstico disponible para {comuna} ahora."
+
+    etiquetas = ["Mañana", "Pasado mañana"]
+    partes: list[str] = []
+
+    for i, dia in enumerate(dias):
+        cuando = etiquetas[i] if i < len(etiquetas) else f"El {dia.fecha.strftime('%d/%m')}"
+
+        tramos: list[str] = []
+        if dia.temp_max_c is not None and dia.temp_min_c is not None:
+            tramos.append(
+                f"máxima de {round(dia.temp_max_c)} grados y mínima de {round(dia.temp_min_c)}"
+            )
+        elif dia.temp_max_c is not None:
+            tramos.append(f"máxima de {round(dia.temp_max_c)} grados")
+
+        # La lluvia se nombra siempre: "no llueve" tambien es la respuesta a
+        # "va a llover manana?", y omitirla dejaria la pregunta sin contestar.
+        lluvia = dia.precipitation_sum_mm
+        if lluvia is not None and lluvia >= 0.1:
+            mm = f"{lluvia:.1f}".replace(".", ",")
+            tramos.append(f"{mm} milímetros de lluvia")
+        elif lluvia is not None:
+            tramos.append("sin lluvia")
+
+        if tramos:
+            partes.append(f"{cuando} en {comuna}: {', '.join(tramos)}")
+
+    if not partes:
+        return f"No tengo pronóstico disponible para {comuna} ahora."
+
+    return f"{'. '.join(partes)}. Según OpenMeteo."
+
+
+async def get_pronostico(comuna: str, dias: int = 2) -> str:
+    """Tool function para el LLM: pronostico de los proximos dias.
+
+    Responde preguntas como "va a llover manana?" o "como viene el tiempo?".
+    Antes de esta tool el LLM solo tenia clima ACTUAL (get_weather) e
+    historico, asi que una pregunta sobre manana no se podia contestar con
+    datos: es la consulta mas comun del productor antes de decidir si cosecha.
+
+    SOLO INFORMA DATOS. Sin recomendaciones agronomicas: entrega milimetros y
+    temperaturas, no dice si regar o cosechar.
+
+    Args:
+        comuna: Nombre de la comuna (ej: "Traiguen", "Temuco", "Santiago").
+        dias: Cuantos dias de pronostico (1 a 3). Por defecto 2.
+
+    Returns:
+        Texto natural en espanol chileno para TTS.
+    """
+    coords = _resolver_comuna(comuna)
+    if coords is None:
+        return (
+            f"Disculpa, no reconozco la comuna '{comuna}'. "
+            "Puedo consultar Traiguén, Temuco, Padre Las Casas, Lautaro, "
+            "Villarrica y otras de la Araucanía, o Santiago. "
+            "¿Cuál te interesa?"
+        )
+
+    lat, lon = coords
+    dias_pedidos = min(max(dias, 1), 3)
+
+    try:
+        pronostico = await get_weather_forecast_daily(lat, lon, days=dias_pedidos)
+        return _format_pronostico_text(pronostico, comuna)
+    except (ConnectionError, RuntimeError, ValueError) as exc:
+        logger.warning(
+            "Error al consultar pronóstico — error=%s",
+            type(exc).__name__,
+        )
+        return (
+            f"No pude consultar el pronóstico de {comuna} ahora. "
+            "¿Probamos más tarde?"
+        )
+
+
 async def get_clima_historico(comuna: str, metrica: str | None = None) -> str:
     """Tool function para el LLM: consulta clima histórico de una comuna.
 
@@ -1089,8 +1253,9 @@ async def get_clima_historico(comuna: str, metrica: str | None = None) -> str:
     if coords is None:
         return (
             f"Disculpa, no reconozco la comuna '{comuna}'. "
-            "Las comunas disponibles son: Traiguén, Temuco, Santiago. "
-            "¿Podrías decirme cuál te interesa?"
+            "Puedo consultar Traiguén, Temuco, Padre Las Casas, Lautaro, "
+            "Villarrica y otras de la Araucanía, o Santiago. "
+            "¿Cuál te interesa?"
         )
 
     lat, lon = coords
@@ -1104,7 +1269,10 @@ async def get_clima_historico(comuna: str, metrica: str | None = None) -> str:
             )
         return _format_historico_text(summaries, comuna, metrica=metrica)
     except (ConnectionError, RuntimeError) as exc:
-        logger.warning("Error al consultar histórico de %s: %s", comuna, exc)
+        logger.warning(
+            "Error al consultar histórico — error=%s",
+            type(exc).__name__,
+        )
         return (
             f"No pude consultar el histórico climático de {comuna} ahora. "
             "¿Probamos más tarde?"
