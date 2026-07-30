@@ -38,6 +38,7 @@ dev = [
     { name = "pytest-bdd" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "websockets" },
 ]
 
 [package.metadata]
@@ -67,6 +68,7 @@ dev = [
     { name = "pytest-bdd", specifier = "==8.1.0" },
     { name = "pytest-cov", specifier = "==7.1.0" },
     { name = "ruff", specifier = "==0.15.22" },
+    { name = "websockets", specifier = "==16.0" },
 ]
 
 [[package]]
