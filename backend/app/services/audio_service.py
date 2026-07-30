@@ -19,6 +19,7 @@ import httpx
 
 from app.core.config import settings
 from app.core.phone_hash import hash_phone
+from app.services import consultation_history_service, delivery_service
 from app.services.openwa_service import OpenWAService
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,84 @@ _HELLO_OGG_PATH = Path(__file__).resolve().parent.parent / "static" / "hello.ogg
 # Tamano maximo de archivo de audio (25 MB). WhatsApp limita audios a ~16 MB,
 # pero este limite es defensivo contra archivos maliciosos o corruptos.
 _MAX_AUDIO_SIZE_BYTES = 25 * 1024 * 1024
+
+
+def _delivery_error_code(exc: Exception) -> str:
+    """Mapea un fallo de envío a un código estable sin persistir su mensaje."""
+    if isinstance(exc, (TimeoutError, httpx.TimeoutException)):
+        return "openwa_timeout"
+    if isinstance(exc, httpx.ConnectError):
+        return "openwa_connection_error"
+    if isinstance(exc, httpx.HTTPError):
+        return "openwa_http_error"
+    if isinstance(exc, ValueError):
+        return "openwa_invalid_response"
+    if isinstance(exc, (OSError, RuntimeError)):
+        return "openwa_send_failed"
+    return "openwa_unexpected_error"
+
+
+async def _mark_delivery_delivered(consultation_id: int | None) -> None:
+    """Persiste una entrega exitosa sin afectar el envío si la DB falla."""
+    if consultation_id is None:
+        return
+
+    try:
+        await asyncio.to_thread(delivery_service.mark_delivery_delivered, consultation_id)
+    except Exception:
+        logger.warning(
+            "No se pudo registrar entrega exitosa — consultation_id=%s",
+            consultation_id,
+        )
+
+
+async def _save_delivered_history(consultation_id: int | None) -> None:
+    """Copia historial consentido y elimina siempre el staging transitorio."""
+    if consultation_id is None:
+        return
+
+    try:
+        await asyncio.to_thread(
+            consultation_history_service.save_delivered_consultation_to_history,
+            consultation_id,
+        )
+    except Exception:
+        logger.warning(
+            "No se pudo procesar historial post-entrega — consultation_id=%s",
+            consultation_id,
+        )
+    finally:
+        try:
+            await asyncio.to_thread(
+                delivery_service.redact_consultation_content,
+                consultation_id,
+            )
+        except Exception:
+            logger.warning(
+                "No se pudo redactar contenido post-entrega — consultation_id=%s",
+                consultation_id,
+            )
+
+
+async def _mark_delivery_failed(
+    consultation_id: int | None,
+    error_code: str,
+) -> None:
+    """Persiste un fallo de entrega usando solo un código estable."""
+    if consultation_id is None:
+        return
+
+    try:
+        await asyncio.to_thread(
+            delivery_service.mark_delivery_failed,
+            consultation_id,
+            error_code,
+        )
+    except Exception:
+        logger.warning(
+            "No se pudo registrar entrega fallida — consultation_id=%s",
+            consultation_id,
+        )
 
 
 def sanitize_message_id(message_id: str) -> str:
@@ -94,13 +173,8 @@ def validate_path_in_audio_dir(path: Path, audio_dir: Path) -> Path:
     resolved = path.resolve()
     audio_resolved = audio_dir.resolve()
     if not str(resolved).startswith(str(audio_resolved) + "/") and resolved != audio_resolved:
-        logger.warning(
-            "Path traversal detectado — path=%s audio_dir=%s resolved=%s",
-            path,
-            audio_dir,
-            resolved,
-        )
-        raise ValueError(f"Path fuera del directorio de audio: {resolved}")
+        logger.warning("Path traversal detectado — recurso=audio_temporal")
+        raise ValueError("Path fuera del directorio de audio permitido")
     return resolved
 
 
@@ -137,18 +211,14 @@ def convert_ogg_to_wav(input_path: Path, output_path: Path) -> None:
         str(output_path),
     ]
 
-    logger.info("Convirtiendo audio — input=%s output=%s", input_path.name, output_path.name)
+    logger.info("Convirtiendo audio — estado=iniciado")
     try:
         subprocess.run(cmd, capture_output=True, check=True, timeout=30)
     except subprocess.TimeoutExpired:
-        logger.error("ffmpeg timeout (30s) — input=%s", input_path.name)
+        logger.error("ffmpeg timeout — timeout_seconds=30")
         raise
     except subprocess.CalledProcessError as exc:
-        logger.error(
-            "ffmpeg fallo — input=%s stderr=%s",
-            input_path.name,
-            exc.stderr.decode("utf-8", errors="replace") if exc.stderr else "(sin stderr)",
-        )
+        logger.error("ffmpeg falló — returncode=%d", exc.returncode)
         raise
     logger.info(
         "Audio convertido — input_size=%d output_size=%d",
@@ -271,11 +341,9 @@ class AudioService:
             # Guardar .ogg temporal desde los bytes recibidos
             ogg_path.write_bytes(audio_bytes)
             logger.info(
-                "Audio guardado — message_id=%s chat_id_hash=%s size_bytes=%d path=%s request_id=%s",
+                "Audio guardado — message_id=%s size_bytes=%d request_id=%s",
                 message_id,
-                chat_id_hash,
                 len(audio_bytes),
-                ogg_path,
                 request_id,
             )
 
@@ -284,10 +352,8 @@ class AudioService:
 
             audio_duration_ms = await asyncio.to_thread(get_audio_duration_ms, wav_path)
             logger.info(
-                "Audio listo para pipeline — message_id=%s chat_id_hash=%s wav_path=%s duration_ms=%d request_id=%s",
+                "Audio listo para pipeline — message_id=%s duration_ms=%d request_id=%s",
                 message_id,
-                chat_id_hash,
-                wav_path,
                 audio_duration_ms,
                 request_id,
             )
@@ -311,7 +377,15 @@ class AudioService:
                 chat_id=chat_id,
             )
 
+            consultation_id = pipeline_result.consultation_id
             response_ogg_path: str | None = pipeline_result.audio_path if pipeline_result.audio_path else None
+            has_primary_response = response_ogg_path is not None
+
+            if not has_primary_response:
+                await _mark_delivery_failed(
+                    consultation_id,
+                    "pipeline_no_response",
+                )
 
             # Fallback a hello.ogg si TTS no genero audio
             if response_ogg_path is None:
@@ -319,9 +393,8 @@ class AudioService:
                     response_ogg_path = str(_HELLO_OGG_PATH)
                 else:
                     logger.warning(
-                        "hello.ogg no encontrado — message_id=%s path=%s",
+                        "Audio fallback no encontrado — message_id=%s",
                         message_id,
-                        _HELLO_OGG_PATH,
                     )
 
             # Onboarding (#86): si es primer contacto, enviar bienvenida PRIMERO.
@@ -332,9 +405,8 @@ class AudioService:
                 try:
                     await openwa.send_audio(chat_id, pipeline_result.welcome_audio_path)
                     logger.info(
-                        "Bienvenida enviada — message_id=%s chat_id_hash=%s request_id=%s",
+                        "Bienvenida enviada — message_id=%s request_id=%s",
                         message_id,
-                        chat_id_hash,
                         request_id,
                     )
                 except (httpx.HTTPError, OSError, RuntimeError):
@@ -358,15 +430,29 @@ class AudioService:
             if response_ogg_path:
                 try:
                     await openwa.send_audio(chat_id, response_ogg_path)
+                    if has_primary_response:
+                        await _mark_delivery_delivered(consultation_id)
+                        await _save_delivered_history(consultation_id)
+                        if pipeline_result.intent == "credito":
+                            await self._enviar_fuentes_indap(
+                                openwa,
+                                chat_id,
+                                pipeline_result.text_response,
+                            )
                     e2e_ms = int((time.monotonic() - start_time) * 1000)
                     logger.info(
-                        "Respuesta enviada — message_id=%s chat_id_hash=%s audio=%s e2e_ms=%d request_id=%s",
+                        "Respuesta enviada — message_id=%s e2e_ms=%d request_id=%s",
                         message_id,
-                        chat_id_hash,
-                        Path(response_ogg_path).name,
                         e2e_ms,
                         request_id,
                     )
+                except (httpx.HTTPError, OSError, RuntimeError, TypeError, ValueError) as exc:
+                    if has_primary_response:
+                        await _mark_delivery_failed(
+                            consultation_id,
+                            _delivery_error_code(exc),
+                        )
+                    raise
                 finally:
                     # Limpiar archivo TTS generado incluso si send_audio falla
                     # (P2: cleanup garantizado, no solo en path exitoso)
@@ -398,18 +484,16 @@ class AudioService:
             except (httpx.HTTPError, OSError, RuntimeError):
                 logger.debug("No se pudo limpiar indicador recording en error path")
             elapsed_ms = (time.monotonic() - start_time) * 1000
-            logger.exception(
-                "Error procesando audio en background — message_id=%s chat_id_hash=%s elapsed_ms=%d request_id=%s",
+            logger.error(
+                "Error procesando audio en background — message_id=%s elapsed_ms=%d request_id=%s",
                 message_id,
-                chat_id_hash,
                 int(elapsed_ms),
                 request_id,
             )
         except asyncio.CancelledError:
             logger.warning(
-                "Procesamiento de audio cancelado — message_id=%s chat_id_hash=%s request_id=%s",
+                "Procesamiento de audio cancelado — message_id=%s request_id=%s",
                 message_id,
-                chat_id_hash,
                 request_id,
             )
             raise
@@ -421,6 +505,30 @@ class AudioService:
                 ogg_path.unlink(missing_ok=True)
             if wav_path is not None:
                 wav_path.unlink(missing_ok=True)
+
+    @staticmethod
+    async def _enviar_fuentes_indap(
+        openwa: OpenWAService,
+        chat_id: str,
+        response_text: str,
+    ) -> None:
+        """Envía una sola tarjeta escrita con URLs INDAP allowlisted.
+
+        El audio principal ya fue aceptado y marcado como entregado cuando
+        entra a este helper. Por eso un fallo del complemento solo genera un
+        warning estable y nunca modifica el estado de entrega principal.
+        """
+        from app.services.indap_credit_service import build_indap_sources_message
+
+        message = build_indap_sources_message(response_text)
+        if message is None:
+            logger.warning("Fuentes INDAP no enviadas — code=indap_sources_missing")
+            return
+        try:
+            await openwa.send_text(chat_id, message)
+            logger.info("Fuentes INDAP enviadas — code=indap_sources_sent")
+        except (httpx.HTTPError, OSError, RuntimeError, TypeError, ValueError):
+            logger.warning("Fuentes INDAP no enviadas — code=indap_sources_send_failed")
 
     @staticmethod
     async def _enviar_aviso_responsabilidad(
@@ -483,9 +591,8 @@ class AudioService:
         message_id = f"texto_{uuid.uuid4().hex[:8]}"
 
         logger.info(
-            "Consulta de texto recibida — message_id=%s chat_id_hash=%s chars=%d request_id=%s",
+            "Consulta de texto recibida — message_id=%s chars=%d request_id=%s",
             message_id,
-            chat_id_hash,
             len(texto),
             request_id,
         )
@@ -507,6 +614,7 @@ class AudioService:
                 texto_directo=texto,
                 generar_audio=False,
             )
+            consultation_id = resultado.consultation_id
 
             # Aviso de responsabilidad ANTES de la primera respuesta, igual que
             # en el camino de audio. Quien escribe no recibe bienvenida hablada,
@@ -515,28 +623,37 @@ class AudioService:
                 await self._enviar_aviso_responsabilidad(openwa, chat_id, request_id)
 
             if resultado.text_response:
-                await openwa.send_text(chat_id, resultado.text_response)
+                try:
+                    await openwa.send_text(chat_id, resultado.text_response)
+                except (httpx.HTTPError, OSError, RuntimeError, TypeError, ValueError) as exc:
+                    await _mark_delivery_failed(
+                        consultation_id,
+                        _delivery_error_code(exc),
+                    )
+                    raise
+                await _mark_delivery_delivered(consultation_id)
+                await _save_delivered_history(consultation_id)
                 logger.info(
-                    "Respuesta de texto enviada — message_id=%s chat_id_hash=%s "
-                    "intent=%s e2e_ms=%d request_id=%s",
+                    "Respuesta de texto enviada — message_id=%s intent=%s e2e_ms=%d request_id=%s",
                     message_id,
-                    chat_id_hash,
                     resultado.intent,
                     int((time.monotonic() - start_time) * 1000),
                     request_id,
                 )
             else:
+                await _mark_delivery_failed(
+                    consultation_id,
+                    "pipeline_no_response",
+                )
                 logger.warning(
                     "Pipeline no genero respuesta para consulta de texto — message_id=%s request_id=%s",
                     message_id,
                     request_id,
                 )
         except (httpx.HTTPError, OSError, ValueError, RuntimeError, TypeError):
-            logger.exception(
-                "Error procesando consulta de texto — message_id=%s chat_id_hash=%s "
-                "elapsed_ms=%d request_id=%s",
+            logger.error(
+                "Error procesando consulta de texto — message_id=%s elapsed_ms=%d request_id=%s",
                 message_id,
-                chat_id_hash,
                 int((time.monotonic() - start_time) * 1000),
                 request_id,
             )

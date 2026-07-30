@@ -9,6 +9,7 @@ Estructura real del payload de Open-WA verificada con trafico en vivo (2026-06-2
 import hashlib
 import hmac as hmac_mod
 import json
+import logging
 import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
@@ -189,6 +190,7 @@ async def test_webhook_firma_valida_voice_retorna_200(
 @pytest.mark.asyncio
 async def test_webhook_mensaje_texto_retorna_200_ignorado(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Mensaje de texto (type=text) se procesa como consulta, no se ignora.
 
@@ -198,6 +200,7 @@ async def test_webhook_mensaje_texto_retorna_200_ignorado(
     """
     from app.main import app
 
+    caplog.set_level(logging.INFO, logger="app.api.webhooks")
     monkeypatch.setattr(settings, "openwa_webhook_secret", "test-secret")
 
     procesados: list[str] = []
@@ -231,6 +234,9 @@ async def test_webhook_mensaje_texto_retorna_200_ignorado(
     data = response.json()
     assert data["status"] == "received"
     assert procesados == ["¿A cuanto esta la papa?"]
+    assert "¿A cuanto esta la papa?" not in caplog.text
+    assert "248069442560050" not in caplog.text
+    assert "chat_id_hash" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -301,6 +307,7 @@ async def test_webhook_mensaje_voice_sin_media_ignorado(
 @pytest.mark.asyncio
 async def test_webhook_payload_invalido_retorna_200_ignorado(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Payload que no cumple el esquema debe retornar 200 con status=ignored.
 
@@ -309,6 +316,7 @@ async def test_webhook_payload_invalido_retorna_200_ignorado(
     """
     from app.main import app
 
+    caplog.set_level(logging.WARNING, logger="app.api.webhooks")
     monkeypatch.setattr(settings, "openwa_webhook_secret", "test-secret")
 
     # data mal tipado -> ValidationError
@@ -332,6 +340,7 @@ async def test_webhook_payload_invalido_retorna_200_ignorado(
     data = response.json()
     assert data["status"] == "ignored"
     assert data["reason"] == "payload_invalido"
+    assert "esto_no_es_un_objeto" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -652,6 +661,7 @@ def test_extract_audio_bytes_voice_sin_media_retorna_none() -> None:
 async def test_audio_service_process_audio_happy_path(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """AudioService.process_audio guarda, convierte, envia respuesta y limpia sin errores.
 
@@ -660,6 +670,7 @@ async def test_audio_service_process_audio_happy_path(
     """
     from app.services.audio_service import AudioService
 
+    caplog.set_level(logging.INFO, logger="app.services.audio_service")
     fake_ogg = b"FAKE_OGG_DATA"
 
     # Mock convert_ogg_to_wav para no ejecutar ffmpeg
@@ -718,6 +729,9 @@ async def test_audio_service_process_audio_happy_path(
     assert len(send_audio_calls) == 1
     assert send_audio_calls[0][0] == "248069442560050@lid"
     assert send_audio_calls[0][1] == str(hello_ogg)
+    assert "248069442560050" not in caplog.text
+    assert str(tmp_path) not in caplog.text
+    assert "chat_id_hash" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -921,10 +935,12 @@ async def test_audio_service_hello_ogg_no_existe_no_crashea(
 async def test_audio_service_send_audio_falla_logs_pero_no_crashea(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Si send_audio lanza HTTPError, process_audio loguea el error sin propagar."""
     from app.services.audio_service import AudioService
 
+    caplog.set_level(logging.INFO, logger="app.services.audio_service")
     def fake_convert(input_path: Path, output_path: Path) -> None:
         output_path.write_bytes(b"FAKE_WAV_DATA")
 
@@ -941,7 +957,9 @@ async def test_audio_service_send_audio_falla_logs_pero_no_crashea(
     async def fake_send_audio_error(
         _self: object, target: str, audio_path: str, caption: str | None = None
     ) -> dict[str, object]:
-        raise httpx.ConnectError("Open-WA no disponible")
+        raise httpx.ConnectError(
+            f"secreto-audio target={target} path={audio_path}"
+        )
 
     monkeypatch.setattr(
         "app.services.openwa_service.OpenWAService.send_audio",
@@ -955,6 +973,10 @@ async def test_audio_service_send_audio_falla_logs_pero_no_crashea(
         chat_id="248069442560050@lid",
         request_id="req-id",
     )
+    assert "secreto-audio" not in caplog.text
+    assert "248069442560050" not in caplog.text
+    assert str(tmp_path) not in caplog.text
+    assert "chat_id_hash" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -1163,20 +1185,6 @@ async def test_audio_service_process_audio_whisper_timeout_continua(
 
     # Pipeline continua: send_audio se llama aunque Whisper timeout
     assert send_audio_called
-
-
-def test_hash_phone_for_log_consistencia() -> None:
-    """_hash_phone_for_log produce el mismo prefijo que hash_phone completo."""
-    from app.core.config import settings
-    from app.core.phone_hash import hash_phone
-    from app.services.openwa_service import _hash_phone_for_log
-
-    phone = "+56912345678"
-    full = hash_phone(phone, settings.phone_hash_pepper)
-    truncated = _hash_phone_for_log(phone)
-
-    assert len(truncated) == 8
-    assert full.startswith(truncated)
 
 
 def test_compute_hmac_consistente() -> None:
