@@ -169,6 +169,20 @@ class Settings(BaseSettings):
     # defecto: sin dominio configurado, la tool no ofrece el link.
     panel_base_url: str = ""
 
+    # ── Console de agrónomos PRODESAL (C4) ──
+    # Un agrónomo sigue a "varios productores" a través de un contacto
+    # prodesal_group (#173): ese identity_type ya representa varios
+    # productores compartiendo un número de WhatsApp. El equipo genera el
+    # link vía admin, no el agricultor por voz — un agrónomo no es un
+    # contacto de WhatsApp propio en este sistema.
+    agronomist_console_enabled: bool = False
+    # Clave dedicada, nunca compartida con panel_link_secret: un link de
+    # agrónomo filtrado no debe habilitar links de panel de agricultor, y
+    # viceversa.
+    agronomist_link_secret: SecretStr = SecretStr("")
+    agronomist_link_ttl_hours: int = Field(default=72, ge=1, le=168)
+    agronomist_base_url: str = ""
+
     # ── Versión ──────────────────────────
     app_version: str = "0.1.0-dev"
 
