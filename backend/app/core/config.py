@@ -182,6 +182,11 @@ class Settings(BaseSettings):
     parcela_tracking_enabled: bool = False
     # Retención técnica: un ciclo agrícola completo (temporada a temporada).
     parcela_retention_days: int = Field(default=365, ge=1, le=730)
+    # Motor de reglas agronómicas citadas (C1+C2). No persiste datos
+    # personales, pero es una capacidad nueva con riesgo real de
+    # responsabilidad si un diagnóstico resulta incorrecto: queda apagada
+    # hasta que el equipo valide el corpus y el matching con productores.
+    agronomic_rules_enabled: bool = False
 
     # ── Logging ──────────────────────────
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"

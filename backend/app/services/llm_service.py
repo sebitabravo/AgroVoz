@@ -78,6 +78,7 @@ WHITELIST_TOOLS = frozenset(
         "register_expense",
         "register_parcela",
         "get_parcelas",
+        "get_regla_agronomica",
     }
 )
 
@@ -594,6 +595,34 @@ TOOLS: list[dict[str, object]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_regla_agronomica",
+            "description": (
+                "USAR cuando el agricultor describa un SINTOMA o PROBLEMA de su cultivo, "
+                "o pregunte CUANDO sembrar, cosechar o rotar. "
+                "NUNCA improvises la respuesta: esta tool resuelve contra reglas ya citadas "
+                "de INIA. Si no hay una regla que calce, dice que no tiene el dato. "
+                "Ej: 'mis papas tienen manchas en las hojas', 'cuando siembro la papa', "
+                "'que cultivo va antes de la papa'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sintoma": {
+                        "type": "string",
+                        "description": "Descripcion del problema o pregunta del agricultor",
+                    },
+                    "cultivo": {
+                        "type": "string",
+                        "description": "Cultivo mencionado (ej: papa). Opcional si no lo dijo.",
+                    },
+                },
+                "required": ["sintoma"],
+            },
+        },
+    },
 ]
 
 # Subconjuntos de tools por tipo de consulta (TipoConsulta en schemas/variables).
@@ -628,6 +657,7 @@ _GATED_TOOLS: dict[str, Callable[[], bool]] = {
     "register_expense": lambda: settings.expense_tracking_enabled,
     "register_parcela": lambda: settings.parcela_tracking_enabled,
     "get_parcelas": lambda: settings.parcela_tracking_enabled,
+    "get_regla_agronomica": lambda: settings.agronomic_rules_enabled,
 }
 
 
@@ -892,6 +922,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
     Los imports son lazy para evitar dependencias circulares y permitir
     que el modulo llm_service.py sea importable sin DB ni servicios.
     """
+    from app.services.agronomic_rules_service import get_agronomic_rule_for_llm
     from app.services.expense_service import register_expense_for_llm
     from app.services.odepa_service import (
         calculate_margin_for_llm,
@@ -917,6 +948,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         "register_expense": register_expense_for_llm,
         "register_parcela": register_parcela_for_llm,
         "get_parcelas": get_parcelas_for_llm,
+        "get_regla_agronomica": get_agronomic_rule_for_llm,
     }
 
 

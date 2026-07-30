@@ -1,0 +1,81 @@
+# Corpus de reglas agronómicas citadas (C1+C2, hard constraint de AGENTS.md).
+#
+# El LLM NUNCA improvisa un consejo agronómico. Cada regla resuelve
+# determinísticamente una consulta específica desde un hecho ya verificado
+# en corpus/inia_papa.yaml, sin parafrasear ni inventar contenido nuevo.
+# Si no hay una regla que calce, el sistema dice que no tiene el dato — no
+# rellena con una respuesta genérica.
+#
+# Formato de vigencia igual al de indap_creditos.yaml: verificado_el /
+# revisar_antes_de. Si el snapshot vence, el motor falla cerrado.
+version: 1
+verificado_el: "2026-07-30"
+revisar_antes_de: "2027-01-30"
+reglas:
+  - id: "papa_tizon_tardio"
+    cultivo: "papa"
+    sintomas:
+      - "manchas marrones en las hojas"
+      - "manchas en las hojas"
+      - "hojas con manchas"
+      - "pudre el tuberculo"
+      - "se pudre la papa"
+      - "hojas manchadas"
+    fuente: "INIA Chile — Ficha técnica: Cultivo de la papa"
+    fecha: "2024"
+    diagnostico: >
+      Según INIA, el tizón tardío (Phytophthora infestans) es la enfermedad
+      más importante del cultivo de papa en Chile. Se presenta en
+      condiciones de alta humedad y temperaturas entre 10°C y 25°C. Los
+      síntomas incluyen manchas marrones en hojas y pudrición del tubérculo.
+    siguiente_paso: "Consulta a tu agrónomo PRODESAL o a INDAP para definir un tratamiento."
+
+  - id: "papa_epoca_siembra"
+    cultivo: "papa"
+    sintomas:
+      - "cuando planto"
+      - "cuando siembro"
+      - "epoca de siembra"
+      - "epoca de plantacion"
+      - "cuando puedo sembrar"
+    fuente: "INIA Chile — Ficha técnica: Cultivo de la papa"
+    fecha: "2024"
+    diagnostico: >
+      Según ficha técnica INIA, la papa requiere suelos profundos, bien
+      drenados y con pH entre 5.0 y 6.5. La preparación del suelo incluye
+      aradura y rastraje. La época de plantación en la zona centro-sur de
+      Chile es entre agosto y noviembre, dependiendo de la variedad y la
+      altitud.
+    siguiente_paso: null
+
+  - id: "papa_rotacion_cultivos"
+    cultivo: "papa"
+    sintomas:
+      - "rotacion de cultivos"
+      - "que sembre antes"
+      - "despues de que cultivo"
+      - "que cultivo va antes"
+    fuente: "INIA Chile — Ficha técnica: Cultivo de la papa"
+    fecha: "2024"
+    diagnostico: >
+      INIA recomienda rotación de cultivos cada 3-4 años para prevenir
+      enfermedades del suelo. Los cultivos que anteceden a la papa no deben
+      ser solanáceas (tomate, ají, berenjena). Cultivos como cereales,
+      leguminosas o praderas son adecuados como antecesores.
+    siguiente_paso: null
+
+  - id: "papa_epoca_cosecha"
+    cultivo: "papa"
+    sintomas:
+      - "cuando cosecho"
+      - "esta lista la papa"
+      - "cuando se cosecha"
+      - "cuando sacar la papa"
+    fuente: "INIA Chile — Ficha técnica: Cultivo de la papa"
+    fecha: "2024"
+    diagnostico: >
+      La cosecha de papa, según ficha INIA, se realiza cuando el follaje se
+      ha secado completamente, aproximadamente 90 a 150 días después de la
+      plantación. El rendimiento promedio nacional es de 25 a 35 toneladas
+      por hectárea en secano y hasta 50 toneladas bajo riego.
+    siguiente_paso: null
