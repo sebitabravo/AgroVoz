@@ -3,6 +3,15 @@
 #   2. El issue referenciado tiene label status:approved
 #   3. El PR tiene al menos un label mod:* (módulo)
 #
+# Los PRs de Dependabot quedan exentos de los tres jobs: el flujo issue-first
+# describe trabajo que decide una persona, y el bot no puede abrir un issue ni
+# hacer que un tech lead lo apruebe antes de proponer un bump. Exigirselo dejaba
+# toda actualización de dependencia bloqueada por definición. Lo que gobierna
+# esos PRs es .github/dependabot.yml, no este gate.
+#
+# Un job saltado por `if` cuenta como aprobado para branch protection, asi que
+# esto sigue siendo seguro de marcar como REQUIRED.
+#
 # Adaptado del patrón gentleman-guardian-angel. Hacer este check REQUIRED en
 # branch protection (Settings → Branches → main → Require status checks).
 name: pr-check
@@ -21,6 +30,7 @@ jobs:
   check-issue-ref:
     name: PR referencia un issue
     runs-on: ubuntu-latest
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     steps:
       - uses: actions/github-script@v9
         with:
@@ -42,6 +52,7 @@ jobs:
   check-issue-approved:
     name: Issue tiene status:approved
     runs-on: ubuntu-latest
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     steps:
       - uses: actions/github-script@v9
         with:
@@ -80,6 +91,7 @@ jobs:
   check-pr-module-label:
     name: PR tiene label mod:*
     runs-on: ubuntu-latest
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     steps:
       - uses: actions/github-script@v9
         with:
