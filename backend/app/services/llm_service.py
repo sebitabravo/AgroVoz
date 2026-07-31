@@ -79,6 +79,7 @@ WHITELIST_TOOLS = frozenset(
         "register_parcela",
         "get_parcelas",
         "get_regla_agronomica",
+        "get_link_resumen",
     }
 )
 
@@ -623,6 +624,22 @@ TOOLS: list[dict[str, object]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_link_resumen",
+            "description": (
+                "USAR cuando el agricultor pida VER, MANDAR o ENVIAR un resumen, panel o link "
+                "con sus datos (parcelas, alertas, comuna). "
+                "Ej: 'mandame mi resumen', 'quiero ver mis datos', 'dame el link del panel'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
 ]
 
 # Subconjuntos de tools por tipo de consulta (TipoConsulta en schemas/variables).
@@ -658,6 +675,7 @@ _GATED_TOOLS: dict[str, Callable[[], bool]] = {
     "register_parcela": lambda: settings.parcela_tracking_enabled,
     "get_parcelas": lambda: settings.parcela_tracking_enabled,
     "get_regla_agronomica": lambda: settings.agronomic_rules_enabled,
+    "get_link_resumen": lambda: settings.farmer_panel_enabled,
 }
 
 
@@ -931,6 +949,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         get_price_history_for_llm,
         get_price_spread_for_llm,
     )
+    from app.services.panel_service import get_panel_link_for_llm
     from app.services.parcela_service import get_parcelas_for_llm, register_parcela_for_llm
     from app.services.rag_service import search_corpus_for_llm
     from app.services.weather_service import get_clima_historico, get_pronostico, get_weather
@@ -949,6 +968,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         "register_parcela": register_parcela_for_llm,
         "get_parcelas": get_parcelas_for_llm,
         "get_regla_agronomica": get_agronomic_rule_for_llm,
+        "get_link_resumen": get_panel_link_for_llm,
     }
 
 
@@ -1002,6 +1022,7 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
             "register_expense",
             "register_parcela",
             "get_parcelas",
+            "get_link_resumen",
         )
         and phone_hash
     ):

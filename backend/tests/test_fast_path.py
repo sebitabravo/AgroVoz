@@ -393,9 +393,10 @@ class TestSubsetDeTools:
     def test_desconocido_incluye_todas_las_tools_habilitadas(self) -> None:
         """Sin certeza no se recorta: el modelo necesita todas las opciones.
 
-        ``register_expense``, las tools de parcela y la de reglas agronomicas
-        quedan fuera mientras sus feature gates estén apagados (#170, C5,
-        C1+C2); la cobertura de esos filtros vive en ``test_llm_service.py``.
+        ``register_expense``, las tools de parcela, la de reglas agronomicas
+        y la del panel quedan fuera mientras sus feature gates estén apagados
+        (#170, C5, C1+C2, C3); la cobertura de esos filtros vive en
+        ``test_llm_service.py``.
         """
         seccion = _TOOLS_SECTION_POR_TIPO["desconocido"]
         for tool in (
@@ -413,6 +414,7 @@ class TestSubsetDeTools:
         assert '"name": "register_parcela"' not in seccion
         assert '"name": "get_parcelas"' not in seccion
         assert '"name": "get_regla_agronomica"' not in seccion
+        assert '"name": "get_link_resumen"' not in seccion
 
     def test_recorte_reduce_el_prompt(self) -> None:
         completo = len(_TOOLS_SECTION_POR_TIPO["desconocido"])

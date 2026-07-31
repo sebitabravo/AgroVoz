@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="es-CL">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AgroVoz — Mi resumen</title>
+  <meta name="description" content="Tu resumen de AgroVoz: comuna, cultivos, parcelas y alertas." />
+  <link rel="manifest" href="/static/panel/manifest.json" />
+  <link rel="icon" href="/static/favicon.svg" />
+  <meta name="theme-color" content="#4f7d5a" />
+  <style>
+    :root { color-scheme: light; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 1.5rem;
+      background: #fbfaf7;
+      color: #1f2a20;
+    }
+    main { max-width: 32rem; margin: 0 auto; }
+    h1 { font-size: 1.25rem; color: #4f7d5a; }
+    .card {
+      background: #fff;
+      border: 1px solid #e2ddd0;
+      border-radius: 0.5rem;
+      padding: 1rem;
+      margin-bottom: 0.75rem;
+    }
+    .card h2 { font-size: 0.95rem; margin: 0 0 0.5rem; }
+    .muted { color: #6b6b6b; font-size: 0.875rem; }
+    #estado-offline {
+      display: none;
+      background: #fff4e0;
+      border: 1px solid #e0c070;
+      border-radius: 0.5rem;
+      padding: 0.5rem 0.75rem;
+      margin-bottom: 0.75rem;
+      font-size: 0.875rem;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Mi resumen — AgroVoz</h1>
+    <p id="estado-offline">Sin conexión: mostrando el último resumen guardado en este dispositivo.</p>
+    <div id="contenido">
+      <p class="muted">Cargando…</p>
+    </div>
+  </main>
+  <script src="/static/panel/app.js"></script>
+  <script src="/static/panel/register-sw.js"></script>
+</body>
+</html>
