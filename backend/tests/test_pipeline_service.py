@@ -9,20 +9,48 @@ ni Piper TTS.
 """
 
 import asyncio
+import logging
 import time
 from pathlib import Path
+from typing import cast
 from unittest.mock import Mock, patch
 
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.config import settings
+from app.core.constants import Intent
 from app.schemas.pipeline import AudioResponse
+from app.services import pipeline_service as pipeline_module
+from app.services.consultation_history_service import LatestConsultationContext
+from app.services.conversation_state import (
+    ConversationClaim,
+    ConversationLease,
+    ConversationRegistry,
+    ConversationState,
+    TransitionStatus,
+)
 from app.services.pipeline_service import (
+    _CONVERSATION_BUSY_TEXT,
+    _HISTORY_VOICE_QUERY_MAX_CHARS,
+    _HISTORY_VOICE_RESPONSE_MAX_CHARS,
     _MAX_WHISPER_AUDIO_MS,
     _PIPELINE_TIMEOUT,
     _WHISPER_TIMEOUT,
     AgroVozPipeline,
 )
+
+_VALID_STATE_HASH = "9" * 64
+
+
+def _assert_datos_sensibles_ausentes(
+    caplog: pytest.LogCaptureFixture,
+    *valores: str,
+) -> None:
+    """Verifica que ningún valor sensible llegue al texto de los logs."""
+    for valor in valores:
+        assert valor not in caplog.text
+
 
 # ── Helpers ────────────────────────────────────────────────────────
 
@@ -102,7 +130,7 @@ def _mock_db_save(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
         tts_ms: int = 0,
         producto: str | None = None,
         requires_review: bool = False,
-    ) -> None:
+    ) -> int:
         calls.append(
             {
                 "phone_hash": phone_hash,
@@ -117,9 +145,47 @@ def _mock_db_save(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
                 "requires_review": requires_review,
             }
         )
+        return 42
 
     monkeypatch.setattr(AgroVozPipeline, "_save_consultation", fake_save)
     return calls
+
+
+def _enable_conversation_state(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    timeout_minutes: int = 30,
+) -> None:
+    """Activa el gate con un registro global limpio para una prueba."""
+    monkeypatch.setattr(settings, "use_conversation_state", True)
+    monkeypatch.setattr(
+        settings,
+        "conversation_timeout_minutes",
+        timeout_minutes,
+    )
+    monkeypatch.setattr(pipeline_module, "_conversation_registry", None)
+
+
+def _mock_generated_response(
+    monkeypatch: pytest.MonkeyPatch,
+    response_text: str = "La papa está a 500 pesos el kilo.",
+) -> None:
+    """Aísla la generación para probar únicamente la orquestación."""
+
+    async def fake_generate(
+        _transcribed_text: str,
+        _chat_id_hash: str,
+        origen_ref: list[str] | None = None,
+    ) -> tuple[str, Intent]:
+        if origen_ref is not None:
+            origen_ref[0] = "test"
+        return response_text, "precio"
+
+    monkeypatch.setattr(
+        AgroVozPipeline,
+        "_generate_response",
+        staticmethod(fake_generate),
+    )
 
 
 # ── _detect_intent ─────────────────────────────────────────────────
@@ -220,6 +286,42 @@ class TestIsResumenQuery:
         assert AgroVozPipeline._is_resumen_query("dame mi resumen por favor") is True
 
 
+# ── _is_explicit_history_query ─────────────────────────────────────
+
+
+class TestIsExplicitHistoryQuery:
+    """Detección cerrada del pedido de contexto anterior."""
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "¿Cuál fue mi última consulta?",
+            "qué pregunté antes",
+            "CONSULTA ANTERIOR",
+            "Por favor, dime cuál fue mi consulta anterior",
+        ],
+    )
+    def test_detecta_solo_frases_inequivocas(self, query: str) -> None:
+        assert AgroVozPipeline._is_explicit_history_query(query) is True
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "lo mismo",
+            "haz lo mismo",
+            "antes de consultar dime el clima",
+            "esta es una consulta anterior al almuerzo",
+            "precio de la papa",
+            "",
+        ],
+    )
+    def test_evade_referencias_ambiguas_y_falsos_positivos(
+        self,
+        query: str,
+    ) -> None:
+        assert AgroVozPipeline._is_explicit_history_query(query) is False
+
+
 # ── _extract_producto ──────────────────────────────────────────────
 
 
@@ -279,6 +381,251 @@ class TestGenerateResponse:
         assert "entendi" in text.lower() or "entendí" in text.lower()
         assert intent == "desconocido"
 
+    async def test_saludo_no_loguea_texto_ni_hash(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """El fast-path de saludo conserva solo la longitud del mensaje."""
+        secreto = "SALUDO-PRIVADO-NO-LOGUEAR"
+        phone_hash = "prefijohash-saludo-privado"
+        monkeypatch.setattr(
+            "app.services.llm_keywords._detect_greeting",
+            lambda _text: True,
+        )
+        caplog.set_level(logging.DEBUG, logger="app.services.pipeline_service")
+
+        _text, intent = await AgroVozPipeline._generate_response(
+            secreto,
+            phone_hash,
+        )
+
+        assert intent == "saludo"
+        assert f"chars={len(secreto)}" in caplog.text
+        _assert_datos_sensibles_ausentes(
+            caplog,
+            secreto,
+            phone_hash,
+            phone_hash[:8],
+        )
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "borra mi historial",
+            "¿Elimina todo mi historial, por favor?",
+            "borra mis consultas",
+            "desactiva mi historial",
+        ],
+    )
+    async def test_borrado_historial_revoca_sin_llm(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        query: str,
+    ) -> None:
+        """Una orden exacta usa la identidad verificada y evita el modelo."""
+        delete_calls: list[tuple[str, dict[str, object]]] = []
+
+        def fake_delete(phone_hash: str, **kwargs: object) -> object:
+            delete_calls.append((phone_hash, kwargs))
+            return object()
+
+        async def fail_llm(*_args: object, **_kwargs: object) -> str:
+            raise AssertionError("Un comando de privacidad no debe llegar al LLM")
+
+        monkeypatch.setattr(
+            "app.services.consultation_history_service.delete_history",
+            fake_delete,
+        )
+        monkeypatch.setattr("app.services.llm_service.answer", fail_llm)
+        origin = ["desconocido"]
+
+        text, intent = await AgroVozPipeline._generate_response(
+            query,
+            "a" * 64,
+            origin,
+        )
+
+        assert intent == "resumen"
+        assert "desactivé" in text
+        assert origin == ["historial_borrado"]
+        assert delete_calls == [
+            (
+                "a" * 64,
+                {
+                    "reason": "consent_revoked",
+                    "requested_via": "verified_whatsapp",
+                },
+            )
+        ]
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "borra el precio de la papa",
+            "quizás borra mi historial mañana",
+            "cuál fue mi historial",
+            "lo mismo",
+        ],
+    )
+    async def test_borrado_historial_rechaza_frases_ambiguas(
+        self,
+        query: str,
+    ) -> None:
+        """Texto adicional o ambiguo no dispara una acción destructiva."""
+        assert AgroVozPipeline._is_history_deletion_query(query) is False
+
+    async def test_historial_consentido_responde_sin_llm_y_sin_filtrar_logs(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """El contexto se recorta otra vez y nunca se envía al modelo."""
+        phone_hash = "hash-historico-secreto"
+        previous_query = "consulta secreta " + ("q" * 300)
+        previous_response = "respuesta secreta " + ("r" * 500)
+        context = LatestConsultationContext(
+            query_text=previous_query,
+            response_text=previous_response,
+            intent="precio",
+            producto="papa",
+        )
+        thread_calls: list[tuple[object, tuple[object, ...]]] = []
+        reader_calls: list[str] = []
+
+        def fake_reader(received_hash: str) -> LatestConsultationContext:
+            reader_calls.append(received_hash)
+            return context
+
+        async def inline_to_thread(
+            function: object,
+            *args: object,
+            **kwargs: object,
+        ) -> object:
+            thread_calls.append((function, args))
+            assert callable(function)
+            return function(*args, **kwargs)
+
+        async def fail_llm(*_args: object, **_kwargs: object) -> str:
+            raise AssertionError("El historial explícito no debe invocar al LLM")
+
+        monkeypatch.setattr(
+            "app.services.consultation_history_service.get_latest_consultation_context",
+            fake_reader,
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline_service.asyncio.to_thread",
+            inline_to_thread,
+        )
+        monkeypatch.setattr("app.services.llm_service.answer", fail_llm)
+        caplog.set_level(logging.DEBUG)
+        origin = ["desconocido"]
+
+        text, intent = await AgroVozPipeline._generate_response(
+            "¿Cuál fue mi última consulta?",
+            phone_hash,
+            origin,
+        )
+
+        assert intent == "resumen"
+        assert origin == ["historial"]
+        assert reader_calls == [phone_hash]
+        assert len(thread_calls) == 1
+        assert "Tu consulta anterior fue:" in text
+        assert "consulta secreta" in text
+        assert "La respuesta que recibiste fue:" in text
+        assert "respuesta secreta" in text
+        assert previous_query not in text
+        assert previous_response not in text
+        assert len(text) <= (_HISTORY_VOICE_QUERY_MAX_CHARS + _HISTORY_VOICE_RESPONSE_MAX_CHARS + 80)
+        assert phone_hash not in caplog.text
+        assert previous_query not in caplog.text
+        assert previous_response not in caplog.text
+
+    @pytest.mark.parametrize(
+        "unavailable_reason",
+        ["gate_apagado", "sin_consentimiento", "sin_fila"],
+    )
+    async def test_historial_no_disponible_conserva_camino_stateless(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        unavailable_reason: str,
+    ) -> None:
+        """Cualquier None del lector cae al mismo LLM que existía antes."""
+        reader_calls: list[str] = []
+        llm_calls: list[str] = []
+
+        def unavailable_reader(phone_hash: str) -> None:
+            reader_calls.append(phone_hash)
+            return None
+
+        async def stateless_answer(
+            query: str,
+            **_kwargs: object,
+        ) -> str:
+            llm_calls.append(query)
+            return f"respuesta stateless para {unavailable_reason}"
+
+        monkeypatch.setattr(
+            "app.services.consultation_history_service.get_latest_consultation_context",
+            unavailable_reader,
+        )
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_load_user_cultivos",
+            staticmethod(lambda _phone_hash: None),
+        )
+        monkeypatch.setattr("app.services.llm_service.answer", stateless_answer)
+        origin = ["desconocido"]
+
+        text, _intent = await AgroVozPipeline._generate_response(
+            "qué pregunté antes",
+            "test-chat-hash",
+            origin,
+        )
+
+        assert reader_calls == ["test-chat-hash"]
+        assert llm_calls == ["qué pregunté antes"]
+        assert text == f"respuesta stateless para {unavailable_reason}"
+        assert origin == ["llm"]
+
+    async def test_error_del_lector_conserva_camino_stateless(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Un fallo inesperado de almacenamiento tampoco cambia la respuesta."""
+        sensitive_error = "contenido-historico-que-no-debe-loguearse"
+
+        def broken_reader(_phone_hash: str) -> None:
+            raise SQLAlchemyError(sensitive_error)
+
+        async def stateless_answer(query: str, **_kwargs: object) -> str:
+            return f"respuesta actual para {query}"
+
+        monkeypatch.setattr(
+            "app.services.consultation_history_service.get_latest_consultation_context",
+            broken_reader,
+        )
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_load_user_cultivos",
+            staticmethod(lambda _phone_hash: None),
+        )
+        monkeypatch.setattr("app.services.llm_service.answer", stateless_answer)
+        caplog.set_level(logging.DEBUG)
+        origin = ["desconocido"]
+
+        text, _intent = await AgroVozPipeline._generate_response(
+            "consulta anterior",
+            "test-chat-hash",
+            origin,
+        )
+
+        assert text == "respuesta actual para consulta anterior"
+        assert origin == ["llm"]
+        assert sensitive_error not in caplog.text
+
     async def test_answer_lanza_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Si answer() lanza excepcion y no hay keywords, retorna disculpa generica.
 
@@ -303,9 +650,7 @@ class TestGenerateResponse:
         assert "problema" in text.lower() or "intentar" in text.lower()
         assert intent == "desconocido"
 
-    async def test_answer_lanza_exception_fallback_precio(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_answer_lanza_exception_fallback_precio(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Path (a): LLM cae, keyword de producto → fallback get_price real.
 
         Issue #121: si el LLM falla pero la query contiene un producto
@@ -332,9 +677,7 @@ class TestGenerateResponse:
         assert "papa" in text.lower()
         assert intent == "precio"
 
-    async def test_answer_lanza_exception_fallback_clima(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_answer_lanza_exception_fallback_clima(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Path (b): LLM cae, keyword de clima → fallback get_weather real.
 
         Issue #121: si el LLM falla pero la query contiene keywords
@@ -346,10 +689,7 @@ class TestGenerateResponse:
             raise RuntimeError("LLM colapso")
 
         async def fake_force_clima(query: str, phone_hash: str | None = None) -> str:
-            return (
-                "En Traiguen ahora: 8 grados, nublado, humedad 80%, "
-                "viento 3.5 m/s, lluvia 0.8 mm, segun OpenMeteo."
-            )
+            return "En Traiguen ahora: 8 grados, nublado, humedad 80%, viento 3.5 m/s, lluvia 0.8 mm, segun OpenMeteo."
 
         monkeypatch.setattr("app.services.llm_service.answer", fake_answer_error)
         monkeypatch.setattr(
@@ -357,16 +697,12 @@ class TestGenerateResponse:
             fake_force_clima,
         )
 
-        text, intent = await AgroVozPipeline._generate_response(
-            "como esta el clima en traiguen", "test-chat-hash"
-        )
+        text, intent = await AgroVozPipeline._generate_response("como esta el clima en traiguen", "test-chat-hash")
         assert "grados" in text.lower()
         assert "traiguen" in text.lower()
         assert intent == "clima"
 
-    async def test_answer_lanza_exception_fallback_venta(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_answer_lanza_exception_fallback_venta(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Path (c): LLM cae, patron "N kilos de producto" → fallback venta.
 
         Issue #121: si el LLM falla pero la query contiene un patron
@@ -390,13 +726,71 @@ class TestGenerateResponse:
             fake_force_venta,
         )
 
-        text, intent = await AgroVozPipeline._generate_response(
-            "voy a vender 30 kilos de papa", "test-chat-hash"
-        )
+        text, intent = await AgroVozPipeline._generate_response("voy a vender 30 kilos de papa", "test-chat-hash")
         assert "kilos" in text.lower()
         assert "papa" in text.lower()
         assert "recibiras" in text.lower()
         assert intent == "precio"
+
+    async def test_margin_y_fallback_no_loguean_consulta_hash_ni_error(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Los caminos degradados publican solo producto/tipo estructurados."""
+        secreto = "DATO-PRIVADO-MARGEN-NO-LOGUEAR"
+        phone_hash = "prefijohash-margen-privado"
+        query = f"vendí 30 kilos de papa {secreto}"
+
+        async def fail_answer(
+            _query: str,
+            **_kwargs: object,
+        ) -> str:
+            raise RuntimeError(f"{secreto} {phone_hash}")
+
+        async def no_openrouter(
+            _query: str,
+            **_kwargs: object,
+        ) -> None:
+            return None
+
+        async def fallback_estructurado(
+            _query: str,
+            phone_hash: str | None = None,
+        ) -> str:
+            return "Referencia estructurada de papa: 500 pesos."
+
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_load_user_cultivos",
+            staticmethod(lambda _phone_hash: None),
+        )
+        monkeypatch.setattr("app.services.llm_service.answer", fail_answer)
+        monkeypatch.setattr(
+            "app.services.llm_service.answer_via_openrouter",
+            no_openrouter,
+        )
+        monkeypatch.setattr(
+            "app.services.llm_keywords._force_keyword_tool",
+            fallback_estructurado,
+        )
+        caplog.set_level(logging.DEBUG, logger="app.services.pipeline_service")
+
+        text, intent = await AgroVozPipeline._generate_response(
+            query,
+            phone_hash,
+        )
+
+        assert text == "Referencia estructurada de papa: 500 pesos."
+        assert intent == "precio"
+        assert "producto=papa" in caplog.text
+        _assert_datos_sensibles_ausentes(
+            caplog,
+            secreto,
+            query,
+            phone_hash,
+            phone_hash[:8],
+        )
 
 
 # ── process() pipeline completo ────────────────────────────────────
@@ -405,6 +799,15 @@ class TestGenerateResponse:
 @pytest.mark.asyncio
 class TestProcess:
     """Tests de integracion para AgroVozPipeline.process()."""
+
+    @pytest.fixture(autouse=True)
+    def _state_machine_off_by_default(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Preserva el contrato stateless de todas las regresiones previas."""
+        monkeypatch.setattr(settings, "use_conversation_state", False)
+        monkeypatch.setattr(pipeline_module, "_conversation_registry", None)
 
     @pytest.fixture
     def wav_path(self, tmp_path: Path) -> Path:
@@ -419,6 +822,729 @@ class TestProcess:
         p = tmp_path / "pipeline_output.ogg"
         p.write_bytes(b"FAKE_TTS_OGG")
         return str(p)
+
+    @pytest.mark.parametrize("entrada", ["texto", "audio"])
+    async def test_logs_no_exponen_contenido_ni_hash_en_entradas(
+        self,
+        entrada: str,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        wav_path: Path,
+    ) -> None:
+        """Texto directo y Whisper comparten el mismo contrato de minimización."""
+        secreto = f"CONTENIDO-PRIVADO-{entrada.upper()}-NO-LOGUEAR"
+        phone_hash = f"prefijohash-{entrada}-privado"
+
+        async def no_alerta(
+            _transcribed_text: str,
+            _phone_hash: str,
+            _wa_chat_id: str | None,
+        ) -> tuple[None, None]:
+            return None, None
+
+        def fake_transcribe(
+            _self: object,
+            _audio_path: str,
+        ) -> dict[str, object]:
+            return {"text": secreto}
+
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_is_first_contact",
+            staticmethod(lambda _phone_hash: False),
+        )
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_handle_alert_commands",
+            staticmethod(no_alerta),
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline_service.WhisperService.transcribe",
+            fake_transcribe,
+        )
+        monkeypatch.setattr(pipeline_module, "retain_audio", lambda *_args: None)
+        _mock_generated_response(monkeypatch)
+        _mock_db_save(monkeypatch)
+        caplog.set_level(logging.DEBUG, logger="app.services.pipeline_service")
+
+        result = await AgroVozPipeline().process(
+            wav_path=None if entrada == "texto" else wav_path,
+            audio_duration_ms=0 if entrada == "texto" else 1000,
+            message_id=f"msg-privacidad-{entrada}",
+            chat_id_hash=phone_hash,
+            request_id=f"req-privacidad-{entrada}",
+            texto_directo=secreto if entrada == "texto" else None,
+            generar_audio=False,
+        )
+
+        assert result.consultation_id == 42
+        assert f"msg-privacidad-{entrada}" in caplog.text
+        assert f"req-privacidad-{entrada}" in caplog.text
+        assert f"chars={len(secreto)}" in caplog.text
+        _assert_datos_sensibles_ausentes(
+            caplog,
+            secreto,
+            phone_hash,
+            phone_hash[:8],
+        )
+
+    # ── State machine (#192) ───────────────────────────────────
+
+    async def test_state_flag_off_no_crea_registry_y_conserva_flujo(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El gate apagado no construye estado ni cambia la respuesta."""
+        registry_constructor = Mock(side_effect=AssertionError("No debe crear registry"))
+        monkeypatch.setattr(
+            pipeline_module,
+            "ConversationRegistry",
+            registry_constructor,
+        )
+        _mock_first_contact(monkeypatch, is_first=False)
+        _mock_generated_response(monkeypatch)
+        _mock_db_save(monkeypatch)
+
+        result = await AgroVozPipeline().process(
+            wav_path=None,
+            audio_duration_ms=0,
+            message_id="state-off",
+            chat_id_hash=_VALID_STATE_HASH,
+            request_id="state-off-request",
+            texto_directo="consulta compleja sobre el precio de la papa",
+            generar_audio=False,
+        )
+
+        assert result.text_response == "La papa está a 500 pesos el kilo."
+        assert pipeline_module._conversation_registry is None
+        registry_constructor.assert_not_called()
+
+    async def test_state_recorre_misma_secuencia_para_texto_y_audio(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        wav_path: Path,
+        tts_ogg: str,
+    ) -> None:
+        """Ambas entradas recorren recibido, búsqueda, respuesta y espera."""
+        _enable_conversation_state(monkeypatch)
+        _mock_first_contact(monkeypatch, is_first=False)
+        _mock_generated_response(monkeypatch)
+        _mock_whisper_transcribe(monkeypatch)
+        _mock_tts_synthesize(monkeypatch, tts_ogg)
+        _mock_db_save(monkeypatch)
+        monkeypatch.setattr(
+            "app.services.pipeline_service.retain_audio",
+            lambda *_args, **_kwargs: None,
+        )
+
+        async def no_alert(
+            _text: str,
+            _phone_hash: str,
+            _chat_id: str | None,
+        ) -> tuple[None, None]:
+            return None, None
+
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_handle_alert_commands",
+            staticmethod(no_alert),
+        )
+
+        sequence: list[ConversationState] = []
+        original_claim = ConversationRegistry.claim
+        original_transition = ConversationLease.transition
+
+        def record_claim(
+            registry: ConversationRegistry,
+            phone_hash: str,
+        ) -> ConversationClaim:
+            claim = original_claim(registry, phone_hash)
+            if claim.status == TransitionStatus.APLICADA:
+                sequence.append(claim.conversation.state)
+            return claim
+
+        def record_transition(
+            lease: ConversationLease,
+            target: ConversationState,
+        ) -> bool:
+            sequence.append(target)
+            return original_transition(lease, target)
+
+        monkeypatch.setattr(ConversationRegistry, "claim", record_claim)
+        monkeypatch.setattr(
+            ConversationLease,
+            "transition",
+            record_transition,
+        )
+
+        pipeline = AgroVozPipeline()
+        text_hash = "a" * 64
+        audio_hash = "b" * 64
+        text_result = await pipeline.process(
+            wav_path=None,
+            audio_duration_ms=0,
+            message_id="state-text",
+            chat_id_hash=text_hash,
+            request_id="state-text-request",
+            texto_directo="consulta compleja sobre el precio de la papa",
+            generar_audio=False,
+        )
+        audio_result = await pipeline.process(
+            wav_path=wav_path,
+            audio_duration_ms=1_000,
+            message_id="state-audio",
+            chat_id_hash=audio_hash,
+            request_id="state-audio-request",
+        )
+
+        expected_turn = [
+            ConversationState.CONSULTA_RECIBIDA,
+            ConversationState.BUSCANDO_DATOS,
+            ConversationState.RESPONDIENDO,
+            ConversationState.ESPERANDO_CONSULTA,
+        ]
+        assert sequence == expected_turn * 2
+        assert text_result.audio_path == ""
+        assert audio_result.audio_path == tts_ogg
+        registry = pipeline_module._conversation_registry
+        assert isinstance(registry, ConversationRegistry)
+        text_snapshot = registry.snapshot(text_hash)
+        audio_snapshot = registry.snapshot(audio_hash)
+        assert text_snapshot is not None
+        assert audio_snapshot is not None
+        assert text_snapshot.state == ConversationState.ESPERANDO_CONSULTA
+        assert audio_snapshot.state == ConversationState.ESPERANDO_CONSULTA
+
+    async def test_state_sin_respuesta_aclara_y_vuelve_a_espera(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Una entrada vacía usa ACLARANDO sin quedar bloqueada."""
+        _enable_conversation_state(monkeypatch)
+        _mock_first_contact(monkeypatch, is_first=False)
+        _mock_db_save(monkeypatch)
+        transitions: list[ConversationState] = []
+        original_transition = ConversationLease.transition
+
+        def record_transition(
+            lease: ConversationLease,
+            target: ConversationState,
+        ) -> bool:
+            transitions.append(target)
+            return original_transition(lease, target)
+
+        monkeypatch.setattr(
+            ConversationLease,
+            "transition",
+            record_transition,
+        )
+
+        result = await AgroVozPipeline().process(
+            wav_path=None,
+            audio_duration_ms=0,
+            message_id="state-empty",
+            chat_id_hash="c" * 64,
+            request_id="state-empty-request",
+            texto_directo="",
+            generar_audio=False,
+        )
+
+        assert "más despacio" in result.text_response
+        assert transitions == [
+            ConversationState.BUSCANDO_DATOS,
+            ConversationState.ACLARANDO,
+            ConversationState.ESPERANDO_CONSULTA,
+        ]
+        registry = pipeline_module._conversation_registry
+        assert isinstance(registry, ConversationRegistry)
+        snapshot = registry.snapshot("c" * 64)
+        assert snapshot is not None
+        assert snapshot.comprehension_failures == 1
+
+    @pytest.mark.parametrize("entrada", ["texto", "audio"])
+    async def test_state_escala_tres_fallos_en_texto_y_audio(
+        self,
+        entrada: str,
+        monkeypatch: pytest.MonkeyPatch,
+        wav_path: Path,
+        tts_ogg: str,
+    ) -> None:
+        """La misma escalada guía ambos canales sin prometer contacto humano."""
+        _enable_conversation_state(monkeypatch)
+        _mock_first_contact(monkeypatch, is_first=False)
+        _mock_db_save(monkeypatch)
+        synthesized: list[str] = []
+
+        async def no_alerta(
+            _text: str,
+            _phone_hash: str,
+            _chat_id: str | None,
+        ) -> tuple[None, None]:
+            return None, None
+
+        async def incomprensible(
+            _text: str,
+            _phone_hash: str,
+            _origen_ref: list[str] | None = None,
+        ) -> tuple[str, Intent]:
+            return "Respuesta original no comprendida.", "desconocido"
+
+        def fake_transcribe(
+            _self: object,
+            _audio_path: str,
+        ) -> dict[str, object]:
+            return {"text": "frase ambigua para probar escalada"}
+
+        def fake_synthesize(
+            _self: object,
+            text: str,
+            _output_dir: str | Path | None = None,
+        ) -> str:
+            synthesized.append(text)
+            return tts_ogg
+
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_handle_alert_commands",
+            staticmethod(no_alerta),
+        )
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_generate_response",
+            staticmethod(incomprensible),
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline_service.WhisperService.transcribe",
+            fake_transcribe,
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline_service.TTSService.synthesize",
+            fake_synthesize,
+        )
+        monkeypatch.setattr(pipeline_module, "retain_audio", lambda *_args: None)
+
+        phone_hash = ("1" if entrada == "texto" else "2") * 64
+        responses: list[str] = []
+        pipeline = AgroVozPipeline()
+        for attempt in range(1, 4):
+            result = await pipeline.process(
+                wav_path=None if entrada == "texto" else wav_path,
+                audio_duration_ms=0 if entrada == "texto" else 1_000,
+                message_id=f"escalada-{entrada}-{attempt}",
+                chat_id_hash=phone_hash,
+                request_id=f"req-escalada-{entrada}-{attempt}",
+                texto_directo=("frase ambigua para probar escalada" if entrada == "texto" else None),
+                generar_audio=entrada == "audio",
+            )
+            responses.append(result.text_response)
+
+        assert "más despacio" in responses[0]
+        assert "escribe tu consulta por texto" in responses[1]
+        assert "no cuenta con atención humana en este chat" in responses[2]
+        assert "contactar directamente" in responses[2]
+        assert "PRODESAL" in responses[2]
+        assert "INDAP" in responses[2]
+        assert "te llamará" not in responses[2].lower()
+        assert "te contactará" not in responses[2].lower()
+        assert synthesized == (responses if entrada == "audio" else [])
+        registry = pipeline_module._conversation_registry
+        assert isinstance(registry, ConversationRegistry)
+        snapshot = registry.snapshot(phone_hash)
+        assert snapshot is not None
+        assert snapshot.comprehension_failures == 3
+
+    async def test_state_exito_reinicia_escalada(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Tras una respuesta válida, el próximo fallo vuelve a pedir repetición."""
+        _enable_conversation_state(monkeypatch)
+        _mock_first_contact(monkeypatch, is_first=False)
+        _mock_db_save(monkeypatch)
+        generated = iter(
+            [
+                ("sin comprender uno", "desconocido"),
+                ("sin comprender dos", "desconocido"),
+                ("La papa está a 500 pesos.", "precio"),
+                ("sin comprender otra vez", "desconocido"),
+            ]
+        )
+
+        async def no_alerta(
+            _text: str,
+            _phone_hash: str,
+            _chat_id: str | None,
+        ) -> tuple[None, None]:
+            return None, None
+
+        async def scripted_response(
+            _text: str,
+            _phone_hash: str,
+            _origen_ref: list[str] | None = None,
+        ) -> tuple[str, Intent]:
+            response_text, intent = next(generated)
+            return response_text, cast(Intent, intent)
+
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_handle_alert_commands",
+            staticmethod(no_alerta),
+        )
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_generate_response",
+            staticmethod(scripted_response),
+        )
+
+        responses: list[str] = []
+        for attempt in range(4):
+            result = await AgroVozPipeline().process(
+                wav_path=None,
+                audio_duration_ms=0,
+                message_id=f"reset-escalada-{attempt}",
+                chat_id_hash="3" * 64,
+                request_id=f"req-reset-escalada-{attempt}",
+                texto_directo="frase ambigua para probar reset",
+                generar_audio=False,
+            )
+            responses.append(result.text_response)
+
+        assert "más despacio" in responses[0]
+        assert "escribe tu consulta por texto" in responses[1]
+        assert responses[2] == "La papa está a 500 pesos."
+        assert "más despacio" in responses[3]
+        registry = pipeline_module._conversation_registry
+        assert isinstance(registry, ConversationRegistry)
+        snapshot = registry.snapshot("3" * 64)
+        assert snapshot is not None
+        assert snapshot.comprehension_failures == 1
+
+    async def test_state_flag_off_no_aplica_escalada(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Con el feature apagado se conserva la respuesta stateless previa."""
+        _mock_first_contact(monkeypatch, is_first=False)
+        _mock_db_save(monkeypatch)
+
+        async def no_alerta(
+            _text: str,
+            _phone_hash: str,
+            _chat_id: str | None,
+        ) -> tuple[None, None]:
+            return None, None
+
+        async def incomprensible(
+            _text: str,
+            _phone_hash: str,
+            _origen_ref: list[str] | None = None,
+        ) -> tuple[str, Intent]:
+            return "Respuesta stateless original.", "desconocido"
+
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_handle_alert_commands",
+            staticmethod(no_alerta),
+        )
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_generate_response",
+            staticmethod(incomprensible),
+        )
+
+        result = await AgroVozPipeline().process(
+            wav_path=None,
+            audio_duration_ms=0,
+            message_id="escalada-off",
+            chat_id_hash="4" * 64,
+            request_id="req-escalada-off",
+            texto_directo="frase ambigua sin feature",
+            generar_audio=False,
+        )
+
+        assert result.text_response == "Respuesta stateless original."
+        assert pipeline_module._conversation_registry is None
+
+    async def test_segunda_consulta_retorna_ocupada_sin_etapas_caras(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Solo el dueño entra a las etapas; la concurrente responde al instante."""
+        _enable_conversation_state(monkeypatch)
+        started = asyncio.Event()
+        release = asyncio.Event()
+        stage_calls = 0
+
+        async def blocked_stages(
+            _pipeline: AgroVozPipeline,
+            **kwargs: object,
+        ) -> AudioResponse:
+            nonlocal stage_calls
+            stage_calls += 1
+            lease = kwargs.get("conversation_lease")
+            assert isinstance(lease, ConversationLease)
+            started.set()
+            await release.wait()
+            assert lease.transition(ConversationState.RESPONDIENDO)
+            return AudioResponse(
+                audio_path="",
+                text_response="respuesta del dueño",
+                latency_ms=1,
+                intent="precio",
+            )
+
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_process_stages",
+            blocked_stages,
+        )
+        pipeline = AgroVozPipeline()
+        owner_task = asyncio.create_task(
+            pipeline.process(
+                wav_path=None,
+                audio_duration_ms=0,
+                message_id="state-owner",
+                chat_id_hash=_VALID_STATE_HASH,
+                request_id="state-owner-request",
+                texto_directo="precio de la papa",
+                generar_audio=False,
+            )
+        )
+        await asyncio.wait_for(started.wait(), timeout=1)
+
+        busy = await pipeline.process(
+            wav_path=None,
+            audio_duration_ms=0,
+            message_id="state-busy",
+            chat_id_hash=_VALID_STATE_HASH,
+            request_id="state-busy-request",
+            texto_directo="clima de mañana",
+            generar_audio=False,
+        )
+
+        assert busy.text_response == _CONVERSATION_BUSY_TEXT
+        assert "consulta en proceso" in busy.text_response
+        assert busy.audio_path == ""
+        assert busy.consultation_id is None
+        assert stage_calls == 1
+
+        release.set()
+        owner = await owner_task
+        assert owner.text_response == "respuesta del dueño"
+
+    async def test_timeout_retira_lease_y_permite_nuevo_turno(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El timeout técnico no bloquea al productor por el timeout conversacional."""
+        _enable_conversation_state(monkeypatch)
+
+        async def never_finishes(
+            _pipeline: AgroVozPipeline,
+            **_kwargs: object,
+        ) -> AudioResponse:
+            await asyncio.sleep(999)
+            raise AssertionError("inalcanzable")
+
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_process_stages",
+            never_finishes,
+        )
+        result = await AgroVozPipeline(pipeline_timeout=0.01).process(
+            wav_path=None,
+            audio_duration_ms=0,
+            message_id="state-timeout",
+            chat_id_hash=_VALID_STATE_HASH,
+            request_id="state-timeout-request",
+            texto_directo="precio de la papa",
+            generar_audio=False,
+        )
+
+        assert result.intent == "desconocido"
+        registry = pipeline_module._conversation_registry
+        assert isinstance(registry, ConversationRegistry)
+        assert registry.snapshot(_VALID_STATE_HASH) is None
+        replacement = registry.claim(_VALID_STATE_HASH)
+        assert replacement.status == TransitionStatus.APLICADA
+        assert replacement.lease is not None
+        assert replacement.lease.abort()
+
+    async def test_timeout_conversacional_reinicia_sesion_vieja(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El registry configurado reemplaza una lease vencida sin heredar turno."""
+        _enable_conversation_state(monkeypatch, timeout_minutes=1)
+        now = [0.0]
+
+        def controlled_clock() -> float:
+            return now[0]
+
+        registry = ConversationRegistry(
+            timeout_minutes=settings.conversation_timeout_minutes,
+            clock=controlled_clock,
+        )
+        monkeypatch.setattr(
+            pipeline_module,
+            "_conversation_registry",
+            registry,
+        )
+        stale = registry.claim(_VALID_STATE_HASH)
+        assert stale.lease is not None
+        now[0] = 60.0
+
+        async def successful_stages(
+            _pipeline: AgroVozPipeline,
+            **kwargs: object,
+        ) -> AudioResponse:
+            lease = kwargs.get("conversation_lease")
+            assert isinstance(lease, ConversationLease)
+            assert lease.transition(ConversationState.RESPONDIENDO)
+            return AudioResponse(
+                audio_path="",
+                text_response="respuesta nueva",
+                latency_ms=1,
+                intent="precio",
+            )
+
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_process_stages",
+            successful_stages,
+        )
+        result = await AgroVozPipeline().process(
+            wav_path=None,
+            audio_duration_ms=0,
+            message_id="state-expired",
+            chat_id_hash=_VALID_STATE_HASH,
+            request_id="state-expired-request",
+            texto_directo="precio de la papa",
+            generar_audio=False,
+        )
+
+        assert result.text_response == "respuesta nueva"
+        assert not stale.lease.abort()
+        snapshot = registry.snapshot(_VALID_STATE_HASH)
+        assert snapshot is not None
+        assert snapshot.state == ConversationState.ESPERANDO_CONSULTA
+        assert snapshot.turn_count == 1
+
+    async def test_cancelacion_retira_lease_duena(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Cancelar el task libera el hash aunque no venza el timeout."""
+        _enable_conversation_state(monkeypatch)
+        started = asyncio.Event()
+
+        async def blocked_stages(
+            _pipeline: AgroVozPipeline,
+            **_kwargs: object,
+        ) -> AudioResponse:
+            started.set()
+            await asyncio.sleep(999)
+            raise AssertionError("inalcanzable")
+
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_process_stages",
+            blocked_stages,
+        )
+        task = asyncio.create_task(
+            AgroVozPipeline().process(
+                wav_path=None,
+                audio_duration_ms=0,
+                message_id="state-cancel",
+                chat_id_hash=_VALID_STATE_HASH,
+                request_id="state-cancel-request",
+                texto_directo="precio de la papa",
+                generar_audio=False,
+            )
+        )
+        await asyncio.wait_for(started.wait(), timeout=1)
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        registry = pipeline_module._conversation_registry
+        assert isinstance(registry, ConversationRegistry)
+        assert registry.snapshot(_VALID_STATE_HASH) is None
+
+    async def test_excepcion_retira_solo_sesion_duena(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Una excepción inesperada libera el hash mediante el finally."""
+        _enable_conversation_state(monkeypatch)
+
+        async def fail_stages(
+            _pipeline: AgroVozPipeline,
+            **_kwargs: object,
+        ) -> AudioResponse:
+            raise RuntimeError("fallo controlado")
+
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_process_stages",
+            fail_stages,
+        )
+
+        with pytest.raises(RuntimeError, match="fallo controlado"):
+            await AgroVozPipeline().process(
+                wav_path=None,
+                audio_duration_ms=0,
+                message_id="state-error",
+                chat_id_hash=_VALID_STATE_HASH,
+                request_id="state-error-request",
+                texto_directo="precio de la papa",
+                generar_audio=False,
+            )
+
+        registry = pipeline_module._conversation_registry
+        assert isinstance(registry, ConversationRegistry)
+        assert registry.snapshot(_VALID_STATE_HASH) is None
+
+    async def test_hash_invalido_no_crea_tracking(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Identidades no HMAC continúan stateless sin crear registro."""
+        _enable_conversation_state(monkeypatch)
+        leases: list[object] = []
+
+        async def simple_stages(
+            _pipeline: AgroVozPipeline,
+            **kwargs: object,
+        ) -> AudioResponse:
+            leases.append(kwargs.get("conversation_lease"))
+            return AudioResponse(
+                audio_path="",
+                text_response="respuesta stateless",
+                latency_ms=1,
+                intent="desconocido",
+            )
+
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_process_stages",
+            simple_stages,
+        )
+
+        result = await AgroVozPipeline().process(
+            wav_path=None,
+            audio_duration_ms=0,
+            message_id="state-invalid",
+            chat_id_hash="sin_chat",
+            request_id="state-invalid-request",
+            texto_directo="hola",
+            generar_audio=False,
+        )
+
+        assert result.text_response == "respuesta stateless"
+        assert leases == [None]
+        assert pipeline_module._conversation_registry is None
 
     # ── Happy path ──────────────────────────────────────────────
 
@@ -447,6 +1573,7 @@ class TestProcess:
         assert result.audio_path == tts_ogg
         assert "450" in result.text_response
         assert result.intent == "precio"
+        assert result.consultation_id == 42
         assert result.whisper_ms >= 0
         assert result.llm_ms >= 0
         assert result.tts_ms >= 0
@@ -594,6 +1721,93 @@ class TestProcess:
         assert len(save_calls) == 1
         assert save_calls[0]["intent"] == "resumen"
 
+    async def test_historial_explicito_es_compartido_por_audio_y_texto(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        wav_path: Path,
+        tts_ogg: str,
+    ) -> None:
+        """Ambas entradas convergen en el mismo lector y respuesta contextual."""
+        history_request = "qué pregunté antes"
+        reader_calls: list[str] = []
+
+        def fake_transcribe_history(
+            _self: object,
+            _audio_path: str,
+        ) -> dict[str, object]:
+            return {
+                "text": history_request,
+                "language": "es",
+                "segments": [],
+                "duration_ms": 800,
+            }
+
+        def fake_reader(phone_hash: str) -> LatestConsultationContext:
+            reader_calls.append(phone_hash)
+            return LatestConsultationContext(
+                query_text="precio de la papa",
+                response_text="La papa estaba a 500 pesos el kilo.",
+                intent="precio",
+                producto="papa",
+            )
+
+        async def no_alert(
+            _text: str,
+            _phone_hash: str,
+            _chat_id: str | None,
+        ) -> tuple[None, None]:
+            return None, None
+
+        async def fail_llm(*_args: object, **_kwargs: object) -> str:
+            raise AssertionError("Audio y texto deben evitar el LLM")
+
+        monkeypatch.setattr(
+            "app.services.pipeline_service.WhisperService.transcribe",
+            fake_transcribe_history,
+        )
+        monkeypatch.setattr(
+            "app.services.consultation_history_service.get_latest_consultation_context",
+            fake_reader,
+        )
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_handle_alert_commands",
+            staticmethod(no_alert),
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline_service.retain_audio",
+            lambda *_args, **_kwargs: None,
+        )
+        monkeypatch.setattr("app.services.llm_service.answer", fail_llm)
+        _mock_first_contact(monkeypatch, is_first=False)
+        _mock_tts_synthesize(monkeypatch, tts_ogg)
+        save_calls = _mock_db_save(monkeypatch)
+        pipeline = AgroVozPipeline()
+
+        audio_result = await pipeline.process(
+            wav_path=wav_path,
+            audio_duration_ms=1_000,
+            message_id="history-audio",
+            chat_id_hash="history-phone-hash",
+            request_id="history-audio-request",
+        )
+        text_result = await pipeline.process(
+            wav_path=None,
+            audio_duration_ms=0,
+            message_id="history-text",
+            chat_id_hash="history-phone-hash",
+            request_id="history-text-request",
+            texto_directo=history_request,
+            generar_audio=False,
+        )
+
+        assert audio_result.text_response == text_result.text_response
+        assert audio_result.intent == text_result.intent == "resumen"
+        assert audio_result.audio_path == tts_ogg
+        assert text_result.audio_path == ""
+        assert reader_calls == ["history-phone-hash", "history-phone-hash"]
+        assert [call["intent"] for call in save_calls] == ["resumen", "resumen"]
+
     async def test_happy_path_clima(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -625,9 +1839,7 @@ class TestProcess:
         async def sin_keyword_match(*_args: object, **_kwargs: object) -> None:
             return None
 
-        monkeypatch.setattr(
-            "app.services.llm_keywords._force_keyword_tool", sin_keyword_match
-        )
+        monkeypatch.setattr("app.services.llm_keywords._force_keyword_tool", sin_keyword_match)
         _mock_llm_answer(monkeypatch, "En Traiguen hay 8 grados con lluvia ligera")
         _mock_tts_synthesize(monkeypatch, tts_ogg)
         _mock_db_save(monkeypatch)
@@ -665,16 +1877,12 @@ class TestProcess:
                 "duration_ms": 1200,
             }
 
-        monkeypatch.setattr(
-            "app.services.pipeline_service.WhisperService.transcribe", fake_transcribe
-        )
+        monkeypatch.setattr("app.services.pipeline_service.WhisperService.transcribe", fake_transcribe)
 
         async def keyword_tool(*_args: object, **_kwargs: object) -> str:
             return "La papa está a 520 pesos el kilo, según ODEPA."
 
-        monkeypatch.setattr(
-            "app.services.llm_keywords._force_keyword_tool", keyword_tool
-        )
+        monkeypatch.setattr("app.services.llm_keywords._force_keyword_tool", keyword_tool)
 
         llamadas_llm: list[str] = []
 
@@ -771,6 +1979,7 @@ class TestProcess:
         assert result.intent == "desconocido"
         assert "tiempo" in result.text_response.lower() or "responder" in result.text_response.lower()
         assert result.audio_path == ""
+        assert result.consultation_id is None
 
     # ── Audio demasiado largo ───────────────────────────────────
 
@@ -982,12 +2191,17 @@ class TestProcess:
 class TestSaveConsultation:
     """Persistencia de consulta en SQLite."""
 
-    def test_save_exitoso(self) -> None:
-        """_save_consultation guarda en DB sin lanzar excepcion."""
-        with patch("app.core.database.SessionLocal") as mock_factory:
+    def test_save_exitoso(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Sin feature de historial persiste métricas, pero no contenido."""
+        caplog.set_level(logging.DEBUG, logger="app.services.pipeline_service")
+        with (
+            patch.object(settings, "consultation_history_enabled", False),
+            patch("app.core.database.SessionLocal") as mock_factory,
+        ):
             mock_session = mock_factory.return_value
+            mock_session.commit.side_effect = lambda: setattr(mock_session.add.call_args.args[0], "id", 42)
             start = time.monotonic()
-            AgroVozPipeline._save_consultation(
+            consultation_id = AgroVozPipeline._save_consultation(
                 phone_hash="test_hash_123",
                 intent="precio",
                 query_text="precio de la papa",
@@ -998,20 +2212,107 @@ class TestSaveConsultation:
             # Verifica que la consulta se persistio en DB.
             mock_session.add.assert_called_once()
             mock_session.commit.assert_called_once()
+            assert consultation_id == 42
+            consulta = mock_session.add.call_args.args[0]
+            assert consulta.query_text == ""
+            assert consulta.response_text == ""
+            mock_session.scalar.assert_not_called()
+            assert "consultation_id=42" in caplog.text
 
-    def test_save_error_no_propaga(self) -> None:
-        """Si la DB falla, _save_consultation no lanza excepcion."""
-        with patch("app.core.database.SessionLocal") as mock_session:
-            mock_session.side_effect = SQLAlchemyError("DB caida")
-            start = time.monotonic()
-            # No debe lanzar excepcion
+    def test_save_con_consentimiento_guarda_contenido_transitorio(self) -> None:
+        """El opt-in específico habilita staging hasta confirmar la entrega."""
+        with (
+            patch.object(settings, "consultation_history_enabled", True),
+            patch("app.core.database.SessionLocal") as mock_factory,
+        ):
+            mock_session = mock_factory.return_value
+            mock_session.scalar.return_value = True
+
             AgroVozPipeline._save_consultation(
-                phone_hash="test_hash_err",
+                phone_hash="a" * 64,
+                intent="precio",
+                query_text="precio de la papa",
+                response_text="450 pesos",
+                audio_duration_ms=3500,
+                start_time=time.monotonic(),
+            )
+
+        consulta = mock_session.add.call_args.args[0]
+        assert consulta.query_text == "precio de la papa"
+        assert consulta.response_text == "450 pesos"
+        mock_session.scalar.assert_called_once()
+
+    def test_save_sin_consentimiento_redacta_contenido(self) -> None:
+        """El feature global jamás reemplaza el consentimiento individual."""
+        with (
+            patch.object(settings, "consultation_history_enabled", True),
+            patch("app.core.database.SessionLocal") as mock_factory,
+        ):
+            mock_session = mock_factory.return_value
+            mock_session.scalar.return_value = False
+
+            AgroVozPipeline._save_consultation(
+                phone_hash="b" * 64,
                 intent="clima",
-                query_text="clima en traiguen",
+                query_text="clima en Traiguén",
                 response_text="8 grados",
                 audio_duration_ms=2000,
+                start_time=time.monotonic(),
+            )
+
+        consulta = mock_session.add.call_args.args[0]
+        assert consulta.query_text == ""
+        assert consulta.response_text == ""
+
+    def test_intencion_no_elegible_nunca_guarda_contenido(self) -> None:
+        """Una respuesta meta no requiere staging aunque exista opt-in."""
+        with (
+            patch.object(settings, "consultation_history_enabled", True),
+            patch("app.core.database.SessionLocal") as mock_factory,
+        ):
+            mock_session = mock_factory.return_value
+
+            AgroVozPipeline._save_consultation(
+                phone_hash="c" * 64,
+                intent="resumen",
+                query_text="qué pregunté antes",
+                response_text="Tu consulta anterior fue...",
+                audio_duration_ms=0,
+                start_time=time.monotonic(),
+            )
+
+        consulta = mock_session.add.call_args.args[0]
+        assert consulta.query_text == ""
+        assert consulta.response_text == ""
+        mock_session.scalar.assert_not_called()
+
+    def test_save_error_no_propaga_ni_filtra_datos(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """El error DB no expone contenido, excepción ni hash operacional."""
+        secreto = "CONTENIDO-PRIVADO-DB-NO-LOGUEAR"
+        phone_hash = "prefijohash-db-privado"
+        caplog.set_level(logging.DEBUG, logger="app.services.pipeline_service")
+        with patch("app.core.database.SessionLocal") as mock_session:
+            mock_session.side_effect = SQLAlchemyError(f"{secreto} {phone_hash}")
+            start = time.monotonic()
+            # No debe lanzar excepcion
+            consultation_id = AgroVozPipeline._save_consultation(
+                phone_hash=phone_hash,
+                intent="clima",
+                query_text=secreto,
+                response_text=f"respuesta {secreto}",
+                audio_duration_ms=2000,
                 start_time=start,
+            )
+            assert consultation_id is None
+            assert "intent=clima" in caplog.text
+            _assert_datos_sensibles_ausentes(
+                caplog,
+                secreto,
+                phone_hash,
+                phone_hash[:8],
             )
 
     def test_save_con_producto(self) -> None:
@@ -1079,9 +2380,7 @@ class TestSaveConsultation:
             )
 
         # 1. SessionLocal() se llama DOS veces (conexiones distintas via NullPool)
-        assert mock_factory.call_count == 2, (
-            f"SessionLocal call_count={mock_factory.call_count}, esperado 2"
-        )
+        assert mock_factory.call_count == 2, f"SessionLocal call_count={mock_factory.call_count}, esperado 2"
 
         # 2. Primer intento: add llamado, commit falla, rollback invocado
         first_session.add.assert_called_once()

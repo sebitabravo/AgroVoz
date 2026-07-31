@@ -5,6 +5,7 @@ Cobertura: 200 con coordenadas default, 200 con coordenadas personalizadas,
 Mockea get_weather_full del servicio (testeado aparte).
 """
 
+import logging
 from collections.abc import AsyncIterator, Iterator
 from unittest.mock import AsyncMock, patch
 
@@ -158,17 +159,29 @@ class TestWeatherEndpoint:
         assert "no disponible" in response.json()["detail"]
 
     async def test_connection_error_returns_502(
-        self, weather_client: AsyncClient
+        self,
+        weather_client: AsyncClient,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """ConnectionError → HTTP 502 (error de red)."""
+        caplog.set_level(logging.WARNING, logger="app.api.weather")
         with patch(
             "app.api.weather.get_weather_full",
-            AsyncMock(side_effect=ConnectionError("Timeout")),
+            AsyncMock(
+                side_effect=ConnectionError(
+                    "secreto-weather lat=-33.4567 lon=-70.6543"
+                )
+            ),
         ):
-            response = await weather_client.get("/api/v1/weather")
+            response = await weather_client.get(
+                "/api/v1/weather?lat=-33.4567&lon=-70.6543"
+            )
 
         assert response.status_code == 502
         assert "no disponible" in response.json()["detail"]
+        assert "secreto-weather" not in caplog.text
+        assert "-33.4567" not in caplog.text
+        assert "-70.6543" not in caplog.text
 
     async def test_runtime_error_returns_502(
         self, weather_client: AsyncClient

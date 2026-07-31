@@ -1,37 +1,57 @@
-# Corpus INDAP — Programas de apoyo a la Agricultura Familiar Campesina
-# Fuente: https://www.indap.gob.cl/
-# Información pública de referencia. Sin recomendaciones financieras directas.
+# Corpus INDAP — derivación informativa sobre financiamiento agrícola
+#
+# Solo contiene hechos publicados en páginas oficiales vigentes de INDAP.
+# AgroVoz no evalúa elegibilidad ni recomienda programas, montos o tasas.
+version: 1
+verificado_el: "2026-07-29"
+revisar_antes_de: "2026-08-28"
 documentos:
-  - titulo: "Programas de crédito INDAP 2025"
-    fuente: "INDAP Chile — Programas de crédito"
-    fecha: "2025"
+  - id: "credito_corto_plazo"
+    titulo: "Crédito Corto Plazo"
+    fuente: "INDAP Chile — Crédito Corto Plazo"
+    fuente_url: "https://www.indap.gob.cl/plataforma-de-servicios/credito-corto-plazo"
+    fecha: "2026-07-29"
     chunks:
       - texto: >
-          Según INDAP, el Programa de Crédito de Corto Plazo Individual
-          entrega financiamiento de hasta 200 UF por agricultor para
-          capital de trabajo: compra de insumos, semillas, fertilizantes,
-          pago de mano de obra y flete. Plazo: hasta 12 meses. Tasa de
-          interés: 3,5% anual para agricultores acreditados.
+          Según INDAP, el Crédito de Corto Plazo financia total o
+          parcialmente capital de trabajo para actividades
+          silvoagropecuarias, con un plazo máximo de 359 días. La solicitud
+          puede iniciarse durante todo el año en una Agencia de Área o
+          mediante Mi INDAP.
+
+  - id: "credito_largo_plazo"
+    titulo: "Crédito Largo Plazo"
+    fuente: "INDAP Chile — Crédito Largo Plazo"
+    fuente_url: "https://www.indap.gob.cl/plataforma-de-servicios/credito-largo-plazo"
+    fecha: "2026-07-29"
+    chunks:
       - texto: >
-          El Crédito de Enlace de INDAP está orientado a cubrir necesidades
-          financieras urgentes del agricultor mientras se aprueba otro
-          crédito de largo plazo. Monto máximo: 100 UF. Plazo: hasta 6 meses.
-          Disponible en todas las agencias de área INDAP del país.
+          Según INDAP, el Crédito de Largo Plazo financia total o
+          parcialmente inversiones y el capital de trabajo definido en el
+          proyecto, con plazos desde 360 días hasta 10 años. La solicitud
+          puede iniciarse durante todo el año en una Agencia de Área o
+          mediante Mi INDAP.
+
+  - id: "programa_desarrollo_inversiones"
+    titulo: "Programa de Desarrollo de Inversiones"
+    fuente: "INDAP Chile — Programa de Desarrollo de Inversiones"
+    fuente_url: "https://www.indap.gob.cl/plataforma-de-servicios/programa-desarrollo-de-inversiones-pdi"
+    fecha: "2026-07-29"
+    chunks:
       - texto: >
-          INDAP ofrece el Programa de Desarrollo de Inversiones (PDI) como
-          incentivo no reembolsable para que pequeños agricultores
-          implementen proyectos de inversión productiva: riego tecnificado,
-          invernaderos, packing, salas de proceso. Cofinanciamiento INDAP
-          de hasta el 80% del costo total con tope de 3.500 UF.
+          Según INDAP, el Programa de Desarrollo de Inversiones, PDI, es un
+          incentivo económico no reembolsable para cofinanciar inversiones
+          productivas. No es un crédito. Cada Dirección Regional determina
+          sus períodos y requisitos específicos de postulación.
+
+  - id: "acreditacion_indap"
+    titulo: "Requisitos para ser usuario o usuaria de INDAP"
+    fuente: "INDAP Chile — Acreditación de usuarios"
+    fuente_url: "https://www.indap.gob.cl/requisitos-para-ser-usuarioa-de-indap"
+    fecha: "2026-07-29"
+    chunks:
       - texto: >
-          Los agricultores usuarios de INDAP pueden acceder al Programa de
-          Desarrollo Local (PRODESAL) que entrega asesoría técnica gratuita
-          a través de equipos municipales. Incluye capacitación en manejo
-          de cultivos, comercialización, acceso a créditos y registro de
-          precios de mercado. Contacto: municipio correspondiente.
-      - texto: >
-          Para postular a los programas INDAP, el agricultor debe estar
-          acreditado como usuario INDAP. La acreditación se realiza en la
-          agencia de área más cercana a su comuna. Requisitos: ser pequeño
-          productor agrícola, tener iniciación de actividades ante el SII,
-          y mantener residencia en la comuna donde postula.
+          Según INDAP, la acreditación como usuario o usuaria permite
+          postular a sus servicios, pero no garantiza el acceso a un crédito
+          o incentivo. INDAP debe revisar los requisitos específicos y la
+          disponibilidad del instrumento solicitado.

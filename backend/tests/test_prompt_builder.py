@@ -86,6 +86,50 @@ class TestSinContenidoNexorVentas:
         )
 
 
+class TestReglasConversacionalesSeguras:
+    """Fija el contrato conversacional local de Discussion #136."""
+
+    def test_hace_una_pregunta_por_turno_con_frases_para_voz(self) -> None:
+        """La conversación pide un dato a la vez y evita frases extensas."""
+        prompt = build_system_prompt()
+        assert "como máximo una pregunta por turno" in prompt
+        assert "pide uno por vez" in prompt
+        assert "frases breves aptas para voz" in prompt
+        assert "una idea por oración" in prompt
+
+    def test_responde_con_transparencia_si_preguntan_si_es_robot(self) -> None:
+        """AgroVoz se identifica como IA, sin respuestas evasivas."""
+        prompt = build_system_prompt()
+        assert "si eres robot o IA" in prompt
+        assert "Sí, soy AgroVoz" in prompt
+        assert "asistente de inteligencia artificial" in prompt
+
+    def test_evitar_entusiasmo_y_cierre_automaticos(self) -> None:
+        """El tono es amable sin entusiasmo vacío ni cierre mecánico."""
+        prompt = build_system_prompt()
+        assert "No uses entusiasmo automático ni empatía vacía" in prompt
+        assert "cierre suave solo si la consulta quedó resuelta" in prompt
+        assert "No termines siempre con una pregunta" in prompt
+
+    def test_no_repite_datos_sensibles_para_validarlos(self) -> None:
+        """La confirmación no debe verbalizar datos personales."""
+        prompt = build_system_prompt()
+        assert "NUNCA confirmes ni valides repitiendo datos sensibles" in prompt
+        assert "teléfono, RUN, dirección o claves" in prompt
+
+    def test_no_promete_derivacion_humana_inexistente(self) -> None:
+        """El prompt declara el límite real del canal."""
+        prompt = build_system_prompt()
+        assert "no ofrece transferencia ni seguimiento por una persona" in prompt
+        assert "No prometas que alguien llamará, responderá o revisará después" in prompt
+
+    def test_mantiene_limite_de_recomendaciones(self) -> None:
+        """Las nuevas reglas no amplían el alcance agronómico."""
+        prompt = build_system_prompt()
+        assert "NUNCA recomendaciones agronómicas" in prompt
+        assert "sin instrucciones ni recomendaciones" in prompt
+
+
 class TestModificacionAislada:
     """Verifica que cada sección sea accesible de forma independiente."""
 

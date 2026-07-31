@@ -50,14 +50,20 @@ async def get_weather_endpoint(
     try:
         wd = await get_weather_full(lat, lon)
     except ValueError as exc:
-        logger.warning("Configuración de clima incompleta: %s", exc)
+        logger.warning(
+            "Configuración de clima incompleta — error=%s",
+            type(exc).__name__,
+        )
         raise HTTPException(
             status_code=503,
             detail="Servicio de clima no disponible",
             headers={"Retry-After": "3600"},  # 1 hora: requiere config
         ) from exc
     except (ConnectionError, RuntimeError) as exc:
-        logger.warning("Error al obtener clima para (%.4f, %.4f): %s", lat, lon, exc)
+        logger.warning(
+            "Error al obtener clima — error=%s",
+            type(exc).__name__,
+        )
         raise HTTPException(
             status_code=502,
             detail="Servicio de clima no disponible",
@@ -90,15 +96,19 @@ async def get_weather_history_endpoint(
     try:
         summaries = await fetch_historico(lat, lon, years)
     except ValueError as exc:
-        logger.warning("Parámetros inválidos para histórico: %s", exc)
+        logger.warning(
+            "Parámetros inválidos para histórico — error=%s",
+            type(exc).__name__,
+        )
         raise HTTPException(
             status_code=422,
             detail=str(exc),
         ) from exc
     except (ConnectionError, RuntimeError) as exc:
         logger.warning(
-            "Error al obtener histórico para (%.4f, %.4f, y=%d): %s",
-            lat, lon, years, exc,
+            "Error al obtener histórico — years=%d error=%s",
+            years,
+            type(exc).__name__,
         )
         raise HTTPException(
             status_code=502,

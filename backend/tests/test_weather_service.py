@@ -10,6 +10,7 @@ fetch_historico, get_clima_historico.
 Sin red real: MockTransport simula respuestas de OpenMeteo.
 """
 
+import logging
 from collections.abc import Callable
 
 import httpx
@@ -249,8 +250,8 @@ class TestParseOpenMeteoResponse:
         assert wd.humidity is None
         assert wd.description == "sin datos"
 
-    def test_coordenadas_lejos_de_traiguen(self) -> None:
-        """Coordenadas lejos de Traiguén → location='la zona consultada'."""
+    def test_coordenadas_de_santiago_nombran_santiago(self) -> None:
+        """Coords de Santiago resuelven al nombre de la comuna, no a genérico."""
         wd = _parse_openmeteo_response(
             {
                 "current": {
@@ -262,9 +263,23 @@ class TestParseOpenMeteoResponse:
             -33.45, -70.65,  # Santiago
         )
 
-        assert wd.location == "la zona consultada"
+        assert wd.location == "Santiago"
         assert wd.temperature_c == 25.0
         assert wd.description == "cielo despejado"
+
+    def test_coordenadas_desconocidas_usan_nombre_generico(self) -> None:
+        """Coords fuera del mapa de comunas → 'la zona consultada'."""
+        wd = _parse_openmeteo_response(
+            {
+                "current": {
+                    "temperature_2m": 10.0,
+                    "relative_humidity_2m": 40,
+                    "weather_code": 0,
+                }
+            },
+            0.0, 0.0,  # Atlántico / desconocido
+        )
+        assert wd.location == "la zona consultada"
 
     def test_rain_cero_no_se_reporta(self) -> None:
         """rain=0.0 → rain_1h_mm=None (umbral > 0)."""
@@ -345,7 +360,7 @@ class TestGetWeather:
         })
         try:
             texto = await get_weather(-33.45, -70.65)
-            assert "la zona consultada" in texto
+            assert "Santiago" in texto
             assert "25°C" in texto
         finally:
             await mock_client.aclose()
@@ -1064,11 +1079,15 @@ class TestGetClimaHistorico:
         assert "Traiguén" in texto or "Temuco" in texto or "Santiago" in texto
 
     async def test_error_api_devuelve_mensaje_amigable(
-        self, monkeypatch: pytest.MonkeyPatch
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Error de API devuelve mensaje amigable para el agricultor."""
+        caplog.set_level(logging.WARNING, logger="app.services.weather_service")
+
         def handler(request: httpx.Request) -> httpx.Response:
-            raise httpx.ConnectError("fallo simulado")
+            raise httpx.ConnectError("secreto-clima Traiguén -38.23,-72.68")
 
         transport = httpx.MockTransport(handler)
         mock_client = httpx.AsyncClient(transport=transport)
@@ -1077,6 +1096,10 @@ class TestGetClimaHistorico:
             texto = await get_clima_historico("Traiguén")
             assert "No pude consultar" in texto
             assert "Traiguén" in texto
+            assert "secreto-clima" not in caplog.text
+            assert "Traiguén" not in caplog.text
+            assert "-38.23" not in caplog.text
+            assert "-72.68" not in caplog.text
         finally:
             await mock_client.aclose()
 

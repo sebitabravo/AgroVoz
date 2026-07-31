@@ -13,15 +13,25 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import unicodedata
 from pathlib import Path
+from threading import Lock
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.config import settings
 from app.core.constants import FeedbackAgricultor, Intent
+from app.core.phone_hash import validate_phone_hash
 from app.schemas.pipeline import AudioResponse
 from app.services.alert_pipeline import detect_and_handle_alert_command
+from app.services.conversation_state import (
+    ConversationLease,
+    ConversationRegistry,
+    ConversationState,
+    TransitionStatus,
+)
 from app.services.dataset_service import retain_audio
 from app.services.llm_keywords import _COMMON_PRODUCTS
 from app.services.llm_service import FALLBACK_TEXT, NO_RESPONSE_TEXT
@@ -38,14 +48,40 @@ logger = logging.getLogger(__name__)
 
 # Keywords para inferir el tipo de consulta en _extract_variables (issue #191).
 # Extracción keyword-based (no LLM) para no sumar latencia al pipeline (#165).
-_PRECIO_KEYWORDS = frozenset({
-    "precio", "cuanto", "cuánto", "cuesta", "vale", "kilo", "saco",
-    "luca", "peso", "vender", "vendi", "vendí", "comprar",
-})
-_CLIMA_KEYWORDS = frozenset({
-    "clima", "tiempo", "lluvia", "llover", "temperatura", "frio", "frío",
-    "calor", "helada", "viento", "pronostico", "pronóstico", "grados",
-})
+_PRECIO_KEYWORDS = frozenset(
+    {
+        "precio",
+        "cuanto",
+        "cuánto",
+        "cuesta",
+        "vale",
+        "kilo",
+        "saco",
+        "luca",
+        "peso",
+        "vender",
+        "vendi",
+        "vendí",
+        "comprar",
+    }
+)
+_CLIMA_KEYWORDS = frozenset(
+    {
+        "clima",
+        "tiempo",
+        "lluvia",
+        "llover",
+        "temperatura",
+        "frio",
+        "frío",
+        "calor",
+        "helada",
+        "viento",
+        "pronostico",
+        "pronóstico",
+        "grados",
+    }
+)
 
 # Timeout interno del pipeline. Si el pipeline completo excede este limite,
 # se aborta y se retorna AudioResponse con texto de error. Distinto del
@@ -68,6 +104,26 @@ _WHISPER_TIMEOUT = 60.0
 
 # Cache singleton de TTSService: el modelo Piper se carga UNA vez.
 _tts_service: TTSService | None = None
+
+# Registro operacional efímero. Se crea solo cuando el feature flag está
+# activo; con el gate apagado el pipeline conserva su flujo stateless.
+_conversation_registry: ConversationRegistry | None = None
+_conversation_registry_lock = Lock()
+
+_CONVERSATION_BUSY_TEXT = "Ya tienes una consulta en proceso. Espera un momento antes de enviar otra."
+_COMPREHENSION_ESCALATION_TEXTS = (
+    "No pude entender bien. Por favor, repite tu consulta más despacio y con una pregunta a la vez.",
+    "Todavía no pude entender. Si puedes, escribe tu consulta por texto en este mismo chat.",
+    (
+        "Sigo sin poder entender tu consulta. AgroVoz no cuenta con atención humana en este chat. "
+        "Para recibir ayuda de una persona, puedes contactar directamente a tu extensionista de "
+        "PRODESAL o a INDAP."
+    ),
+)
+
+# Solo estas intenciones pueden necesitar contenido transitorio para copiarlo
+# al historial consentido después de confirmar la entrega por WhatsApp.
+_HISTORY_STAGING_INTENTS = frozenset({"precio", "clima", "credito", "corpus"})
 
 # Keywords de feedback del agricultor. Se detectan como intent especial
 # y actualizan la consulta ANTERIOR (no generan nueva consulta).
@@ -106,6 +162,44 @@ _FEEDBACK_NO_UTIL = [
     "no es eso",
 ]
 
+# Pedidos cerrados de contexto. La detección exige que toda la frase, salvo
+# fórmulas breves de cortesía, corresponda al pedido: nunca se interpreta un
+# "lo mismo" aislado ni se intenta resolver referencias ambiguas con el LLM.
+_EXPLICIT_HISTORY_QUERIES = frozenset(
+    {
+        "cual fue mi ultima consulta",
+        "cual fue mi consulta anterior",
+        "que pregunte antes",
+        "que fue lo que pregunte antes",
+        "consulta anterior",
+        "la consulta anterior",
+        "mi consulta anterior",
+    }
+)
+_HISTORY_QUERY_PREFIXES = (
+    "por favor ",
+    "dime ",
+    "muestrame ",
+    "recuerdame ",
+    "quiero saber ",
+)
+_HISTORY_DELETION_QUERIES = frozenset(
+    {
+        "borra mi historial",
+        "borra todo mi historial",
+        "elimina mi historial",
+        "elimina todo mi historial",
+        "borra mis consultas",
+        "elimina mis consultas",
+        "desactiva mi historial",
+    }
+)
+
+# Segundo límite, menor al del servicio de historial, para que una respuesta
+# hablada no se vuelva interminable aunque la fila persistida sea extensa.
+_HISTORY_VOICE_QUERY_MAX_CHARS = 160
+_HISTORY_VOICE_RESPONSE_MAX_CHARS = 320
+
 # Texto fijo de bienvenida para primer contacto (issue #86).
 # No requiere LLM: es un mensaje predefinido sintetizado con TTS.
 # Sin tildes a proposito: Piper las verbaliza mal en algunas palabras.
@@ -137,29 +231,46 @@ WELCOME_DISCLAIMER_TEXT = (
 )
 
 
-
-def _sanitize_for_log(text: str, max_len: int = 80) -> str:
-    """Neutraliza saltos de línea y caracteres de control para evitar log injection.
-
-    Anonimiza el contenido acotando longitud. Cumple con Ley 21.719 (transcripciones anonimizadas).
-
-    Args:
-        text: Texto a sanitizar (ej: transcripción del usuario).
-        max_len: Largo máximo en caracteres (default 80).
-
-    Returns:
-        Texto con caracteres de control escapados y acotado a max_len.
-    """
-    cleaned = text.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
-    return cleaned[:max_len]
-
-
 def _get_tts_service() -> TTSService:
     """Retorna la instancia singleton de TTSService."""
     global _tts_service
     if _tts_service is None:
         _tts_service = TTSService()
     return _tts_service
+
+
+def _get_conversation_registry() -> ConversationRegistry | None:
+    """Obtiene el registro lazy solo cuando el feature flag está activo."""
+    if not settings.use_conversation_state:
+        return None
+
+    global _conversation_registry
+    with _conversation_registry_lock:
+        if _conversation_registry is None:
+            _conversation_registry = ConversationRegistry(
+                timeout_minutes=settings.conversation_timeout_minutes,
+            )
+        return _conversation_registry
+
+
+def _claim_conversation(
+    phone_hash: str,
+) -> tuple[ConversationLease | None, bool]:
+    """Reclama un turno válido sin crear tracking para identidades inválidas."""
+    if not settings.use_conversation_state:
+        return None, False
+    if not validate_phone_hash(phone_hash):
+        logger.debug("State machine omitida: identidad operacional no es HMAC-SHA256")
+        return None, False
+
+    registry = _get_conversation_registry()
+    if registry is None:
+        return None, False
+
+    claim = registry.claim(phone_hash)
+    if claim.status == TransitionStatus.OCUPADA:
+        return None, True
+    return claim.lease, False
 
 
 def _detect_feedback(text: str) -> FeedbackAgricultor | None:
@@ -180,6 +291,19 @@ def _detect_feedback(text: str) -> FeedbackAgricultor | None:
         if kw in text_lower:
             return "util"
     return None
+
+
+def _truncate_for_voice(text: str, max_chars: int) -> str:
+    """Compacta y recorta texto en un límite estable, idealmente entre palabras."""
+    compact = " ".join(text.split())
+    if len(compact) <= max_chars:
+        return compact
+
+    fragment = compact[: max_chars - 1].rstrip()
+    last_space = fragment.rfind(" ")
+    if last_space >= max_chars // 2:
+        fragment = fragment[:last_space].rstrip()
+    return f"{fragment}…"
 
 
 class AgroVozPipeline:
@@ -291,7 +415,8 @@ class AgroVozPipeline:
         # Indicadores de RAG/corpus (boletines, documentos, contexto).
         # "segun" solo no basta porque "segun OpenMeteo" es clima.
         corpus_patterns = [
-            "boletin", "boletín",
+            "boletin",
+            "boletín",
             "odepa dice",
             "fuente: odepa",
             "segun el boletin",
@@ -373,6 +498,35 @@ class AgroVozPipeline:
         return any(kw in q for kw in resumen_keywords)
 
     @staticmethod
+    def _is_explicit_history_query(query_text: str) -> bool:
+        """Detecta únicamente pedidos inequívocos de la consulta anterior."""
+        decomposed = unicodedata.normalize("NFD", query_text.casefold())
+        without_accents = "".join(char for char in decomposed if unicodedata.category(char) != "Mn")
+        normalized = " ".join("".join(char if char.isalnum() else " " for char in without_accents).split())
+
+        # Se aceptan fórmulas de cortesía encadenadas, pero no texto adicional.
+        prefix_removed = True
+        while prefix_removed:
+            prefix_removed = False
+            for prefix in _HISTORY_QUERY_PREFIXES:
+                if normalized.startswith(prefix):
+                    normalized = normalized.removeprefix(prefix).strip()
+                    prefix_removed = True
+                    break
+        normalized = normalized.removesuffix(" por favor").strip()
+        return normalized in _EXPLICIT_HISTORY_QUERIES
+
+    @staticmethod
+    def _is_history_deletion_query(query_text: str) -> bool:
+        """Detecta solo órdenes inequívocas de revocar y borrar historial."""
+        decomposed = unicodedata.normalize("NFD", query_text.casefold())
+        without_accents = "".join(char for char in decomposed if unicodedata.category(char) != "Mn")
+        normalized = " ".join("".join(char if char.isalnum() else " " for char in without_accents).split())
+        normalized = normalized.removeprefix("por favor ").strip()
+        normalized = normalized.removesuffix(" por favor").strip()
+        return normalized in _HISTORY_DELETION_QUERIES
+
+    @staticmethod
     def _extract_producto(query_text: str) -> str | None:
         """Extrae el nombre de un producto agrícola de la consulta.
 
@@ -448,28 +602,26 @@ class AgroVozPipeline:
     # no aplica: son casos donde el productor pregunta dos cosas, compara, o
     # pide una explicacion, y ahi el LLM si aporta.
     _FAST_PATH_BLOQUEANTES = (
-        " y ademas", " y además", " tambien", " también", " o sea",
-        " por que", " por qué", " porque", " conviene", " me sirve",
-        " comparado", " diferencia", " deberia", " debería", " recomend",
+        " y ademas",
+        " y además",
+        " tambien",
+        " también",
+        " o sea",
+        " por que",
+        " por qué",
+        " porque",
+        " conviene",
+        " me sirve",
+        " comparado",
+        " diferencia",
+        " deberia",
+        " debería",
+        " recomend",
     )
 
     # Tope de largo para el fast-path. Una consulta larga suele traer contexto o
     # varias preguntas; el atajo esta pensado para la pregunta directa y corta.
     _FAST_PATH_MAX_CHARS = 120
-
-    # Nombres de mercados ODEPA. Si el productor pide un mercado concreto, el
-    # atajo NO sirve: _force_keyword_tool resuelve el mercado por el telefono
-    # del productor y no lee el nombre de la consulta, asi que responderia con
-    # otro mercado (preguntar por Vega Central y recibir Lo Valledor). Esos
-    # casos van al LLM, que si extrae el mercado como parametro de la tool.
-    #
-    # Solo tokens ESPECIFICOS: "mercado" y "feria" a secas son genericos
-    # ("¿a como esta la papa en el mercado?") y deben seguir usando el atajo.
-    _FAST_PATH_MERCADOS = (
-        "vega central", "valledor", "palmera", "femacal", "mapocho",
-        "macroferia", "lagunitas", "limari", "limarí", "chillan", "chillán",
-        "arica", "talca", "puerto montt", "la serena", "la calera",
-    )
 
     @staticmethod
     def _puede_usar_fast_path(
@@ -480,9 +632,12 @@ class AgroVozPipeline:
         """Decide si la consulta puede responderse sin invocar al LLM.
 
         Solo con certeza total: tipo clasificado como precio o clima, producto
-        identificado si es precio, consulta corta, sin mercado especifico, sin
-        marcas de pregunta compuesta y sin el tip de margen (que necesita
-        razonamiento del LLM).
+        identificado si es precio, consulta corta, sin marcas de pregunta
+        compuesta y sin el tip de margen (que necesita razonamiento del LLM).
+
+        Los mercados nombrados SI usan fast-path: ``_force_keyword_tool``
+        extrae el alias ("vega central", "valledor") y ``get_price_for_llm``
+        lo resuelve por substring. Antes se bloqueaban y caian al LLM (~25s).
 
         Args:
             texto: Consulta transcrita del agricultor.
@@ -501,9 +656,6 @@ class AgroVozPipeline:
 
         limpio = texto.strip().lower()
         if len(limpio) > AgroVozPipeline._FAST_PATH_MAX_CHARS:
-            return False
-
-        if any(m in limpio for m in AgroVozPipeline._FAST_PATH_MERCADOS):
             return False
 
         # Se normalizan los signos de apertura y se rodea de espacios para que
@@ -530,9 +682,7 @@ class AgroVozPipeline:
 
         session = SessionLocal()
         try:
-            prefs = session.scalar(
-                select(UserPrefs).where(UserPrefs.phone_hash == phone_hash)
-            )
+            prefs = session.scalar(select(UserPrefs).where(UserPrefs.phone_hash == phone_hash))
             if prefs is None or not prefs.cultivos:
                 return None
             parsed = json.loads(prefs.cultivos)
@@ -540,22 +690,25 @@ class AgroVozPipeline:
                 return [str(c) for c in parsed]
             return None
         except (SQLAlchemyError, json.JSONDecodeError, TypeError, ValueError):
-            logger.exception(
-                "Error cargando cultivos de user_prefs — phone_hash=%s",
-                phone_hash[:8] if phone_hash else "sin_hash",
-            )
+            logger.error("Error cargando cultivos de user_prefs")
             return None
         finally:
             session.close()
 
     @staticmethod
-    async def _generate_response(transcribed_text: str, chat_id_hash: str) -> tuple[str, Intent]:
-        """Genera respuesta textual: saludo rápido, resumen o LLM con Tool Calling.
+    async def _generate_response(
+        transcribed_text: str,
+        chat_id_hash: str,
+        origen_ref: list[str] | None = None,
+    ) -> tuple[str, Intent]:
+        """Genera respuesta textual: historial, saludo, resumen o Tool Calling.
 
         Detecta en orden (por eficiencia):
-        1. Saludos puros (sin pregunta) → respuesta rápida, sin LLM.
-        2. Resumen (por keyword) → estadísticas del agricultor.
-        3. Consulta normal → LLM con Tool Calling.
+        1. Revocación/borrado explícito de historial.
+        2. Pedido explícito de consulta anterior → historial consentido.
+        3. Crédito o saludo puro → respuesta rápida, sin LLM.
+        4. Resumen (por keyword) → estadísticas del agricultor.
+        5. Consulta normal → LLM con Tool Calling.
 
         El hash también se usa para resolver el mercado más cercano según
         comuna (Issue #89). Los cultivos de interés del agricultor se cargan
@@ -564,15 +717,103 @@ class AgroVozPipeline:
         Args:
             transcribed_text: Texto transcrito por Whisper.
             chat_id_hash: Hash anonimizado del chat (resumen y mercado cercano).
+            origen_ref: Lista de un elemento donde se deja COMO se genero la
+                respuesta ("historial", "saludo", "resumen", "fast_path", "llm",
+                "fallback_keywords", "openrouter", "generico"). El caller lo usa
+                para loguear la verdad: antes el log decia "Respuesta LLM
+                generada" tambien cuando respondio el fast-path sin tocar el
+                LLM, y eso hacia imposible distinguir la latencia real del LLM
+                de la del atajo. Opcional para no romper los llamadores de tests.
 
         Returns:
             Tupla (texto_respuesta, intent).
         """
+
+        def _marcar(origen: str) -> None:
+            """Registra el origen de la respuesta si el caller lo pidio."""
+            if origen_ref is not None:
+                origen_ref[0] = origen
+
         if not transcribed_text or not transcribed_text.strip():
+            _marcar("sin_texto")
             return (
                 "No entendi tu mensaje. ¿Podrias enviar un audio mas claro?",
                 "desconocido",
             )
+
+        if AgroVozPipeline._is_history_deletion_query(transcribed_text):
+            from app.services.consultation_history_service import (
+                HistoryOperationError,
+                delete_history,
+            )
+
+            try:
+                await asyncio.to_thread(
+                    delete_history,
+                    chat_id_hash,
+                    reason="consent_revoked",
+                    requested_via="verified_whatsapp",
+                )
+            except HistoryOperationError:
+                logger.error("Borrado de historial solicitado por WhatsApp no confirmado")
+                _marcar("historial_borrado_error")
+                return (
+                    "No pude confirmar el borrado de tu historial. Inténtalo nuevamente en unos minutos.",
+                    "resumen",
+                )
+
+            logger.info("Historial revocado y borrado desde WhatsApp")
+            _marcar("historial_borrado")
+            return (
+                "Listo. Eliminé tu historial y desactivé el guardado de consultas futuras.",
+                "resumen",
+            )
+
+        # El historial solo se consulta ante una frase explícita. El servicio
+        # aplica feature gate, consentimiento y aislamiento por phone_hash. Si
+        # no entrega contexto, este bloque es invisible y el flujo stateless
+        # continúa exactamente por crédito, saludo, resumen o LLM.
+        if AgroVozPipeline._is_explicit_history_query(transcribed_text):
+            from app.services.consultation_history_service import (
+                get_latest_consultation_context,
+            )
+
+            try:
+                context = await asyncio.to_thread(
+                    get_latest_consultation_context,
+                    chat_id_hash,
+                )
+            except (SQLAlchemyError, TimeoutError, RuntimeError, OSError, ValueError):
+                logger.warning("Lectura contextual no disponible — continuando sin historial")
+                context = None
+
+            if context is not None:
+                previous_query = _truncate_for_voice(
+                    context.query_text,
+                    _HISTORY_VOICE_QUERY_MAX_CHARS,
+                )
+                previous_response = _truncate_for_voice(
+                    context.response_text,
+                    _HISTORY_VOICE_RESPONSE_MAX_CHARS,
+                )
+                logger.info("Respuesta contextual generada sin LLM")
+                _marcar("historial")
+                return (
+                    f"Tu consulta anterior fue: {previous_query}. La respuesta que recibiste fue: {previous_response}.",
+                    "resumen",
+                )
+
+        # P0 #174: crédito se detecta ANTES de saludo, extracción de producto,
+        # fuzzy matching, RAG y LLM. Sin esta precedencia, frases reales como
+        # "crédito para semillas" y "documento que habla de crédito" caían en
+        # precio por similitudes para→pera y habla→haba.
+        from app.services.indap_credit_service import get_indap_credit_referral
+
+        credit_referral = get_indap_credit_referral(transcribed_text)
+        if credit_referral is not None:
+            logger.info("Derivación informativa INDAP sin LLM")
+            _marcar("fast_path_credito")
+            return credit_referral, "credito"
 
         # 0. Detectar saludos puros ANTES del LLM: fast-path determinista sin latencia.
         # Saludos simples ("hola", "buenos días") sin pregunta real no requieren LLM.
@@ -580,10 +821,10 @@ class AgroVozPipeline:
 
         if _detect_greeting(transcribed_text):
             logger.info(
-                "Saludo puro detectado — omitiendo LLM — query=%.100s chat_id_hash=%s",
-                transcribed_text,
-                chat_id_hash[:8] if chat_id_hash else "sin_chat",
+                "Saludo puro detectado — omitiendo LLM — chars=%d",
+                len(transcribed_text),
             )
+            _marcar("saludo")
             return (
                 "¡Hola! Preguntame por el precio de algún producto o por el clima de Traiguén.",
                 "saludo",
@@ -612,9 +853,11 @@ class AgroVozPipeline:
                     response_text = await asyncio.to_thread(get_consultation_summary, session, chat_id_hash)
                 finally:
                     session.close()
+                _marcar("resumen")
                 return response_text, "resumen"
             except (TimeoutError, RuntimeError, OSError, ValueError):
-                logger.exception("Error generando resumen")
+                logger.error("Error generando resumen")
+                _marcar("resumen_error")
                 return (
                     "Tuve un problema al generar tu resumen. ¿Podrias intentar de nuevo?",
                     "resumen",
@@ -622,7 +865,10 @@ class AgroVozPipeline:
 
         # 2. Pipeline normal: LLM con tool calling.
         # Import local para permitir mocking en tests
-        from app.services.llm_keywords import _force_keyword_tool
+        from app.services.llm_keywords import (
+            _force_compound_keyword_tools,
+            _force_keyword_tool,
+        )
         from app.services.llm_service import answer
 
         # Cargar cultivos de interés del agricultor para personalizar el
@@ -634,11 +880,27 @@ class AgroVozPipeline:
         # al LLM via system_tip (Issue #91). El LLM ya tiene la tool en su
         # definicion, pero el system_tip refuerza la seleccion cuando el
         # agricultor habla en pasado ("vendi", "recibi").
-        margin_keywords = ["vendí", "vendi", "vender", "vendido",
-                           "vendió", "vendio", "vendiste", "vendieron",
-                           "recibí", "recibi", "recibiste", "recibió",
-                           "recibio", "me pagaron", "me pagó", "me pago",
-                           "acabo de vender", "recién vendí", "recien vendi"]
+        margin_keywords = [
+            "vendí",
+            "vendi",
+            "vender",
+            "vendido",
+            "vendió",
+            "vendio",
+            "vendiste",
+            "vendieron",
+            "recibí",
+            "recibi",
+            "recibiste",
+            "recibió",
+            "recibio",
+            "me pagaron",
+            "me pagó",
+            "me pago",
+            "acabo de vender",
+            "recién vendí",
+            "recien vendi",
+        ]
         system_tip = None
         if any(kw in transcribed_text.strip().lower() for kw in margin_keywords):
             system_tip = (
@@ -647,11 +909,24 @@ class AgroVozPipeline:
                 "usa calculate_margin para comparar contra la referencia ODEPA."
             )
             logger.info(
-                "Margin keywords detectados — system_tip activado para calculate_margin"
-                " — query=%.100s chat_id_hash=%s",
-                transcribed_text,
-                chat_id_hash[:8] if chat_id_hash else "sin_chat",
+                "Margin keywords detectados — system_tip activado para calculate_margin — producto=%s",
+                extracted.producto,
             )
+
+        # 1.8. Precio + clima: ambas fuentes son deterministas y deben
+        # consultarse aunque una falle. El orquestador compuesto conserva el
+        # bloque válido y explica el faltante, sin pagar la latencia del LLM.
+        if extracted.consulta_tipo == "ambos" and system_tip is None:
+            compound = await _force_compound_keyword_tools(
+                transcribed_text.strip(),
+                phone_hash=chat_id_hash,
+            )
+            logger.info(
+                "Fast-path compuesto sin LLM — producto=%s",
+                extracted.producto,
+            )
+            _marcar("fast_path_compuesto")
+            return compound, "precio"
 
         # 1.9. Fast-path determinista: consulta simple y clasificada con certeza.
         # El LLM en CPU limitada tarda decenas de segundos casi todo en leer el
@@ -666,11 +941,11 @@ class AgroVozPipeline:
                 # tipo calce con Intent (que no tiene "ambos").
                 intent_fast: Intent = "precio" if extracted.consulta_tipo == "precio" else "clima"
                 logger.info(
-                    "Fast-path sin LLM — tipo=%s producto=%s chat_id_hash=%s",
+                    "Fast-path sin LLM — tipo=%s producto=%s",
                     intent_fast,
                     extracted.producto,
-                    chat_id_hash[:8] if chat_id_hash else "sin_chat",
                 )
+                _marcar("fast_path")
                 return fast, intent_fast
 
         try:
@@ -681,8 +956,9 @@ class AgroVozPipeline:
                 system_tip=system_tip,
                 consulta_tipo=extracted.consulta_tipo,
             )
+            _marcar("llm")
         except (TimeoutError, RuntimeError, OSError, ValueError):
-            logger.exception("Error en generacion LLM local — probando fallbacks")
+            logger.error("Error en generacion LLM local — probando fallbacks")
 
             # Fallback de 3 capas cuando el LLM local falla:
             # 1. OpenRouter (tool calling remoto, deshabilitado por defecto —
@@ -697,30 +973,26 @@ class AgroVozPipeline:
                 transcribed_text.strip(), phone_hash=chat_id_hash, cultivos=cultivos
             )
             if forced_result:
-                logger.warning(
-                    "Respuesta via OpenRouter (LLM local fallo) — phone_hash=%s",
-                    chat_id_hash[:8] if chat_id_hash else "sin_chat",
-                )
+                _marcar("openrouter")
+                logger.warning("Respuesta via OpenRouter (LLM local fallo)")
             else:
                 try:
-                    forced_result = await _force_keyword_tool(
-                        transcribed_text.strip(), phone_hash=chat_id_hash
-                    )
+                    forced_result = await _force_keyword_tool(transcribed_text.strip(), phone_hash=chat_id_hash)
                 except (TimeoutError, RuntimeError, OSError, ValueError, SQLAlchemyError):
-                    logger.exception("Fallback determinista tambien fallo")
+                    logger.error("Fallback determinista tambien fallo")
                     forced_result = None
 
                 if forced_result:
+                    _marcar("fallback_keywords")
                     logger.warning(
-                        "Respuesta DEGRADADA (sin LLM) — query=%s phone_hash=%s",
-                        _sanitize_for_log(transcribed_text),
-                        chat_id_hash[:8] if chat_id_hash else "sin_chat",
+                        "Respuesta DEGRADADA (sin LLM) — producto=%s consulta_tipo=%s",
+                        extracted.producto,
+                        extracted.consulta_tipo,
                     )
 
-            response_text = forced_result or (
-                "Tuve un problema al procesar tu consulta. "
-                "¿Podrias intentar de nuevo?"
-            )
+            if not forced_result:
+                _marcar("generico")
+            response_text = forced_result or ("Tuve un problema al procesar tu consulta. ¿Podrias intentar de nuevo?")
 
         intent = AgroVozPipeline._detect_intent(transcribed_text, response_text)
         return response_text, intent
@@ -738,8 +1010,8 @@ class AgroVozPipeline:
         tts_ms: int = 0,
         producto: str | None = None,
         requires_review: bool = False,
-    ) -> None:
-        """Guarda la consulta en SQLite para metricas anonimizadas.
+    ) -> int | None:
+        """Guarda métricas y, solo con opt-in, contenido transitorio.
 
         Fire-and-forget: si falla, loguea el error pero no interrumpe
         el pipeline. La consulta se pierde, pero el audio se responde igual.
@@ -759,11 +1031,15 @@ class AgroVozPipeline:
             tts_ms: Latencia del TTS en ms.
             producto: Producto detectado en la consulta (opcional).
             requires_review: Si la consulta debe marcarse para revisión humana.
+
+        Returns:
+            ID de la consulta persistida, o None si ambos intentos fallan.
         """
         import time as _time
 
         from app.core.database import SessionLocal
         from app.models.consultation import Consultation
+        from app.models.user_prefs import UserPrefs
 
         latency_ms = int((_time.monotonic() - start_time) * 1000)
 
@@ -775,12 +1051,23 @@ class AgroVozPipeline:
             try:
                 session = SessionLocal()
                 try:
+                    stage_history_content = False
+                    if settings.consultation_history_enabled and intent in _HISTORY_STAGING_INTENTS:
+                        stage_history_content = (
+                            session.scalar(
+                                select(UserPrefs.history_consent).where(
+                                    UserPrefs.phone_hash == phone_hash,
+                                )
+                            )
+                            is True
+                        )
+
                     consulta = Consultation(
                         phone_hash=phone_hash,
                         intent=intent,
                         producto=producto,
-                        query_text=query_text,
-                        response_text=response_text,
+                        query_text=query_text if stage_history_content else "",
+                        response_text=response_text if stage_history_content else "",
                         audio_duration_ms=audio_duration_ms,
                         latency_ms=latency_ms,
                         whisper_ms=whisper_ms,
@@ -790,14 +1077,14 @@ class AgroVozPipeline:
                     )
                     session.add(consulta)
                     session.commit()
+                    consultation_id = consulta.id
                     logger.debug(
-                        "Consulta guardada — phone_hash=%s intent=%s producto=%s latency_ms=%d",
-                        phone_hash[:8],
+                        "Consulta guardada — consultation_id=%s intent=%s latency_ms=%d",
+                        consultation_id,
                         intent,
-                        producto,
                         latency_ms,
                     )
-                    return
+                    return consultation_id
                 except SQLAlchemyError:
                     session.rollback()
                     raise
@@ -806,16 +1093,15 @@ class AgroVozPipeline:
             except SQLAlchemyError:
                 if _attempt == 0:
                     logger.warning(
-                        "Error guardando consulta (reintento) — phone_hash=%s intent=%s",
-                        phone_hash[:8],
+                        "Error guardando consulta (reintento) — intent=%s",
                         intent,
                     )
                 else:
-                    logger.exception(
-                        "Error guardando consulta en DB — phone_hash=%s intent=%s",
-                        phone_hash[:8],
+                    logger.error(
+                        "Error guardando consulta en DB — intent=%s",
                         intent,
                     )
+        return None
 
     @staticmethod
     def _update_previous_feedback(
@@ -856,8 +1142,7 @@ class AgroVozPipeline:
             consulta = session.scalars(stmt).first()
             if consulta is None:
                 logger.warning(
-                    "Feedback sin consulta previa — phone_hash=%s feedback=%s",
-                    phone_hash[:8],
+                    "Feedback sin consulta previa — feedback=%s",
                     feedback,
                 )
                 return False
@@ -865,17 +1150,15 @@ class AgroVozPipeline:
             consulta.feedback = feedback
             session.commit()
             logger.info(
-                "Feedback actualizado — consultation_id=%d phone_hash=%s feedback=%s",
+                "Feedback actualizado — consultation_id=%d feedback=%s",
                 consulta.id,
-                phone_hash[:8],
                 feedback,
             )
             return True
         except SQLAlchemyError:
             session.rollback()
-            logger.exception(
-                "Error actualizando feedback — phone_hash=%s feedback=%s",
-                phone_hash[:8],
+            logger.error(
+                "Error actualizando feedback — feedback=%s",
                 feedback,
             )
             return False
@@ -909,10 +1192,7 @@ class AgroVozPipeline:
             )
             return bool(count == 0)
         except SQLAlchemyError:
-            logger.exception(
-                "Error consultando consultas previas — phone_hash=%s",
-                phone_hash[:8],
-            )
+            logger.error("Error consultando consultas previas")
             return False
         finally:
             session.close()
@@ -956,50 +1236,78 @@ class AgroVozPipeline:
         tts_ms_ref = [0]
         welcome_ogg_ref: list[str | None] = [None]
         primer_contacto_ref: list[bool] = [False]
+        conversation_lease, conversation_busy = _claim_conversation(chat_id_hash)
 
-        try:
-            # Ejecutar pipeline con timeout.
-            return await asyncio.wait_for(
-                self._process_stages(
-                    wav_path=wav_path,
-                    audio_duration_ms=audio_duration_ms,
-                    message_id=message_id,
-                    chat_id_hash=chat_id_hash,
-                    request_id=request_id,
-                    chat_id=chat_id,
-                    pipeline_start=pipeline_start,
-                    whisper_ms_ref=whisper_ms_ref,
-                    llm_ms_ref=llm_ms_ref,
-                    tts_ms_ref=tts_ms_ref,
-                    welcome_ogg_ref=welcome_ogg_ref,
-                    primer_contacto_ref=primer_contacto_ref,
-                    texto_directo=texto_directo,
-                    generar_audio=generar_audio,
-                ),
-                timeout=self._timeout,
-            )
-        except TimeoutError:
+        if conversation_busy:
             total_ms = int((time.monotonic() - pipeline_start) * 1000)
-            logger.warning(
-                "Pipeline timeout (%ss) — message_id=%s total_ms=%d request_id=%s",
-                self._timeout,
-                message_id,
-                total_ms,
-                request_id,
-            )
-            # Si se genero bienvenida antes del timeout, limpiar el archivo
-            # para evitar leak en audio_temp/ (el ref se captura antes del cancel).
-            if welcome_ogg_ref[0]:
-                Path(welcome_ogg_ref[0]).unlink(missing_ok=True)
             return AudioResponse(
                 audio_path="",
-                text_response=("Tuve problemas para responder a tiempo. ¿Podrias preguntar de nuevo mas breve?"),
+                text_response=_CONVERSATION_BUSY_TEXT,
                 latency_ms=total_ms,
                 intent="desconocido",
-                whisper_ms=whisper_ms_ref[0],
-                llm_ms=llm_ms_ref[0],
-                tts_ms=tts_ms_ref[0],
+                whisper_ms=0,
+                llm_ms=0,
+                tts_ms=0,
             )
+
+        try:
+            if conversation_lease is not None and not conversation_lease.transition(ConversationState.BUSCANDO_DATOS):
+                conversation_lease.abort()
+                conversation_lease = None
+
+            try:
+                # Ejecutar pipeline con timeout.
+                response = await asyncio.wait_for(
+                    self._process_stages(
+                        wav_path=wav_path,
+                        audio_duration_ms=audio_duration_ms,
+                        message_id=message_id,
+                        chat_id_hash=chat_id_hash,
+                        request_id=request_id,
+                        chat_id=chat_id,
+                        pipeline_start=pipeline_start,
+                        whisper_ms_ref=whisper_ms_ref,
+                        llm_ms_ref=llm_ms_ref,
+                        tts_ms_ref=tts_ms_ref,
+                        welcome_ogg_ref=welcome_ogg_ref,
+                        primer_contacto_ref=primer_contacto_ref,
+                        texto_directo=texto_directo,
+                        generar_audio=generar_audio,
+                        conversation_lease=conversation_lease,
+                    ),
+                    timeout=self._timeout,
+                )
+            except TimeoutError:
+                total_ms = int((time.monotonic() - pipeline_start) * 1000)
+                logger.warning(
+                    "Pipeline timeout (%ss) — message_id=%s total_ms=%d request_id=%s",
+                    self._timeout,
+                    message_id,
+                    total_ms,
+                    request_id,
+                )
+                # Si se genero bienvenida antes del timeout, limpiar el archivo
+                # para evitar leak en audio_temp/ (el ref se captura antes del cancel).
+                if welcome_ogg_ref[0]:
+                    Path(welcome_ogg_ref[0]).unlink(missing_ok=True)
+                return AudioResponse(
+                    audio_path="",
+                    text_response=("Tuve problemas para responder a tiempo. ¿Podrias preguntar de nuevo mas breve?"),
+                    latency_ms=total_ms,
+                    intent="desconocido",
+                    whisper_ms=whisper_ms_ref[0],
+                    llm_ms=llm_ms_ref[0],
+                    tts_ms=tts_ms_ref[0],
+                )
+
+            if conversation_lease is not None and conversation_lease.transition(ConversationState.ESPERANDO_CONSULTA):
+                conversation_lease.finish()
+            return response
+        finally:
+            # En timeout, cancelación o excepción se retira solo la sesión que
+            # aún pertenece a esta lease. Una sesión reemplazante queda intacta.
+            if conversation_lease is not None:
+                conversation_lease.abort()
 
     async def _process_stages(
         self,
@@ -1017,6 +1325,7 @@ class AgroVozPipeline:
         primer_contacto_ref: list[bool],
         texto_directo: str | None = None,
         generar_audio: bool = True,
+        conversation_lease: ConversationLease | None = None,
     ) -> AudioResponse:
         """Ejecuta las etapas del pipeline secuencialmente con benchmark.
 
@@ -1048,22 +1357,18 @@ class AgroVozPipeline:
                     primer_contacto_ref[0] = True
                     if generar_audio:
                         tts_welcome = _get_tts_service()
-                        welcome_ogg_ref[0] = await asyncio.to_thread(
-                            tts_welcome.synthesize, _WELCOME_TEXT
-                        )
+                        welcome_ogg_ref[0] = await asyncio.to_thread(tts_welcome.synthesize, _WELCOME_TEXT)
                     logger.info(
-                        "Primer contacto detectado — bienvenida=%s — phone_hash=%s message_id=%s request_id=%s",
+                        "Primer contacto detectado — bienvenida=%s — message_id=%s request_id=%s",
                         "audio" if generar_audio else "solo texto",
-                        chat_id_hash[:8],
                         message_id,
                         request_id,
                     )
-            except (SQLAlchemyError, RuntimeError, OSError, ValueError) as exc:
+            except (SQLAlchemyError, RuntimeError, OSError, ValueError):
                 logger.warning(
                     "Deteccion de primer contacto o TTS de bienvenida fallo — "
-                    "continuando sin bienvenida: message_id=%s error=%s request_id=%s",
+                    "continuando sin bienvenida: message_id=%s request_id=%s",
                     message_id,
-                    exc,
                     request_id,
                 )
 
@@ -1076,9 +1381,8 @@ class AgroVozPipeline:
         if texto_directo is not None:
             transcribed_text = texto_directo
             logger.info(
-                "Consulta de texto (sin Whisper) — message_id=%s text=%.200s chars=%d request_id=%s",
+                "Consulta de texto (sin Whisper) — message_id=%s chars=%d request_id=%s",
                 message_id,
-                transcribed_text,
                 len(transcribed_text),
                 request_id,
             )
@@ -1107,18 +1411,16 @@ class AgroVozPipeline:
                 transcribed_text = str(transcription.get("text", ""))
                 whisper_ms_ref[0] = int((time.monotonic() - t_whisper_start) * 1000)
                 logger.info(
-                    "Audio transcrito — message_id=%s text=%.200s chars=%d whisper_ms=%d request_id=%s",
+                    "Audio transcrito — message_id=%s chars=%d whisper_ms=%d request_id=%s",
                     message_id,
-                    transcribed_text,
                     len(transcribed_text),
                     whisper_ms_ref[0],
                     request_id,
                 )
-            except (RuntimeError, FileNotFoundError, ValueError, TimeoutError) as exc:
+            except (RuntimeError, FileNotFoundError, ValueError, TimeoutError):
                 logger.warning(
-                    "Whisper fallo — continuando sin transcripcion: message_id=%s error=%s request_id=%s",
+                    "Whisper fallo — continuando sin transcripcion: message_id=%s request_id=%s",
                     message_id,
-                    exc,
                     request_id,
                 )
 
@@ -1143,11 +1445,9 @@ class AgroVozPipeline:
                     audio_duration_ms,
                 )
             except (RuntimeError, OSError, ValueError, TypeError, AttributeError):
-                logger.exception(
-                    "Error reteniendo audio para dataset — continuando pipeline: "
-                    "message_id=%s phone_hash=%s request_id=%s",
+                logger.error(
+                    "Error reteniendo audio para dataset — continuando pipeline: message_id=%s request_id=%s",
                     message_id,
-                    chat_id_hash[:8],
                     request_id,
                 )
 
@@ -1210,7 +1510,11 @@ class AgroVozPipeline:
 
                     # _generate_response detecta internally si es resumen o LLM,
                     # maneja su propia lógica y error handling.
-                    response_text, intent = await self._generate_response(transcribed_text, chat_id_hash)
+                    # Se captura COMO se genero la respuesta para que el log no
+                    # mienta: antes decia "Respuesta LLM generada" incluso cuando
+                    # respondio el fast-path sin tocar el LLM.
+                    origen_ref: list[str] = ["desconocido"]
+                    response_text, intent = await self._generate_response(transcribed_text, chat_id_hash, origen_ref)
                     llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
 
                     if intent == "resumen":
@@ -1223,13 +1527,26 @@ class AgroVozPipeline:
                         )
                     else:
                         logger.info(
-                            "Respuesta LLM generada — message_id=%s intent=%s chars=%d llm_ms=%d request_id=%s",
+                            "Respuesta generada — origen=%s message_id=%s intent=%s chars=%d gen_ms=%d request_id=%s",
+                            origen_ref[0],
                             message_id,
                             intent,
                             len(response_text),
                             llm_ms_ref[0],
                             request_id,
                         )
+
+        if conversation_lease is not None:
+            comprehension_failed = intent == "desconocido" or not response_text.strip()
+            if comprehension_failed:
+                failure_count = conversation_lease.register_comprehension_failure()
+                if failure_count is not None:
+                    response_text = _COMPREHENSION_ESCALATION_TEXTS[failure_count - 1]
+                response_state = ConversationState.ACLARANDO
+            else:
+                conversation_lease.reset_comprehension_failures()
+                response_state = ConversationState.RESPONDIENDO
+            conversation_lease.transition(response_state)
 
         # ── Etapa 3: Sintesis TTS ────────────────────────────────────
         # generar_audio=False para consultas escritas: quien escribe puede leer,
@@ -1248,11 +1565,10 @@ class AgroVozPipeline:
                     tts_ms_ref[0],
                     request_id,
                 )
-            except (PiperModelNotFoundError, RuntimeError, ValueError, OSError) as exc:
+            except (PiperModelNotFoundError, RuntimeError, ValueError, OSError):
                 logger.warning(
-                    "TTS fallo — message_id=%s error=%s request_id=%s",
+                    "TTS fallo — message_id=%s request_id=%s",
                     message_id,
-                    exc,
                     request_id,
                 )
 
@@ -1267,6 +1583,7 @@ class AgroVozPipeline:
         # retorne True en el siguiente audio (evita bienvenida repetida, #105).
         # El feedback NO crea consulta nueva: actualiza la anterior (#97), y
         # como siempre tiene transcripcion valida no necesita el stub.
+        consultation_id: int | None = None
         if intent != "feedback":
             # Determinar si esta consulta requiere revision humana (issue #99);
             # una transcripcion fallida tambien queda marcada para revision.
@@ -1278,7 +1595,7 @@ class AgroVozPipeline:
                 transcribed_text=transcribed_text or "",
             )
             try:
-                await asyncio.to_thread(
+                consultation_id = await asyncio.to_thread(
                     self._save_consultation,
                     phone_hash=chat_id_hash,
                     intent=intent,
@@ -1293,10 +1610,11 @@ class AgroVozPipeline:
                     requires_review=mark_review,
                 )
             except (RuntimeError, OSError, SQLAlchemyError, TypeError, AttributeError, KeyError):
-                logger.exception(
-                    "Error guardando consulta — continuando pipeline: phone_hash=%s intent=%s",
-                    chat_id_hash[:8],
+                logger.error(
+                    "Error guardando consulta — continuando pipeline: message_id=%s intent=%s request_id=%s",
+                    message_id,
                     intent,
+                    request_id,
                 )
 
         # Log de benchmark agregado: latencia total + breakdown por etapa.
@@ -1316,6 +1634,7 @@ class AgroVozPipeline:
             text_response=response_text,
             latency_ms=total_ms,
             intent=intent,
+            consultation_id=consultation_id,
             whisper_ms=whisper_ms_ref[0],
             llm_ms=llm_ms_ref[0],
             tts_ms=tts_ms_ref[0],
