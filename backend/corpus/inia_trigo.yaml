@@ -1,0 +1,42 @@
+# Corpus INIA — Fichas técnicas de cultivo
+# Fuente: https://www.inia.cl/ (Instituto de Investigaciones Agropecuarias, Chile)
+# Datos públicos de referencia para agricultores. Información factual,
+# sin recomendaciones agronómicas directas.
+#
+# Corpus deliberadamente acotado: el repositorio institucional de INIA
+# (biblioteca.inia.cl, DSpace) no permite extraer texto completo de sus
+# fichas técnicas de forma automática. Solo se incluyen hechos verificados
+# textualmente contra una fuente accesible, no contenido reconstruido o
+# parafraseado desde un resumen incompleto. Ampliar este corpus requiere
+# verificación manual del equipo contra el documento original.
+documentos:
+  - titulo: "INIA Carillanca lanza oficialmente Galactiko INIA — nueva variedad de trigo invernal"
+    fuente: "INIA Chile — www.inia.cl, 16 de diciembre de 2025"
+    fecha: "2025-12-16"
+    chunks:
+      - texto: >
+          Según INIA Carillanca, Galactiko INIA es una nueva variedad de
+          trigo invernal para el centro sur y sur de Chile, de amplia
+          adaptabilidad a las condiciones del sur del país. Es de altura
+          mediana, ciclo semitardío y hábito de desarrollo invernal con
+          crecimiento muy rastrero al estado de plántula. Es resistente a
+          polvillo estriado y oidio, y moderadamente susceptible a polvillo
+          de la hoja. No necesita fungicida y tiene muy buena eficiencia en
+          el uso del nitrógeno, según INIA.
+      - texto: >
+          Según INIA, Galactiko INIA superó en promedio a Rocky INIA
+          (testigo oficial del SAG), se equiparó a Karnaval INIA y estuvo
+          levemente bajo Chevignon y Monarka INIA en los ensayos. Tiene
+          buenas características de calidad para panificación directa, con
+          valor W de 206, peso hectolitro cercano a 80 kg/Hl, proteína
+          superior al 9% y gluten húmedo de 26%, lo que la clasifica como
+          trigo intermedio según INIA.
+
+  - titulo: "Recomendación nacional de variedades de trigo, temporada 2015-2016 — zona sur"
+    fuente: "INIA Chile — cartilla de recomendación nacional de variedades de trigo"
+    fecha: "2015-07-14"
+    chunks:
+      - texto: >
+          Según INIA, en la zona sur (regiones de La Araucanía, Los Ríos y
+          Los Lagos) la siembra de trigo se realiza entre abril y
+          septiembre, dependiendo de la variedad y de la zona geográfica.

@@ -88,6 +88,32 @@ def nonexistent_dir() -> Path:
     return Path("/tmp/nonexistent_corpus_dir_xyz")
 
 
+# ── Corpus real del repositorio (no el sintético de tests) ───────────
+
+
+class TestRealCorpusDirectory:
+    """El corpus versionado en corpus/ debe cargar sin errores.
+
+    A diferencia del resto de la suite (fixtures sintéticas aisladas),
+    esto valida el YAML que de verdad se despliega — protege contra un
+    error de sintaxis en un archivo nuevo (#35 idea 9: ampliar fuentes).
+    """
+
+    def test_corpus_real_carga_sin_errores(self) -> None:
+        corpus = RAGCorpus(corpus_dir=Path(__file__).resolve().parent.parent / "corpus")
+        corpus.load()
+        assert len(corpus._chunks) > 0
+
+    def test_corpus_real_incluye_trigo_araucania(self) -> None:
+        """Regresión de la fuente agregada: variedad Galactiko INIA (#35)."""
+        corpus = RAGCorpus(corpus_dir=Path(__file__).resolve().parent.parent / "corpus")
+        corpus.load()
+
+        results = corpus.search("variedad de trigo invernal", top_k=5)
+
+        assert any("Galactiko" in str(r.get("text")) for r in results)
+
+
 # ── RAGCorpus: carga y disponibilidad ────────────────────────────────
 
 
@@ -222,6 +248,7 @@ class TestSearchCorpusForLLM:
         """Sin resultados, retorna mensaje de no encontrado."""
         # Usar directorio vacio temporal
         import tempfile
+
         empty_dir = Path(tempfile.mkdtemp())
         (empty_dir / ".gitkeep").write_text("")
 
@@ -293,9 +320,7 @@ class TestRAGCorpusRobustez:
         with open(corpus_dir / "ok.yaml", "w", encoding="utf-8") as f:
             yaml.dump(valido, f, allow_unicode=True)
         # Sintaxis YAML rota (llaves/corchetes sin cerrar).
-        (corpus_dir / "roto.yaml").write_text(
-            "documentos: [ {titulo: 'x', chunks: [", encoding="utf-8"
-        )
+        (corpus_dir / "roto.yaml").write_text("documentos: [ {titulo: 'x', chunks: [", encoding="utf-8")
 
         rag = RAGCorpus(corpus_dir=str(corpus_dir))
         rag.load()
