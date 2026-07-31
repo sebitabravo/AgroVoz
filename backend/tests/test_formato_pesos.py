@@ -36,6 +36,16 @@ class TestRedondeoAlPeso:
         """ROUND_HALF_UP: 9760,8695 -> 9.761, no 9.760."""
         assert formatear_pesos(Decimal("9760.8695")) == "9.761 pesos"
 
+    def test_mitad_exacta_redondea_hacia_arriba_no_al_par(self) -> None:
+        """Distingue ROUND_HALF_UP del ROUND_HALF_EVEN por defecto de Decimal.
+
+        1200,5 es el caso donde ambos modos difieren: HALF_EVEN redondearia
+        a 1200 (el par mas cercano) porque no especifica ``rounding``
+        explicito, HALF_UP siempre sube a 1201. Sin este caso, remover el
+        argumento ``rounding=ROUND_HALF_UP`` no rompe ningun test existente.
+        """
+        assert formatear_pesos(Decimal("1200.5")) == "1.201 pesos"
+
     def test_no_trunca(self) -> None:
         """El bug de alert_service: int(14999.9) daba 14.999."""
         assert formatear_pesos(Decimal("14999.9")) == "15.000 pesos"

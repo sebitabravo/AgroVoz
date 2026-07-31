@@ -31,6 +31,8 @@ dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "pytest-cov==7.1.0",
+    "pytest-bdd==8.1.0",
+    "mutmut==3.6.0",
     "ruff==0.15.22",
     "mypy==2.3.0",
 ]
@@ -89,7 +91,60 @@ testpaths = ["tests"]
 python_files = "test_*.py"
 addopts = ["-v", "--strict-markers", "--tb=short"]
 asyncio_mode = "auto"
+bdd_features_base_dir = "tests/features"
 markers = [
     "slow: tests lentos (audio, modelos IA)",
     "e2e: tests end-to-end con servicios reales",
+]
+
+# Cobertura medida en 89% al 30/07/2026 (7121 sentencias, 780 sin cubrir).
+# El piso se fija en 85%: dejar margen de 4 puntos evita que el gate se
+# vuelva quebradizo, sin dejar de detectar una regresión real de cobertura.
+[tool.coverage.run]
+source = ["app"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "\\.\\.\\.",
+]
+
+# Mutation testing (mutmut) — escopeado a lógica financiera y de seguridad,
+# no al backend completo: mutar los 72 módulos tardaría horas por corrida y
+# la mayoría es I/O o glue code donde un mutante sobreviviente no dice nada.
+# Corrida manual: `uv run mutmut run` desde backend/, `uv run mutmut html`
+# para el reporte. No integrado a CI todavia (evidencia local, no gate).
+#
+# also_copy incluye el resto de app/: mutmut solo copia source_paths a su
+# sandbox (mutants/), pero tests/conftest.py importa app.main a nivel de
+# módulo. Sin el paquete completo, cualquier corrida rompe en el import de
+# conftest antes de ejecutar un solo test.
+[tool.mutmut]
+source_paths = [
+    "app/services/expense_service.py",
+    "app/core/security.py",
+    "app/core/phone_hash.py",
+    "app/core/formato.py",
+]
+also_copy = ["app/", "migrations/", "alembic.ini", "corpus/"]
+# Acota qué tests corre mutmut a los que realmente ejercitan source_paths.
+# Sin esto, mutmut colecciona TODA la suite (1700+ tests) solo para armar el
+# mapa mutante->test, y varios de esos tests referencian rutas fuera de
+# backend/ (ej. docker-compose.prod.yml en la raiz del repo) que no resuelven
+# bien porque mutants/ agrega un nivel extra de anidamiento.
+pytest_add_cli_args_test_selection = [
+    "tests/test_expense_service.py",
+    "tests/test_expense_migration.py",
+    "tests/test_expense_extraction_accuracy.py",
+    "tests/test_expense_ttl_job.py",
+    "tests/test_security.py",
+    "tests/test_config_security.py",
+    "tests/test_formato_pesos.py",
+    "tests/test_log_privacy.py",
 ]

@@ -297,9 +297,7 @@ class TestFastPathCompuesto:
             return "Precio ODEPA disponible."
 
         async def broken_weather(*args: object, **kwargs: object) -> str:
-            raise RuntimeError(
-                "secreto compuesto: precio de papa y clima en Traiguén phone-hash"
-            )
+            raise RuntimeError("secreto compuesto: precio de papa y clima en Traiguén phone-hash")
 
         monkeypatch.setattr("app.core.database.SessionLocal", DummySession)
         monkeypatch.setattr("app.services.odepa_service.get_price_for_llm", fake_price)
