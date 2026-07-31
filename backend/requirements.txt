@@ -13,7 +13,7 @@ faster-whisper==1.2.1
 # Camino de respaldo (WHISPER_BACKEND=openai). Se retira cuando faster-whisper
 # quede validado en el VPS y en el piso de 1 vCPU.
 openai-whisper==20250625
-piper-tts==1.4.2
+piper-tts==1.6.0
 llama-cpp-python>=0.3.34
 jinja2==3.1.6
 itsdangerous==2.2.0
