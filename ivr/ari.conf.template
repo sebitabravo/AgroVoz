@@ -1,0 +1,13 @@
+[general]
+enabled=yes
+pretty=yes
+
+; Usuario ARI del puente local (scripts/ivr_ari_bridge.py). La contraseña
+; real se inyecta en build/arranque del contenedor desde la variable de
+; entorno IVR_ARI_PASSWORD (ver docker-compose.yml, entrypoint.sh) — nunca
+; se commitea en texto plano. Solo alcanzable dentro de la red interna de
+; Docker Compose (C10, #172).
+[agrovoz]
+type=user
+password=${IVR_ARI_PASSWORD}
+read_only=no

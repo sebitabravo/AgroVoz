@@ -35,6 +35,10 @@ dev = [
     "mutmut==3.6.0",
     "ruff==0.15.22",
     "mypy==2.3.0",
+    # Solo para scripts/ivr_ari_bridge.py (spike IVR, #172, C10): conecta al
+    # WebSocket de eventos de Asterisk ARI. Nunca se importa desde app/, no
+    # viaja en la imagen de producción.
+    "websockets==16.0",
 ]
 
 [tool.ruff]

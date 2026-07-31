@@ -93,3 +93,94 @@ abierto hasta contar con:
 Una institución PRODESAL/INDAP podría absorber el costo fijo en una fase
 posterior. Esa hipótesis requiere validación comercial y no se considera un
 compromiso actual.
+
+## Extensión: VAD, streaming y barge-in (C10, 30 de julio de 2026)
+
+Backlog de las Discussions del repositorio: que el productor pueda
+**interrumpir la locución hablando encima** (barge-in) en vez de esperar a
+que termine, y que la respuesta se transmita en fragmentos cortos en vez de
+un único archivo largo. Sigue siendo un spike local: no cambia la decisión
+de no desplegar a PSTN.
+
+### Por qué hace falta ARI (y no alcanza con AGI/dialplan)
+
+El flujo original (extensión `600`) usa `Playback()` estático: no hay forma
+de saber, desde el dialplan, que el productor empezó a hablar mientras el
+audio se reproduce. Asterisk expone esa señal — `TALK_DETECT` y los eventos
+`ChannelTalkingStarted`/`ChannelTalkingFinished` — únicamente a los clientes
+de **ARI** (REST + WebSocket), no a AGI ni al dialplan puro. Por eso la
+extensión nueva `601` entrega el canal a `Stasis(agrovoz-ivr)`.
+
+### Arquitectura
+
+- `backend/app/services/ivr_turn_service.py` — máquina de estados de turno
+  (`IvrTurnController`): decide qué acción corresponde ante cada evento
+  (cortar la locución, grabar, transcribir, reproducir la respuesta) sin
+  conocer Asterisk. 100% de cobertura, más un escenario BDD
+  (`tests/features/ivr_barge_in.feature`) para el caso de negocio central:
+  el productor interrumpe hablando encima.
+- `backend/scripts/ivr_ari_bridge.py` — puente ARI: traduce eventos reales
+  de Asterisk a los métodos de `IvrTurnController` y las acciones de vuelta
+  a comandos REST (`Playback`, `Record`, `TALK_DETECT`, `Hangup`). Reutiliza
+  `TTSService` (fragmentos cortos, igual que el pipeline de WhatsApp),
+  `WhisperService` y el fallback determinista por keywords
+  (`_force_keyword_tool`) — una sola fuente de verdad para "qué producto
+  preguntó", sin duplicar esa lógica para el canal telefónico.
+- `ivr/http.conf` + `ivr/ari.conf.template` + `ivr/entrypoint.sh` — habilitan
+  la interfaz ARI en el contenedor Asterisk. La contraseña (`IVR_ARI_PASSWORD`)
+  se sustituye en el arranque vía `envsubst`, nunca queda commiteada en texto
+  plano. El puerto 8088 no se publica al host: solo es alcanzable dentro de
+  la red interna de Docker Compose, igual que el resto del perfil `ivr`.
+
+### Qué se verificó localmente
+
+```bash
+IVR_ARI_PASSWORD=<clave-dev> docker compose --profile ivr up -d --build ivr
+IVR_ARI_PASSWORD=<clave-dev> docker compose --profile ivr exec ivr \
+  asterisk -rx "http show status"        # confirma ARI escuchando en 8088
+IVR_ARI_PASSWORD=<clave-dev> docker compose --profile ivr exec ivr \
+  asterisk -rx "dialplan show agrovoz-local"   # confirma 601 -> Stasis(agrovoz-ivr)
+```
+
+Con un cliente WebSocket conectado a
+`ws://ivr:8088/ari/events?app=agrovoz-ivr&api_key=agrovoz:<clave>` y un
+`channel originate Local/601@agrovoz-local application Wait 3`, se observó
+la secuencia real de eventos ARI terminando en:
+
+```text
+EVENT TYPE: ChannelCreated
+EVENT TYPE: ChannelDialplan
+EVENT TYPE: Dial
+EVENT TYPE: ChannelDialplan
+EVENT TYPE: ChannelVarset
+EVENT TYPE: StasisStart
+```
+
+Esto confirma la cadena completa **dialplan → Stasis → ARI → evento
+recibido por el puente**, que es el riesgo de integración principal de esta
+extensión.
+
+### Qué NO se verificó (limitación honesta)
+
+- **Detección real de voz (VAD).** `channel originate ... application Wait`
+  no inyecta energía de audio real en el canal: no dispara
+  `ChannelTalkingStarted`/`Finished` porque no hay nadie "hablando". Verificar
+  el barge-in con voz real requiere un softphone SIP o un archivo de audio
+  inyectado en el canal — pendiente para cuando haya un caso de prueba con
+  llamada real (ver sección de PSTN arriba).
+- **Streaming percibido por el oyente.** Los fragmentos se generan y se
+  reproducen secuencialmente vía `Playback`, pero Asterisk reproduce cada
+  archivo completo antes del siguiente — no hay streaming de audio en
+  progreso (chunked transfer) como en un TTS verdaderamente incremental.
+  Es "fragmentado", no "streaming" en el sentido estricto.
+- **Detección de producto en la transcripción.** Reutiliza el fallback por
+  keywords del canal de WhatsApp; no prueba una consulta compuesta o
+  ambigua específica del canal de voz telefónica.
+
+### Estado
+
+Igual que el resto del spike IVR: **no se despliega a producción.** El
+issue #172 sigue abierto con las mismas condiciones de la sección
+"Decisión" de arriba, más la verificación de VAD con audio real como
+requisito adicional antes de considerar esta extensión lista para un
+piloto telefónico.

@@ -107,8 +107,16 @@ Nacido como proyecto estudiantil para Desafío Crea INACAP 2026, hoy es un produ
 - Clima por coordenadas dinámicas (one-time location share de WhatsApp)
 - Cobertura de mercados fuera del catálogo ODEPA
 
-**En construcción** (decidido el 30/07/2026 al revisar las 10 Discussions):
-- VAD, streaming audible y barge-in sobre el canal IVR en tiempo real
+**Spike técnico, no desplegado (canal IVR de respaldo, #172):** VAD,
+streaming fragmentado y barge-in por voz sobre el dialplan local de
+Asterisk vía ARI — el productor puede interrumpir la locución hablando
+encima, en vez de esperar a que termine. Verificado localmente: la cadena
+dialplan → Stasis → ARI → evento recibido responde con eventos reales de
+Asterisk (`StasisStart` confirmado). Sin verificar: detección de voz con
+audio real (el barge-in con `channel originate` no inyecta energía de voz)
+y streaming real de audio (Asterisk reproduce cada fragmento completo, no
+hay chunked transfer). Mismo estado que el resto del canal IVR: no se
+despliega a PSTN. Detalle completo en `docs/spike-ivr.md`.
 
 **Fuera de scope:**
 - Multi-idioma (solo español chileno)

@@ -12,3 +12,6 @@ jiwer==4.0.0
 soundfile==0.14.0
 datasets==5.0.0
 torchcodec==0.15.0
+# Solo para scripts/ivr_ari_bridge.py (spike IVR, #172, C10): WebSocket de
+# eventos de Asterisk ARI. Nunca se importa desde app/.
+websockets==16.0

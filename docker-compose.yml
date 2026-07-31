@@ -114,6 +114,10 @@ services:
       context: ./ivr
       dockerfile: Dockerfile
     restart: "no"
+    environment:
+      # Credencial ARI del puente local (C10, #172). Solo alcanzable dentro
+      # de la red interna de Compose: este servicio no publica puertos.
+      - IVR_ARI_PASSWORD=${IVR_ARI_PASSWORD:?IVR_ARI_PASSWORD requerida para habilitar ARI — ver .env.example}
     volumes:
       - ./backend/data/ivr:/usr/share/asterisk/sounds/agrovoz:ro
     tmpfs:
