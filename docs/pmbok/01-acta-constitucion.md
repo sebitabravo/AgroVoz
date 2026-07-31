@@ -35,8 +35,9 @@ aplicación ni adquiere sensores. El sistema recibe audio o texto y responde en
 el mismo medio con datos de ODEPA y OpenMeteo.
 
 El beneficio esperado es que el productor disponga de una referencia oficial
-cuando consulta precios, clima o cálculos derivados. AgroVoz informa; no
-recomienda qué sembrar, cuándo vender ni qué tratamiento aplicar.
+cuando consulta precios, clima o cálculos derivados. AgroVoz informa con datos
+oficiales; no improvisa consejos agronómicos: si existe una regla determinística
+con fuente INIA/INDAP vigente, la verbaliza citando fuente y fecha.
 
 ## Objetivos y criterios de éxito
 
@@ -47,7 +48,7 @@ recomienda qué sembrar, cuándo vender ni qué tratamiento aplicar.
 | Mantener latencia útil | Menos de 15 segundos end-to-end, incluido el piso de 1 vCPU y 6 GB RAM | Pendiente de validación reproducible en [#215][i215] |
 | Validar reconocimiento rural | WER menor a 15% en una muestra del piloto de Traiguén | Pendiente; requiere audios consentidos del piloto |
 | Validar uso real | Piloto de 3–5 productores durante cuatro semanas | Planificado, no se registra como ejecutado |
-| Proteger datos personales | Audio temporal eliminado antes de 24 horas, transcripciones minimizadas/seudonimizadas y consentimiento explícito donde corresponda | Controles técnicos implementados; auditoría formal pre-escalamiento pendiente |
+| Proteger datos personales | Media temporal (audio/imagen) eliminada antes de 24 horas, transcripciones minimizadas/seudonimizadas y consentimiento explícito donde corresponda | Controles técnicos implementados; auditoría formal pre-escalamiento pendiente |
 | Verificar el canal real | Prueba E2E con Open-WA autenticado y envío/recepción por WhatsApp | Nueva validación pendiente en [#214][i214] |
 
 ## Alcance de alto nivel
@@ -68,7 +69,7 @@ recomienda qué sembrar, cuándo vender ni qué tratamiento aplicar.
 
 ### Excluido
 
-- Recomendaciones o diagnósticos agronómicos.
+- Recomendaciones o diagnósticos agronómicos sin fuente citada.
 - Aplicación móvil nativa y dashboard para agricultores.
 - Sensores o dispositivos IoT.
 - Pagos integrados.
@@ -139,7 +140,7 @@ horas, aprobaciones ni contribuciones adicionales.
 | Latencia o falta de memoria en hardware mínimo | Fast paths, modelo cuantizado y prueba obligatoria en [#215][i215] |
 | Fallo nativo del runtime LLM | Aislamiento del proceso de inferencia y fallback determinístico |
 | Tratamiento inadecuado de datos personales | Opt-in, minimización/seudonimización, retención limitada y auditoría legal pre-escalamiento |
-| Interpretación como recomendación | Respuestas limitadas a datos y exclusión expresa de consejo agronómico |
+| Interpretación como recomendación sin fuente | Respuestas basadas en reglas determinísticas con fuente citada o datos crudos; prohibición de consejo improvisado |
 
 ## Autoridad y control de cambios
 

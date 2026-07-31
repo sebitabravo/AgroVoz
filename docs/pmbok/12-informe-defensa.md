@@ -50,7 +50,8 @@ fuente primaria o secundaria antes de presentarse como dato verificado.
 La propuesta de valor defendible es:
 
 > Consultar por WhatsApp, hablando o escribiendo, precios agrícolas y clima provenientes de fuentes
-> identificadas, sin instalar una aplicación y sin recibir recomendaciones agronómicas.
+> identificadas, sin instalar una aplicación. Las recomendaciones agronómicas se limitan a reglas
+> determinísticas con fuente INIA/INDAP citada; sin fuente vigente, el sistema informa la falta de dato.
 
 No se debe prometer aumento de ingresos, reducción de pérdidas o adopción masiva mientras no exista
 una medición de campo con método y limitaciones.
@@ -79,7 +80,7 @@ WhatsApp → Open-WA → FastAPI
 - Sin app nativa, IoT, pagos ni dashboard para agricultores.
 - Solo español chileno en el alcance actual.
 - SQLite y procesamiento síncrono por decisión de simplicidad y costo.
-- Sin recomendaciones agronómicas.
+- Recomendaciones agronómicas solo por regla citada con fuente INIA/INDAP vigente (actualmente apagadas por feature gate).
 - La auditoría formal por Ley 21.719 está pendiente antes de escalar.
 - El peor caso de 1 vCPU / 6 GB RAM debe respaldarse con una ejecución actual, no solo con diseño.
 

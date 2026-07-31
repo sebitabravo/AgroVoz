@@ -16,7 +16,9 @@ consulta con componentes locales, usa herramientas limitadas para acceder a
 datos estructurados y responde por el mismo canal.
 
 El producto incluye operación, administración y preparación de un piloto
-acotado. No transforma los datos en recomendaciones agronómicas o comerciales.
+acotado. No improvisa recomendaciones agronómicas: solo verbaliza reglas
+determinísticas con fuente INIA/INDAP citada. Precio y clima se entregan como
+datos crudos, sin interpretación.
 
 ## Requisitos de alto nivel
 
@@ -144,7 +146,7 @@ acotado. No transforma los datos en recomendaciones agronómicas o comerciales.
 | 4.2 Demo | Permite demostrar consultas sin WhatsApp cuando el endpoint está habilitado | Implementado con restricción operativa conocida |
 | 4.3–4.4 Admin | Ocho vistas, HTMX, Chart.js local y soporte PWA administrativo | Implementado |
 | 5.1–5.4 Infraestructura | Entornos reproducibles, CI y despliegue documentado | Implementado |
-| 5.5 Retención | Audio temporal se elimina dentro del límite y datos sensibles se minimizan | Implementado en diseño y tests; observar en operación |
+| 5.5 Retención | Media temporal (audio/imagen) se elimina dentro del límite y datos sensibles se minimizan | Implementado en diseño y tests; observar en operación |
 | 6.1 Calidad automatizada | Suite, linter y tipos pasan en el commit candidato | Repetible; debe ejecutarse por cambio |
 | 6.2 E2E autenticado | Audio/texto real cruza WhatsApp y vuelve al usuario | Pendiente |
 | 6.3 Piso degradado | Escenarios críticos cumplen umbrales en 1 vCPU / 6 GB | Pendiente en [#215][i215] |

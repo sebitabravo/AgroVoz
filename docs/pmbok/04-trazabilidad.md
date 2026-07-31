@@ -46,7 +46,7 @@ issues o en la línea base.
 | RQ-NF06 | Mantener stack principal open-source y sin API paga | Restricción de `AGENTS.md` | Whisper, LLM local, Piper y Open-WA | Revisión de dependencias/config | Implementado |
 | RQ-Q01 | Código Python tipado y validado | Convenciones de `AGENTS.md` | pytest, Ruff y mypy estricto | Comandos de calidad | Implementado por cambio |
 | RQ-Q02 | WER rural menor a 15% | Objetivo del proyecto | Dataset consentido y `eval_wer.py` | Muestra piloto | Planificado |
-| RQ-L01 | Eliminar audio temporal antes de 24 h y minimizar/seudonimizar transcripciones | Restricción legal | Servicios de retención y dataset | Tests + observación operativa | Implementado; auditar |
+| RQ-L01 | Eliminar media temporal (audio/imagen) antes de 24 h y minimizar/seudonimizar transcripciones | Restricción legal | Servicios de retención y dataset | Tests + observación operativa | Implementado; auditar |
 | RQ-L02 | Auditar formalmente Ley 21.719 antes de escalar | Restricción legal | Auditoría y controles de consentimiento | Revisión formal | Planificado |
 | RQ-V01 | Ejecutar piloto con 3–5 productores durante cuatro semanas | Próximo hito de `AGENTS.md`, [#98][i98] | Kit de piloto y ejecución en terreno | Registros y métricas reales | Kit implementado; ejecución pendiente |
 
@@ -172,4 +172,8 @@ uv run mypy app/
 [i213]: https://github.com/sebitabravo/AgroVoz/issues/213
 [i214]: https://github.com/sebitabravo/AgroVoz/issues/214
 [i215]: https://github.com/sebitabravo/AgroVoz/issues/215
+[i238]: https://github.com/sebitabravo/AgroVoz/issues/238
+[i244]: https://github.com/sebitabravo/AgroVoz/issues/244
+[i245]: https://github.com/sebitabravo/AgroVoz/issues/245
+[i246]: https://github.com/sebitabravo/AgroVoz/issues/246
 [pr203]: https://github.com/sebitabravo/AgroVoz/pull/203

@@ -8,7 +8,7 @@
 
 Este plan controla cambios de alcance, cronograma, costo, calidad, datos, arquitectura y operación.
 No reemplaza los hard constraints de `AGENTS.md`: una solicitud no puede autorizar por sí sola una
-app nativa, recomendaciones agronómicas, servicios pagos obligatorios, otra base de datos o un
+app nativa, recomendaciones agronómicas sin fuente citada, servicios pagos obligatorios, otra base de datos o un
 despliegue que no funcione en 1 vCPU / 6 GB.
 
 ## 2. Controles existentes y brechas

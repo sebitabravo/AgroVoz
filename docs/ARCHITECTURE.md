@@ -56,7 +56,7 @@ por la misma vía. El texto evita Whisper y TTS.
    - Si pregunta por precio → query SQLite ODEPA
    - Si pregunta por clima → GET OpenMeteo API
    - Whitelist de 10 tools (ver lista completa en `app/services/` más abajo). Si alucina una tool fuera de la whitelist → fallback.
-7. Fast-path determinista o LLM genera respuesta textual (datos, NO recomendaciones)
+7. Fast-path determinista o LLM genera respuesta textual (datos crudos de precio/clima, o reglas citadas de fuente oficial)
 8. Solo audio: Piper TTS convierte texto → audio `.wav`
 9. Solo audio: ffmpeg convierte `.wav` → `.ogg`
 10. FastAPI envía texto o audio por Open-WA y registra entrega efectiva

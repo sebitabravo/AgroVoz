@@ -66,8 +66,8 @@ no contiene una cadencia aprobada.
 
 La línea base está en [Alcance y EDT](./03-alcance-edt.md). Incluye voz y texto
 por WhatsApp, datos oficiales, herramientas determinísticas, alertas,
-administración, despliegue y validación. Excluye recomendaciones agronómicas,
-IoT, app nativa, pagos y base de datos separada.
+administración, despliegue y validación. Excluye recomendaciones agronómicas
+sin fuente citada, IoT, app nativa, pagos y base de datos separada.
 
 ### Cronograma
 
@@ -133,14 +133,14 @@ Una solicitud cambia la línea base solo si:
 4. se integra mediante el flujo de GitHub;
 5. actualiza la [Matriz de trazabilidad](./04-trazabilidad.md).
 
-Ideas incompatibles, como diagnóstico agronómico, app offline para agricultores,
+Ideas incompatibles, como diagnóstico agronómico sin fuente citada, app offline para agricultores,
 planes pagados o una base Turso, fueron cerradas o rechazadas en GitHub. Su
 cierre también es trazabilidad: evita que reaparezcan como alcance implícito.
 
 ## Gestión de configuración
 
 - Variables y secretos se mantienen fuera de Git.
-- SQLite, modelos y audio temporal no se versionan.
+- SQLite, modelos y media temporal (audio/imagen) no se versionan.
 - Cambios de esquema requieren migración Alembic y documentación.
 - Cambios de arquitectura requieren actualizar `docs/ARCHITECTURE.md`.
 - Los artefactos de desarrollo y producción se mantienen separados.
@@ -173,7 +173,7 @@ Un fallo se atiende primero con mecanismos dentro del alcance: cache, fallback
 determinístico, timeout, reinicio, retry limitado y monitoreo. Se escala al
 equipo cuando afecta datos, privacidad, autenticación, migraciones, webhooks o
 despliegue. Una ampliación material —por ejemplo, API paga, nueva base de datos
-o recomendación agronómica— requiere decisión explícita y cambio de las fuentes
+o recomendación agronómica sin fuente citada— requiere decisión explícita y cambio de las fuentes
 normativas.
 
 ## Cierre del proyecto o hito

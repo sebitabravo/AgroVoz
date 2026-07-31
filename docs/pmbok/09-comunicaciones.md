@@ -20,8 +20,9 @@ piloto, posibles contactos institucionales e incidentes operativos.
    minutas, presentaciones o chats de coordinación.
 4. **Consentimiento explícito.** El participante debe conocer propósito, uso de datos y posibilidad
    de retirarse antes de recopilar material del piloto.
-5. **Sin recomendaciones agronómicas.** Toda comunicación del producto presenta precios y clima
-   como información, no como consejo.
+5. **Recomendaciones solo por regla citada.** Toda comunicación del producto verbaliza
+   reglas determinísticas con fuente INIA/INDAP; nunca improvisa un consejo. Precio y clima
+   se entregan como datos crudos.
 6. **Sin respaldo institucional implícito.** Contactar a PRODESAL o INDAP no autoriza a presentarlos
    como socios, validadores o patrocinadores.
 7. **Incidentes con hechos.** Comunicar impacto observado, alcance y siguiente acción; no especular
@@ -134,10 +135,10 @@ jurídica está pendiente.
 ## 9. Custodia y retención de comunicaciones
 
 - No incluir secretos, credenciales ni archivos `.env`.
-- No copiar audio temporal a herramientas de gestión.
+- No copiar media temporal (audio/imagen) a herramientas de gestión.
 - Anonimizar cualquier ejemplo antes de usarlo en defensa.
 - Conservar consentimientos con acceso restringido y separado de métricas agregadas.
-- Eliminar audio temporal del VPS en menos de 24 horas, según la restricción del proyecto.
+- Eliminar media temporal del VPS en menos de 24 horas, según la restricción del proyecto.
 - Registrar decisiones técnicas en el repositorio; no depender únicamente de mensajes privados.
 
 La política definitiva de retención para escalar el producto requiere auditoría formal previa.
