@@ -147,6 +147,7 @@ async def metrics_page(
     intents = metrics_service.get_intent_distribution(db, days=days)
     productos = metrics_service.get_top_products(db, days=days, limit=10)
     errores = metrics_service.get_error_stats(db, days=days, limit=15)
+    groups = metrics_service.get_prodesal_group_metrics(db, days=days)
     total_30d = metrics_service.get_total_30d(db)
     audio_avg = metrics_service.get_audio_avg(db, days=30)
     # Datos para los charts de Chart.js: se pasan como dict al template,
@@ -162,7 +163,9 @@ async def metrics_page(
         "intents": {
             "precio": intents.precio,
             "clima": intents.clima,
+            "credito": intents.credito,
             "desconocido": intents.desconocido,
+            "total": intents.total,
         },
         "productos": (
             {
@@ -184,6 +187,7 @@ async def metrics_page(
             "intents": intents,
             "productos": productos,
             "errores": errores,
+            "groups": groups,
             "total_30d": total_30d,
             "audio_avg": audio_avg,
             "chart_data": chart_data,
@@ -326,14 +330,16 @@ async def odepa_precios_page(
     precios_data = []
     for precio in precios_recientes:
         precio_por_kilo = _calculate_precio_por_kilo(precio)
-        precios_data.append({
-            "producto": precio.producto,
-            "mercado": precio.mercado,
-            "precio_kg": float(precio.precio_kg),
-            "unidad": precio.unidad,
-            "precio_por_kilo": precio_por_kilo,
-            "fecha": precio.fecha.isoformat(),
-        })
+        precios_data.append(
+            {
+                "producto": precio.producto,
+                "mercado": precio.mercado,
+                "precio_kg": float(precio.precio_kg),
+                "unidad": precio.unidad,
+                "precio_por_kilo": precio_por_kilo,
+                "fecha": precio.fecha.isoformat(),
+            }
+        )
 
     return templates.TemplateResponse(
         request,
@@ -565,9 +571,13 @@ async def resolve_consultation(
 
     try:
         db.commit()
-    except Exception:
+    except Exception as exc:
         db.rollback()
-        logger.exception("Error al actualizar consulta %d", consultation_id)
+        logger.error(
+            "Error al actualizar consulta — consultation_id=%d error=%s",
+            consultation_id,
+            type(exc).__name__,
+        )
         return HTMLResponse("<span class='badge-error'>Error</span>", status_code=500)
 
     # Retornar partial HTMX con el estado actualizado usando helper.
@@ -698,14 +708,15 @@ def _format_consultation_for_view(c: object) -> dict[str, object]:
     Se usa en revision_page() y resolve_consultation() para mantener
     consistencia en la representación.
     """
+    query_text = str(c.query_text or "").strip()  # type: ignore[attr-defined]
+    response_text = str(c.response_text or "").strip()  # type: ignore[attr-defined]
+    unavailable = "Contenido no conservado"
     return {
         "id": c.id,  # type: ignore[attr-defined]
-        "phone_hash_short": (c.phone_hash[:8] + "..." if c.phone_hash else ""),  # type: ignore[attr-defined]
+        "phone_hash_short": "protegida",
         "intent": c.intent,  # type: ignore[attr-defined]
-        "query_text_short": truncate_text(c.query_text, max_len=80),  # type: ignore[attr-defined]
-        "response_text_short": truncate_text(c.response_text, max_len=80),  # type: ignore[attr-defined]
-        "query_text": c.query_text,  # type: ignore[attr-defined]
-        "response_text": c.response_text,  # type: ignore[attr-defined]
+        "query_text_short": (truncate_text(query_text, max_len=80) if query_text else unavailable),
+        "response_text_short": (truncate_text(response_text, max_len=80) if response_text else unavailable),
         "created_at": c.created_at.strftime("%Y-%m-%d %H:%M") if c.created_at else "",  # type: ignore[attr-defined]
         "resuelto": c.resuelto,  # type: ignore[attr-defined]
         "revisado_por": c.revisado_por or "",  # type: ignore[attr-defined]

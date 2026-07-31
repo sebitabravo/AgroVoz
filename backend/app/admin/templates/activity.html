@@ -30,12 +30,14 @@
     <span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;background:#f0f0ec;color:#7e827a;display:inline-block">{{ q.intent }}</span>
     {% endif %}
     {# Detalle #}
-    <span style="font-size:12px;color:#1c1e1a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ q.text }}</span>
+    <span style="font-size:12px;color:#1c1e1a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ q.text or 'Contenido no conservado' }}</span>
     {# Estado #}
     {% if q.ok %}
-    <span style="font-size:11px;font-weight:600;color:#4f7d5a">✓ ok</span>
+    <span style="font-size:11px;font-weight:600;color:#4f7d5a">✓ entregada</span>
+    {% elif q.status_text == 'pendiente' %}
+    <span style="font-size:11px;font-weight:600;color:#7e827a">• sin confirmar</span>
     {% else %}
-    <span style="font-size:11px;font-weight:600;color:#c05252">✗ fail</span>
+    <span style="font-size:11px;font-weight:600;color:#c05252">✗ falló envío</span>
     {% endif %}
   </div>
   {% endfor %}

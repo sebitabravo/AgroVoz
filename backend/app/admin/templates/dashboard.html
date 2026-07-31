@@ -81,28 +81,35 @@
 <div class="grid-2">
   <div class="card">
     <p class="card-label" style="margin-bottom:16px">Distribución de intents (24h)</p>
-    {% set total = kpis.intents.total if kpis.intents.total > 0 else 1 %}
+    {% set intent_total = kpis.intents.total %}
     <div style="display:flex;flex-direction:column;gap:14px">
       <div>
         <div style="display:flex;justify-content:space-between;margin-bottom:6px">
           <span style="font-size:13px;font-weight:600">Precio</span>
           <span style="font-size:13px;font-weight:700">{{ kpis.intents.precio }}</span>
         </div>
-        <div class="bar"><div class="bar-fill" style="width:{{ (kpis.intents.precio / total * 100)|round(1) }}%"></div></div>
+        <div class="bar"><div class="bar-fill" style="width:{{ ((kpis.intents.precio / intent_total * 100)|round(1)) if intent_total > 0 else 0 }}%"></div></div>
       </div>
       <div>
         <div style="display:flex;justify-content:space-between;margin-bottom:6px">
           <span style="font-size:13px;font-weight:600">Clima</span>
           <span style="font-size:13px;font-weight:700">{{ kpis.intents.clima }}</span>
         </div>
-        <div class="bar"><div class="bar-fill" style="width:{{ (kpis.intents.clima / total * 100)|round(1) }}%;background:#2a5f90"></div></div>
+        <div class="bar"><div class="bar-fill" style="width:{{ ((kpis.intents.clima / intent_total * 100)|round(1)) if intent_total > 0 else 0 }}%;background:#2a5f90"></div></div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:13px;font-weight:600">Crédito</span>
+          <span style="font-size:13px;font-weight:700">{{ kpis.intents.credito }}</span>
+        </div>
+        <div class="bar"><div class="bar-fill" style="width:{{ ((kpis.intents.credito / intent_total * 100)|round(1)) if intent_total > 0 else 0 }}%;background:#6d28d9"></div></div>
       </div>
       <div>
         <div style="display:flex;justify-content:space-between;margin-bottom:6px">
           <span style="font-size:13px;font-weight:600">Desconocido</span>
           <span style="font-size:13px;font-weight:700">{{ kpis.intents.desconocido }}</span>
         </div>
-        <div class="bar"><div class="bar-fill err" style="width:{{ (kpis.intents.desconocido / total * 100)|round(1) }}%"></div></div>
+        <div class="bar"><div class="bar-fill err" style="width:{{ ((kpis.intents.desconocido / intent_total * 100)|round(1)) if intent_total > 0 else 0 }}%"></div></div>
       </div>
     </div>
   </div>
@@ -137,9 +144,29 @@
       {% for q in recientes %}
       <tr>
         <td style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ q.text }}</td>
-        <td>{% if q.intent == 'precio' %}<span class="badge badge-precio">precio</span>{% elif q.intent == 'clima' %}<span class="badge badge-clima">clima</span>{% else %}<span class="badge badge-error">error</span>{% endif %}</td>
+        <td>
+          {% if q.intent == 'precio' %}
+          <span class="badge badge-precio">precio</span>
+          {% elif q.intent == 'clima' %}
+          <span class="badge badge-clima">clima</span>
+          {% elif q.intent == 'credito' %}
+          <span class="badge badge-credito" style="background:#ede9fe;color:#4c1d95">crédito</span>
+          {% elif q.intent == 'desconocido' %}
+          <span class="badge badge-error">desconocido</span>
+          {% else %}
+          <span class="badge" style="background:#f1f0eb;color:#4a4d47">{{ q.intent }}</span>
+          {% endif %}
+        </td>
         <td class="mono">{{ q.latency_s }} s</td>
-        <td>{% if q.ok %}<span class="badge-ok">✓ ok</span>{% else %}<span class="badge-fail">✗ error</span>{% endif %}</td>
+        <td>
+          {% if q.ok %}
+          <span class="badge-ok">✓ entregada</span>
+          {% elif q.status_text == 'pendiente' %}
+          <span class="muted">• sin confirmar</span>
+          {% else %}
+          <span class="badge-fail">✗ falló envío</span>
+          {% endif %}
+        </td>
         <td class="muted">{{ q.ago }}</td>
       </tr>
       {% endfor %}

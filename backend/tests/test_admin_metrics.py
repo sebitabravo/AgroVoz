@@ -6,7 +6,7 @@ Cubre:
 - /daily: rellena huecos con count=0.
 - /latency: avg/percentiles sobre muestra.
 - /intents: conteos por intent.
-- /products: top productos vía match keyword ODEPA.
+- /products: top productos desde el campo estructurado de la consulta.
 - /errors: tasa + lista de errores.
 - /recent: lista de consultas recientes.
 - /stages: desglose de latencia por etapa del pipeline (Whisper/LLM/TTS).
@@ -24,7 +24,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import settings
 from app.models.consultation import Consultation
 from app.models.odepa_price import OdepaPrice
-from app.services.metrics_service import _contar_productos_en_textos
+from app.models.user_prefs import UserPrefs
+from app.services.metrics_service import get_intent_distribution
 
 _ADMIN_HEADERS = {"X-Admin-Key": settings.admin_api_key}
 
@@ -55,6 +56,8 @@ def _consulta(
     llm_ms: int = 0,
     tts_ms: int = 0,
     is_test: bool = False,
+    delivery_status: str = "delivered",
+    producto: str | None = None,
 ) -> Consultation:
     """Inserta una Consultation de prueba.
 
@@ -73,10 +76,35 @@ def _consulta(
         tts_ms=tts_ms,
         created_at=created_at or datetime.datetime.now(),
         is_test=is_test,
+        delivery_status=delivery_status,
+        producto=producto,
     )
     db.add(reg)
     db.commit()
     return reg
+
+
+def _identidad(
+    db: Session,
+    *,
+    phone_hash: str,
+    identity_type: str,
+    group_label: str | None = None,
+    comuna: str | None = "Traiguén",
+    localidad: str | None = None,
+) -> UserPrefs:
+    """Inserta una identidad individual o grupal sin exponerla en respuestas."""
+    prefs = UserPrefs(
+        phone_hash=phone_hash,
+        identity_type=identity_type,
+        group_label=group_label,
+        comuna=comuna,
+        localidad=localidad,
+        dataset_consent=False,
+    )
+    db.add(prefs)
+    db.commit()
+    return prefs
 
 
 # ── Auth ───────────────────────────────────────────────────────────
@@ -97,9 +125,7 @@ class TestMetricasAuth:
         assert resp.status_code == 401
 
     async def test_admin_key_valido_retorna_200(self, client: AsyncClient) -> None:
-        resp = await client.get(
-            "/api/v1/admin/metrics/dashboard", headers=_ADMIN_HEADERS
-        )
+        resp = await client.get("/api/v1/admin/metrics/dashboard", headers=_ADMIN_HEADERS)
         assert resp.status_code == 200
 
 
@@ -110,9 +136,7 @@ class TestDashboard:
     """KPIs principales."""
 
     async def test_sin_datos_retorna_ceros(self, client: AsyncClient) -> None:
-        resp = await client.get(
-            "/api/v1/admin/metrics/dashboard", headers=_ADMIN_HEADERS
-        )
+        resp = await client.get("/api/v1/admin/metrics/dashboard", headers=_ADMIN_HEADERS)
         assert resp.status_code == 200
         data = resp.json()
         assert data["today"] == 0
@@ -124,20 +148,21 @@ class TestDashboard:
         # sparkline siempre tiene 14 puntos (relleno de días); path es str.
         assert isinstance(data["sparkline_line_path"], str)
 
-    async def test_con_datos_hoy_cuenta_consultas(
-        self, client: AsyncClient, tmp_path: Path
-    ) -> None:
+    async def test_con_datos_hoy_cuenta_consultas(self, client: AsyncClient, tmp_path: Path) -> None:
         with next(_session_test_db(tmp_path)) as db:
             _consulta(db, intent="precio", phone_hash="h1" + "a" * 62)
             _consulta(db, intent="clima", phone_hash="h2" + "a" * 62)
-            _consulta(db, intent="desconocido", phone_hash="h3" + "a" * 62)
+            _consulta(
+                db,
+                intent="desconocido",
+                phone_hash="h3" + "a" * 62,
+                delivery_status="failed",
+            )
 
-        resp = await client.get(
-            "/api/v1/admin/metrics/dashboard", headers=_ADMIN_HEADERS
-        )
+        resp = await client.get("/api/v1/admin/metrics/dashboard", headers=_ADMIN_HEADERS)
         data = resp.json()
         assert data["today"] == 3
-        # 2 de 3 fueron éxito (precio + clima).
+        # Dos respuestas fueron entregadas y una falló.
         assert data["success_rate"] == pytest.approx(0.667, abs=0.01)
         assert data["error_count_24h"] == 1
         assert data["active_farmers_7d"] == 3
@@ -145,41 +170,31 @@ class TestDashboard:
         assert len(data["sparkline"]) == 14
         assert data["sparkline_line_path"]
 
-    async def test_ayer_no_cuenta_para_hoy(
-        self, client: AsyncClient, tmp_path: Path
-    ) -> None:
+    async def test_ayer_no_cuenta_para_hoy(self, client: AsyncClient, tmp_path: Path) -> None:
         ayer = datetime.datetime.now() - datetime.timedelta(days=1)
         with next(_session_test_db(tmp_path)) as db:
             _consulta(db, intent="precio", created_at=ayer)
-        resp = await client.get(
-            "/api/v1/admin/metrics/dashboard", headers=_ADMIN_HEADERS
-        )
+        resp = await client.get("/api/v1/admin/metrics/dashboard", headers=_ADMIN_HEADERS)
         data = resp.json()
         assert data["today"] == 0
         assert data["yesterday"] == 1
         # today=0 vs yesterday=1 → caída del 100%.
         assert data["today_trend_pct"] == pytest.approx(-100.0)
 
-    async def test_today_trend_pct_calcula_variacion(
-        self, client: AsyncClient, tmp_path: Path
-    ) -> None:
+    async def test_today_trend_pct_calcula_variacion(self, client: AsyncClient, tmp_path: Path) -> None:
         ayer = datetime.datetime.now() - datetime.timedelta(days=1)
         with next(_session_test_db(tmp_path)) as db:
             _consulta(db, intent="precio", created_at=ayer)  # 1 ayer
             _consulta(db, intent="precio")  # 2 hoy
             _consulta(db, intent="clima")
-        resp = await client.get(
-            "/api/v1/admin/metrics/dashboard", headers=_ADMIN_HEADERS
-        )
+        resp = await client.get("/api/v1/admin/metrics/dashboard", headers=_ADMIN_HEADERS)
         data = resp.json()
         assert data["today"] == 2
         assert data["yesterday"] == 1
         # (2 - 1) / 1 * 100 = +100%.
         assert data["today_trend_pct"] == pytest.approx(100.0)
 
-    async def test_is_test_no_cuenta_en_kpis(
-        self, client: AsyncClient, tmp_path: Path
-    ) -> None:
+    async def test_is_test_no_cuenta_en_kpis(self, client: AsyncClient, tmp_path: Path) -> None:
         """Regresión: filas is_test=True no deben sesgar los KPIs del dashboard.
 
         148 filas de datos sintéticos ("Hola esta es una prueba") en la DB
@@ -195,16 +210,46 @@ class TestDashboard:
                 response_text="Respuesta mock del LLM",
                 latency_ms=1,
                 is_test=True,
+                delivery_status="failed",
             )
-        resp = await client.get(
-            "/api/v1/admin/metrics/dashboard", headers=_ADMIN_HEADERS
-        )
+        resp = await client.get("/api/v1/admin/metrics/dashboard", headers=_ADMIN_HEADERS)
         data = resp.json()
         # Solo la consulta real cuenta; la de test queda afuera.
         assert data["today"] == 1
         assert data["success_rate"] == 1.0
         assert data["error_count_24h"] == 0
         assert data["active_farmers_7d"] == 1
+
+    async def test_success_rate_mide_entrega_no_intent(self, client: AsyncClient, tmp_path: Path) -> None:
+        """Un intent válido fallido no cuenta; uno desconocido entregado sí."""
+        with next(_session_test_db(tmp_path)) as db:
+            _consulta(db, intent="precio", delivery_status="failed")
+            _consulta(
+                db,
+                intent="desconocido",
+                phone_hash="b" * 64,
+                delivery_status="delivered",
+            )
+            _consulta(
+                db,
+                intent="clima",
+                phone_hash="c" * 64,
+                delivery_status="pending",
+            )
+            _consulta(
+                db,
+                intent="credito",
+                phone_hash="d" * 64,
+                delivery_status="delivered",
+            )
+
+        resp = await client.get("/api/v1/admin/metrics/dashboard", headers=_ADMIN_HEADERS)
+
+        data = resp.json()
+        # Dos entregadas y una fallida; pending no entra al denominador.
+        # El intent crédito no altera la definición basada en delivery.
+        assert data["success_rate"] == pytest.approx(0.667, abs=0.001)
+        assert data["error_count_24h"] == 1
 
 
 # ── /daily ─────────────────────────────────────────────────────────
@@ -214,9 +259,7 @@ class TestDaily:
     """Series diarias con relleno de huecos."""
 
     async def test_rellena_huecos_con_cero(self, client: AsyncClient) -> None:
-        resp = await client.get(
-            "/api/v1/admin/metrics/daily?days=7", headers=_ADMIN_HEADERS
-        )
+        resp = await client.get("/api/v1/admin/metrics/daily?days=7", headers=_ADMIN_HEADERS)
         data = resp.json()
         assert len(data) == 7
         # Todas las entradas tienen date ISO y count entero.
@@ -228,9 +271,7 @@ class TestDaily:
     async def test_cuenta_consulta_de_hoy(self, client: AsyncClient, tmp_path: Path) -> None:
         with next(_session_test_db(tmp_path)) as db:
             _consulta(db, intent="precio")
-        resp = await client.get(
-            "/api/v1/admin/metrics/daily?days=3", headers=_ADMIN_HEADERS
-        )
+        resp = await client.get("/api/v1/admin/metrics/daily?days=3", headers=_ADMIN_HEADERS)
         data = resp.json()
         hoy = datetime.date.today().isoformat()
         ultimo = data[-1]
@@ -245,9 +286,7 @@ class TestLatency:
     """Estadísticos de latencia."""
 
     async def test_sin_datos_retorna_ceros(self, client: AsyncClient) -> None:
-        resp = await client.get(
-            "/api/v1/admin/metrics/latency", headers=_ADMIN_HEADERS
-        )
+        resp = await client.get("/api/v1/admin/metrics/latency", headers=_ADMIN_HEADERS)
         data = resp.json()
         assert data["count"] == 0
         assert data["avg"] == 0.0
@@ -256,9 +295,7 @@ class TestLatency:
         with next(_session_test_db(tmp_path)) as db:
             for ms in (100, 200, 300):
                 _consulta(db, latency_ms=ms)
-        resp = await client.get(
-            "/api/v1/admin/metrics/latency?days=1", headers=_ADMIN_HEADERS
-        )
+        resp = await client.get("/api/v1/admin/metrics/latency?days=1", headers=_ADMIN_HEADERS)
         data = resp.json()
         assert data["count"] == 3
         assert data["avg"] == pytest.approx(200.0)
@@ -277,88 +314,111 @@ class TestIntents:
             _consulta(db, intent="precio")
             _consulta(db, intent="precio")
             _consulta(db, intent="clima")
+            _consulta(db, intent="credito")
+            _consulta(db, intent="credito")
             _consulta(db, intent="desconocido")
-        resp = await client.get(
-            "/api/v1/admin/metrics/intents?days=1", headers=_ADMIN_HEADERS
-        )
+            # Otros intents no se mezclan con desconocido ni con el total
+            # operativo de IntentDistribution.
+            _consulta(db, intent="corpus")
+            _consulta(db, intent="resumen")
+            distribution = get_intent_distribution(db, days=1)
+        resp = await client.get("/api/v1/admin/metrics/intents?days=1", headers=_ADMIN_HEADERS)
         data = resp.json()
         assert data["precio"] == 2
         assert data["clima"] == 1
+        assert data["credito"] == 2
         assert data["desconocido"] == 1
+        assert distribution.total == 6
 
-    async def test_is_test_excluido_del_conteo(
-        self, client: AsyncClient, tmp_path: Path
-    ) -> None:
+    async def test_is_test_excluido_del_conteo(self, client: AsyncClient, tmp_path: Path) -> None:
         """Regresión: filas is_test=True no deben aparecer en la distribución."""
         with next(_session_test_db(tmp_path)) as db:
             _consulta(db, intent="precio")
+            _consulta(db, intent="credito", phone_hash="b" * 64)
+            _consulta(db, intent="credito", phone_hash="c" * 64, is_test=True)
             _consulta(db, intent="desconocido", is_test=True)
             _consulta(db, intent="desconocido", is_test=True)
-        resp = await client.get(
-            "/api/v1/admin/metrics/intents?days=1", headers=_ADMIN_HEADERS
-        )
+            distribution = get_intent_distribution(db, days=1)
+        resp = await client.get("/api/v1/admin/metrics/intents?days=1", headers=_ADMIN_HEADERS)
         data = resp.json()
         assert data["precio"] == 1
+        assert data["credito"] == 1
         assert data["desconocido"] == 0
+        assert distribution.total == 2
 
 
 # ── /products ──────────────────────────────────────────────────────
 
 
 class TestProducts:
-    """Top productos mencionados (match keyword ODEPA)."""
+    """Top productos desde Consultation.producto."""
 
-    async def test_match_producto_papa(
-        self, client: AsyncClient, tmp_path: Path
+    async def test_producto_cuenta_con_contenido_redactado(
+        self,
+        client: AsyncClient,
+        tmp_path: Path,
     ) -> None:
+        """El ranking funciona sin conservar query_text ni response_text."""
         with next(_session_test_db(tmp_path)) as db:
-            db.add(OdepaPrice(
-                producto="papa", mercado="Lo Valledor",
-                precio_kg=1200, unidad="kg", fecha=datetime.date.today(),
-            ))
+            db.add(
+                OdepaPrice(
+                    producto="papa",
+                    mercado="Lo Valledor",
+                    precio_kg=1200,
+                    unidad="kg",
+                    fecha=datetime.date.today(),
+                )
+            )
             db.commit()
-            _consulta(db, intent="precio", query_text="¿cuánto vale la papa?")
-            _consulta(db, intent="precio", query_text="precio papa lo valledor")
-        resp = await client.get(
-            "/api/v1/admin/metrics/products?days=1", headers=_ADMIN_HEADERS
-        )
+            _consulta(
+                db,
+                intent="precio",
+                query_text="",
+                response_text="",
+                producto="  PAPA  ",
+            )
+        resp = await client.get("/api/v1/admin/metrics/products?days=1", headers=_ADMIN_HEADERS)
         data = resp.json()
-        assert len(data) >= 1
+        assert len(data) == 1
         assert data[0]["name"] == "papa"
-        assert data[0]["queries"] == 2
+        assert data[0]["queries"] == 1
         assert data[0]["pct"] == 100.0
 
-    async def test_substring_no_cuenta_papa_en_papaya(
-        self, client: AsyncClient, tmp_path: Path
+    async def test_texto_libre_no_infiere_producto_sin_valor_estructurado(
+        self,
+        client: AsyncClient,
+        tmp_path: Path,
     ) -> None:
-        # Regresión (review PR #70): el match era por substring, así una
-        # consulta sobre "papaya" contaba falsamente como "papa" (papa está
-        # antes en orden A-Z y el break se queda con el primero). Ahora usa
-        # word-boundary: cada producto cuenta solo cuando aparece como palabra.
+        """Null y vacío se excluyen aunque el texto mencione un producto."""
         with next(_session_test_db(tmp_path)) as db:
-            db.add(OdepaPrice(
-                producto="papa", mercado="X", precio_kg=1,
-                unidad="kg", fecha=datetime.date.today(),
-            ))
-            db.add(OdepaPrice(
-                producto="papaya", mercado="X", precio_kg=1,
-                unidad="kg", fecha=datetime.date.today(),
-            ))
+            db.add(
+                OdepaPrice(
+                    producto="papa",
+                    mercado="X",
+                    precio_kg=1,
+                    unidad="kg",
+                    fecha=datetime.date.today(),
+                )
+            )
             db.commit()
-            _consulta(db, intent="precio", query_text="¿cuánto cuesta la papaya?")
-        resp = await client.get(
-            "/api/v1/admin/metrics/products?days=1", headers=_ADMIN_HEADERS
-        )
-        nombres = {p["name"]: p["queries"] for p in resp.json()}
-        assert nombres.get("papaya") == 1
-        assert "papa" not in nombres
+            _consulta(
+                db,
+                intent="precio",
+                query_text="¿cuánto cuesta la papa?",
+                producto=None,
+            )
+            _consulta(
+                db,
+                intent="precio",
+                query_text="precio papa",
+                producto="   ",
+                phone_hash="b" * 64,
+            )
+        resp = await client.get("/api/v1/admin/metrics/products?days=1", headers=_ADMIN_HEADERS)
+        assert resp.json() == []
 
-    async def test_sin_productos_retorna_lista_vacia(
-        self, client: AsyncClient
-    ) -> None:
-        resp = await client.get(
-            "/api/v1/admin/metrics/products", headers=_ADMIN_HEADERS
-        )
+    async def test_sin_productos_retorna_lista_vacia(self, client: AsyncClient) -> None:
+        resp = await client.get("/api/v1/admin/metrics/products", headers=_ADMIN_HEADERS)
         assert resp.json() == []
 
 
@@ -368,9 +428,7 @@ class TestProducts:
 class TestErrors:
     """Tasa de error (intent desconocido)."""
 
-    async def test_tasa_y_lista_errores(
-        self, client: AsyncClient, tmp_path: Path
-    ) -> None:
+    async def test_tasa_y_lista_errores(self, client: AsyncClient, tmp_path: Path) -> None:
         with next(_session_test_db(tmp_path)) as db:
             _consulta(db, intent="precio")
             _consulta(
@@ -378,9 +436,7 @@ class TestErrors:
                 intent="desconocido",
                 query_text="bla bla incomprensible",
             )
-        resp = await client.get(
-            "/api/v1/admin/metrics/errors?days=1", headers=_ADMIN_HEADERS
-        )
+        resp = await client.get("/api/v1/admin/metrics/errors?days=1", headers=_ADMIN_HEADERS)
         data = resp.json()
         assert data["total_queries"] == 2
         assert data["total_errors"] == 1
@@ -395,15 +451,11 @@ class TestErrors:
 class TestRecent:
     """Consultas recientes."""
 
-    async def test_lista_recientes_ordenadas(
-        self, client: AsyncClient, tmp_path: Path
-    ) -> None:
+    async def test_lista_recientes_ordenadas(self, client: AsyncClient, tmp_path: Path) -> None:
         with next(_session_test_db(tmp_path)) as db:
             _consulta(db, query_text="primera consulta")
             _consulta(db, query_text="segunda consulta")
-        resp = await client.get(
-            "/api/v1/admin/metrics/recent?hours=24", headers=_ADMIN_HEADERS
-        )
+        resp = await client.get("/api/v1/admin/metrics/recent?hours=24", headers=_ADMIN_HEADERS)
         data = resp.json()
         assert len(data) == 2
         # Cada entrada tiene los campos esperados.
@@ -414,10 +466,258 @@ class TestRecent:
         with next(_session_test_db(tmp_path)) as db:
             for i in range(5):
                 _consulta(db, query_text=f"consulta {i}")
-        resp = await client.get(
-            "/api/v1/admin/metrics/recent?hours=24&limit=2", headers=_ADMIN_HEADERS
-        )
+        resp = await client.get("/api/v1/admin/metrics/recent?hours=24&limit=2", headers=_ADMIN_HEADERS)
         assert len(resp.json()) == 2
+
+    async def test_estado_reciente_refleja_entrega_real(self, client: AsyncClient, tmp_path: Path) -> None:
+        """El intent no puede convertir un envío fallido en “ok”."""
+        with next(_session_test_db(tmp_path)) as db:
+            _consulta(db, intent="precio", delivery_status="failed")
+            _consulta(
+                db,
+                intent="desconocido",
+                phone_hash="b" * 64,
+                delivery_status="delivered",
+            )
+            _consulta(
+                db,
+                intent="clima",
+                phone_hash="c" * 64,
+                delivery_status="pending",
+            )
+
+        resp = await client.get("/api/v1/admin/metrics/recent?hours=24", headers=_ADMIN_HEADERS)
+        por_estado = {entry["status_text"]: entry["ok"] for entry in resp.json()}
+
+        assert por_estado == {
+            "pendiente": False,
+            "ok": True,
+            "error": False,
+        }
+
+
+# ── /groups ─────────────────────────────────────────────────────────
+
+
+class TestGroups:
+    """Métricas colectivas PRODESAL sin detalle de integrantes."""
+
+    async def test_requiere_auth_y_acepta_admin(
+        self,
+        client: AsyncClient,
+    ) -> None:
+        """El endpoint nuevo hereda el gate X-Admin-Key del router."""
+        unauthorized = await client.get("/api/v1/admin/metrics/groups")
+        authorized = await client.get(
+            "/api/v1/admin/metrics/groups",
+            headers=_ADMIN_HEADERS,
+        )
+
+        assert unauthorized.status_code == 401
+        assert authorized.status_code == 200
+
+    @pytest.mark.parametrize("days", [0, 91])
+    async def test_valida_ventana(
+        self,
+        client: AsyncClient,
+        days: int,
+    ) -> None:
+        """SQLite nunca recibe ventanas fuera del rango común 1..90."""
+        response = await client.get(
+            f"/api/v1/admin/metrics/groups?days={days}",
+            headers=_ADMIN_HEADERS,
+        )
+
+        assert response.status_code == 422
+
+    async def test_grupo_sin_consultas_aparece_con_ceros(
+        self,
+        client: AsyncClient,
+        tmp_path: Path,
+    ) -> None:
+        """El LEFT JOIN conserva una agrupación todavía inactiva."""
+        phone_hash = "grupo-sin-actividad"
+        with next(_session_test_db(tmp_path)) as db:
+            _identidad(
+                db,
+                phone_hash=phone_hash,
+                identity_type="prodesal_group",
+                group_label="Comité Los Aromos",
+                comuna="Traiguén",
+                localidad="Quechereguas",
+            )
+
+        response = await client.get(
+            "/api/v1/admin/metrics/groups?days=30",
+            headers=_ADMIN_HEADERS,
+        )
+
+        assert response.status_code == 200
+        assert response.json() == [
+            {
+                "group_label": "Comité Los Aromos",
+                "comuna": "Traiguén",
+                "localidad": "Quechereguas",
+                "total_consultations": 0,
+                "delivered": 0,
+                "failed": 0,
+                "pending": 0,
+                "delivery_rate": 0.0,
+                "avg_latency_ms": 0.0,
+                "last_activity": None,
+            }
+        ]
+
+    async def test_dos_grupos_aislados_de_identidades_individuales(
+        self,
+        client: AsyncClient,
+        tmp_path: Path,
+    ) -> None:
+        """Solo group_label/comuna/localidad definen agregados visibles."""
+        group_a_member_1 = "grupo-a-integrante-1"
+        group_a_member_2 = "grupo-a-integrante-2"
+        group_b_member = "grupo-b-integrante"
+        individual = "productor-individual"
+        with next(_session_test_db(tmp_path)) as db:
+            for member_hash in (group_a_member_1, group_a_member_2):
+                _identidad(
+                    db,
+                    phone_hash=member_hash,
+                    identity_type="prodesal_group",
+                    group_label="Grupo A",
+                    comuna="Traiguén",
+                    localidad="Quino",
+                )
+            _identidad(
+                db,
+                phone_hash=group_b_member,
+                identity_type="prodesal_group",
+                group_label="Grupo B",
+                comuna="Lumaco",
+                localidad="Capitán Pastene",
+            )
+            _identidad(
+                db,
+                phone_hash=individual,
+                identity_type="individual",
+            )
+            _consulta(db, phone_hash=group_a_member_1, query_text="secreto a1")
+            _consulta(db, phone_hash=group_a_member_2, query_text="secreto a2")
+            _consulta(db, phone_hash=group_b_member, query_text="secreto b")
+            _consulta(db, phone_hash=individual, query_text="secreto individual")
+
+        response = await client.get(
+            "/api/v1/admin/metrics/groups?days=1",
+            headers=_ADMIN_HEADERS,
+        )
+        data = response.json()
+
+        assert response.status_code == 200
+        assert [group["group_label"] for group in data] == ["Grupo A", "Grupo B"]
+        assert [group["total_consultations"] for group in data] == [2, 1]
+        serialized = response.text
+        for forbidden in (
+            group_a_member_1,
+            group_a_member_2,
+            group_b_member,
+            individual,
+            "secreto a1",
+            "secreto a2",
+            "secreto b",
+            "secreto individual",
+            "phone_hash",
+            "query_text",
+            "response_text",
+            "members",
+        ):
+            assert forbidden not in serialized
+
+    async def test_estados_tasa_latencia_y_filtro_is_test(
+        self,
+        client: AsyncClient,
+        tmp_path: Path,
+    ) -> None:
+        """Pending se separa y no entra al denominador de entrega."""
+        phone_hash = "grupo-estados"
+        with next(_session_test_db(tmp_path)) as db:
+            _identidad(
+                db,
+                phone_hash=phone_hash,
+                identity_type="prodesal_group",
+                group_label="Grupo Estados",
+            )
+            _consulta(
+                db,
+                phone_hash=phone_hash,
+                delivery_status="delivered",
+                latency_ms=100,
+            )
+            _consulta(
+                db,
+                phone_hash=phone_hash,
+                delivery_status="failed",
+                latency_ms=300,
+            )
+            _consulta(
+                db,
+                phone_hash=phone_hash,
+                delivery_status="pending",
+                latency_ms=500,
+            )
+            _consulta(
+                db,
+                phone_hash=phone_hash,
+                delivery_status="delivered",
+                latency_ms=1,
+                is_test=True,
+            )
+
+        response = await client.get(
+            "/api/v1/admin/metrics/groups?days=1",
+            headers=_ADMIN_HEADERS,
+        )
+        group = response.json()[0]
+
+        assert group["total_consultations"] == 3
+        assert group["delivered"] == 1
+        assert group["failed"] == 1
+        assert group["pending"] == 1
+        assert group["delivery_rate"] == pytest.approx(0.5)
+        assert group["avg_latency_ms"] == pytest.approx(300.0)
+        assert group["last_activity"] is not None
+
+    async def test_ventana_excluye_consultas_antiguas_sin_ocultar_grupo(
+        self,
+        client: AsyncClient,
+        tmp_path: Path,
+    ) -> None:
+        """Una actividad fuera de ventana deja el grupo visible con cero."""
+        phone_hash = "grupo-antiguo"
+        old_date = datetime.datetime.now() - datetime.timedelta(days=10)
+        with next(_session_test_db(tmp_path)) as db:
+            _identidad(
+                db,
+                phone_hash=phone_hash,
+                identity_type="prodesal_group",
+                group_label="Grupo Histórico",
+            )
+            _consulta(
+                db,
+                phone_hash=phone_hash,
+                created_at=old_date,
+                delivery_status="delivered",
+            )
+
+        response = await client.get(
+            "/api/v1/admin/metrics/groups?days=7",
+            headers=_ADMIN_HEADERS,
+        )
+        group = response.json()[0]
+
+        assert group["group_label"] == "Grupo Histórico"
+        assert group["total_consultations"] == 0
+        assert group["delivered"] == 0
+        assert group["last_activity"] is None
 
 
 # ── /stages ─────────────────────────────────────────────────────────
@@ -427,9 +727,7 @@ class TestStages:
     """Desglose de latencia por etapa del pipeline."""
 
     async def test_sin_datos_retorna_ceros(self, client: AsyncClient) -> None:
-        resp = await client.get(
-            "/api/v1/admin/metrics/stages", headers=_ADMIN_HEADERS
-        )
+        resp = await client.get("/api/v1/admin/metrics/stages", headers=_ADMIN_HEADERS)
         data = resp.json()
         assert data["whisper_ms"] == 0.0
         assert data["llm_ms"] == 0.0
@@ -437,15 +735,11 @@ class TestStages:
         assert data["total_ms"] == 0.0
         assert data["count"] == 0
 
-    async def test_promedio_sobre_muestra(
-        self, client: AsyncClient, tmp_path: Path
-    ) -> None:
+    async def test_promedio_sobre_muestra(self, client: AsyncClient, tmp_path: Path) -> None:
         with next(_session_test_db(tmp_path)) as db:
             _consulta(db, whisper_ms=800, llm_ms=1200, tts_ms=600)
             _consulta(db, whisper_ms=1000, llm_ms=1400, tts_ms=800)
-        resp = await client.get(
-            "/api/v1/admin/metrics/stages?days=1", headers=_ADMIN_HEADERS
-        )
+        resp = await client.get("/api/v1/admin/metrics/stages?days=1", headers=_ADMIN_HEADERS)
         data = resp.json()
         assert data["count"] == 2
         assert data["whisper_ms"] == pytest.approx(900.0)
@@ -453,49 +747,13 @@ class TestStages:
         assert data["tts_ms"] == pytest.approx(700.0)
         assert data["total_ms"] == pytest.approx(2900.0)
 
-    async def test_filtra_registros_sin_timing(
-        self, client: AsyncClient, tmp_path: Path
-    ) -> None:
+    async def test_filtra_registros_sin_timing(self, client: AsyncClient, tmp_path: Path) -> None:
         """Consultas con stage en 0 (pre-migración) no diluyen el promedio."""
         with next(_session_test_db(tmp_path)) as db:
             _consulta(db, whisper_ms=0, llm_ms=0, tts_ms=0)  # pre-migración
             _consulta(db, whisper_ms=500, llm_ms=700, tts_ms=300)  # con timing
-        resp = await client.get(
-            "/api/v1/admin/metrics/stages?days=1", headers=_ADMIN_HEADERS
-        )
+        resp = await client.get("/api/v1/admin/metrics/stages?days=1", headers=_ADMIN_HEADERS)
         data = resp.json()
         assert data["count"] == 1  # solo la que tiene timing
         assert data["whisper_ms"] == pytest.approx(500.0)
         assert data["total_ms"] == pytest.approx(1500.0)
-
-
-class TestContarProductosEnTextos:
-    """Contrato del helper _contar_productos_en_textos (unitario, sin DB).
-
-    Regresión (review PR #70 run 7): el helper debe ser case-insensitive para
-    no depender del contrato implícito de que callers y list_products()
-    entreguen todo en minúsculas.
-    """
-
-    def test_producto_capitalizado_matchea_texto_lowercased(self) -> None:
-        """Producto 'Papa' (mayúscula) debe contar en 'precio papa' (minúscula)."""
-        conteos = _contar_productos_en_textos(["precio papa"], ["Papa"])
-        assert conteos == {"Papa": 1}
-
-    def test_texto_capitalizado_matchea_producto_lowercased(self) -> None:
-        """Texto 'PRECIO PAPA' debe matchear producto 'papa'."""
-        conteos = _contar_productos_en_textos(["PRECIO PAPA"], ["papa"])
-        assert conteos == {"papa": 1}
-
-    def test_word_boundary_sigue_aplicando(self) -> None:
-        """re.IGNORECASE no relaja el word-boundary: 'papa' no cuenta en 'papaya'."""
-        conteos = _contar_productos_en_textos(["¿cuánto cuesta la papaya?"], ["papa"])
-        assert conteos == {}
-
-    def test_una_consulta_un_producto(self) -> None:
-        """El break hace que una consulta cuente para un solo producto."""
-        conteos = _contar_productos_en_textos(
-            ["precio papa lo valledor"], ["papa", "valledor"]
-        )
-        # 'papa' aparece antes en orden A-Z -> se queda con ese.
-        assert conteos == {"papa": 1}

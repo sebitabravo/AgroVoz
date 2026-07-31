@@ -12,8 +12,8 @@
     <span class="badge badge-webhook">{{ c.intent }}</span>
     {% endif %}
   </td>
-  <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ c.query_text }}">{{ c.query_text_short }}</td>
-  <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ c.response_text }}">{{ c.response_text_short }}</td>
+  <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ c.query_text_short }}">{{ c.query_text_short }}</td>
+  <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ c.response_text_short }}">{{ c.response_text_short }}</td>
   <td class="mono">{{ c.created_at }}</td>
   <td>
     {% if c.resuelto %}

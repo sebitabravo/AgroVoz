@@ -4,12 +4,15 @@ Encapsula rate limiting, headers de seguridad HTTP, validación HMAC
 de webhooks de Open-WA y constantes de hardening.
 """
 
+from __future__ import annotations
+
 import hashlib
 import hmac as hmac_mod
 import json
 import logging
 import threading
 import time
+import weakref
 from collections.abc import Awaitable, Callable
 
 from fastapi import HTTPException, Request
@@ -95,12 +98,10 @@ def _get_client_ip(request: Request) -> str:
     return "unknown"
 
 
-# Referencia a la instancia activa de RateLimitMiddleware.
-# Se setea en __init__ para que los tests puedan resetear el contador
-# entre ejecuciones: el middleware vive en el singleton `app` y su estado
-# `_requests` persiste entre tests si no se limpia, saturando el contador
-# global cuando la suite completa acumula más de rate_limit_per_minute.
-_active_rate_limiter: "RateLimitMiddleware | None" = None
+# Registro débil de todas las instancias de RateLimitMiddleware. Starlette puede
+# construir más de una durante los tests (app principal + apps aisladas); guardar
+# solo la última dejaba contadores antiguos sin resetear y contaminaba la suite.
+_rate_limiter_instances: weakref.WeakSet[RateLimitMiddleware] = weakref.WeakSet()
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -112,14 +113,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     Para producción, delegar a Traefik/Nginx o usar slowapi.
     """
 
-    def __init__(self, app: "ASGIApp") -> None:
+    def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
         self._requests: dict[str, list[float]] = {}
         self._lock = threading.Lock()
         self._last_cleanup: float = 0.0  # Timestamp de la última limpieza global
-        # Registrar instancia para que los tests puedan resetear el estado.
-        global _active_rate_limiter
-        _active_rate_limiter = self
+        # Registrar la instancia sin impedir que el recolector libere apps de test.
+        _rate_limiter_instances.add(self)
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         client_ip: str = _get_client_ip(request)
@@ -158,17 +158,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
 
 def reset_rate_limiter_for_tests() -> None:
-    """Limpia los contadores del RateLimitMiddleware activo.
+    """Limpia los contadores de todos los RateLimitMiddleware activos.
 
-    Pensado para tests: el middleware es un singleton dentro de `app` y su
-    estado `_requests` persiste entre tests, lo que satura el contador global
-    cuando la suite completa acumula requests. Igual patrón que
-    `monitor_service.reset_uptime_for_tests`.
+    Pensado para tests: la app principal y las apps aisladas pueden mantener
+    instancias simultáneas. Su estado persiste entre requests y, si solo se
+    limpia la última instancia creada, la suite completa satura el contador de
+    la app principal. Igual patrón que `monitor_service.reset_uptime_for_tests`.
     """
-    if _active_rate_limiter is not None:
-        with _active_rate_limiter._lock:
-            _active_rate_limiter._requests.clear()
-            _active_rate_limiter._last_cleanup = 0.0
+    for rate_limiter in list(_rate_limiter_instances):
+        with rate_limiter._lock:
+            rate_limiter._requests.clear()
+            rate_limiter._last_cleanup = 0.0
 
 
 # ── Validación HMAC de webhooks de Open-WA ──────────────────────

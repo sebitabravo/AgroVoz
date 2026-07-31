@@ -9,7 +9,7 @@ from httpx import ASGITransport, AsyncClient
 from starlette.responses import Response as StarletteResponse
 
 from app.core.config import Settings, settings
-from app.core.security import RateLimitMiddleware
+from app.core.security import RateLimitMiddleware, reset_rate_limiter_for_tests
 
 
 async def test_rate_limit_bloquea_despues_de_n_requests(
@@ -182,6 +182,26 @@ async def test_rate_limit_cero_bloquea_todo(
     ) as c:
         response = await c.get("/api/v1/health")
         assert response.status_code == 429
+
+
+async def test_reset_rate_limiter_limpia_todas_las_instancias() -> None:
+    """El reset de tests limpia la app principal y cualquier app aislada."""
+    app_uno = FastAPI()
+    app_dos = FastAPI()
+    middleware_uno = RateLimitMiddleware(app_uno)
+    middleware_dos = RateLimitMiddleware(app_dos)
+
+    middleware_uno._requests["127.0.0.1"] = [1.0]
+    middleware_dos._requests["127.0.0.2"] = [2.0]
+    middleware_uno._last_cleanup = 1.0
+    middleware_dos._last_cleanup = 2.0
+
+    reset_rate_limiter_for_tests()
+
+    assert middleware_uno._requests == {}
+    assert middleware_dos._requests == {}
+    assert middleware_uno._last_cleanup == 0.0
+    assert middleware_dos._last_cleanup == 0.0
 
 
 def test_phone_hash_pepper_dev_con_warning() -> None:

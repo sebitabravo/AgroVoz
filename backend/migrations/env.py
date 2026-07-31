@@ -14,7 +14,10 @@ config = context.config
 
 # Logging desde alembic.ini
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Las migraciones también se ejecutan programáticamente en smoke tests y
+    # herramientas operativas. No deben silenciar loggers de la aplicación
+    # que ya estén cargados en ese mismo proceso.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # ── Metadata de modelos ─────────────────────────────────────────
 # Importar Base y TODOS los modelos para que Base.metadata los incluya.
