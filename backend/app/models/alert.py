@@ -49,7 +49,5 @@ class Alert(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
 
     def __repr__(self) -> str:
-        return (
-            f"<Alert(phone_hash='{self.phone_hash[:8]}...', tipo='{self.tipo}', "
-            f"producto='{self.producto}', activa={self.activa})>"
-        )
+        """Representa estado operativo sin exponer sujeto ni preferencias."""
+        return f"<Alert(id={self.id}, tipo='{self.tipo}', activa={self.activa})>"

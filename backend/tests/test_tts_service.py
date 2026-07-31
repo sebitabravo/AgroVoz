@@ -6,6 +6,7 @@ ejecucion de test. Mockea PiperVoice.load y subprocess.run (ffmpeg).
 El split de texto se prueba sin mocks (es logica pura de strings).
 """
 
+import logging
 import subprocess
 from collections.abc import Generator
 from pathlib import Path
@@ -383,12 +384,14 @@ class TestTTSServiceSynthesize:
         tmp_audio_dir: Path,
         mock_piper_voice: Mock,
         tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Texto largo debe generar multiples fragmentos y concatenarse."""
+        caplog.set_level(logging.INFO, logger="app.services.tts_service")
         model_path = _create_fake_model_file(tmp_path)
 
         # Generar texto que requiere 2+ chunks
-        chunk1 = "El precio de la papa en Santiago es de 500 pesos. "
+        chunk1 = "SECRETO-TTS El precio de la papa en Santiago es de 500 pesos. "
         chunk2 = "En Temuco el precio es de 450 pesos. "
         text = chunk1 * 20 + chunk2 * 20  # Texto largo
 
@@ -401,6 +404,9 @@ class TestTTSServiceSynthesize:
 
         assert Path(result).exists()
         assert result.endswith(".ogg")
+        assert "SECRETO-TTS" not in caplog.text
+        assert "Santiago" not in caplog.text
+        assert str(tmp_audio_dir) not in caplog.text
 
     def test_synthesize_reusa_cache(
         self,
@@ -581,8 +587,10 @@ class TestTTSServiceConversion:
     def test_convert_wav_to_ogg_ffmpeg_falla(
         self,
         tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Si ffmpeg falla, debe propagar CalledProcessError."""
+        caplog.set_level(logging.ERROR, logger="app.services.tts_service")
         input_wav = tmp_path / "input.wav"
         input_wav.write_bytes(b"fake wav content")
         output_ogg = tmp_path / "output.ogg"
@@ -591,12 +599,19 @@ class TestTTSServiceConversion:
             patch(
                 "app.services.tts_service.subprocess.run",
                 side_effect=subprocess.CalledProcessError(
-                    1, ["ffmpeg"], stderr=b"error simulado"
+                    1,
+                    ["ffmpeg"],
+                    stderr=(
+                        f"secreto-ffmpeg ruta={tmp_path} teléfono=56912345678"
+                    ).encode(),
                 ),
             ),
             pytest.raises(subprocess.CalledProcessError),
         ):
             TTSService._convert_wav_to_ogg(input_wav, output_ogg)
+        assert "secreto-ffmpeg" not in caplog.text
+        assert str(tmp_path) not in caplog.text
+        assert "56912345678" not in caplog.text
 
     def test_concatenate_wavs_llama_ffmpeg(
         self,
@@ -673,4 +688,3 @@ class TestSentenceSplitRegex:
             "El precio es $1.500 pesos.",
             "La papa cuesta 2.500.",
         ]
-

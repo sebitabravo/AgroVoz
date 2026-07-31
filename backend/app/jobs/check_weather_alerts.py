@@ -36,7 +36,10 @@ async def _ejecutar() -> int:
         )
         return 0
     except (sqlalchemy.exc.SQLAlchemyError, OSError, ValueError) as exc:
-        logger.exception("Evaluacion de alertas climaticas fallo: %s", exc)
+        logger.error(
+            "Evaluación de alertas climáticas falló — error=%s",
+            type(exc).__name__,
+        )
         return 1
     finally:
         session.close()

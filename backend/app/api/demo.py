@@ -74,7 +74,11 @@ async def demo_preguntar(
     try:
         response = await process_demo_request(payload)
     except ValueError as exc:
-        logger.warning("Demo consulta inválida — request_id=%s error=%s", request_id, exc)
+        logger.warning(
+            "Demo consulta inválida — request_id=%s error=%s",
+            request_id,
+            type(exc).__name__,
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     logger.info(

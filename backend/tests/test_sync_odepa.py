@@ -48,18 +48,21 @@ class TestEjecutar:
         assert rc == 1
 
     async def test_excepcion_inesperada_devuelve_uno(self) -> None:
-        """Excepción de BD/sistema (OSError) da exit 1 y loguea trace completo."""
+        """Excepción de sistema da exit 1 sin exponer mensaje ni traceback."""
+        secret_message = "boom-ruta-privada"
         with (
             patch(
                 "app.jobs.sync_odepa.sync_odepa",
-                new=AsyncMock(side_effect=OSError("boom")),
+                new=AsyncMock(side_effect=OSError(secret_message)),
             ),
-            patch("app.jobs.sync_odepa.logger.exception") as mock_log,
+            patch("app.jobs.sync_odepa.logger.error") as mock_log,
         ):
             rc = await _ejecutar()
         assert rc == 1
         mock_log.assert_called_once()
         assert "Sync ODEPA falló con error inesperado" in mock_log.call_args[0][0]
+        assert mock_log.call_args[0][1] == "OSError"
+        assert secret_message not in str(mock_log.call_args)
 
     async def test_ok_reinicia_contador_de_fallos(self) -> None:
         """Un sync exitoso despues de fallos resetea el contador a 0 (#176)."""

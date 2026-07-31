@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Benchmark de latencia del LLM con las 7 tools activas.
+"""Microbenchmark saneado de latencia del LLM local.
 
-Mide `answer()` end-to-end con consultas representativas de precio,
-clima y margen. Resultados en data/bench_results.json.
+Mide ``answer()`` con consultas sintéticas de precio, clima y margen. No mide
+Whisper, TTS, Open-WA ni latencia E2E y, por sí solo, no cierra el issue #215.
+El reporte omite consultas y respuestas para que pueda adjuntarse sin exponer
+contenido conversacional.
 
 Uso:
     cd backend
@@ -18,6 +20,7 @@ import asyncio
 import json
 import logging
 import os
+import platform
 import sys
 import time
 from pathlib import Path
@@ -26,25 +29,33 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.core.config import settings
-from app.services.llm_service import answer, preload_model
+from app.services.llm_service import (
+    answer,
+    get_model_error,
+    is_model_available,
+    preload_model,
+)
 
 logger = logging.getLogger("bench_latencia")
 
 # ── Queries de benchmark ──────────────────────────────────────────────
 BENCH_QUERIES: list[dict[str, object]] = [
     {
+        "case_id": "precio_mercado",
         "query": "¿a cómo está la papa en Temuco?",
         "intent": "precio",
         "cultivos": ["papa"],
         "system_tip": None,
     },
     {
+        "case_id": "clima_futuro",
         "query": "¿cómo va a estar el tiempo mañana en Traiguén?",
         "intent": "clima",
         "cultivos": None,
         "system_tip": None,
     },
     {
+        "case_id": "margen_venta",
         "query": "vendí 100 kilos de papa a $800 cada uno, ¿cómo me fue?",
         "intent": "margen",
         "cultivos": ["papa"],
@@ -70,6 +81,7 @@ async def _run_bench() -> list[dict[str, object]]:
 
     for i, entry in enumerate(BENCH_QUERIES):
         query = str(entry["query"])
+        case_id = str(entry["case_id"])
         intent = str(entry["intent"])
         cultivos = entry.get("cultivos")
         system_tip = entry.get("system_tip")
@@ -78,11 +90,11 @@ async def _run_bench() -> list[dict[str, object]]:
             cultivos = [str(c) for c in cultivos]
 
         logger.info(
-            "[%d/%d] Ejecutando query %s: %s",
+            "[%d/%d] Ejecutando caso sintetico — case_id=%s intent=%s",
             i + 1,
             len(BENCH_QUERIES),
+            case_id,
             intent,
-            query[:60],
         )
 
         t0 = time.perf_counter()
@@ -93,28 +105,39 @@ async def _run_bench() -> list[dict[str, object]]:
                 cultivos=cultivos,  # type: ignore[arg-type]
                 system_tip=str(system_tip) if system_tip else None,
             )
-        except Exception as exc:
-            logger.exception("Error en query %s: %s", intent, exc)
-            response = f"ERROR: {exc}"
+            status = "ok" if response else "empty"
+            error_code = None
+        except (TimeoutError, RuntimeError, OSError, ValueError) as exc:
+            logger.error(
+                "Caso sintetico fallo — case_id=%s error=%s",
+                case_id,
+                type(exc).__name__,
+            )
+            response = ""
+            status = "error"
+            error_code = type(exc).__name__
         t1 = time.perf_counter()
 
         total_ms = (t1 - t0) * 1000
 
         result: dict[str, object] = {
-            "query": query,
+            "case_id": case_id,
             "intent": intent,
             "total_ms": round(total_ms, 1),
-            "response_preview": response[:200] if response else "",
+            "response_chars": len(response),
+            "status": status,
+            "error_code": error_code,
         }
         results.append(result)
 
         logger.info(
-            "[%d/%d] %s → %s (respuesta: %.80s)",
+            "[%d/%d] Caso completado — case_id=%s intent=%s total=%s status=%s",
             i + 1,
             len(BENCH_QUERIES),
+            case_id,
             intent,
             _format_ms(total_ms),
-            response,
+            status,
         )
 
         # Pequeña pausa entre queries para dejar que el sistema respire.
@@ -137,6 +160,26 @@ def _compute_summary(results: list[dict[str, object]]) -> dict[str, object]:
     }
 
 
+def _read_cgroup_value(path: str) -> str | None:
+    """Lee un límite cgroup sin fallar fuera de Linux/contenedor."""
+    try:
+        value = Path(path).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return value or None
+
+
+async def _wait_for_model(timeout_seconds: float = 60.0) -> bool:
+    """Espera el preload con un límite explícito para un benchmark reproducible."""
+    preload_model()
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if is_model_available():
+            return True
+        await asyncio.sleep(0.1)
+    return False
+
+
 async def main() -> None:
     """Punto de entrada del benchmark."""
     logging.basicConfig(
@@ -154,14 +197,19 @@ async def main() -> None:
         )
         sys.exit(1)
 
-    logger.info("Benchmark de latencia LLM — n_ctx=%d, modelo=%s", 4096, model_path)
+    logger.info(
+        "Microbenchmark LLM — n_ctx=%d arquitectura=%s",
+        4096,
+        platform.machine(),
+    )
     logger.info("Cargando modelo (cold start)...")
 
-    # Pre-cargar modelo (bloqueante para benchmark preciso).
-    # preload_model() es async (thread daemon), asi que esperamos a que cargue.
-    preload_model()
-    # Dar tiempo al thread daemon para que termine la carga.
-    await asyncio.sleep(0.5)
+    if not await _wait_for_model():
+        logger.error(
+            "Worker LLM no quedo listo — error=%s",
+            get_model_error() or "startup_timeout",
+        )
+        sys.exit(1)
 
     logger.info("Iniciando %d queries de benchmark...", len(BENCH_QUERIES))
     t_start = time.perf_counter()
@@ -174,9 +222,12 @@ async def main() -> None:
     # ── Reporte ────────────────────────────────────────────────────
     output = {
         "device": "CPU",
+        "architecture": platform.machine(),
         "n_ctx": 4096,
-        "n_threads": os.cpu_count() or 4,
+        "n_threads": min(os.cpu_count() or 4, 8),
         "model": os.path.basename(model_path),
+        "cgroup_cpu_max": _read_cgroup_value("/sys/fs/cgroup/cpu.max"),
+        "cgroup_memory_max": _read_cgroup_value("/sys/fs/cgroup/memory.max"),
         "results": results,
         "summary": summary,
         "wall_clock_total_s": round(t_total, 1),
@@ -199,8 +250,10 @@ async def main() -> None:
     print(f"  Queries:      {summary['num_queries']}")
     print("-" * 60)
     for r in results:
-        print(f"  [{r['intent']:8s}] {_format_ms(float(r['total_ms'])):>8s}  "
-              f"{r['query'][:50]}")
+        total_ms_value = r["total_ms"]
+        if not isinstance(total_ms_value, (int, float)):
+            raise TypeError("total_ms invalido en resultado interno")
+        print(f"  [{r['case_id']!s:16s}] {_format_ms(float(total_ms_value)):>8s}  {r['status']}")
     print("-" * 60)
     print(f"  Promedio:     {_format_ms(float(summary['avg_total_ms']))}")  # type: ignore[arg-type]
     print(f"  Mínimo:       {_format_ms(float(summary['min_total_ms']))}")  # type: ignore[arg-type]
@@ -209,17 +262,7 @@ async def main() -> None:
     print("=" * 60)
     print(f"\nReporte detallado: {output_path}")
 
-    # ── Diagnóstico vs target ───────────────────────────────────────
-    target_s = 15.0
-    llm_avg_s = float(summary["avg_total_ms"]) / 1000  # type: ignore[arg-type]
-    if llm_avg_s > target_s:
-        print(f"\n⚠️  LATENCIA EXCEDE TARGET (<15s E2E)")
-        print(f"   Solo LLM: {llm_avg_s:.1f}s promedio")
-        print(f"   Faltan: Whisper (~3-5s) + TTS (~2-3s) + red (~2s)")
-        print(f"   Estimado E2E: ~{llm_avg_s + 8:.0f}s")
-        print(f"   Acción requerida: comprimir prompt, reducir tools, o documentar trade-off.")
-    else:
-        print(f"\n✅  Latencia dentro del target (<15s E2E)")
+    print("\nNOTA: este resultado es solo del LLM. Ejecute docs/validacion-operativa.md para evaluar el target E2E.")
 
 
 if __name__ == "__main__":

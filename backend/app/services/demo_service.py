@@ -19,7 +19,7 @@ from app.services.audio_service import (
     get_audio_duration_ms,
     validate_path_in_audio_dir,
 )
-from app.services.llm_keywords import _detect_greeting
+from app.services.llm_keywords import _detect_greeting, _force_keyword_tool
 from app.services.llm_service import answer
 from app.services.pipeline_service import AgroVozPipeline
 from app.services.tts_service import TTSService
@@ -93,14 +93,43 @@ async def _synthesize_response(text: str, audio_temp_dir: Path) -> str:
 
 
 async def _generate_demo_response(query_text: str) -> tuple[str, str]:
-    """Genera respuesta de texto para la demo reutilizando el LLM."""
+    """Genera la respuesta de la demo por el MISMO camino que WhatsApp.
+
+    Antes esto iba directo al LLM, saltandose el fast-path. El efecto era que
+    la demo mostraba algo PEOR que el producto: "a cuanto esta la papa" tardaba
+    31s y terminaba en timeout, cuando por WhatsApp se responde en ~100 ms sin
+    tocar el LLM. Una demo que se comporta distinto al producto no demuestra
+    nada; por eso replica el orden real: fast-path primero, LLM despues.
+    """
     if _detect_greeting(query_text):
         return _DEMO_GREETING_TEXT, "saludo"
 
+    # Fast-path deterministico: mismo gate que usa el pipeline de voz y texto.
+    # Para la consulta tipica las tools ya arman la frase final con el dato de
+    # ODEPA y el LLM no aporta nada que el productor escuche.
+    try:
+        extracted = AgroVozPipeline._extract_variables(query_text)
+        if AgroVozPipeline._puede_usar_fast_path(query_text, extracted, None):
+            rapida = await _force_keyword_tool(query_text, phone_hash=_DEMO_CHAT_ID_HASH)
+            if rapida:
+                intent_rapido = "precio" if extracted.consulta_tipo == "precio" else "clima"
+                logger.info(
+                    "Demo fast-path sin LLM — tipo=%s producto=%s",
+                    intent_rapido,
+                    extracted.producto,
+                )
+                return rapida, intent_rapido
+    except (RuntimeError, OSError, ValueError):
+        # El fast-path es un atajo, no un requisito: si falla se sigue al LLM.
+        logger.warning("Fast-path de demo falló — fallback=llm")
+
     try:
         response_text = await answer(query_text, phone_hash=_DEMO_CHAT_ID_HASH)
-    except (TimeoutError, RuntimeError, OSError, ValueError):
-        logger.exception("Error en generacion LLM para demo")
+    except (TimeoutError, RuntimeError, OSError, ValueError) as exc:
+        logger.error(
+            "Error en generación LLM para demo — error=%s",
+            type(exc).__name__,
+        )
         response_text = "Tuve un problema al procesar tu consulta. Podrias intentar de nuevo?"
 
     intent = AgroVozPipeline._detect_intent(query_text, response_text)
@@ -133,7 +162,10 @@ async def process_demo_request(request: DemoPreguntaRequest) -> DemoRespuestaRes
         try:
             audio_base64 = await _synthesize_response(response_text, audio_temp_dir)
         except (RuntimeError, ValueError, OSError) as exc:
-            logger.warning("Demo TTS fallo — error=%s", exc)
+            logger.warning(
+                "Demo TTS falló — error=%s",
+                type(exc).__name__,
+            )
             audio_base64 = ""
 
     latency_ms = int((time.monotonic() - start_time) * 1000)

@@ -209,6 +209,31 @@ const pageDescription = "Probá AgroVoz desde el navegador. Escribí una pregunt
     messages.scrollTop = messages.scrollHeight;
   }
 
+  /**
+   * Base del backend.
+   *
+   * En produccion la landing y el backend van detras del mismo reverse proxy,
+   * asi que el mismo origen es correcto y no hay CORS. Pero en desarrollo la
+   * landing corre en :4321 (Astro) y el backend en :8000: con el mismo origen
+   * el fetch iba a localhost:4321/api/... y no respondia nada. Por eso la
+   * demo "no funcionaba" en local.
+   *
+   * PUBLIC_API_URL permite apuntar a otro host si hace falta (por ejemplo,
+   * landing en Cloudflare Pages y backend en el VPS).
+   */
+  function apiBase(): string {
+    const configurada = import.meta.env.PUBLIC_API_URL;
+    if (configurada) return String(configurada).replace(/\/$/, "");
+
+    const esDesarrolloLocal =
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1";
+    if (esDesarrolloLocal && window.location.port !== "8000") {
+      return `${window.location.protocol}//${window.location.hostname}:8000`;
+    }
+    return window.location.origin;
+  }
+
   async function sendQuery(text: string) {
     if (loading || !text.trim()) return;
 
@@ -216,7 +241,7 @@ const pageDescription = "Probá AgroVoz desde el navegador. Escribí una pregunt
     setLoading("Consultando...");
 
     try {
-      const apiUrl = window.location.origin + "/api/v1/demo/preguntar";
+      const apiUrl = apiBase() + "/api/v1/demo/preguntar";
       const resp = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
