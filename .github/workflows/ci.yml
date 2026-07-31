@@ -55,6 +55,10 @@ jobs:
         uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
+          # setup-uv v9 cambió el default de prune-cache a false, lo que engorda
+          # el cache de Actions y sube el costo. Se fija explícito al valor que
+          # traía v8 para que el bump no cambie el gasto.
+          prune-cache: true
 
       - name: Install dependencies
         if: steps.gate.outputs.skip != 'true'
@@ -97,6 +101,10 @@ jobs:
         uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
+          # setup-uv v9 cambió el default de prune-cache a false, lo que engorda
+          # el cache de Actions y sube el costo. Se fija explícito al valor que
+          # traía v8 para que el bump no cambie el gasto.
+          prune-cache: true
 
       - name: Install dependencies
         if: steps.gate.outputs.skip != 'true'
@@ -150,6 +158,10 @@ jobs:
         uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
+          # setup-uv v9 cambió el default de prune-cache a false, lo que engorda
+          # el cache de Actions y sube el costo. Se fija explícito al valor que
+          # traía v8 para que el bump no cambie el gasto.
+          prune-cache: true
 
       - name: Install dependencies
         if: steps.gate.outputs.skip != 'true'
