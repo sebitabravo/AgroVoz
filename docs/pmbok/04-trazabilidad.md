@@ -73,9 +73,12 @@ no significa que todas las ideas hayan sido aceptadas.
 
 | Idea | Decisión | Evidencia |
 |---|---|---|
-| Recomendaciones o diagnóstico agronómico | Excluido por restricción de producto | [#101][i101], [#130][i130], [#177][i177], [#178][i178] |
-| PWA/app para agricultores | Excluida; WhatsApp es la aplicación | [#102][i102] |
-| Tiendas cercanas con API paga | Excluida por costo y alcance | [#103][i103] |
+| Recomendaciones o diagnóstico agronómico sin fuente | Excluido; solo se permiten reglas determinísticas con fuente citada | [#101][i101], [#130][i130] |
+| Diagnóstico fitosanitario por imagen | Reabierto post-MVP con MobileNetV3 ONNX + fuente INIA | Reabierto en [#238][i238] |
+| Calendario agrícola de siembra/cosecha | Reabierto post-MVP con reglas citadas INIA | Reabierto en [#244][i244] |
+| Derivación a créditos/programas INDAP | Reabierto post-MVP con datos públicos INDAP | Reabierto en [#245][i245] |
+| Directorio de cooperativas agrícolas | Reabierto post-MVP con Open Data (datos.gob.cl) | Reabierto en [#246][i246] |
+| Tiendas cercanas con API paga | Excluida por costo de Google Maps API (reemplazada por Open Data) | [#103][i103] |
 | Planes free/premium | Excluidos del alcance actual | [#131][i131] |
 | Base de datos Turso | Excluida; SQLite es restricción | [#133][i133] |
 | Canal IVR | Backlog, no parte de la línea base | [#172][i172] |

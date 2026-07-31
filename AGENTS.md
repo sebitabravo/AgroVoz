@@ -37,7 +37,7 @@ Nacido como proyecto estudiantil para Desafío Crea INACAP 2026, hoy es un produ
 - **Stack 100% open-source.** Whisper, LLM, TTS y gateway WhatsApp corren localmente. Sin APIs pagas externas.
 - **WhatsApp es la vía principal y suficiente.** Ningún flujo puede exigir instalar algo: todo lo que el productor necesita tiene que resolverse por WhatsApp. La PWA es un complemento opcional, nunca un requisito.
 - **Sin app nativa iOS/Android.** Si hace falta una interfaz instalable, es PWA sobre el mismo backend.
-- **Sin IoT/sensores.** Solo el micrófono del teléfono.
+- **Sin IoT/sensores.** Solo el micrófono y la cámara del teléfono. La cámara se usa para identificación visual de cultivos (por foto de WhatsApp o desde la PWA), no para sensores externos.
 - **Recomendaciones agronómicas solo por regla citada.** El LLM nunca improvisa un consejo: enruta y verbaliza reglas resueltas de forma determinística desde hechos publicados por INIA/INDAP/ODEPA, y toda respuesta agronómica cita su fuente y su fecha. Si no hay regla con fuente vigente, el sistema dice que no tiene el dato. Precio y clima siguen siendo datos crudos, sin interpretación.
 - **VPS Hetzner CX43** (8 vCPU, 16 GB RAM, 160 GB SSD) — EUR 12,49/mes (~CLP 13.000)
 - **Debe funcionar en hardware degradado.** El peor caso soportado es 1 vCPU / 6 GB RAM: si el producto no responde ahí, no sirve. Todo cambio de rendimiento se valida contra ese piso, no solo contra el VPS.
@@ -46,7 +46,7 @@ Nacido como proyecto estudiantil para Desafío Crea INACAP 2026, hoy es un produ
 - **SQLite.** Sin servidor de DB separado.
 - **Procesamiento síncrono.** Sin Celery/Redis: cada audio se procesa en el request del webhook.
 - **Sin autenticación de usuarios.** Número WhatsApp = identidad.
-- **Audio temporal:** eliminado del VPS en <24h. Transcripciones minimizadas y seudonimizadas.
+- **Media temporal:** audios e imágenes eliminados del VPS en <24h. Transcripciones minimizadas y seudonimizadas.
 - **Ley 21.719** (Protección de Datos, dic 2026) — auditoría formal pre-escalamiento.
 - **Código comentado en español** (contexto académico INACAP)
 
@@ -57,6 +57,7 @@ Nacido como proyecto estudiantil para Desafío Crea INACAP 2026, hoy es un produ
 - SQLAlchemy 2.0+, SQLite 3.x, Alembic 1.14+
 - Pydantic v2, pydantic-settings, httpx 0.28+
 - Whisper open-source (modelo `small` o `tiny`)
+- MobileNetV3 ONNX (~15 MB) para clasificación visual de enfermedades/plagas de cultivos (PlantVillage)
 - LLM cuantizado ≤3B params, 4-bit (Qwen2.5-3B-Instruct Q4_K_M) vía llama-cpp-python
 - Piper TTS (voz español `es_MX-claude-high`)
 - ffmpeg (conversión de audio .ogg ↔ .wav)
@@ -103,8 +104,18 @@ Nacido como proyecto estudiantil para Desafío Crea INACAP 2026, hoy es un produ
 - Dashboard admin de 8 vistas: dashboard, métricas, piloto, actividad, revisión, ODEPA, alertas, monitor
 - Landing page + demo interactiva web
 
+**En desarrollo (post-MVP):**
+- WhatsApp imagen → identificación visual de enfermedades/plagas con MobileNetV3 ONNX + respuesta con regla INIA citada. Feature gate: `VISION_ENABLED=false`
+- WhatsApp ubicación → clima por coordenadas GPS exactas de la parcela (one-time location share). Antes en backlog, ahora promovido
+- Calendario agrícola por comuna/región → ventanas de siembra y cosecha basadas en reglas verificadas INIA con fuente citada
+- Derivación a créditos y programas INDAP → información oficial de financiamiento y fomento sin evaluación de elegibilidad
+- Registro de gastos por voz → `register_expense` (tabla `expenses` con consentimiento `expense_consent` y TTL 180 días)
+- Directorio de cooperativas y servicios agrícolas → consulta de sedes INDAP/PRODESAL por comuna (Open Data datos.gob.cl)
+- Reportes PDF de precios y clima enviados por WhatsApp (`sendFile`). Feature gate: `PDF_REPORTS_ENABLED=false`
+- Gráficos interactivos de precios ODEPA (Chart.js) en el panel PWA del agricultor
+- Cámara en vivo con identificación visual desde el panel PWA (complementa visión por WhatsApp)
+
 **Backlog:**
-- Clima por coordenadas dinámicas (one-time location share de WhatsApp)
 - Cobertura de mercados fuera del catálogo ODEPA
 
 **Spike técnico, no desplegado (canal IVR de respaldo, #172):** VAD,

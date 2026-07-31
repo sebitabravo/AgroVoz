@@ -66,16 +66,14 @@ acotado. No transforma los datos en recomendaciones agronómicas o comerciales.
 
 ## Fuera del alcance
 
-- Diagnóstico de enfermedades, calendario de cultivo o recomendaciones de
-  siembra, cosecha, fumigación, riego o venta.
-- App nativa iOS/Android, PWA para agricultores o dashboard del agricultor.
-- Sensores, parcelas IoT o hardware adicional.
+- Diagnóstico o recomendaciones agronómicas improvisadas sin regla ni fuente citada (se permite la identificación determinística de plagas/enfermedades y calendarios citando fuentes INIA/INDAP).
+- App nativa iOS/Android (WhatsApp es la vía principal; PWA es el complemento opcional).
+- Sensores IoT o hardware adicional (solo micrófono y cámara del teléfono).
 - Pagos integrados y planes de suscripción para agricultores.
 - Operación multi-idioma.
 - APIs pagas como dependencia del flujo principal.
 - PostgreSQL, Turso, Redis, Celery u otro servidor de persistencia/colas.
 - Cobertura garantizada fuera del catálogo ODEPA.
-- Ubicación por coordenadas compartidas dinámicamente; permanece en backlog.
 - Canal IVR como parte de la línea base actual; [#172][i172] sigue abierto.
 
 ## EDT

@@ -359,3 +359,10 @@ CREATE INDEX idx_consultations_created ON consultations(created_at);
     el servicio va a rechazar gasta 809 caracteres de prefijo en cada request y
     quema un round-trip completo de LLM, que en 1 vCPU es el cuello. Encenderlo
     depende de aprobar la retención de 180 días en revisión legal, no de código.
+
+27. **Ampliación de alcance post-MVP y reevaluación de restricciones (#238-#248).**
+    Se reevaluaron las restricciones para impulsar el producto post-piloto:
+    - **Visión por computador (`VISION_ENABLED=false`):** Procesamiento de imágenes `type="image"` vía Open-WA `decryptMedia` y modelos ONNX locales (MobileNetV3 ~15 MB). Mantiene el hard constraint agronómico: la inferencia clasifica el cultivo/enfermedad determinísticamente y la respuesta verbaliza la regla citada INIA vigente.
+    - **Ubicación GPS por WhatsApp:** Procesamiento de mensajes `type="location"` para clima preciso por parcela.
+    - **Reglas citadas de valor agregado:** Reapertura de calendarios agrícolas por zona (fuente INIA citada), derivación a programas de crédito INDAP (datos públicos) y directorio de cooperativas por comuna (Open Data datos.gob.cl).
+    - **Reportes PDF (`PDF_REPORTS_ENABLED=false`):** Generación de resumen semanal PDF enviado vía Open-WA `sendFile`.
