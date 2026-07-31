@@ -525,6 +525,80 @@ class TestDownloadCsvWithFallback:
         finally:
             await real_client.aclose()
 
+    @pytest.mark.parametrize(
+        "result",
+        [None, [], "records", {"records": None}, {"records": ["no soy un objeto"]}],
+        ids=["null", "lista", "string", "records-null", "records-no-dict"],
+    )
+    async def test_fallback_result_malformado_lanza_odepa_sync_error(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        result: object,
+    ) -> None:
+        """Regresión: un result raro tiraba AttributeError/ValueError y escapaba el contrato.
+
+        El caller solo atrapa OdepaSyncError, así que cualquier otra excepción
+        rompía el job de sync en vez de reportar el fallo del fallback.
+        """
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if str(request.url) == settings.odepa_csv_url:
+                return httpx.Response(503, text="")
+            return httpx.Response(200, json={"success": True, "result": result})
+
+        fake_cls, real_client = _csv_fake_client(handler)
+        monkeypatch.setattr("app.services.odepa_service.httpx.AsyncClient", fake_cls)
+        try:
+            with pytest.raises(OdepaSyncError, match="Fallaron URL primaria y fallback CKAN"):
+                await download_csv_with_fallback()
+        finally:
+            await real_client.aclose()
+
+    async def test_fallback_esquema_heterogeneo_no_pierde_registros(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Una columna extra en un registro tardío no puede matar la re-serialización."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if str(request.url) == settings.odepa_csv_url:
+                return httpx.Response(503, text="")
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "result": {
+                        "records": [
+                            {
+                                "producto": "papa",
+                                "mercado": "X",
+                                "precio": "900",
+                                "unidad": "kg",
+                                "fecha": "2026-06-20",
+                            },
+                            {
+                                "producto": "trigo",
+                                "mercado": "X",
+                                "precio": "700",
+                                "unidad": "kg",
+                                "fecha": "2026-06-20",
+                                "columna_nueva": "z",
+                            },
+                        ]
+                    },
+                },
+            )
+
+        fake_cls, real_client = _csv_fake_client(handler)
+        monkeypatch.setattr("app.services.odepa_service.httpx.AsyncClient", fake_cls)
+        try:
+            contenido = await download_csv_with_fallback()
+        finally:
+            await real_client.aclose()
+
+        registros = parse_csv(contenido)
+        assert [r.producto for r in registros] == ["papa", "trigo"]
+
     async def test_fallback_success_false_lanza_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             if str(request.url) == settings.odepa_csv_url:

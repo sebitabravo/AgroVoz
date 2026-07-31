@@ -237,12 +237,34 @@ async def _download_csv_via_ckan(url: str, timeout: float) -> str:
     if not isinstance(data, dict) or not data.get("success"):
         raise OdepaSyncError("Fallback CKAN respondió success=false o formato inesperado")
 
-    records = data.get("result", {}).get("records", [])
-    if not records:
+    # ``result`` puede venir null o como lista si CKAN cambia de forma: el
+    # default de .get() solo aplica si falta la clave, no si vale None, y un
+    # AttributeError aquí escaparía al OdepaSyncError que espera el caller.
+    result = data.get("result")
+    if not isinstance(result, dict):
+        raise OdepaSyncError("Fallback CKAN devolvió result con formato inesperado")
+
+    records = result.get("records")
+    if not isinstance(records, list) or not records:
         raise OdepaSyncError("Fallback CKAN sin registros")
+    if not all(isinstance(record, dict) for record in records):
+        raise OdepaSyncError("Fallback CKAN devolvió registros que no son objetos")
+
+    # Union de claves en orden de aparición, no solo las del primer registro:
+    # si uno trae una columna extra, DictWriter lanzaría ValueError y el
+    # fallback moriría con la excepción equivocada. Con la union, las claves
+    # ausentes quedan vacías y parse_csv descarta esas filas por su cuenta.
+    fieldnames: list[str] = []
+    for record in records:
+        fieldnames.extend(key for key in record if key not in fieldnames)
+    if any(len(record) != len(fieldnames) for record in records):
+        logger.warning(
+            "Fallback CKAN devolvió registros con esquema heterogéneo — columnas=%d",
+            len(fieldnames),
+        )
 
     buffer = io.StringIO()
-    writer = csv.DictWriter(buffer, fieldnames=list(records[0].keys()))
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames)
     writer.writeheader()
     writer.writerows(records)
     return buffer.getvalue()

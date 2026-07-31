@@ -386,3 +386,18 @@ El trabajo ya no se organiza por fases: es mantención y evolución de un produc
 | 13 anclas muertas en `/demo`: la nav y el footer apuntaban a secciones que solo existen en el index | Anclas root-relative (`/#como`) en `Header.astro` y `Footer.astro` |
 | Skip link de accesibilidad roto en `/demo` (apuntaba a un `#top` inexistente) | `id="top"` en el `<main>` de `demo.astro` |
 | `/demo` sin tildes ("Proba", "Escribi", "Traiguen", "manana") | Ortografía corregida en toda la página |
+
+**Resuelto en la auditoría de contenido del motor agronómico (30/07/2026):**
+
+Verificación con criterio de dominio (fact-check contra fuentes primarias INIA, no validación profesional de un agrónomo colegiado) sobre `corpus/reglas_agronomicas.yaml` y `corpus/inia_papa.yaml`:
+
+| Tema | Fix |
+|---|---|
+| `agronomic_rules_service.py` no chequeaba su propio gate: con `AGRONOMIC_RULES_ENABLED=false` igual respondía el diagnóstico completo si la tool llegaba a ejecutarse (solo `_offered_tools` del LLM filtraba el anuncio, no la ejecución contra `WHITELIST_TOOLS`) | Chequeo de gate como primera línea del servicio, mismo patrón fail-closed que `expense_service`/`parcela_service`/`panel_service` |
+| Rango de temperatura del tizón tardío: el corpus decía 10-25°C | Corregido a 15-25°C (pico de avance ~21°C), verificado contra `enfermedadespapa.inia.cl` |
+| Solo matcheaba el síntoma tardío ("manchas marrones"); el síntoma inicial real (manchas acuosas verde oscuro con halo amarillo pálido en hojas inferiores) no tenía regla — se perdía la ventana de detección temprana, la única donde el fungicida preventivo sirve | Agregados síntomas tempranos al matching + al texto del diagnóstico |
+| Ventana de siembra "agosto a noviembre, zona centro-sur" no cubría la plantación temprana real de Araucanía costera (julio-agosto, Carahue/Saavedra, ~10% de la producción regional) — un productor costero preguntando en julio se quedaba sin regla | Regla `papa_epoca_siembra` reescrita con las 3 épocas reales de La Araucanía |
+| Rendimiento "25-35 t/ha secano, hasta 50 riego" mezclaba categorías sin fuente | Corregido con cifras trazables: 15-25 t/ha (temprana secano costera), 29,2 t/ha (promedio nacional INE/ODEPA), hasta 80 t/ha con riego tecnificado |
+| Fuente citada como "INIA Chile — Ficha técnica: Cultivo de la papa" sin URL: documento irrastreable | `fuente_url` ahora obligatorio en el schema de `reglas_agronomicas.yaml`, cada regla cita su URL real |
+
+Las 4 correcciones de contenido no cambian la decisión del gate: `AGRONOMIC_RULES_ENABLED` sigue en `false` — la condición de reapertura (agrónomo asesor que valide y firme las reglas) sigue sin cumplirse. Ver issues #130, #178, #101 (reabiertas/revisadas 30/07/2026 tras el cambio del hard constraint de "sin recomendaciones" a "solo por regla citada").

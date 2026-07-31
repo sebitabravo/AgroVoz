@@ -378,6 +378,7 @@ def get_latest_consultation_context(
                 )
                 .where(
                     ConsultationHistory.phone_hash == phone_hash,
+                    ConsultationHistory.created_at >= _history_cutoff(),
                     func.trim(
                         ConsultationHistory.intent,
                         _HISTORY_CONTEXT_TRIM_CHARS,
@@ -478,6 +479,16 @@ def _normalize_utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise HistoryOperationError("La fecha de purga debe incluir zona horaria.")
     return value.astimezone(UTC)
+
+
+def _history_cutoff(now: datetime | None = None) -> datetime:
+    """Instante mínimo de ``created_at`` para que una fila siga vigente.
+
+    Lo usan tanto la purga como las lecturas: una fila anterior al corte ya
+    venció aunque la purga programada todavía no haya pasado, y no puede
+    seguir saliendo por ninguna vía.
+    """
+    return _normalize_utc(now or datetime.now(UTC)) - timedelta(days=settings.consultation_history_ttl_days)
 
 
 def _get_idempotent_result(
@@ -649,8 +660,7 @@ def purge_expired_history(
     Raises:
         HistoryOperationError: Si no se puede confirmar purga y auditoría.
     """
-    current_time = _normalize_utc(now or datetime.now(UTC))
-    cutoff_at = current_time - timedelta(days=settings.consultation_history_ttl_days)
+    cutoff_at = _history_cutoff(now)
     if not settings.consultation_history_enabled:
         logger.debug("Purga de historial omitida — feature gate desactivado")
         return HistoryPurgeResult(
@@ -715,20 +725,43 @@ def purge_expired_history(
 
 
 def get_history(phone_hash: str, limit: int = 5) -> list[dict[str, object]]:
-    """Obtiene consultas de un sujeto ya identificado por un caller confiable.
+    """Obtiene consultas vigentes de un sujeto que consintió el historial.
+
+    Devuelve ``query_text`` y ``response_text`` en crudo, así que aplica los
+    mismos tres cortes que el resto del servicio antes de leer: gate propio,
+    consentimiento del sujeto y TTL. No alcanza con que el caller sea
+    confiable, porque el dato que retorna es justamente el que protegen.
 
     Args:
         phone_hash: Hash del número de teléfono.
         limit: Máximo de registros a retornar.
 
     Returns:
-        Lista de diccionarios con los registros más recientes primero.
+        Lista de diccionarios con los registros más recientes primero, o
+        lista vacía si falta el gate, el consentimiento o no hay filas.
     """
+    if not settings.consultation_history_enabled:
+        logger.debug("Historial omitido — feature gate desactivado")
+        return []
+    if not phone_hash.strip():
+        logger.debug("Historial omitido — sujeto inválido")
+        return []
+
     session = SessionLocal()
     try:
+        has_consent = session.scalar(
+            select(UserPrefs.history_consent).where(UserPrefs.phone_hash == phone_hash)
+        )
+        if has_consent is not True:
+            logger.debug("Historial omitido — falta consentimiento")
+            return []
+
         stmt = (
             select(ConsultationHistory)
-            .where(ConsultationHistory.phone_hash == phone_hash)
+            .where(
+                ConsultationHistory.phone_hash == phone_hash,
+                ConsultationHistory.created_at >= _history_cutoff(),
+            )
             .order_by(ConsultationHistory.created_at.desc())
             .limit(limit)
         )

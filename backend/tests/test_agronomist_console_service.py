@@ -25,9 +25,10 @@ _NOW = 1_800_000_000
 
 @pytest.fixture(autouse=True)
 def _configure_agronomist(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fija una clave de firma segura y un TTL determinista para cada test."""
+    """Fija una clave de firma segura, un TTL determinista y el gate encendido."""
     monkeypatch.setattr(settings, "agronomist_link_secret", SecretStr("x" * 32))
     monkeypatch.setattr(settings, "agronomist_link_ttl_hours", 72)
+    monkeypatch.setattr(settings, "agronomist_console_enabled", True)
 
 
 class TestValidateGroupLabel:
@@ -218,6 +219,66 @@ class TestGetGroupSummary:
 
         assert resumenes is not None
         assert resumenes[0].parcelas == [{"cultivo": "papa", "superficie_ha": 2.5, "comuna": "traiguén"}]
+
+    def test_parcela_vencida_no_aparece_en_la_console(
+        self,
+        db: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El agrónomo tampoco ve una fila vencida antes de que corra la purga."""
+        monkeypatch.setattr(settings, "parcela_tracking_enabled", True)
+        db.add(
+            UserPrefs(
+                phone_hash="a" * 64,
+                identity_type="prodesal_group",
+                group_label=_GROUP,
+                comuna="Traiguén",
+                parcela_consent=True,
+            )
+        )
+        db.add(
+            Parcela(
+                phone_hash="a" * 64,
+                cultivo="papa",
+                superficie_ha=2.5,
+                comuna="traiguén",
+                expires_at=datetime.datetime.now() - datetime.timedelta(seconds=1),
+            )
+        )
+        db.add(
+            Parcela(
+                phone_hash="a" * 64,
+                cultivo="trigo",
+                superficie_ha=1.0,
+                comuna="traiguén",
+                expires_at=datetime.datetime.now() + datetime.timedelta(days=300),
+            )
+        )
+        db.commit()
+
+        resumenes = get_group_summary(db, _GROUP)
+
+        assert resumenes is not None
+        assert resumenes[0].parcelas == [{"cultivo": "trigo", "superficie_ha": 1.0, "comuna": "traiguén"}]
+
+    def test_resumen_vacio_si_el_gate_de_la_console_esta_apagado(
+        self,
+        db: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El servicio corta por su cuenta, sin depender del router."""
+        monkeypatch.setattr(settings, "agronomist_console_enabled", False)
+        db.add(
+            UserPrefs(
+                phone_hash="a" * 64,
+                identity_type="prodesal_group",
+                group_label=_GROUP,
+                comuna="Traiguén",
+            )
+        )
+        db.commit()
+
+        assert get_group_summary(db, _GROUP) is None
 
     def test_parcelas_ocultas_si_gate_apagado_aunque_haya_consentimiento(
         self,

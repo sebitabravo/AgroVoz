@@ -19,6 +19,7 @@ TTSService a nivel de metodo, no de modulo.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import subprocess
 import threading
@@ -133,9 +134,10 @@ _MAX_PIPER_CHARS = 500
 # Tope de fragmentos sintetizados en paralelo (#136). Piper libera el GIL
 # durante la inferencia ONNX, asi que varios fragmentos cortos rinden real
 # en CPU multi-nucleo: medido 1.32x en 3 oraciones sobre hardware de
-# desarrollo. En el piso de 1 vCPU no hay nucleo de sobra para paralelizar,
-# pero tampoco degrada: mismo trabajo total, sin oversubscription porque el
-# tope nunca supera los fragmentos reales de una respuesta.
+# desarrollo. El tope efectivo tambien se acota por os.cpu_count(): tener mas
+# hilos que nucleos es oversubscription aunque no supere los fragmentos, y en
+# el piso soportado de 1 vCPU la inferencia ONNX es CPU-bound. Ahi el calculo
+# da 1 worker y el camino vuelve a ser secuencial, sin contencion.
 _MAX_PARALLEL_CHUNKS = 4
 
 # Regex para dividir texto en oraciones. Preserva el signo de puntuacion
@@ -561,7 +563,7 @@ class TTSService:
         # inferencia ONNX, asi que varios fragmentos cortos rinden en CPU
         # multi-nucleo (#136). Los resultados se leen en orden para que un
         # error se reporte de forma deterministica.
-        workers = min(len(chunks), _MAX_PARALLEL_CHUNKS)
+        workers = max(1, min(len(chunks), _MAX_PARALLEL_CHUNKS, os.cpu_count() or 1))
         executor = ThreadPoolExecutor(max_workers=workers)
         futures = [
             executor.submit(self._synthesize_wav, chunk, wav_path)

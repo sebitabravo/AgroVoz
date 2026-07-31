@@ -117,7 +117,11 @@ async def mcp_tools_handler(
 
     if not _check_scope(tool_name, api_key_scope):
         raise HTTPException(
-            status_code=403, detail=f"Scope insuficiente para {tool_name}"
+            status_code=403,
+            detail={
+                "code": "MCP_SCOPE_INSUFFICIENT",
+                "message": "La clave no tiene scope para esta tool.",
+            },
         )
 
     try:

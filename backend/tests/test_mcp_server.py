@@ -18,7 +18,7 @@ from app.main import RequestIDMiddleware, _mount_mcp_router, lifespan
 from app.mcp.router import _TOOL_SCOPES, _check_scope, router
 from app.models.consultation import Consultation
 from app.schemas.mcp import McpToolRequest
-from app.services import mcp_service
+from app.services import delivery_service, mcp_service
 from app.services.metrics_service import get_dashboard_kpis
 
 
@@ -539,6 +539,35 @@ class TestMcpReadHandlers:
         assert items[1]["delivery_error_code"] == "pipeline_no_response"
         assert "traceback" not in response.text.lower()
         assert "/srv/" not in response.text.lower()
+
+    def test_get_error_log_conserva_todo_codigo_que_delivery_service_acepta(
+        self,
+        client: TestClient,
+        mcp_session_factory: sessionmaker[Session],
+    ) -> None:
+        """Regresión: la whitelist de lectura no puede quedarse corta.
+
+        Antes MCP tenía su propia copia de la lista y códigos válidos como
+        openwa_send_failed se leían como delivery_error_unknown.
+        """
+        esperados = sorted(delivery_service.ALLOWED_DELIVERY_ERROR_CODES)
+        for codigo in esperados:
+            _insert_consultation(
+                mcp_session_factory,
+                delivery_status="failed",
+                delivery_error_code=codigo,
+            )
+
+        response = client.post(
+            "/mcp/tools",
+            json={"tool": "get_error_log", "arguments": {"limit": 50}},
+            headers={"X-MCP-Key": "test-read-key"},
+        )
+
+        assert response.status_code == 200
+        items = response.json()["result"]["items"]
+        assert sorted(item["delivery_error_code"] for item in items) == esperados
+        assert "delivery_error_unknown" not in {item["delivery_error_code"] for item in items}
 
     @pytest.mark.parametrize(
         ("tool", "arguments", "error_code"),

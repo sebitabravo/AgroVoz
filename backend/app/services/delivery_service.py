@@ -17,7 +17,9 @@ _DeliveryStatus = Literal["delivered", "failed"]
 _STAGING_RETENTION_HOURS: Final[int] = 24
 
 # Lista cerrada: impide persistir mensajes de excepción, teléfonos u otra PII.
-_ALLOWED_DELIVERY_ERROR_CODES: Final[frozenset[str]] = frozenset(
+# Pública porque mcp_service la reusa como whitelist de lectura: con dos copias
+# los códigos se desincronizaban y la telemetría perdía resolución.
+ALLOWED_DELIVERY_ERROR_CODES: Final[frozenset[str]] = frozenset(
     {
         "openwa_connection_error",
         "openwa_http_error",
@@ -47,7 +49,7 @@ def mark_delivery_delivered(consultation_id: int) -> bool:
 
 def mark_delivery_failed(consultation_id: int, error_code: str) -> bool:
     """Marca una entrega fallida y elimina su contenido transitorio."""
-    if error_code not in _ALLOWED_DELIVERY_ERROR_CODES:
+    if error_code not in ALLOWED_DELIVERY_ERROR_CODES:
         logger.warning(
             "Código de entrega rechazado para consultation_id=%s",
             consultation_id,
