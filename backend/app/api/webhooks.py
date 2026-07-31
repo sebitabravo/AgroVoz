@@ -12,8 +12,6 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from app.core.config import settings
-from app.core.phone_hash import hash_phone
 from app.core.security import verify_openwa_webhook
 from app.schemas.webhook import WebhookPayload
 from app.services.audio_service import AudioService, sanitize_message_id
@@ -113,9 +111,9 @@ async def webhook_whatsapp(
         payload = WebhookPayload.model_validate(raw_payload)
     except ValidationError as exc:
         logger.warning(
-            "Webhook con payload invalido — request_id=%s errors=%s",
+            "Webhook con payload invalido — request_id=%s error_count=%d",
             request_id,
-            exc.errors(),
+            len(exc.errors()),
         )
         return JSONResponse(
             status_code=200,
@@ -128,9 +126,8 @@ async def webhook_whatsapp(
     message_id_safe = sanitize_message_id(raw_message_id)
 
     logger.info(
-        "Webhook recibido — message_id=%s chat_id_hash=%s type=%s request_id=%s",
+        "Webhook recibido — message_id=%s type=%s request_id=%s",
         message_id_safe,
-        hash_phone(chat_id, settings.phone_hash_pepper) if chat_id else "sin_chat",
         message_type,
         request_id,
     )
@@ -141,9 +138,8 @@ async def webhook_whatsapp(
     if _is_text_message(payload):
         texto = payload.data.body.strip()
         logger.info(
-            "Mensaje de texto recibido — message_id=%s chat_id_hash=%s chars=%d request_id=%s",
+            "Mensaje de texto recibido — message_id=%s chars=%d request_id=%s",
             message_id_safe,
-            hash_phone(chat_id, settings.phone_hash_pepper) if chat_id else "sin_chat",
             len(texto),
             request_id,
         )
@@ -186,9 +182,8 @@ async def webhook_whatsapp(
         )
 
     logger.info(
-        "Audio de voz recibido — message_id=%s chat_id_hash=%s size_bytes=%d request_id=%s",
+        "Audio de voz recibido — message_id=%s size_bytes=%d request_id=%s",
         message_id_safe,
-        hash_phone(chat_id, settings.phone_hash_pepper) if chat_id else "sin_chat",
         len(audio_bytes),
         request_id,
     )
