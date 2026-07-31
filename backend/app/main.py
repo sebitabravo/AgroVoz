@@ -26,9 +26,12 @@ from starlette.responses import Response
 from app import __version__
 from app.admin.admin import router as admin_html_router
 from app.admin.auth import AdminAuthMiddleware
+from app.agronomist_web import router as agronomist_web_router
+from app.api.admin.agronomist_admin import router as admin_agronomist_router
 from app.api.admin.metrics import router as admin_metrics_router
 from app.api.admin.odepa_admin import router as admin_odepa_router
 from app.api.admin.user_admin import router as admin_user_router
+from app.api.agronomist import router as agronomist_router
 from app.api.demo import router as demo_router
 from app.api.health import router as health_router
 from app.api.panel import router as panel_router
@@ -457,10 +460,13 @@ app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(demo_router, prefix="/api/v1")
 app.include_router(panel_router, prefix="/api/v1")
 app.include_router(panel_web_router)  # prefix "/panel" va en el router
+app.include_router(agronomist_router, prefix="/api/v1")
+app.include_router(agronomist_web_router)  # prefix "/agronomo" va en el router
 # Admin — APIs JSON (autenticadas con X-Admin-Key) + dashboard HTML (cookie).
 app.include_router(admin_metrics_router, prefix="/api/v1")
 app.include_router(admin_odepa_router, prefix="/api/v1")
 app.include_router(admin_user_router, prefix="/api/v1")
+app.include_router(admin_agronomist_router, prefix="/api/v1")
 app.include_router(admin_html_router)  # prefix "/admin" va en el router
 _mount_mcp_router(app)
 
