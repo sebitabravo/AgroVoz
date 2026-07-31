@@ -10,6 +10,7 @@ httpx.AsyncClient se mockea para no tocar la red ni el gateway real.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
@@ -138,8 +139,10 @@ async def test_resolve_session_id_sin_sesiones_lanza_runtime_error(
 @pytest.mark.asyncio
 async def test_send_text_normaliza_chat_id_y_envia(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """send_text POSTea a send-text con chatId normalizado y header X-API-Key."""
+    caplog.set_level(logging.INFO, logger="app.services.openwa_service")
     monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
     monkeypatch.setattr(settings, "openwa_api_key", "secret-key")
 
@@ -157,13 +160,19 @@ async def test_send_text_normaliza_chat_id_y_envia(
         headers={"X-API-Key": "secret-key"},
         json={"chatId": "56912345678@c.us", "text": "Hola"},
     )
+    assert "56912345678" not in caplog.text
+    assert "Hola" not in caplog.text
+    assert "secret-key" not in caplog.text
+    assert "hash=" not in caplog.text
 
 
 @pytest.mark.asyncio
 async def test_send_text_propaga_http_error(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Si Open-WA retorna error HTTP, send_text propaga httpx.HTTPError."""
+    caplog.set_level(logging.ERROR, logger="app.services.openwa_service")
     monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
     monkeypatch.setattr(settings, "openwa_api_key", "k")
 
@@ -171,7 +180,7 @@ async def test_send_text_propaga_http_error(
     resp = Mock()
     resp.raise_for_status = Mock(
         side_effect=httpx.HTTPStatusError(
-            "500 Server Error",
+            "secreto-query +56999999999",
             request=httpx.Request("POST", "http://openwa:2785"),
             response=httpx.Response(500),
         )
@@ -183,6 +192,9 @@ async def test_send_text_propaga_http_error(
     service = OpenWAService()
     with pytest.raises(httpx.HTTPError):
         await service.send_text("569@c.us", "x")
+    assert "secreto-query" not in caplog.text
+    assert "56999999999" not in caplog.text
+    assert "569@c.us" not in caplog.text
 
 
 # ── download_media ─────────────────────────────────────────────
