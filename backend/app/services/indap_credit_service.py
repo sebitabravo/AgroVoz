@@ -285,6 +285,28 @@ def _format_overview(catalog: _CreditCatalog) -> str:
     )
 
 
+def get_corpus_metadata(*, corpus_path: Path | None = None) -> tuple[date, date] | None:
+    """Lee verificado_el/revisar_antes_de sin aplicar la gate estricta de vigencia.
+
+    Uso exclusivo de monitoreo: reporta "vence en N días" o "vencido hace N
+    días" incluso cuando el corpus ya no es seguro para servir respuestas
+    (a diferencia de ``_load_catalog``, que en ese caso falla cerrado).
+
+    Returns:
+        ``(verified_on, review_before)`` si el YAML es legible y tiene esos
+        dos campos, o ``None`` si el archivo no existe o está corrupto.
+    """
+    effective_path = corpus_path or _CORPUS_PATH
+    try:
+        raw: object = yaml.safe_load(effective_path.read_text(encoding="utf-8"))
+        root = _as_mapping(raw)
+        verified_on = date.fromisoformat(_required_text(root, "verificado_el"))
+        review_before = date.fromisoformat(_required_text(root, "revisar_antes_de"))
+    except (OSError, TypeError, ValueError, yaml.YAMLError):
+        return None
+    return verified_on, review_before
+
+
 def get_indap_credit_referral(
     query_text: str,
     *,
