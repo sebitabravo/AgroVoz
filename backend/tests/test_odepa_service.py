@@ -6,7 +6,6 @@ y orquestador sync_odepa con session inyectada.
 """
 
 import datetime
-import json
 from collections.abc import Callable
 from decimal import Decimal
 from pathlib import Path
@@ -28,7 +27,6 @@ from app.services.odepa_service import (
     download_csv_with_fallback,
     get_price_spread_for_llm,
     parse_csv,
-    register_expense_for_llm,
     sync_odepa,
     upsert_prices,
 )
@@ -589,132 +587,6 @@ class TestSyncOdepa:
         # odepa_productos_list = None ('*'), sin filtro: 5 registros.
         assert resultado.insertados == 5
         mock_session.close.assert_called_once()
-
-
-class TestRegisterExpenseForLlm:
-    """register_expense_for_llm: JSONL scoped por phone_hash (#170)."""
-
-    def _gastos_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-        gastos_file = tmp_path / "gastos.jsonl"
-        monkeypatch.setattr("app.services.odepa_service._GASTOS_FILE", gastos_file)
-        return gastos_file
-
-    def test_happy_path_guarda_scoped_por_phone_hash(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        gastos_file = self._gastos_file(tmp_path, monkeypatch)
-
-        respuesta = register_expense_for_llm(
-            session=MagicMock(spec=Session),
-            producto="papa",
-            concepto="semilla",
-            monto="50000",
-            phone_hash="hash_agricultor_a",
-        )
-
-        assert "semilla" in respuesta
-        assert "50000" in respuesta
-        lineas = gastos_file.read_text(encoding="utf-8").strip().splitlines()
-        assert len(lineas) == 1
-        registro = json.loads(lineas[0])
-        assert registro["phone_hash"] == "hash_agricultor_a"
-        assert registro["producto"] == "papa"
-        assert registro["monto"] == "50000"
-
-    def test_dos_agricultores_no_se_mezclan(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        gastos_file = self._gastos_file(tmp_path, monkeypatch)
-        session = MagicMock(spec=Session)
-
-        register_expense_for_llm(
-            session=session, producto="papa", concepto="semilla", monto="10000", phone_hash="hash_a"
-        )
-        register_expense_for_llm(
-            session=session, producto="tomate", concepto="abono", monto="20000", phone_hash="hash_b"
-        )
-
-        lineas = gastos_file.read_text(encoding="utf-8").strip().splitlines()
-        registros = [json.loads(linea) for linea in lineas]
-        assert {r["phone_hash"] for r in registros} == {"hash_a", "hash_b"}
-
-    def test_sin_phone_hash_cae_a_anonimo(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        gastos_file = self._gastos_file(tmp_path, monkeypatch)
-
-        register_expense_for_llm(session=MagicMock(spec=Session), producto="papa", concepto="flete", monto="5000")
-
-        registro = json.loads(gastos_file.read_text(encoding="utf-8").strip())
-        assert registro["phone_hash"] == "anonimo"
-
-    def test_monto_no_numerico_no_escribe_archivo(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        gastos_file = self._gastos_file(tmp_path, monkeypatch)
-
-        respuesta = register_expense_for_llm(
-            session=MagicMock(spec=Session),
-            producto="papa",
-            concepto="semilla",
-            monto="no-es-un-numero",
-            phone_hash="hash_a",
-        )
-
-        assert "no entendí" in respuesta.lower() or "no entendi" in respuesta.lower()
-        assert not gastos_file.exists()
-
-    def test_monto_cero_o_negativo_rechazado(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        gastos_file = self._gastos_file(tmp_path, monkeypatch)
-
-        respuesta = register_expense_for_llm(
-            session=MagicMock(spec=Session), producto="papa", concepto="semilla", monto="0", phone_hash="hash_a"
-        )
-
-        assert "mayor a cero" in respuesta.lower()
-        assert not gastos_file.exists()
-
-    def test_monto_formato_chileno_se_normaliza(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        gastos_file = self._gastos_file(tmp_path, monkeypatch)
-
-        register_expense_for_llm(
-            session=MagicMock(spec=Session), producto="papa", concepto="semilla", monto="$50.000", phone_hash="hash_a"
-        )
-
-        registro = json.loads(gastos_file.read_text(encoding="utf-8").strip())
-        assert registro["monto"] == "50.000" or registro["monto"] == "50000"
-
-    def test_caracteres_especiales_no_rompen_jsonl(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        gastos_file = self._gastos_file(tmp_path, monkeypatch)
-
-        register_expense_for_llm(
-            session=MagicMock(spec=Session),
-            producto='papa "criolla"\ncon salto',
-            concepto="semilla",
-            monto="1000",
-            phone_hash="hash_a",
-        )
-
-        lineas = gastos_file.read_text(encoding="utf-8").strip().splitlines()
-        # Un salto de linea embebido en producto no debe partir el JSONL en 2 líneas.
-        assert len(lineas) == 1
-        registro = json.loads(lineas[0])
-        assert "criolla" in registro["producto"]
-
-    def test_error_de_escritura_retorna_mensaje_amigable(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        self._gastos_file(tmp_path, monkeypatch)
-        with patch("builtins.open", side_effect=OSError("disco lleno")):
-            respuesta = register_expense_for_llm(
-                session=MagicMock(spec=Session), producto="papa", concepto="semilla", monto="1000", phone_hash="hash_a"
-            )
-
-        assert "problema" in respuesta.lower()
-
-    def test_archivo_nuevo_queda_con_permisos_0600(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        gastos_file = self._gastos_file(tmp_path, monkeypatch)
-
-        register_expense_for_llm(
-            session=MagicMock(spec=Session), producto="papa", concepto="semilla", monto="1000", phone_hash="hash_a"
-        )
-
-        modo = gastos_file.stat().st_mode & 0o777
-        assert modo == 0o600
 
 
 class TestGetPriceSpreadForLlm:

@@ -10,12 +10,14 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from sqlalchemy import Float, String, create_engine, inspect
+from sqlalchemy import Float, String, create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.models.alert import Alert
 from app.models.consultation import Consultation
 from app.models.odepa_price import OdepaPrice
+from app.models.user_prefs import UserPrefs
 
 
 class TestOdepaPrice:
@@ -44,11 +46,13 @@ class TestOdepaPrice:
 
     def test_consultar_precio_por_producto(self, db: Session) -> None:
         """Se puede filtrar por producto con query."""
-        db.add_all([
-            OdepaPrice(producto="papa", mercado="Santiago", precio_kg=500, fecha=datetime.date(2026, 6, 15)),
-            OdepaPrice(producto="papa", mercado="Temuco", precio_kg=480, fecha=datetime.date(2026, 6, 15)),
-            OdepaPrice(producto="trigo", mercado="Santiago", precio_kg=320, fecha=datetime.date(2026, 6, 15)),
-        ])
+        db.add_all(
+            [
+                OdepaPrice(producto="papa", mercado="Santiago", precio_kg=500, fecha=datetime.date(2026, 6, 15)),
+                OdepaPrice(producto="papa", mercado="Temuco", precio_kg=480, fecha=datetime.date(2026, 6, 15)),
+                OdepaPrice(producto="trigo", mercado="Santiago", precio_kg=320, fecha=datetime.date(2026, 6, 15)),
+            ]
+        )
         db.commit()
 
         papas = db.query(OdepaPrice).filter_by(producto="papa").all()
@@ -56,9 +60,7 @@ class TestOdepaPrice:
 
     def test_repr_incluye_producto_y_precio(self, db: Session) -> None:
         """El __repr__ muestra info útil para debugging."""
-        precio = OdepaPrice(
-            producto="papa", mercado="Santiago", precio_kg=500, fecha=datetime.date(2026, 6, 15)
-        )
+        precio = OdepaPrice(producto="papa", mercado="Santiago", precio_kg=500, fecha=datetime.date(2026, 6, 15))
         db.add(precio)
         db.commit()
 
@@ -69,9 +71,7 @@ class TestOdepaPrice:
 
     def test_precio_kg_es_decimal(self, db: Session) -> None:
         """precio_kg usa Decimal (Numeric 10,2) para precisión monetaria exacta."""
-        precio = OdepaPrice(
-            producto="papa", mercado="Santiago", precio_kg=500.5, fecha=datetime.date(2026, 6, 15)
-        )
+        precio = OdepaPrice(producto="papa", mercado="Santiago", precio_kg=500.5, fecha=datetime.date(2026, 6, 15))
         db.add(precio)
         db.commit()
 
@@ -80,9 +80,7 @@ class TestOdepaPrice:
 
     def test_producto_vacio_se_persiste(self, db: Session) -> None:
         """Producto vacío se guarda (validación es responsabilidad del service, no del modelo)."""
-        precio = OdepaPrice(
-            producto="", mercado="Santiago", precio_kg=500, fecha=datetime.date(2026, 6, 15)
-        )
+        precio = OdepaPrice(producto="", mercado="Santiago", precio_kg=500, fecha=datetime.date(2026, 6, 15))
         db.add(precio)
         db.commit()
 
@@ -111,18 +109,14 @@ class TestOdepaPrice:
         db.rollback()  # Limpia el estado fallido de la sesión tras IntegrityError
 
         # Verifica que la sesión sigue usable después del rollback
-        precio3 = OdepaPrice(
-            producto="trigo", mercado="Santiago", precio_kg=320, fecha=datetime.date(2026, 6, 15)
-        )
+        precio3 = OdepaPrice(producto="trigo", mercado="Santiago", precio_kg=320, fecha=datetime.date(2026, 6, 15))
         db.add(precio3)
         db.commit()
         assert precio3.id is not None
 
     def test_updated_at_no_cambia_con_update(self, db: Session) -> None:
         """updated_at no se modifica al hacer UPDATE (datos ODEPA append-only, sin onupdate)."""
-        precio = OdepaPrice(
-            producto="papa", mercado="Santiago", precio_kg=500, fecha=datetime.date(2026, 6, 15)
-        )
+        precio = OdepaPrice(producto="papa", mercado="Santiago", precio_kg=500, fecha=datetime.date(2026, 6, 15))
         db.add(precio)
         db.commit()
         db.refresh(precio)
@@ -150,6 +144,28 @@ class TestOdepaPrice:
         db.rollback()
 
 
+def test_alert_repr_no_expone_sujeto_ni_preferencias() -> None:
+    """La alerta no debe filtrar identificadores, producto ni umbral."""
+    alert = Alert(
+        id=7,
+        phone_hash="a" * 64,
+        wa_chat_id="56912345678@c.us",
+        tipo="precio",
+        producto="producto-secreto",
+        condicion=">",
+        umbral=Decimal("12345"),
+        activa=True,
+    )
+
+    representation = repr(alert)
+
+    assert "aaaaaaaa" not in representation
+    assert "56912345678" not in representation
+    assert "producto-secreto" not in representation
+    assert "12345" not in representation
+    assert "id=7" in representation
+
+
 class TestConsultation:
     """CRUD y constraints del modelo Consultation."""
 
@@ -172,6 +188,61 @@ class TestConsultation:
         assert consulta.intent == "precio"
         assert len(consulta.query_text) > 0
         assert consulta.created_at is not None
+        assert consulta.delivery_status == "pending"
+        assert consulta.delivered_at is None
+        assert consulta.delivery_error_code is None
+
+    def test_persistir_entrega_fallida(self, db: Session) -> None:
+        """Una entrega fallida conserva estado y código estable del error."""
+        consulta = Consultation(
+            phone_hash="1" * 64,
+            intent="precio",
+            query_text="¿A cuánto está la papa?",
+            response_text="La papa está a 500 pesos el kilo.",
+            delivery_status="failed",
+            delivery_error_code="openwa_timeout",
+        )
+        db.add(consulta)
+        db.commit()
+        db.refresh(consulta)
+
+        assert consulta.delivery_status == "failed"
+        assert consulta.delivered_at is None
+        assert consulta.delivery_error_code == "openwa_timeout"
+
+    def test_persistir_entrega_confirmada(self, db: Session) -> None:
+        """Una entrega confirmada conserva su marca temporal."""
+        momento_entrega = datetime.datetime(2026, 7, 29, 12, 30)
+        consulta = Consultation(
+            phone_hash="3" * 64,
+            intent="clima",
+            query_text="¿Va a llover?",
+            response_text="No hay lluvia pronosticada.",
+            delivery_status="delivered",
+            delivered_at=momento_entrega,
+        )
+        db.add(consulta)
+        db.commit()
+        db.refresh(consulta)
+
+        assert consulta.delivery_status == "delivered"
+        assert consulta.delivered_at == momento_entrega
+        assert consulta.delivery_error_code is None
+
+    def test_rechazar_estado_de_entrega_desconocido(self, db: Session) -> None:
+        """La base rechaza estados fuera del contrato de entrega."""
+        consulta = Consultation(
+            phone_hash="2" * 64,
+            intent="clima",
+            query_text="¿Va a llover?",
+            response_text="No hay lluvia pronosticada.",
+            delivery_status="desconocido",
+        )
+        db.add(consulta)
+
+        with pytest.raises(IntegrityError):
+            db.commit()
+        db.rollback()
 
     def test_phone_hash_formato_hex_64(self, db: Session) -> None:
         """phone_hash almacena 64 caracteres hexadecimales en minúscula."""
@@ -190,6 +261,25 @@ class TestConsultation:
         db.commit()
 
         assert consulta.phone_hash == hash_real
+
+    def test_repr_no_expone_identidad_ni_contenido(self) -> None:
+        """La representación solo incluye metadatos operativos."""
+        consulta = Consultation(
+            id=42,
+            phone_hash="a" * 64,
+            intent="precio",
+            query_text="consulta confidencial",
+            response_text="respuesta confidencial",
+            latency_ms=321,
+        )
+
+        representation = repr(consulta)
+
+        assert "aaaaaaaa" not in representation
+        assert "consulta confidencial" not in representation
+        assert "respuesta confidencial" not in representation
+        assert "id=42" in representation
+        assert "intent='precio'" in representation
 
     def test_intent_default_desconocido(self, db: Session) -> None:
         """Si no se especifica intent, usa 'desconocido' por defecto."""
@@ -232,7 +322,7 @@ class TestConsultation:
         assert consulta.latency_ms == 0
 
     def test_repr_oculta_phone_hash(self, db: Session) -> None:
-        """El __repr__ solo muestra los primeros 8 chars del hash (anonimizado)."""
+        """El __repr__ no muestra ni siquiera un prefijo correlacionable."""
         consulta = Consultation(
             phone_hash="e" * 64,
             intent="precio",
@@ -243,8 +333,8 @@ class TestConsultation:
         db.commit()
 
         r = repr(consulta)
-        assert "e" * 64 not in r  # hash completo NO visible
-        assert "eeeeeeee..." in r  # solo primeros 8 chars
+        assert "e" * 64 not in r
+        assert "eeeeeeee" not in r
         assert "precio" in r
 
     def test_campos_requeridos_sin_default(self, db: Session) -> None:
@@ -258,6 +348,187 @@ class TestConsultation:
         with pytest.raises(IntegrityError):
             db.commit()
         db.rollback()
+
+
+class TestUserPrefs:
+    """Constraints de identidad individual y grupal."""
+
+    def test_identidad_individual_es_default(self, db: Session) -> None:
+        """Una preferencia nueva parte como identidad individual."""
+        prefs = UserPrefs(phone_hash="1" * 64)
+        db.add(prefs)
+        db.commit()
+        db.refresh(prefs)
+
+        assert prefs.identity_type == "individual"
+        assert prefs.group_label is None
+        assert prefs.localidad is None
+        assert prefs.history_consent is False
+
+    @pytest.mark.parametrize(
+        (
+            "hash_character",
+            "dataset_consent",
+            "alert_consent",
+            "history_consent",
+        ),
+        [
+            ("0", False, False, False),
+            ("1", False, False, True),
+            ("2", False, True, False),
+            ("3", False, True, True),
+            ("4", True, False, False),
+            ("5", True, False, True),
+            ("6", True, True, False),
+            ("7", True, True, True),
+        ],
+    )
+    def test_tres_consentimientos_son_independientes(
+        self,
+        db: Session,
+        hash_character: str,
+        dataset_consent: bool,
+        alert_consent: bool,
+        history_consent: bool,
+    ) -> None:
+        """Cada combinación se persiste sin inferir un consentimiento de otro."""
+        prefs = UserPrefs(
+            phone_hash=hash_character * 64,
+            dataset_consent=dataset_consent,
+            alert_consent=alert_consent,
+            history_consent=history_consent,
+        )
+        db.add(prefs)
+        db.commit()
+        db.refresh(prefs)
+
+        assert prefs.dataset_consent is dataset_consent
+        assert prefs.alert_consent is alert_consent
+        assert prefs.history_consent is history_consent
+
+    def test_history_consent_rechaza_null(self, db: Session) -> None:
+        """El opt-in de historial es obligatorio en la base de datos."""
+        with pytest.raises(IntegrityError):
+            db.execute(
+                text(
+                    """
+                    INSERT INTO user_prefs (
+                        phone_hash,
+                        dataset_consent,
+                        alert_consent,
+                        history_consent
+                    )
+                    VALUES (:phone_hash, 0, 0, NULL)
+                    """
+                ),
+                {"phone_hash": "8" * 64},
+            )
+            db.commit()
+        db.rollback()
+
+    def test_history_consent_rechaza_valor_fuera_de_booleano(
+        self,
+        db: Session,
+    ) -> None:
+        """El CHECK de SQLite impide enteros distintos de cero o uno."""
+        with pytest.raises(IntegrityError):
+            db.execute(
+                text(
+                    """
+                    INSERT INTO user_prefs (
+                        phone_hash,
+                        dataset_consent,
+                        alert_consent,
+                        history_consent
+                    )
+                    VALUES (:phone_hash, 0, 0, 2)
+                    """
+                ),
+                {"phone_hash": "9" * 64},
+            )
+            db.commit()
+        db.rollback()
+
+    def test_grupo_prodesal_valido(self, db: Session) -> None:
+        """Un grupo admite etiqueta operativa y localidad acotadas."""
+        prefs = UserPrefs(
+            phone_hash="2" * 64,
+            identity_type="prodesal_group",
+            group_label="prodesal-traiguen-norte",
+            localidad="Quilquén",
+        )
+        db.add(prefs)
+        db.commit()
+        db.refresh(prefs)
+
+        assert prefs.identity_type == "prodesal_group"
+        assert prefs.group_label == "prodesal-traiguen-norte"
+        assert prefs.localidad == "Quilquén"
+
+    @pytest.mark.parametrize(
+        ("phone_hash", "identity_type", "group_label", "localidad"),
+        [
+            ("3" * 64, "otro", None, None),
+            ("4" * 64, "prodesal_group", None, None),
+            ("5" * 64, "prodesal_group", "   ", None),
+            ("6" * 64, "individual", "prodesal-traiguen-norte", None),
+            ("7" * 64, "prodesal_group", "g" * 101, None),
+            ("8" * 64, "individual", None, "   "),
+            ("9" * 64, "individual", None, "l" * 121),
+            ("b" * 64, "prodesal_group", (" " * 100) + "g", None),
+            ("c" * 64, "individual", None, (" " * 120) + "l"),
+            ("d" * 64, "prodesal_group", "\t\n", None),
+            ("e" * 64, "prodesal_group", " prodesal-norte", None),
+            ("f" * 64, "individual", None, "\tSector Norte\n"),
+        ],
+    )
+    def test_rechaza_identidad_o_longitudes_invalidas(
+        self,
+        db: Session,
+        phone_hash: str,
+        identity_type: str,
+        group_label: str | None,
+        localidad: str | None,
+    ) -> None:
+        """La base aplica dominio, coherencia de grupo y longitudes."""
+        prefs = UserPrefs(
+            phone_hash=phone_hash,
+            identity_type=identity_type,
+            group_label=group_label,
+            localidad=localidad,
+        )
+        db.add(prefs)
+
+        with pytest.raises(IntegrityError):
+            db.commit()
+        db.rollback()
+
+    def test_repr_no_expone_identidad_ni_preferencias(self) -> None:
+        """La representación omite hash, etiqueta y ubicación."""
+        prefs = UserPrefs(
+            phone_hash="a" * 64,
+            identity_type="prodesal_group",
+            group_label="grupo-operativo-reservado",
+            localidad="Sector Norte",
+            comuna="Traiguén",
+            cultivos="papas",
+            dataset_consent=True,
+            alert_consent=False,
+            history_consent=True,
+        )
+
+        representation = repr(prefs)
+
+        assert "aaaaaaaa" not in representation
+        assert "grupo-operativo-reservado" not in representation
+        assert "Sector Norte" not in representation
+        assert "Traiguén" not in representation
+        assert "papas" not in representation
+        assert "prodesal_group" not in representation
+        assert "id=" not in representation
+        assert "dataset_consent=True" in representation
+        assert "alert_consent=False" in representation
+        assert "history_consent=True" in representation
 
 
 class TestPhoneHash:
@@ -446,9 +717,7 @@ class TestMigraciones:
         # Verificar que precio_kg volvió a FLOAT (downgrade de refine_column_types)
         columnas_odepa = {c["name"]: c["type"] for c in inspector.get_columns("odepa_prices")}
         precio_kg_type = columnas_odepa["precio_kg"]
-        assert isinstance(precio_kg_type, Float), (
-            f"precio_kg debería ser Float tras downgrade, es {precio_kg_type}"
-        )
+        assert isinstance(precio_kg_type, Float), f"precio_kg debería ser Float tras downgrade, es {precio_kg_type}"
 
         # Verificar que intent volvió a VARCHAR(20) (downgrade de refine_column_types)
         columnas_cons = {c["name"]: c["type"] for c in inspector.get_columns("consultations")}
@@ -492,11 +761,7 @@ class TestMigraciones:
         tablas = inspector.get_table_names()
 
         assert "alembic_version" in tablas
-        assert "consultations" not in tablas, (
-            "consultations no debería existir tras downgrade a base"
-        )
-        assert "odepa_prices" not in tablas, (
-            "odepa_prices no debería existir tras downgrade a base"
-        )
+        assert "consultations" not in tablas, "consultations no debería existir tras downgrade a base"
+        assert "odepa_prices" not in tablas, "odepa_prices no debería existir tras downgrade a base"
 
         engine.dispose()

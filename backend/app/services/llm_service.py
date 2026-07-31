@@ -9,6 +9,7 @@ Tools disponibles (whitelist):
   - get_price_history(producto, dias)         -> odepa_service.get_price_history_for_llm()
   - calculate_sale_value(producto, kg, mercado) -> odepa_service.calculate_sale_value_for_llm()
    - get_weather(lat, lon)                      -> weather_service.get_weather()
+   - get_pronostico(comuna, dias)               -> weather_service.get_pronostico()
    - get_clima_historico(comuna, metrica)       -> weather_service.get_clima_historico()
 
 Si el LLM intenta usar cualquier otra tool, se responde con texto
@@ -26,8 +27,9 @@ import logging
 import os
 import re
 import threading
+import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 import httpx
 from sqlalchemy.exc import SQLAlchemyError
@@ -37,10 +39,17 @@ from app.services.llm_keywords import (
     _force_keyword_tool,
     _is_generic_response,
 )
+from app.services.llm_worker import (
+    LlmWorkerBusyError,
+    LlmWorkerConfig,
+    LlmWorkerCrashedError,
+    LlmWorkerManager,
+    LlmWorkerProtocolError,
+    LlmWorkerRemoteError,
+    LlmWorkerTimeoutError,
+    LlmWorkerUnavailableError,
+)
 from app.services.prompt_builder import build_system_prompt
-
-if TYPE_CHECKING:
-    from llama_cpp import Llama
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +74,7 @@ WHITELIST_TOOLS = frozenset(
         "calculate_margin",
         "get_price_spread",
         "get_weather",
+        "get_pronostico",
         "get_clima_historico",
         "search_corpus",
         "register_expense",
@@ -86,9 +96,13 @@ MAX_TOOL_ITERATIONS = 3
 # loop. Lo que hace que el caso comun entre en presupuesto no es este timeout,
 # sino el fast-path deterministico y el cache de prompt.
 _GENERATION_TIMEOUT = 25.0
+_LLM_CIRCUIT_COOLDOWN_SECONDS = 90.0
+_LLM_BUSY_TEXT = (
+    "Estoy procesando otra consulta ahora. ¿Podrías intentar de nuevo en un momento?"
+)
 
-# Contexto máximo del modelo (tokens). Con las 7 tools actuales (incluye
-# calculate_margin #91 y search_corpus #100), el system prompt + tools ya
+# Contexto máximo del modelo (tokens). Con las 10 tools actuales, el system
+# prompt completo + tools ya
 # ocupa ~2771 tokens medidos con el tokenizer real de Qwen2.5 — n_ctx=1024
 # y n_ctx=2048 NO alcanzan ni para el primer prompt (ValueError instantaneo
 # de llama-cpp-python, no timeout). Con tool_response de search_corpus
@@ -110,7 +124,7 @@ _N_CTX = 4096
 # scheduler en maquinas grandes sin beneficio real para un 3B en CPU.
 _N_THREADS: int = min(os.cpu_count() or 4, 8)
 
-# Tamano de lote para prompt eval. El prompt fijo (system + 9 tools) ronda los
+# Tamano de lote para prompt eval. El prompt fijo (system + 10 tools) ronda los
 # 2700 tokens y se evalua en lotes: un batch mas grande procesa mas tokens por
 # pasada y reduce el overhead por lote, que es donde se va el tiempo cuando hay
 # poca CPU. Ver _preload_prompt_cache() para el otro lado del problema.
@@ -154,7 +168,10 @@ class ToolResultCache:
         if _t.monotonic() - stored_at > self._ttl:
             del self._cache[self._key(tool_name, params)]
             return None
-        logger.debug("Cache hit — tool=%s params=%s", tool_name, params)
+        if tool_name in WHITELIST_TOOLS:
+            logger.debug("Cache hit — tool=%s", tool_name)
+        else:
+            logger.debug("Cache hit")
         return result
 
     def set(self, tool_name: str, result: str, **params: object) -> None:
@@ -298,6 +315,37 @@ TOOLS: list[dict[str, object]] = [
                     },
                 },
                 "required": ["lat", "lon"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_pronostico",
+            "description": (
+                "PRONOSTICO: clima de MANANA o proximos dias. "
+                "NO para clima de ahora (get_weather) ni pasado (get_clima_historico). "
+                "Ej: 'va a llover manana', 'va a helar', 'como viene el tiempo'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "comuna": {
+                        "type": "string",
+                        "description": (
+                            "Nombre de la comuna chilena (ej: Traiguen, Temuco, Santiago). "
+                            "Usar Traiguen si no se especifica ubicacion."
+                        ),
+                    },
+                    "dias": {
+                        "type": "integer",
+                        "description": (
+                            "Cuantos dias de pronostico entregar, de 1 a 3. "
+                            "Usar 1 si preguntan solo por manana, 2 por defecto."
+                        ),
+                    },
+                },
+                "required": ["comuna"],
             },
         },
     },
@@ -484,7 +532,14 @@ TOOLS: list[dict[str, object]] = [
                     },
                     "monto": {
                         "type": "string",
-                        "description": "Monto en pesos chilenos (ej: 50000)",
+                        "description": "Monto en pesos chilenos (ej: 50000, 50 lucas)",
+                    },
+                    "fecha": {
+                        "type": "string",
+                        "description": (
+                            "Fecha del gasto: YYYY-MM-DD, DD/MM/YYYY, hoy o ayer. "
+                            "Si no se menciona, omitir para usar hoy."
+                        ),
                     },
                 },
                 "required": ["producto", "concepto", "monto"],
@@ -494,12 +549,12 @@ TOOLS: list[dict[str, object]] = [
 ]
 
 # Subconjuntos de tools por tipo de consulta (TipoConsulta en schemas/variables).
-# Las 9 definiciones juntas pesan ~2000 tokens y se re-inyectan en cada consulta:
+# Las 10 definiciones juntas pesan ~2000 tokens y se re-inyectan en cada consulta:
 # es el grueso del prompt y, con poca CPU, el grueso de la latencia. El pipeline
 # ya clasifica la consulta ANTES de llamar al LLM (_extract_variables), asi que
 # mandamos solo las tools del dominio consultado.
 #
-# "ambos" y "desconocido" reciben las 9: si no sabemos que pregunta, recortar
+# "ambos" y "desconocido" reciben las 10: si no sabemos qué pregunta, recortar
 # tools le sacaria capacidad al modelo. Solo recortamos cuando hay certeza.
 #
 # search_corpus va en ambos subconjuntos: responde dudas de contexto agricola
@@ -513,24 +568,49 @@ _TOOLS_PRECIO = frozenset({
     "register_expense",
     "search_corpus",
 })
-_TOOLS_CLIMA = frozenset({"get_weather", "get_clima_historico", "search_corpus"})
+_TOOLS_CLIMA = frozenset({"get_weather", "get_pronostico", "get_clima_historico", "search_corpus"})
+
+
+# Tools apagadas por feature gate: no se anuncian. Ofrecer una tool que el
+# servicio va a rechazar gasta prefijo en cada request y quema un round-trip
+# completo del LLM, que en 1 vCPU es el cuello (#170).
+_GATED_TOOLS: dict[str, Callable[[], bool]] = {
+    "register_expense": lambda: settings.expense_tracking_enabled,
+}
+
+
+def _tool_is_offered(nombre: str) -> bool:
+    """Indica si la tool puede anunciarse según su feature gate."""
+    gate = _GATED_TOOLS.get(nombre)
+    return gate is None or gate()
+
+
+def _tool_names(definiciones: list[dict[str, object]]) -> list[str]:
+    """Extrae los nombres de una lista de tool definitions."""
+    return [str(cast("dict[str, object]", d["function"])["name"]) for d in definiciones]
+
+
+def _offered_tools(nombres: frozenset[str] | None = None) -> list[dict[str, object]]:
+    """Filtra ``TOOLS`` por subconjunto de intent y por feature gate."""
+    return [
+        tool_def
+        for tool_def in TOOLS
+        if (nombres is None or str(cast("dict[str, object]", tool_def["function"])["name"]) in nombres)
+        and _tool_is_offered(str(cast("dict[str, object]", tool_def["function"])["name"]))
+    ]
 
 
 def _render_tools_section(nombres: frozenset[str] | None = None) -> str:
     """Arma la sección <tools> del system prompt en formato nativo Qwen2.5.
 
     Args:
-        nombres: Tools a incluir. None = todas (fuente única: ``TOOLS``).
+        nombres: Tools a incluir. None = todas las habilitadas (fuente única:
+            ``TOOLS``, menos las apagadas por feature gate).
 
     Returns:
         Bloque de texto listo para concatenar al system prompt.
     """
-    definiciones = [
-        tool_def
-        for tool_def in TOOLS
-        if nombres is None
-        or str(cast("dict[str, object]", tool_def["function"])["name"]) in nombres
-    ]
+    definiciones = _offered_tools(nombres)
     lineas = "\n".join(json.dumps(tool_def, ensure_ascii=False) for tool_def in definiciones)
     return f"""
 
@@ -563,155 +643,196 @@ _TOOLS_SECTION_POR_TIPO: dict[str, str] = {
     "desconocido": _TOOLS_SECTION,
 }
 
-# ── Singleton del modelo ───────────────────────────────────────────
+# ── Singleton del worker aislado ───────────────────────────────────
 
-_model: Llama | None = None
-_model_lock = threading.Lock()
+_worker_manager: LlmWorkerManager | None = None
+# Aliases legacy consumidos por monitor_service. Apuntan al manager, nunca a
+# llama.cpp, y se mantienen hasta que ese monitor migre a is_model_available().
+_model: LlmWorkerManager | None = None
 _model_loaded = False
+_model_lock = threading.Lock()
 _model_error: str | None = None
+_llm_circuit_lock = threading.Lock()
+_llm_circuit_open_until = 0.0
+
+
+class LlmGuardError(RuntimeError):
+    """Error base de guardas de ejecución del LLM."""
+
+
+class LlmBusyError(LlmGuardError):
+    """El LLM ya está ejecutando otra inferencia."""
+
+
+class LlmCircuitOpenError(LlmGuardError):
+    """Circuit breaker activo: se evita usar LLM temporalmente."""
 
 
 def preload_model() -> None:
-    """Pre-carga el modelo LLM en background para evitar cold start en el primer request.
+    """Inicia en background el proceso que carga el modelo LLM.
 
     Llamar desde el ciclo de vida de FastAPI (startup) para que el modelo
     esté listo antes de que llegue la primera consulta. En VPS CX43 tarda
     ~6s cargar el GGUF de 3GB en RAM.
 
-    No bloquea: dispara la carga en un thread daemon. Si falla, el error
-    queda en _model_error y answer() usara mock en desarrollo.
+    FastAPI nunca importa ni ejecuta llama.cpp: el thread solo espera el
+    handshake del proceso ``spawn``. Si falla, ``answer`` conserva su fallback.
     """
     threading.Thread(target=_get_model, daemon=True, name="llm-preload").start()
 
 
-def _preload_cxx_runtime() -> None:
-    """Carga libstdc++ con RTLD_GLOBAL antes de importar llama_cpp.
-
-    Los wheels de llama-cpp-python 0.3.x para linux/arm64 publican
-    ``libggml-base.so`` sin la entrada DT_NEEDED a ``libstdc++.so.6``, asi que
-    el dlopen falla con ``undefined symbol:
-    _ZTVN10__cxxabiv117__class_type_infoE`` aunque la lib este instalada.
-    Cargarla antes en el namespace global deja los simbolos C++ resueltos.
-
-    Best-effort: si falla (ej. macOS, o build que si linkea bien), seguimos —
-    el import de llama_cpp decide.
-    """
-    import ctypes
-
-    for soname in ("libstdc++.so.6", "libc++.1.dylib"):
-        try:
-            ctypes.CDLL(soname, mode=ctypes.RTLD_GLOBAL)
-            return
-        except OSError:
-            continue
-    logger.debug("No se pudo precargar el runtime C++ — se intenta importar igual")
+def _worker_config(model_path: str) -> LlmWorkerConfig:
+    """Construye la configuración fija enviada al proceso hijo."""
+    return LlmWorkerConfig(
+        model_path=model_path,
+        n_ctx=_N_CTX,
+        n_threads=_N_THREADS,
+        n_batch=_N_BATCH,
+        prompt_cache_bytes=_PROMPT_CACHE_BYTES,
+        request_timeout_seconds=_GENERATION_TIMEOUT,
+    )
 
 
-def _enable_prompt_cache(model: Llama) -> None:
-    """Activa reuso del estado KV para el prefijo fijo del prompt.
-
-    El system prompt + las definiciones de las 9 tools son BYTE A BYTE
-    identicos en cada consulta y pesan ~2700 tokens. Sin cache, llama.cpp los
-    re-evalua enteros antes de generar el primer token: en 1 vCPU eso solo ya
-    supera el timeout de 60s. Con cache, el prefijo se evalua una vez y las
-    consultas siguientes arrancan desde ahi.
-
-    LlamaRAMCache guarda el estado por prefijo de tokens y hace match por el
-    prefijo comun mas largo, que es exactamente nuestro caso. La capacidad va
-    acotada porque el piso soportado son 6 GB de RAM y el modelo ya ocupa ~2 GB.
-
-    Best-effort: si la version de llama-cpp-python no expone el cache, se sigue
-    sin el (mas lento, pero funcional).
-    """
-    try:
-        # attr-defined: los stubs de llama-cpp-python no exportan LlamaRAMCache,
-        # pero existe en runtime desde 0.2.x (verificado en 0.3.34).
-        from llama_cpp import LlamaRAMCache  # type: ignore[attr-defined]
-    except ImportError:
-        logger.debug("LlamaRAMCache no disponible — sin cache de prompt")
-        return
-
-    try:
-        model.set_cache(LlamaRAMCache(capacity_bytes=_PROMPT_CACHE_BYTES))
-    except (AttributeError, TypeError, ValueError):
-        logger.warning("No se pudo activar el cache de prompt — se sigue sin el")
-        return
-    logger.info("Cache de prompt activo — capacidad=%d MB", _PROMPT_CACHE_BYTES // 1_048_576)
-
-
-def _get_model() -> Llama | None:
-    """Carga el modelo Qwen2.5-3B Q4 en modo lazy y thread-safe.
-
-    Double-checked locking: si el modelo ya está cargado, retorna
-    inmediatamente sin adquirir el lock (hot path).
-
-    El modelo se cachea en el proceso. Cada worker de uvicorn tiene
-    su propia instancia (no se comparte entre workers con sqlite).
-
-    Returns:
-        Instancia de Llama lista para generar, o None si:
-        - llama-cpp-python no está instalado (CI/test)
-        - El modelo no existe en el path configurado
-        - Ocurrió un error al cargar
-    """
-    global _model, _model_loaded, _model_error
-
-    if _model_loaded:
-        return _model
+def _get_model() -> LlmWorkerManager | None:
+    """Obtiene un worker saludable sin cargar llama.cpp en FastAPI."""
+    global _worker_manager, _model, _model_loaded, _model_error
 
     with _model_lock:
-        if _model_loaded:
-            return _model
-
-        _preload_cxx_runtime()
-
-        try:
-            from llama_cpp import Llama
-        except (ImportError, OSError, RuntimeError) as exc:
-            # RuntimeError/OSError: el wheel de llama-cpp-python no logra hacer
-            # dlopen de sus .so (ABI incompatible, libs de sistema faltantes).
-            # Sin este catch la excepcion mata el thread de preload y sube como
-            # 500 en el request path en vez de degradar a mock.
-            _model_error = f"llama-cpp-python no cargable: {exc}"
-            _model_loaded = True  # Permanente: sin reinstalar no se arregla
-            logger.warning("llama-cpp-python no cargable (%s) — LLM en modo mock", exc)
-            return None
-
         model_path = settings.llm_model_path
         if not model_path or not os.path.isfile(model_path):
-            _model_error = f"Modelo LLM no encontrado en {model_path}"
+            if _worker_manager is not None:
+                _worker_manager.stop()
+            _worker_manager = None
+            _model = None
+            _model_loaded = False
+            _model_error = "model_not_found"
             logger.warning(
-                "Modelo LLM no encontrado en %s — LLM funcionando en modo mock. "
-                "Se reintentara en el proximo request.",
-                model_path,
+                "Modelo LLM no encontrado — LLM en modo mock; "
+                "se reintentara en el proximo request"
             )
-            return None  # NO setea _model_loaded — permite retry cuando el archivo llegue
+            return None
 
-        try:
-            logger.info("Cargando modelo LLM desde %s ...", model_path)
-            _model = Llama(
-                model_path=model_path,
-                n_ctx=_N_CTX,
-                n_threads=_N_THREADS,
-                n_batch=_N_BATCH,
-                verbose=False,
-            )
-            _enable_prompt_cache(_model)
-            _model_loaded = True  # Solo en exito
-            logger.info(
-                "Modelo LLM cargado — n_ctx=%d n_threads=%d n_batch=%d",
-                _N_CTX,
-                _N_THREADS,
-                _N_BATCH,
-            )
-        except Exception as exc:
-            _model_error = f"Error al cargar modelo: {exc}"
-            logger.exception(
-                "Error al cargar modelo LLM — se reintentara en el proximo request"
-            )
-            return None  # NO setea _model_loaded — permite retry si fue OOM transitorio
+        if _worker_manager is None:
+            _worker_manager = LlmWorkerManager(_worker_config(model_path))
+        if (
+            not _worker_manager.is_healthy()
+            and _is_llm_circuit_open()
+        ):
+            # No recargar ~2 GB para una request que el circuit breaker
+            # rechazará inmediatamente; el primer request post-cooldown reinicia.
+            return _worker_manager
+        if _worker_manager.start():
+            _model = _worker_manager
+            _model_loaded = True
+            _model_error = None
+            return _worker_manager
 
-    return _model
+        _model = None
+        _model_loaded = False
+        _model_error = (
+            _worker_manager.health().last_error_code or "worker_unavailable"
+        )
+        logger.warning(
+            "LLM worker no disponible — error=%s; se reintentara",
+            _model_error,
+        )
+        return None
+
+
+def _mark_worker_failure(
+    manager: LlmWorkerManager,
+    error_code: str,
+) -> None:
+    """Actualiza aliases de salud sin exponer mensajes del proceso hijo."""
+    global _model, _model_loaded, _model_error
+    with _model_lock:
+        if _worker_manager is not manager or manager.is_healthy():
+            return
+        _model = None
+        _model_loaded = False
+        _model_error = error_code
+
+
+def _is_llm_circuit_open() -> bool:
+    """Indica si el circuit breaker del LLM está activo."""
+    with _llm_circuit_lock:
+        return time.monotonic() < _llm_circuit_open_until
+
+
+def _open_llm_circuit(reason: str) -> None:
+    """Abre el circuit breaker del LLM por una ventana de enfriamiento."""
+    global _llm_circuit_open_until
+    with _llm_circuit_lock:
+        _llm_circuit_open_until = time.monotonic() + _LLM_CIRCUIT_COOLDOWN_SECONDS
+    safe_reason = (
+        reason
+        if reason
+        in {
+            "timeout",
+            "RuntimeError",
+            "OSError",
+            "ValueError",
+            "worker_crashed",
+            "worker_protocol_error",
+            "worker_unavailable",
+            "worker_remote_error",
+        }
+        else "unknown"
+    )
+    logger.warning(
+        "Circuit breaker LLM abierto por %ss — motivo=%s",
+        int(_LLM_CIRCUIT_COOLDOWN_SECONDS),
+        safe_reason,
+    )
+
+
+def _close_llm_circuit() -> None:
+    """Cierra el circuit breaker del LLM."""
+    global _llm_circuit_open_until
+    with _llm_circuit_lock:
+        _llm_circuit_open_until = 0.0
+
+
+async def _run_llm_completion(
+    model: LlmWorkerManager,
+    messages: list[dict[str, object]],
+    max_tokens: int = 128,
+) -> object:
+    """Delega inferencia al hijo y traduce fallas al contrato existente."""
+    if _is_llm_circuit_open():
+        raise LlmCircuitOpenError("llm_circuit_open")
+
+    try:
+        response = await asyncio.to_thread(
+            model.complete,
+            messages,
+            max_tokens,
+            _GENERATION_TIMEOUT,
+        )
+    except LlmWorkerBusyError:
+        raise LlmBusyError("llm_busy") from None
+    except LlmWorkerTimeoutError:
+        _mark_worker_failure(model, "worker_timeout")
+        _open_llm_circuit("timeout")
+        raise TimeoutError("llm_worker_timeout") from None
+    except LlmWorkerCrashedError:
+        _mark_worker_failure(model, "worker_crashed")
+        _open_llm_circuit("worker_crashed")
+        raise RuntimeError("llm_worker_crashed") from None
+    except LlmWorkerProtocolError:
+        _mark_worker_failure(model, "worker_protocol_error")
+        _open_llm_circuit("worker_protocol_error")
+        raise RuntimeError("llm_worker_protocol_error") from None
+    except LlmWorkerUnavailableError:
+        _mark_worker_failure(model, "worker_unavailable")
+        _open_llm_circuit("worker_unavailable")
+        raise RuntimeError("llm_worker_unavailable") from None
+    except LlmWorkerRemoteError:
+        _open_llm_circuit("worker_remote_error")
+        raise RuntimeError("llm_worker_remote_error") from None
+
+    _close_llm_circuit()
+    return response
 
 
 # ── Tool dispatcher ─────────────────────────────────────────────────
@@ -727,16 +848,16 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
     Los imports son lazy para evitar dependencias circulares y permitir
     que el modulo llm_service.py sea importable sin DB ni servicios.
     """
+    from app.services.expense_service import register_expense_for_llm
     from app.services.odepa_service import (
         calculate_margin_for_llm,
         calculate_sale_value_for_llm,
         get_price_for_llm,
         get_price_history_for_llm,
         get_price_spread_for_llm,
-        register_expense_for_llm,
     )
     from app.services.rag_service import search_corpus_for_llm
-    from app.services.weather_service import get_clima_historico, get_weather
+    from app.services.weather_service import get_clima_historico, get_pronostico, get_weather
 
     return {
         "get_price": get_price_for_llm,
@@ -745,6 +866,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         "calculate_sale_value": calculate_sale_value_for_llm,
         "calculate_margin": calculate_margin_for_llm,
         "get_weather": get_weather,
+        "get_pronostico": get_pronostico,
         "get_clima_historico": get_clima_historico,
         "search_corpus": search_corpus_for_llm,
         "register_expense": register_expense_for_llm,
@@ -787,14 +909,19 @@ async def _execute_tool(
     handler = handlers.get(name)
 
     if handler is None:
-        logger.warning("Tool no whitelisteada: %s", name)
+        logger.warning("Tool rechazada — codigo=not_whitelisted")
         return FALLBACK_TEXT
 
     # Filtrar argumentos alucinados por el LLM contra la firma real del handler.
     # Evita TypeError cuando el LLM inventa params que el handler no acepta.
     # Inyectar phone_hash: tools de precio (Issue #89: mercado cercano) y
     # register_expense (Issue #170: scoping de gastos por agricultor).
-    if name in ("get_price", "get_price_history", "register_expense") and phone_hash:
+    if name in (
+        "get_price",
+        "get_price_history",
+        "calculate_margin",
+        "register_expense",
+    ) and phone_hash:
         arguments = {**arguments, "phone_hash": phone_hash}
     valid_args = _filter_handler_args(handler, arguments)
 
@@ -813,7 +940,7 @@ async def _execute_tool(
         # Las tools de precio necesitan session de DB. Se la pasamos como kwarg.
         if name in (
             "get_price", "get_price_history", "calculate_sale_value",
-            "calculate_margin",
+            "calculate_margin", "register_expense",
         ):
             from app.core.database import SessionLocal
 
@@ -849,6 +976,17 @@ async def _execute_tool(
                         "No entendi el monto total que recibiste. "
                         "¿Podrias repetir cuanto te pagaron en total?"
                     )
+            if name == "register_expense":
+                if not str(valid_args.get("concepto", "")).strip():
+                    return (
+                        "No entendí en qué gastaste. "
+                        "¿Podrías repetir el concepto?"
+                    )
+                if not str(valid_args.get("monto", "")).strip():
+                    return (
+                        "No entendí el monto gastado. "
+                        "¿Podrías repetir cuánto fue?"
+                    )
             # Mercado/dias son opcionales: cada handler aplica su default.
 
             session = SessionLocal()
@@ -868,13 +1006,23 @@ async def _execute_tool(
             else:
                 result = await asyncio.to_thread(handler, **valid_args)
 
-        logger.info("Tool %s ejecutada — args=%s", name, valid_args)
+        if name in WHITELIST_TOOLS:
+            logger.info("Tool ejecutada — tool=%s", name)
+        else:
+            logger.info("Tool ejecutada")
         # Cachear resultado para evitar futuras llamadas al LLM.
         if name in cacheable:
             _tool_cache.set(name, str(result), **valid_args)
         return str(result)
     except (RuntimeError, ValueError, OSError, SQLAlchemyError) as exc:
-        logger.exception("Error ejecutando tool %s: %s", name, exc)
+        if name in WHITELIST_TOOLS:
+            logger.error(
+                "Error ejecutando tool — tool=%s error=%s",
+                name,
+                type(exc).__name__,
+            )
+        else:
+            logger.error("Error ejecutando tool — error=%s", type(exc).__name__)
         return "Hubo un error al consultar ese dato. ¿Probamos con otro?"
 
 
@@ -970,13 +1118,13 @@ def _parse_text_tool_calls(content: str) -> list[dict[str, object]]:
         try:
             parsed = json.loads(match.strip())
         except json.JSONDecodeError:
-            logger.warning("JSON invalido dentro de <tool_call>: %.100s", match.strip())
+            logger.warning("Tool call descartada — error=JSONDecodeError")
             continue
 
         name = parsed.get("name", "")
         arguments = parsed.get("arguments", {})
         if not name or not isinstance(name, str):
-            logger.warning("Tool call sin 'name' valido: %.100s", match.strip())
+            logger.warning("Tool call descartada — codigo=invalid_tool_name")
             continue
 
         tool_calls.append({
@@ -1054,7 +1202,7 @@ def _build_messages(
         system_tip: Instrucción adicional opcional para el system prompt.
         consulta_tipo: Tipo detectado por el pipeline ("precio", "clima",
                        "ambos", "desconocido"). Recorta el bloque de tools al
-                       dominio consultado. None o desconocido = las 9 tools.
+                       dominio consultado. None o desconocido = las 10 tools.
     """
     # El bloque de tools va inmediatamente despues del system prompt para que el
     # prefijo quede estable y reusable por el cache KV. Todo lo variable
@@ -1123,7 +1271,9 @@ async def answer(
     if not query_text or not query_text.strip():
         return NO_RESPONSE_TEXT
 
-    model = _get_model()
+    # La carga/reinicialización del hijo puede esperar hasta el timeout de
+    # startup. Nunca bloquear el event loop del webhook mientras ocurre.
+    model = await asyncio.to_thread(_get_model)
     history = history or []
 
     if model is None:
@@ -1141,15 +1291,7 @@ async def answer(
         for _iteration in range(MAX_TOOL_ITERATIONS):
             # NO pasar tools/tool_choice — Qwen2.5 genera <tool_call> como texto
             # nativo cuando las definiciones estan en el system prompt.
-            response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    model.create_chat_completion,
-                    messages=messages,  # type: ignore[arg-type]
-                    temperature=0.0,
-                    max_tokens=128,
-                ),
-                timeout=_GENERATION_TIMEOUT,
-            )
+            response = await _run_llm_completion(model, messages, max_tokens=128)
 
             content = _parse_content(response)
             if not content:
@@ -1206,7 +1348,9 @@ async def answer(
 
                 # Whitelist enforcement: solo tools permitidas.
                 if fn_name not in WHITELIST_TOOLS:
-                    logger.warning("Tool fuera de whitelist: %s — enviando fallback", fn_name)
+                    logger.warning(
+                        "Tool rechazada — codigo=not_whitelisted; enviando fallback"
+                    )
                     messages.append({
                         "role": "user",
                         "content": f"<tool_response>\n{FALLBACK_TEXT}\n</tool_response>",
@@ -1217,7 +1361,10 @@ async def answer(
                 try:
                     fn_args: dict[str, object] = json.loads(str(fn_args_str))
                 except json.JSONDecodeError:
-                    logger.warning("Argumentos JSON invalidos para %s: %s", fn_name, fn_args_str)
+                    logger.warning(
+                        "Argumentos de tool descartados — tool=%s error=JSONDecodeError",
+                        fn_name,
+                    )
                     fn_args = {}
 
                 # Ejecutar tool.
@@ -1231,9 +1378,8 @@ async def answer(
 
         # Si llegamos aca, se agotaron las iteraciones.
         logger.warning(
-            "Tool Calling loop agoto %d iteraciones — query=%.100s",
+            "Tool Calling loop agoto %d iteraciones",
             MAX_TOOL_ITERATIONS,
-            query_text,
         )
         # Ultimo intento: forzar respuesta sin tools.
         messages.append({
@@ -1244,35 +1390,45 @@ async def answer(
             ),
         })
         try:
-            final_response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    model.create_chat_completion,
-                    messages=messages,  # type: ignore[arg-type]
-                    temperature=0.0,
-                    max_tokens=128,
-                ),
-                timeout=_GENERATION_TIMEOUT,
-            )
+            final_response = await _run_llm_completion(model, messages, max_tokens=128)
             content = _parse_content(final_response)
             if content:
                 cleaned = _strip_tool_tags(content)
                 if cleaned:
                     return cleaned
-        except (TimeoutError, RuntimeError, OSError, ValueError) as exc:
-            logger.warning("Error en respuesta final: %s", exc)
+        except (TimeoutError, RuntimeError, OSError, ValueError, LlmGuardError) as exc:
+            logger.warning(
+                "Error en respuesta final — error=%s",
+                type(exc).__name__,
+            )
 
         return FALLBACK_TEXT
 
     except TimeoutError:
-        logger.warning("Timeout del LLM (%ss) — query=%.100s", _GENERATION_TIMEOUT, query_text)
+        logger.warning("Timeout del LLM — timeout_seconds=%s", _GENERATION_TIMEOUT)
+        forced = await _force_keyword_tool(query_text, phone_hash=phone_hash)
+        if forced:
+            return forced
         return "Estoy teniendo problemas para responder. ¿Podrías preguntar de nuevo más breve?"
+    except LlmGuardError as exc:
+        logger.warning(
+            "LLM no disponible temporalmente — error=%s",
+            type(exc).__name__,
+        )
+        forced = await _force_keyword_tool(query_text, phone_hash=phone_hash)
+        if forced:
+            return forced
+        return _LLM_BUSY_TEXT
     except (json.JSONDecodeError, RuntimeError, OSError, ValueError) as exc:
         # ValueError: llama-cpp-python la lanza cuando el prompt (system+tools+
         # historial+query, o el tool_response inyectado) excede n_ctx. Con
         # n_ctx=4096 no ocurre en el flujo normal, pero un tool_response
         # inusualmente largo o un audio muy extenso transcrito podrian
         # seguir gatillandola.
-        logger.exception("Error en generacion LLM: %s", exc)
+        logger.error("Error en generacion LLM — error=%s", type(exc).__name__)
+        forced = await _force_keyword_tool(query_text, phone_hash=phone_hash)
+        if forced:
+            return forced
         return "Tuve un problema al procesar tu consulta. ¿Probamos de nuevo?"
 
 
@@ -1284,6 +1440,8 @@ _OPENROUTER_SYSTEM_PROMPT = (
     "Responde en español chileno, maximo 3 oraciones cortas. "
     "SIEMPRE usa una herramienta antes de responder. "
     "NUNCA inventes precios ni clima. NUNCA des recomendaciones agronomicas. "
+    "NUNCA evalues elegibilidad financiera ni recomiendes creditos, programas, "
+    "montos o tasas. NUNCA pidas RUT, ingresos ni deudas. "
     "Conserva la fuente (ODEPA para precios, OpenMeteo para clima) al citar datos."
 )
 
@@ -1332,7 +1490,8 @@ async def answer_via_openrouter(
 
     try:
         for _iteration in range(MAX_TOOL_ITERATIONS):
-            response = await openrouter_service.chat_completion_with_tools(messages, TOOLS)
+            # Mismo criterio que el prompt local: no ofrecer tools apagadas.
+            response = await openrouter_service.chat_completion_with_tools(messages, _offered_tools())
             message = response["choices"][0]["message"]
             tool_calls = message.get("tool_calls")
 
@@ -1362,7 +1521,7 @@ async def answer_via_openrouter(
         logger.warning("OpenRouter Tool Calling loop agoto %d iteraciones", MAX_TOOL_ITERATIONS)
         return None
     except (httpx.HTTPError, KeyError, IndexError, TypeError) as exc:
-        logger.warning("Fallback OpenRouter fallo: %s", exc)
+        logger.warning("Fallback OpenRouter fallo — error=%s", type(exc).__name__)
         return None
 
 
@@ -1379,17 +1538,18 @@ def _mock_answer(query_text: str) -> str:
                       "frio", "calor", "humedad", "viento", "pronóstico", "pronostico"]
     if any(kw in q for kw in clima_keywords):
         return (
-            "En Traiguén ahora: 18°C, nublado, humedad 65%, viento 3.6 m/s, "
-            "lluvia 0.5 mm."
+            "Modo de prueba: clima simulado en Traiguén, 18 grados, nublado, "
+            "humedad 65 por ciento, viento 3 coma 6 metros por segundo y "
+            "lluvia 0 coma 5 milímetros. No es una consulta real a OpenMeteo."
         )
 
     # Detección de keywords de precio
     precio_keywords = ["precio", "cuánto", "cuanto", "cuesta", "vale",
                        "está", "esta", "cómo está", "como esta"]
     if any(kw in q for kw in precio_keywords):
-        # Intentar extraer producto (palabra después de "la", "el", "los", "las")
         return (
-            "Papa está a $1.200 el kilo en Lo Valledor, precio del 22/06/2026."
+            "Modo de prueba: precio simulado de papa, 1.200 pesos el kilo "
+            "en Lo Valledor. No es una consulta real a ODEPA."
         )
 
     # Fuera de scope
@@ -1397,18 +1557,35 @@ def _mock_answer(query_text: str) -> str:
 
 
 def is_model_available() -> bool:
-    """Indica si el modelo LLM está cargado y listo para usar."""
-    return _model is not None
+    """Indica si el proceso LLM está vivo y listo para inferencia."""
+    with _model_lock:
+        return (
+            _worker_manager is not None
+            and _worker_manager.is_healthy()
+        )
 
 
 def get_model_error() -> str | None:
-    """Retorna el mensaje de error si el modelo no se pudo cargar."""
-    return _model_error
+    """Retorna un código seguro del último error del worker."""
+    with _model_lock:
+        if _model_error is not None:
+            return _model_error
+        if _worker_manager is None:
+            return None
+        return _worker_manager.health().last_error_code
 
 
 def reset_model() -> None:
-    """Resetea el singleton para tests (libera memoria)."""
-    global _model, _model_loaded, _model_error
-    _model = None
-    _model_loaded = False
-    _model_error = None
+    """Detiene y descarta el worker para liberar su memoria."""
+    global _worker_manager, _model, _model_loaded, _model_error
+    global _llm_circuit_open_until
+    with _model_lock:
+        if _worker_manager is not None:
+            # Cerrar antes de liberar el lock evita solapar dos modelos de ~2 GB.
+            _worker_manager.stop()
+        _worker_manager = None
+        _model = None
+        _model_loaded = False
+        _model_error = None
+    with _llm_circuit_lock:
+        _llm_circuit_open_until = 0.0

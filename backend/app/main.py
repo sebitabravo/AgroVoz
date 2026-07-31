@@ -44,6 +44,10 @@ from app.core.security import (
 
 logger = logging.getLogger(__name__)
 
+_CONSULTATION_HISTORY_PURGE_INTERVAL_SECONDS = 24 * 60 * 60
+_CONSULTATION_STAGING_CLEANUP_INTERVAL_SECONDS = 60 * 60
+_EXPENSE_PURGE_INTERVAL_SECONDS = 24 * 60 * 60
+
 # ContextVar para propagar el request_id a los logs.
 # El middleware lo setea por request; el logging.Filter lo inyecta en cada LogRecord.
 request_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
@@ -115,12 +119,133 @@ async def _odepa_scheduler() -> None:
                 resultado.insertados,
                 resultado.actualizados,
             )
-        except Exception:
+        except Exception as exc:
             # Cron de fondo en loop infinito: cualquier excepcion NO capturada
             # mata el scheduler para siempre. except Exception es intencional aca
             # (boundary de resiliencia). CancelledError hereda de BaseException,
             # no se captura -> shutdown limpio via odepa_task.cancel() en lifespan.
-            logger.exception("ODEPA scheduler: error en sync automatica")
+            logger.error(
+                "ODEPA scheduler: error en sync automática — error=%s",
+                type(exc).__name__,
+            )
+
+
+async def _consultation_history_scheduler() -> None:
+    """Purga diariamente el historial vencido sin bloquear el event loop."""
+    from app.services.consultation_history_service import (
+        HistoryOperationError,
+        purge_expired_history,
+    )
+
+    while True:
+        try:
+            result = await asyncio.to_thread(purge_expired_history)
+            logger.info(
+                "Historial scheduler: purga OK — %d registros",
+                result.records_deleted,
+            )
+        except HistoryOperationError:
+            logger.error("Historial scheduler: purga auditada no confirmada")
+        except Exception as exc:
+            # Boundary de resiliencia: una falla inesperada no debe matar el
+            # scheduler para siempre. CancelledError no se captura.
+            logger.error(
+                "Historial scheduler: error inesperado — error=%s",
+                type(exc).__name__,
+            )
+
+        await asyncio.sleep(_CONSULTATION_HISTORY_PURGE_INTERVAL_SECONDS)
+
+
+async def _consultation_staging_cleanup_scheduler() -> None:
+    """Redacta cada hora contenido transitorio que superó las 24 horas."""
+    from app.services.delivery_service import (
+        ContentRedactionError,
+        redact_stale_consultation_content,
+    )
+
+    while True:
+        try:
+            records_redacted = await asyncio.to_thread(redact_stale_consultation_content)
+            logger.info(
+                "Staging scheduler: limpieza OK — %d registros",
+                records_redacted,
+            )
+        except ContentRedactionError:
+            logger.error("Staging scheduler: limpieza no confirmada")
+        except Exception as exc:
+            logger.error(
+                "Staging scheduler: error inesperado — error=%s",
+                type(exc).__name__,
+            )
+
+        await asyncio.sleep(_CONSULTATION_STAGING_CLEANUP_INTERVAL_SECONDS)
+
+
+async def _expense_purge_scheduler() -> None:
+    """Purga diariamente los gastos vencidos según su ``expires_at`` (#170)."""
+    from app.services.expense_service import (
+        ExpenseOperationError,
+        purge_expired_expenses,
+    )
+
+    while True:
+        try:
+            records_deleted = await asyncio.to_thread(purge_expired_expenses)
+            logger.info(
+                "Gastos scheduler: purga TTL OK — %d registros",
+                records_deleted,
+            )
+        except ExpenseOperationError:
+            logger.error("Gastos scheduler: purga TTL no confirmada")
+        except Exception as exc:
+            # Boundary de resiliencia: una falla inesperada no debe matar el
+            # scheduler para siempre. CancelledError no se captura.
+            logger.error(
+                "Gastos scheduler: error inesperado — error=%s",
+                type(exc).__name__,
+            )
+
+        await asyncio.sleep(_EXPENSE_PURGE_INTERVAL_SECONDS)
+
+
+def _start_consultation_history_scheduler() -> asyncio.Task[None] | None:
+    """Crea la tarea TTL solo cuando el feature gate está habilitado."""
+    if not settings.consultation_history_enabled:
+        return None
+    return asyncio.create_task(
+        _consultation_history_scheduler(),
+        name="consultation-history-ttl",
+    )
+
+
+def _start_consultation_staging_cleanup_scheduler() -> asyncio.Task[None]:
+    """Crea siempre la tarea de minimización de contenido transitorio."""
+    return asyncio.create_task(
+        _consultation_staging_cleanup_scheduler(),
+        name="consultation-staging-cleanup",
+    )
+
+
+def _start_expense_purge_scheduler() -> asyncio.Task[None]:
+    """Crea siempre la purga TTL de gastos, incluso con el gate apagado.
+
+    Apagar ``expense_tracking_enabled`` detiene las escrituras nuevas, no la
+    retención de lo ya registrado: los gastos previos deben seguir venciendo.
+    """
+    return asyncio.create_task(
+        _expense_purge_scheduler(),
+        name="expense-ttl",
+    )
+
+
+async def _cancel_background_task(task: asyncio.Task[None] | None) -> None:
+    """Cancela una tarea y espera su cierre cooperativo."""
+    if task is None:
+        return
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
 
 
 @asynccontextmanager
@@ -130,6 +255,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     Al iniciar: configura logging, valida configuración crítica en producción.
     Al cerrar: libera conexiones del pool SQLite.
     """
+    # Revalidar incluso si settings fue mutado después de importar el módulo.
+    # Debe ocurrir antes de precargar modelos o crear tareas de fondo.
+    settings.validate_mcp_security()
+    settings.validate_consultation_history_security()
+
     # Configurar logging según entorno.
     # RequestIDFormatter inyecta request_id en cada línea de log desde el ContextVar.
     log_format = (
@@ -170,23 +300,44 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Pre-cargar modelo LLM en background (~6s en VPS CX43).
     # Evita cold start timeout en el primer request al pipeline.
     from app.services.llm_service import preload_model
+
     preload_model()
 
     # Scheduler ODEPA: sync diario a las 06:00 AM hora local.
     # Tarea de fondo del lifespan. Se cancela automáticamente al detener la app.
     odepa_task = asyncio.create_task(_odepa_scheduler())
+    history_purge_task = _start_consultation_history_scheduler()
+    staging_cleanup_task = _start_consultation_staging_cleanup_scheduler()
+    expense_purge_task = _start_expense_purge_scheduler()
 
     yield
 
     logger.info("AgroVoz deteniendo — liberando conexiones")
-    odepa_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await odepa_task
+    await _cancel_background_task(expense_purge_task)
+    await _cancel_background_task(staging_cleanup_task)
+    await _cancel_background_task(history_purge_task)
+    await _cancel_background_task(odepa_task)
     engine.dispose()
     from app.services.weather_service import _close_http_client
+
     await _close_http_client()
     from app.services.openrouter_service import close_http_client as _close_openrouter_client
+
     await _close_openrouter_client()
+
+
+def _mount_mcp_router(application: FastAPI) -> None:
+    """Monta la RPC administrativa MCP solo cuando su gate está habilitado."""
+    if not settings.mcp_enabled:
+        return
+    if getattr(application.state, "_agrovoz_mcp_router_mounted", False):
+        return
+
+    settings.validate_mcp_security()
+    from app.mcp.router import router as mcp_router
+
+    application.include_router(mcp_router)
+    application.state._agrovoz_mcp_router_mounted = True
 
 
 app = FastAPI(
@@ -265,6 +416,7 @@ app.include_router(admin_metrics_router, prefix="/api/v1")
 app.include_router(admin_odepa_router, prefix="/api/v1")
 app.include_router(admin_user_router, prefix="/api/v1")
 app.include_router(admin_html_router)  # prefix "/admin" va en el router
+_mount_mcp_router(app)
 
 
 @app.exception_handler(Exception)
@@ -274,7 +426,12 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     En desarrollo: expone el mensaje real para debug.
     En producción: mensaje genérico para no leakear información interna.
     """
-    logger.exception("Error no manejado en %s %s", request.method, request.url.path)
+    logger.error(
+        "Error no manejado — method=%s path=%s error=%s",
+        request.method,
+        request.url.path,
+        type(exc).__name__,
+    )
     if settings.app_env == "development":
         response = JSONResponse(
             status_code=500,

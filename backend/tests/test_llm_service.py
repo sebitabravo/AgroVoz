@@ -9,7 +9,11 @@ y _execute_tool con whitelist enforcement.
 Sin modelo real: todos los tests corren en CI sin llama-cpp-python ni GGUF.
 """
 
+import asyncio
+import logging
 import os
+import threading
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -26,6 +30,7 @@ from app.services.llm_service import (
     SYSTEM_PROMPT,
     TOOLS,
     WHITELIST_TOOLS,
+    LlmBusyError,
     _build_messages,
     _execute_tool,
     _filter_handler_args,
@@ -40,6 +45,7 @@ from app.services.llm_service import (
     is_model_available,
     reset_model,
 )
+from app.services.llm_worker import LlmWorkerCrashedError
 
 # ── Constantes ──────────────────────────────────────────────────
 
@@ -56,6 +62,8 @@ class TestConstantes:
         assert "search_corpus" in SYSTEM_PROMPT
         assert "register_expense" in SYSTEM_PROMPT
         assert "NUNCA recomendaciones" in SYSTEM_PROMPT
+        assert "Crédito: deriva a INDAP, sin asesorar" in SYSTEM_PROMPT
+        assert "NUNCA pidas datos personales" in SYSTEM_PROMPT
         assert "NUNCA inventes precios" in SYSTEM_PROMPT
         assert "Español chileno" in SYSTEM_PROMPT
         assert "pesos chilenos" in SYSTEM_PROMPT
@@ -84,8 +92,9 @@ class TestConstantes:
         assert len(NO_RESPONSE_TEXT) > 10
         assert "reformular" in NO_RESPONSE_TEXT.lower()
 
-    def test_whitelist_nueve_tools(self) -> None:
-        """Whitelist: precio, spread, historico, venta, margen, clima, clima historico, corpus y gastos (9 tools)."""
+    def test_whitelist_diez_tools(self) -> None:
+        """Whitelist: precio, spread, historico, venta, margen, clima actual,
+        pronostico, clima historico, corpus y gastos (10 tools)."""
         assert (
             frozenset(
                 {
@@ -95,6 +104,7 @@ class TestConstantes:
                     "calculate_sale_value",
                     "calculate_margin",
                     "get_weather",
+                    "get_pronostico",
                     "get_clima_historico",
                     "search_corpus",
                     "register_expense",
@@ -105,8 +115,9 @@ class TestConstantes:
 
     def test_tools_definition_formato_openai(self) -> None:
         """Las tool definitions siguen el formato OpenAI function-calling."""
-        # 5 base + calculate_margin (#155) + search_corpus (#156) + register_expense (#170) + get_price_spread (#171)
-        assert len(TOOLS) == 9
+        # 5 base + calculate_margin (#155) + search_corpus (#156)
+        # + register_expense (#170) + get_price_spread (#171) + get_pronostico
+        assert len(TOOLS) == 10
         for tool in TOOLS:
             assert tool["type"] == "function"
             fn = tool["function"]
@@ -114,6 +125,28 @@ class TestConstantes:
             assert "description" in fn
             assert "parameters" in fn
             assert fn["name"] in WHITELIST_TOOLS  # type: ignore[index]
+
+    def test_tool_apagada_por_gate_no_se_ofrece(self) -> None:
+        """Fail-closed también significa no anunciar la tool (#170)."""
+        from app.services.llm_service import _offered_tools, _tool_names
+
+        with patch.object(settings, "expense_tracking_enabled", False):
+            assert "register_expense" not in _tool_names(_offered_tools())
+        with patch.object(settings, "expense_tracking_enabled", True):
+            assert "register_expense" in _tool_names(_offered_tools())
+
+    def test_seccion_de_tools_omite_la_tool_apagada(self) -> None:
+        """El prefijo del prompt no gasta chars en una tool deshabilitada."""
+        from app.services.llm_service import _render_tools_section
+
+        with patch.object(settings, "expense_tracking_enabled", False):
+            apagada = _render_tools_section()
+        with patch.object(settings, "expense_tracking_enabled", True):
+            encendida = _render_tools_section()
+
+        assert '"name": "register_expense"' not in apagada
+        assert '"name": "register_expense"' in encendida
+        assert len(apagada) < len(encendida)
 
     def test_max_tool_iterations_razonable(self) -> None:
         """El maximo de iteraciones del loop debe ser >= 1 y <= 10."""
@@ -198,19 +231,25 @@ class TestLlmConfig:
         """El prompt total (system + tools) no debe exceder un limite.
 
         Guard barato (no requiere cargar el modelo) contra regresiones que
-        inflan el prompt sin querer. ~9022 chars con 7 tools (ratio medido
-        ~3.26 chars/token con el tokenizer de Qwen2.5, ver test_n_ctx_
-        alcanza_para_prompt_con_siete_tools). Con register_expense (#170)
-        y get_price_spread (#171) son 9 tools, ~10104 chars ≈ ~3103 tokens
-        — sumado al peor caso de tool_response (~360 tokens) deja ~633
-        tokens de margen dentro de n_ctx=4096 para query + respuesta.
-        Limite subido a 10200 (margen de ~96 chars sobre el valor actual)
-        para seguir detectando crecimiento no intencional sin bloquear el
-        estado real con 9 tools.
-        que el prompt crezca sin darse cuenta.
+        inflan el prompt sin querer. Ratio medido ~3.26 chars/token con el
+        tokenizer de Qwen2.5 (ver test_n_ctx_alcanza_para_prompt_con_siete_tools).
+
+        Con 10 tools (se sumo get_pronostico) son ~10359 chars ≈ ~3178 tokens.
+        Sumado al peor caso de tool_response (~360 tokens de search_corpus) da
+        ~3538, y deja ~558 tokens de margen dentro de n_ctx=4096 para la query
+        y la respuesta — que esta capada en max_tokens=128. Entra con holgura.
+
+        Ademas este es el PEOR caso: la seccion completa solo se manda cuando
+        el intent es 'desconocido' o 'ambos'. Con el subset por intent, una
+        consulta de clima manda 4 tools (~1677 tokens), la mitad.
+
+        Limite en 10400 (margen de ~40 chars sobre el valor actual) para seguir
+        detectando crecimiento no intencional. Si se agrega otra tool, apretar
+        descripciones antes que subir este numero: cada token del prefijo se
+        paga en prompt eval, que es el cuello en 1 vCPU.
         """
         total_chars = len(SYSTEM_PROMPT) + len(_TOOLS_SECTION)
-        assert total_chars <= 10200, (
+        assert total_chars <= 10400, (
             f"Prompt total={total_chars} chars demasiado grande "
             f"para n_ctx={_N_CTX}. Reduce o aumenta n_ctx."
         )
@@ -411,15 +450,24 @@ class TestParseTextToolCalls:
         assert _parse_text_tool_calls("") == []
         assert _parse_text_tool_calls(None) == []  # type: ignore[arg-type]
 
-    def test_json_invalido_dentro_de_tool_call(self) -> None:
-        """JSON invalido dentro del tag no rompe el parseo."""
+    def test_json_invalido_dentro_de_tool_call(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """JSON inválido se descarta sin registrar su fragmento."""
+        secret = "rut-secreto-11.111.111-1"
         content = (
             '<tool_call>\n'
-            'esto no es json\n'
+            f'{{"name": "get_price", "arguments": {{"nota": "{secret}"}},}}\n'
             '</tool_call>'
         )
+        caplog.set_level(logging.WARNING, logger="app.services.llm_service")
+
         result = _parse_text_tool_calls(content)
+
         assert result == []
+        assert secret not in caplog.text
+        assert "JSONDecodeError" in caplog.text
 
     def test_multiple_tool_calls(self) -> None:
         """Soporta multiples tool calls en un mismo texto."""
@@ -541,13 +589,13 @@ class TestMockAnswer:
         """Detecta intencion de clima por keywords."""
         result = _mock_answer("¿Cómo está el clima en Traiguén?")
         assert "Traiguén" in result
-        assert "°C" in result
+        assert "simulado" in result
         assert "humedad" in result
 
     def test_keyword_temperatura(self) -> None:
         """'temperatura' dispara respuesta de clima."""
         result = _mock_answer("¿Qué temperatura hace hoy?")
-        assert "°C" in result
+        assert "simulado" in result
 
     def test_keyword_lluvia(self) -> None:
         """'lluvia' dispara respuesta de clima."""
@@ -558,13 +606,14 @@ class TestMockAnswer:
         """Detecta intencion de precio por keyword 'precio'."""
         result = _mock_answer("¿Cuál es el precio de la papa?")
         assert "papa" in result.lower() or "Papa" in result
-        assert "$" in result
+        assert "pesos" in result
+        assert "simulado" in result
         assert "kilo" in result
 
     def test_keyword_cuanto_cuesta(self) -> None:
         """'cuánto cuesta' dispara respuesta de precio."""
         result = _mock_answer("¿Cuánto cuesta la cebolla?")
-        assert "$" in result
+        assert "pesos" in result
 
     def test_fuera_de_scope(self) -> None:
         """Consulta fuera de scope retorna FALLBACK_TEXT."""
@@ -579,7 +628,7 @@ class TestMockAnswer:
     def test_keywords_insensibles_a_mayusculas(self) -> None:
         """Deteccion case-insensitive."""
         result = _mock_answer("CLIMA EN SANTIAGO")
-        assert "°C" in result
+        assert "simulado" in result
 
 
 # ── answer() sin modelo (mock path) ─────────────────────────────
@@ -592,13 +641,13 @@ class TestAnswerMockPath:
         """Sin modelo, answer() delega en _mock_answer para clima."""
         monkeypatch.setattr("app.services.llm_service._get_model", lambda: None)
         result = await answer("¿Cómo está el clima?")
-        assert "°C" in result
+        assert "simulado" in result
 
     async def test_answer_sin_modelo_precio(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Sin modelo, answer() delega en _mock_answer para precio."""
         monkeypatch.setattr("app.services.llm_service._get_model", lambda: None)
         result = await answer("¿Cuál es el precio de la papa?")
-        assert "$" in result
+        assert "simulado" in result
 
     async def test_answer_sin_modelo_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Sin modelo, query fuera de scope retorna fallback."""
@@ -624,7 +673,304 @@ class TestAnswerMockPath:
         """answer con historial vacio funciona igual."""
         monkeypatch.setattr("app.services.llm_service._get_model", lambda: None)
         result = await answer("clima en Traiguén", history=[])
-        assert "°C" in result
+        assert "simulado" in result
+
+
+class TestAnswerGuardasLlm:
+    """Regresiones de guardas anti-cuelgue en camino LLM local."""
+
+    async def test_carga_worker_no_bloquea_event_loop(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El arranque del proceso hijo se delega fuera del event loop."""
+        worker_started = threading.Event()
+        release_worker = threading.Event()
+        heartbeat_completed = False
+
+        def _slow_get_model() -> None:
+            worker_started.set()
+            release_worker.wait(timeout=1.0)
+            return None
+
+        async def _heartbeat() -> None:
+            nonlocal heartbeat_completed
+            while not worker_started.is_set():
+                await asyncio.sleep(0)
+            heartbeat_completed = True
+            release_worker.set()
+
+        monkeypatch.setattr(
+            "app.services.llm_service._get_model",
+            _slow_get_model,
+        )
+
+        result, _ = await asyncio.gather(
+            answer("consulta de integración"),
+            _heartbeat(),
+        )
+
+        assert heartbeat_completed is True
+        assert result == FALLBACK_TEXT
+
+    async def test_answer_delega_inferencia_al_worker(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El happy path conserva el contrato textual de answer()."""
+        captured_messages: list[list[dict[str, object]]] = []
+
+        class _HappyWorker:
+            def complete(
+                self,
+                messages: list[dict[str, object]],
+                max_tokens: int,
+                timeout_seconds: float,
+            ) -> dict[str, object]:
+                captured_messages.append(messages)
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "Respuesta segura desde worker."
+                            }
+                        }
+                    ]
+                }
+
+        monkeypatch.setattr(
+            "app.services.llm_service._get_model",
+            lambda: _HappyWorker(),
+        )
+
+        result = await answer("consulta de integración")
+
+        assert result == "Respuesta segura desde worker."
+        assert captured_messages
+        assert captured_messages[0][-1]["content"] == "consulta de integración"
+
+    async def test_timeout_llm_cae_a_fallback_determinista(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Si el LLM timeout, answer intenta _force_keyword_tool antes de disculpa."""
+        query_secret = "precio papa para rut-secreto-timeout"
+        exception_secret = "prompt-secreto-en-timeout"
+
+        async def _raise_timeout(*args: object, **kwargs: object) -> object:
+            raise TimeoutError(exception_secret)
+
+        async def _forced(*args: object, **kwargs: object) -> str | None:
+            return "Papa está a 900 pesos el kilo según ODEPA."
+
+        monkeypatch.setattr("app.services.llm_service._get_model", lambda: object())
+        monkeypatch.setattr("app.services.llm_service._run_llm_completion", _raise_timeout)
+        monkeypatch.setattr("app.services.llm_service._force_keyword_tool", _forced)
+        caplog.set_level(logging.WARNING, logger="app.services.llm_service")
+
+        result = await answer(query_secret)
+
+        assert result == "Papa está a 900 pesos el kilo según ODEPA."
+        assert query_secret not in caplog.text
+        assert exception_secret not in caplog.text
+        assert "timeout_seconds" in caplog.text
+
+    async def test_llm_ocupado_responde_sin_colgar(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Si la guarda detecta LLM ocupado, retorna mensaje rápido sin esperar."""
+
+        async def _raise_busy(*args: object, **kwargs: object) -> object:
+            raise LlmBusyError("llm_busy")
+
+        async def _forced_none(*args: object, **kwargs: object) -> str | None:
+            return None
+
+        monkeypatch.setattr("app.services.llm_service._get_model", lambda: object())
+        monkeypatch.setattr("app.services.llm_service._run_llm_completion", _raise_busy)
+        monkeypatch.setattr("app.services.llm_service._force_keyword_tool", _forced_none)
+
+        result = await answer("consulta sin producto ni clima")
+        assert "procesando otra consulta" in result.lower()
+
+    async def test_error_runtime_llm_prioriza_fallback_determinista(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Si el runtime del LLM falla, answer retorna datos forzados si existen."""
+        query_secret = "clima para parcela-secreta-runtime"
+        exception_secret = "contenido-privado-en-excepcion"
+
+        async def _raise_runtime(*args: object, **kwargs: object) -> object:
+            raise RuntimeError(exception_secret)
+
+        async def _forced(*args: object, **kwargs: object) -> str | None:
+            return "Mañana en Temuco: máxima de 14 grados, según OpenMeteo."
+
+        monkeypatch.setattr("app.services.llm_service._get_model", lambda: object())
+        monkeypatch.setattr("app.services.llm_service._run_llm_completion", _raise_runtime)
+        monkeypatch.setattr("app.services.llm_service._force_keyword_tool", _forced)
+        caplog.set_level(logging.WARNING, logger="app.services.llm_service")
+
+        result = await answer(query_secret)
+
+        assert "según OpenMeteo" in result
+        assert query_secret not in caplog.text
+        assert exception_secret not in caplog.text
+        assert "RuntimeError" in caplog.text
+
+    async def test_crash_del_worker_conserva_fallback_determinista(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Un hijo muerto se traduce al fallback sin escapar hacia FastAPI."""
+        query_secret = "precio para sujeto-secreto-worker"
+
+        class _CrashedWorker:
+            def complete(
+                self,
+                messages: list[dict[str, object]],
+                max_tokens: int,
+                timeout_seconds: float,
+            ) -> dict[str, object]:
+                raise LlmWorkerCrashedError("worker_crashed")
+
+        async def _forced(*args: object, **kwargs: object) -> str | None:
+            return "Papa está a 900 pesos el kilo según ODEPA."
+
+        monkeypatch.setattr(
+            "app.services.llm_service._get_model",
+            lambda: _CrashedWorker(),
+        )
+        monkeypatch.setattr("app.services.llm_service._force_keyword_tool", _forced)
+        caplog.set_level(logging.WARNING, logger="app.services.llm_service")
+
+        try:
+            result = await answer(query_secret)
+        finally:
+            reset_model()
+
+        assert result == "Papa está a 900 pesos el kilo según ODEPA."
+        assert query_secret not in caplog.text
+        assert "worker_crashed" in caplog.text
+
+    async def test_argumentos_json_invalidos_no_se_loguean(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """El loop conserva solo tool y clase de error, nunca el JSON libre."""
+        query_secret = "consulta-secreta-json"
+        arguments_secret = "telefono-secreto-56912345678"
+        completions = iter(
+            [
+                {"choices": [{"message": {"content": "primera-vuelta"}}]},
+                {"choices": [{"message": {"content": "respuesta final segura"}}]},
+            ]
+        )
+
+        async def _completion(*args: object, **kwargs: object) -> object:
+            return next(completions)
+
+        def _tool_calls(content: str) -> list[dict[str, object]]:
+            if content != "primera-vuelta":
+                return []
+            return [
+                {
+                    "function": {
+                        "name": "get_price",
+                        "arguments": (
+                            f'{{"producto": "papa", "nota": "{arguments_secret}"'
+                        ),
+                    }
+                }
+            ]
+
+        async def _tool_result(*args: object, **kwargs: object) -> str:
+            return "resultado seguro"
+
+        monkeypatch.setattr("app.services.llm_service._get_model", lambda: object())
+        monkeypatch.setattr(
+            "app.services.llm_service._run_llm_completion",
+            _completion,
+        )
+        monkeypatch.setattr(
+            "app.services.llm_service._parse_text_tool_calls",
+            _tool_calls,
+        )
+        monkeypatch.setattr("app.services.llm_service._execute_tool", _tool_result)
+        caplog.set_level(logging.WARNING, logger="app.services.llm_service")
+
+        result = await answer(query_secret)
+
+        assert result == "respuesta final segura"
+        assert query_secret not in caplog.text
+        assert arguments_secret not in caplog.text
+        assert "get_price" in caplog.text
+        assert "JSONDecodeError" in caplog.text
+
+    async def test_loop_agotado_no_loguea_query_ni_tool_call(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Al agotar iteraciones solo registra el contador configurado."""
+        query_secret = "consulta-secreta-loop"
+        arguments_secret = "direccion-secreta-parcela-42"
+        tool_result_secret = "resultado-tool-secreto"
+        completion_count = 0
+
+        async def _completion(*args: object, **kwargs: object) -> object:
+            nonlocal completion_count
+            completion_count += 1
+            content = (
+                "tool-call-generado"
+                if completion_count <= MAX_TOOL_ITERATIONS
+                else "respuesta final segura"
+            )
+            return {"choices": [{"message": {"content": content}}]}
+
+        def _tool_calls(content: str) -> list[dict[str, object]]:
+            if content != "tool-call-generado":
+                return []
+            return [
+                {
+                    "function": {
+                        "name": "get_price",
+                        "arguments": (
+                            '{"producto": "papa", '
+                            f'"nota": "{arguments_secret}"'
+                            "}"
+                        ),
+                    }
+                }
+            ]
+
+        async def _tool_result(*args: object, **kwargs: object) -> str:
+            return tool_result_secret
+
+        monkeypatch.setattr("app.services.llm_service._get_model", lambda: object())
+        monkeypatch.setattr(
+            "app.services.llm_service._run_llm_completion",
+            _completion,
+        )
+        monkeypatch.setattr(
+            "app.services.llm_service._parse_text_tool_calls",
+            _tool_calls,
+        )
+        monkeypatch.setattr("app.services.llm_service._execute_tool", _tool_result)
+        caplog.set_level(logging.WARNING, logger="app.services.llm_service")
+
+        result = await answer(query_secret)
+
+        assert result == "respuesta final segura"
+        assert query_secret not in caplog.text
+        assert arguments_secret not in caplog.text
+        assert tool_result_secret not in caplog.text
+        assert f"agoto {MAX_TOOL_ITERATIONS} iteraciones" in caplog.text
 
 
 # ── Funciones utilitarias ───────────────────────────────────────
@@ -657,10 +1003,52 @@ class TestUtilidades:
 class TestExecuteToolWhitelist:
     """_execute_tool rechaza tools fuera del whitelist."""
 
-    async def test_tool_no_whitelisteada(self) -> None:
-        """Tool fuera del whitelist retorna FALLBACK_TEXT."""
-        result = await _execute_tool("get_advisory", {"topic": "riego"})
+    async def test_tool_no_whitelisteada(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Tool fuera del whitelist retorna fallback sin registrar su nombre."""
+        tool_name_secret = "get_advisory_rut_secreto"
+        argument_secret = "dato-libre-secreto"
+        caplog.set_level(logging.WARNING, logger="app.services.llm_service")
+
+        result = await _execute_tool(
+            tool_name_secret,
+            {"topic": argument_secret},
+        )
+
         assert result == FALLBACK_TEXT
+        assert tool_name_secret not in caplog.text
+        assert argument_secret not in caplog.text
+
+    async def test_error_de_tool_loguea_solo_nombre_validado_y_clase(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Argumentos y mensaje de excepción no aparecen en telemetría."""
+        argument_secret = "coordenada-secreta-tool"
+        exception_secret = "respuesta-privada-en-error-tool"
+
+        async def _failing_handler(**kwargs: object) -> str:
+            raise RuntimeError(exception_secret)
+
+        monkeypatch.setattr(
+            "app.services.llm_service._get_tool_handlers",
+            lambda: {"get_weather": _failing_handler},
+        )
+        caplog.set_level(logging.INFO, logger="app.services.llm_service")
+
+        result = await _execute_tool(
+            "get_weather",
+            {"ubicacion": argument_secret},
+        )
+
+        assert "error" in result.lower()
+        assert argument_secret not in caplog.text
+        assert exception_secret not in caplog.text
+        assert "get_weather" in caplog.text
+        assert "RuntimeError" in caplog.text
 
     async def test_tool_nombre_vacio(self) -> None:
         """Tool con nombre vacio retorna FALLBACK_TEXT."""
@@ -781,7 +1169,7 @@ class TestForceKeywordToolDbError:
 
         monkeypatch.setattr(db_module, "SessionLocal", lambda: _FakeSession())
 
-        def _raise_db_error(session, producto, phone_hash=None):
+        def _raise_db_error(session, producto, mercado="", phone_hash=None):
             raise SQLAlchemyError("database is locked")
 
         monkeypatch.setattr(odepa_service, "get_price_for_llm", _raise_db_error)
@@ -818,9 +1206,15 @@ class TestVentaKilosRegex:
         """'kilos de papa' sin numero no dispara el calculo de venta."""
         assert _VENTA_KILOS_RE.search("kilos de papa") is None
 
-    def test_regex_no_matchea_sin_de(self) -> None:
-        """'tengo 30 kilos' (sin 'de') no dispara venta (reduce falsos positivos)."""
+    def test_regex_no_matchea_sin_texto_despues(self) -> None:
+        """'tengo 30 kilos' al final de frase no dispara venta."""
         assert _VENTA_KILOS_RE.search("tengo 30 kilos") is None
+
+    def test_regex_acepta_sin_de_con_producto(self) -> None:
+        """'cuanto vale 50 kilos papa' (sin 'de') tambien cuenta como venta."""
+        match = _VENTA_KILOS_RE.search("cuanto vale 50 kilos papa")
+        assert match is not None
+        assert match.group(1) == "50"
 
     def test_regex_case_insensitive(self) -> None:
         assert _VENTA_KILOS_RE.search("VOY A VENDER 30 KILOS DE PAPA") is not None
