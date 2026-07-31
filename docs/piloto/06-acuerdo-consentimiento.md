@@ -1,8 +1,11 @@
 # Acuerdo de Uso y Consentimiento de Datos — AgroVoz
 
-> Documento preparado conforme a la Ley 19.628 (vigente hoy) y a la Ley 21.719 sobre Protección
-> de Datos Personales, que entra en vigencia el 1 de diciembre de 2026.
-> **Leer en voz alta al productor, completo, aunque no lo pida.** Dejar una copia firmada al productor.
+> **BORRADOR TÉCNICO — NO USAR NI FIRMAR EN TERRENO.**
+> Requiere responsable y contactos designados, cierre de las brechas P0 y revisión jurídica externa
+> firmada. No constituye asesoría legal ni acredita cumplimiento. La Ley 21.719 entra en vigencia el
+> 1 de diciembre de 2026.
+>
+> Una vez aprobado: leerlo completo al productor y dejarle una copia firmada.
 
 ---
 
@@ -12,7 +15,6 @@
 |---|---|
 | Fecha | ____ / ____ / ______ |
 | Nombre del productor | ______________________________ |
-| RUN (opcional) | ______________________________ |
 | Comuna | ______________________________ |
 | Número de WhatsApp | +56 9 _____________ |
 | Nombre del encargado AgroVoz | ______________________________ |
@@ -27,100 +29,121 @@ pronósticos climáticos enviando un audio **o un mensaje escrito**.
 
 El piloto se realiza en Traiguén, La Araucanía, durante 4 semanas con 3 a 5 productores.
 
-**Responsable de sus datos:** el equipo AgroVoz, integrado por Sebastián Bravo, Francisco Fernández
-y Matías Atuán, estudiantes de Ingeniería en Informática de INACAP Temuco.
+**Responsable de sus datos:** **[POR DESIGNAR ANTES DEL PILOTO]**.
+
+**Representante legal, si corresponde:** **[POR DESIGNAR]**.
 
 **Contacto para cualquier tema de datos personales:**
 
 | Vía | Dato |
 |---|---|
-| WhatsApp de AgroVoz | +56 9 __________ |
-| Correo | __________________ |
-| Presencial | Cualquier integrante del equipo, en Traiguén |
+| WhatsApp o canal equivalente | **[POR COMPLETAR]** |
+| Correo | **[POR COMPLETAR]** |
+| Domicilio | **[POR COMPLETAR]** |
 
-Nos comprometemos a responder cualquier solicitud sobre sus datos en un **plazo máximo de 10 días hábiles**.
+> Sin estos datos completos y un procedimiento aprobado para verificar la identidad de quien
+> solicita, este acuerdo no puede usarse para incorporar participantes.
 
 ---
 
 ## 2. ¿Qué datos recopilamos?
 
-| Dato | ¿Se guarda? | ¿Se comparte? | Detalle |
-|---|---|---|---|
-| Audio enviado por WhatsApp | Temporalmente | No | Se borra del servidor en menos de 24 horas. |
-| Transcripción del audio (el texto de lo que usted dijo) | Sí, de forma anónima | Solo dentro del equipo académico | Se guarda con un código (`phone_hash`), no con su nombre ni su número. |
-| Texto que usted escriba | Sí, de forma anónima | Solo dentro del equipo académico | Igual que la transcripción. |
-| Número de WhatsApp | No en texto claro | No | Se transforma en un código irreversible (`phone_hash`). |
-| Respuesta generada por el sistema | Sí | Solo dentro del equipo académico | Sirve para revisar la calidad. |
-| Fecha y hora de la consulta | Sí | Solo dentro del equipo académico | Para métricas de uso. |
-| Comuna declarada | Sí | No | Para entregarle el clima de su zona. |
+| Dato | Comportamiento actual | Para qué |
+|---|---|---|
+| Audio enviado por WhatsApp | Archivo temporal eliminado del VPS en menos de 24 horas, salvo copia separada autorizada para el dataset de voz | Transcribir y responder |
+| Copia de audio para dataset | Solo si marca “Sí” en 7.2 | Evaluar o mejorar el reconocimiento de voz |
+| Transcripción o texto escrito | Sin memoria autorizada no se conserva en `consultations`. Con `history_consent` queda como staging hasta confirmar entrega y luego pasa al historial consentido | Responder y, opcionalmente, memoria contextual |
+| Respuesta del sistema | Aplica la misma regla: vacía sin opt-in y staging máximo de 24 horas con opt-in | Entrega y memoria contextual opcional |
+| Número/identificador de WhatsApp | El canal lo procesa; AgroVoz usa un hash interno. Las alertas guardan además `wa_chat_id` para poder enviar mensajes | Identidad técnica y entrega |
+| Fecha, hora, intent, producto, tiempos y estado de entrega | Se guardan con la consulta | Métricas y diagnóstico |
+| Comuna/localidad, cultivos y código de grupo | Se guardan en preferencias cuando corresponda | Personalizar clima y métricas grupales |
+| Memoria contextual | Apagada; si se aprueba, guardaría consulta y respuesta por hasta 28 días | Responder pedidos explícitos de la consulta anterior |
+| Alertas | Solo si marca “Sí” en 7.4 | Enviar avisos proactivos |
+| Logs técnicos | Pueden incluir IDs, prefijos de hash o texto truncado | Diagnóstico; su minimización y plazo están pendientes |
 
-**No recopilamos:** nombre completo, dirección exacta del predio, RUN (salvo que usted lo escriba
-voluntariamente en este acuerdo), ubicación GPS ni datos bancarios.
+Estos datos son **seudonimizados, no anónimos**. Quien controla el canal, el servidor y las claves
+puede correlacionarlos. No pedimos dirección exacta del predio, datos bancarios ni ubicación GPS
+precisa. El nombre, firma, fecha y número escritos en este acuerdo también son datos personales y su
+custodia todavía debe aprobarse.
 
 ---
 
 ## 3. ¿Para qué usamos estos datos y por cuánto tiempo?
 
-Usamos los datos anónimos para:
+Las finalidades deben decidirse por separado:
 
-1. **Medir si AgroVoz funciona bien** durante las 4 semanas del piloto.
-2. **Mejorar el reconocimiento de voz del español rural chileno**, ajustando el modelo de
-   transcripción con las frases y el vocabulario que usan los productores de la zona.
-3. **Elaborar el informe académico** del Desafío Crea INACAP 2026.
+1. **Prestar el servicio:** procesar la pregunta y entregar precios o clima.
+2. **Operación y métricas:** medir entrega, latencia y funcionamiento sin conservar contenido libre.
+   La base y el plazo de los metadatos seudonimizados todavía deben aprobarse.
+3. **Dataset de voz opcional:** conservar audio y transcripción para evaluar o mejorar Whisper.
+4. **Memoria contextual opcional:** recordar la consulta anterior por hasta 28 días.
+5. **Alertas opcionales:** enviar mensajes de precio o clima sin una pregunta inmediata.
+6. **Informe académico:** usar únicamente resultados agregados que no identifiquen participantes.
 
 **Plazo de conservación:**
 
 | Dato | Se conserva hasta |
 |---|---|
-| Audio | Menos de 24 horas |
-| Transcripción anónima | Cierre del proyecto académico (estimado: diciembre de 2026) |
-| Métricas de uso agregadas | Sin plazo, porque no permiten identificar a nadie |
+| Audio temporal | Menos de 24 horas, sujeto a verificar excepciones y backups |
+| Query/respuesta transitorias en `consultations` | Tras entrega/fallo; respaldo horario a 24 horas |
+| Metadatos de `consultations` | Plazo pendiente de aprobación |
+| Dataset de voz autorizado | Propuesta hasta diciembre de 2026; borrado automatizado pendiente |
+| Memoria contextual | 28 días si se habilita |
+| Preferencias, alertas, logs y auditoría | Plazo pendiente de aprobación |
+| Métricas realmente agregadas | Plazo por definir según riesgo de reidentificación |
 
-Al cierre del proyecto académico, las transcripciones se eliminan o se conservan **únicamente en
-forma agregada**, sin posibilidad de asociarlas a una persona.
+AgroVoz no usa los datos para venderlos, publicarlos con su nombre o número, publicidad ni
+finalidades secundarias no informadas. Los proveedores necesarios para operar el canal y el
+servidor se describen a continuación.
 
-**No usamos los datos para:** venderlos, publicarlos con su nombre o su número, entregarlos a
-empresas privadas, ni para ningún fin fuera de AgroVoz sin pedirle a usted una autorización nueva
-y separada.
+> Esta declaración no elimina el tratamiento que ya realizan Meta/WhatsApp y Hetzner para operar el
+> canal y el servidor. Sus roles, contratos y plazos deben informarse en la versión aprobada.
 
 ---
 
-## 4. Sus derechos (Ley 21.719)
+## 4. Sus derechos
 
 Usted tiene derecho a:
 
 - **Acceder** a sus datos y saber qué tenemos guardado sobre usted.
 - **Rectificar** cualquier dato incorrecto.
-- **Cancelar** o eliminar sus datos.
+- **Suprimir** o eliminar sus datos cuando corresponda.
 - **Oponerse** a que tratemos sus datos.
 - **Portabilidad:** pedir una copia de sus datos en un formato que pueda llevarse.
+- **Bloqueo:** pedir la suspensión temporal de un tratamiento en los casos previstos.
 - **No quedar sujeto a decisiones automatizadas:** AgroVoz le entrega información, pero ninguna
   decisión sobre usted se toma de forma automática.
 
-Para ejercer cualquiera de estos derechos, use los contactos de la sección 1. Le respondemos en un
-**máximo de 10 días hábiles**, sin costo para usted.
+El canal, la autenticación de la persona solicitante y los plazos operativos deben ser completados y
+revisados antes del piloto. No se promete aquí un plazo distinto del que finalmente determine la
+normativa aplicable y el procedimiento aprobado.
 
 ---
 
 ## 5. ¿Cómo revocar el consentimiento?
 
-Puede revocar su consentimiento en cualquier momento, sin dar explicaciones:
+Cada opt-in opcional se puede revocar por separado. Una vez habilitado el canal formal, podrá hacerlo:
 
 - Enviando un audio o un mensaje de texto al encargado del piloto.
 - Llamando al encargado del piloto.
-- Escribiendo al WhatsApp de AgroVoz la frase: **"Revocar consentimiento"**.
+- Indicando expresamente qué opción revoca: dataset de voz, memoria o alertas.
 
-Una vez que usted revoca:
+La revocación de memoria desde admin autenticado o WhatsApp verificado elimina
+`consultation_history`, redacta query/respuesta transitorias y deja evidencia append-only, pero
+**no elimina automáticamente**:
 
-- **Sus consultas nuevas dejan de guardarse de inmediato.**
-- **Sus transcripciones ya guardadas se eliminan en un plazo de 7 días hábiles.**
-- Puede seguir usando AgroVoz normalmente si lo desea.
+- metadatos no textuales de `consultations`;
+- copias del dataset de voz;
+- logs y backups;
+- preferencias y alertas;
+- datos conservados por WhatsApp/Meta.
 
-> **Advertencia honesta sobre el reconocimiento de voz.** Si antes de que usted revocara ya habíamos
-> usado sus transcripciones para ajustar el modelo de reconocimiento de voz, ese ajuste **no se puede
-> deshacer**: es una limitación técnica real de este tipo de sistemas, no una decisión nuestra.
-> Lo que sí garantizamos es que sus datos no se usarán en ningún ajuste posterior y que dejamos
-> constancia escrita de su revocación. Se lo decimos por adelantado para que decida sabiéndolo.
+Por eso no se promete borrado total en siete días. El flujo integral de acceso, supresión y
+revocación es un bloqueo antes del piloto.
+
+> Si audio o transcripciones se usan para entrenar un modelo, puede no ser técnicamente posible
+> retirar su influencia del modelo ya entrenado. No se debe realizar entrenamiento antes de que esta
+> limitación, el momento de uso y el procedimiento de revocación sean revisados y aceptados.
 
 ---
 
@@ -142,7 +165,7 @@ Una vez que usted revoca:
 
 ---
 
-## 7. Consentimientos
+## 7. Decisiones y consentimientos
 
 Marque con una equis **[X]** según corresponda. Puede aceptar unos y rechazar otros.
 
@@ -151,15 +174,27 @@ Marque con una equis **[X]** según corresponda. Puede aceptar unos y rechazar o
 - [ ] **Acepto usar AgroVoz** durante el piloto y declaro que entiendo la sección 6 sobre el alcance
       de la información que entrega.
 
-### 7.2 Aporte al reconocimiento de voz
+### 7.2 Dataset de voz rural
 
-- [ ] **Sí, autorizo** que se conserven las **transcripciones anónimas** de mis consultas (el texto,
-      no el audio, que se borra en menos de 24 horas) para mejorar el reconocimiento del español
-      rural chileno. Entiendo que si después revoco, el ajuste ya realizado no se puede deshacer.
+- [ ] **Sí, autorizo** conservar una copia seudonimizada del **audio y su transcripción** para
+      evaluar o mejorar el reconocimiento del español rural chileno, separada del audio temporal.
 
-- [ ] **No autorizo.** Uso AgroVoz igual, pero mis consultas no se conservan para ese fin.
+- [ ] **No autorizo el dataset de voz.** Puedo usar el servicio igual. Esta negativa no activa
+      memoria contextual ni alertas.
 
-### 7.3 Avisos automáticos
+### 7.3 Memoria contextual
+
+Si se habilita, AgroVoz puede recordar por hasta 28 días la consulta y respuesta anteriores para
+contestar pedidos explícitos como “¿qué pregunté antes?”.
+
+- [ ] **Sí, autorizo memoria contextual** por hasta 28 días.
+- [ ] **No autorizo memoria contextual.**
+
+> **Estado técnico:** esta elección se registra en `history_consent`, independiente del dataset y
+> las alertas. `CONSULTATION_HISTORY_ENABLED` debe seguir apagado hasta completar responsable,
+> canales, revisión jurídica externa y autorización formal del piloto.
+
+### 7.4 Avisos automáticos
 
 AgroVoz puede enviarle mensajes **sin que usted pregunte**, por ejemplo si el precio de su producto
 sube o baja fuerte, o si se pronostica helada o lluvia intensa en su comuna.
@@ -167,11 +202,11 @@ sube o baja fuerte, o si se pronostica helada o lluvia intensa en su comuna.
 - [ ] **Sí, quiero recibir avisos automáticos** de precio y de clima.
 - [ ] **No quiero recibir avisos automáticos.**
 
-> Puede cambiar de opinión en cualquier momento escribiendo **"No quiero avisos"** al WhatsApp de AgroVoz.
+> Puede cambiar de opinión en cualquier momento por el canal formal que se complete en la sección 1.
 
 ---
 
-## 8. Firmas
+## 8. Firmas del participante y del equipo
 
 Al firmar, declaro que he leído o escuchado este acuerdo completo, que me explicaron lo que no
 entendí, que sé para qué se usarán mis datos y que doy mi consentimiento de forma libre y voluntaria.
@@ -194,13 +229,29 @@ Fecha: ____ / ____ / ______
 
 ---
 
-## 9. Registro interno del equipo AgroVoz
+## 9. Revisión profesional externa — bloqueo
+
+Este documento no puede usarse en terreno sin completar esta sección.
+
+| Campo | Información |
+|---|---|
+| Nombre del profesional jurídico | **[PENDIENTE]** |
+| Credencial o registro | **[PENDIENTE]** |
+| Versión revisada | **[PENDIENTE]** |
+| Fecha | **[PENDIENTE]** |
+| Firma | **[PENDIENTE]** |
+
+---
+
+## 10. Registro interno del equipo AgroVoz
 
 Usar esta sección solo para el sistema:
 
-- [ ] `dataset_consent = true` — autorizó conservar transcripciones anónimas (sección 7.2).
+- [ ] `dataset_consent = true` — autorizó dataset de audio + transcripción (sección 7.2).
 - [ ] `dataset_consent = false` — no autorizó.
-- [ ] `alert_consent = true` — autorizó avisos automáticos (sección 7.3).
+- [ ] `history_consent = true` — autorizó memoria contextual (sección 7.3).
+- [ ] `history_consent = false` — no autorizó o revocó memoria contextual.
+- [ ] `alert_consent = true` — autorizó avisos automáticos (sección 7.4).
 - [ ] `alert_consent = false` — no autorizó avisos automáticos.
 
 Identificador interno (`phone_hash`): ______________________________
@@ -212,7 +263,22 @@ Fecha de registro en sistema: ____ / ____ / ______
 **Notas para el equipo:**
 
 - Guardar este acuerdo en formato físico y digital. **No incluir datos personales en el repositorio de código.**
-- `alert_consent` debe estar implementado y respetado **antes** de enviar cualquier aviso proactivo.
-  Si el campo no existe todavía en `user_prefs`, no se envían avisos.
-- Si el productor marca "No autorizo" en 7.2, verificar que `dataset_consent = false` quede efectivamente
-  registrado antes de la primera consulta.
+- No comenzar el piloto mientras los P0 de la auditoría técnica sigan abiertos.
+- No usar `dataset_consent` como consentimiento de memoria.
+- Mantener `CONSULTATION_HISTORY_ENABLED`, `USE_CONVERSATION_STATE` y `MCP_ENABLED` apagados hasta
+  su revisión y autorización respectivas.
+- Si el productor rechaza 7.2 o 7.4, verificar el valor técnico antes de procesar dataset o alertas.
+- Verificar que la negativa a memoria deje query/respuesta vacías en `consultations` y que el job
+  horario de redacción esté operativo.
+
+## 11. Fuentes y estado
+
+- [BCN — Ley 21.719, versión 01-12-2026](https://www.bcn.cl/leychile/Navegar?idNorma=1209272&idVersion=2026-12-01)
+- [Diario Oficial — Ley 21.719](https://www.diariooficial.interior.gob.cl/publicaciones/2024/12/13/44023/01/2583630.pdf)
+- [Auditoría técnica preliminar de AgroVoz](../legal/auditoria-tecnica-ley-21719.md)
+
+---
+
+**Última actualización:** 29 de julio de 2026
+
+**Versión:** 1.1 (borrador bloqueado para uso en terreno)

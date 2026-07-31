@@ -8,7 +8,7 @@
 
 Problema: más de 205.000 agricultores INDAP pierden 40-60% del precio mayorista por asimetría de información. No tienen acceso a datos de mercado cuando negocian con intermediarios.
 
-Nacido como proyecto estudiantil para Desafío Crea INACAP 2026, hoy es un producto en operación: pipeline E2E de voz (Whisper + LLM + TTS con Tool Calling sobre 9 tools), catálogo completo ODEPA (79 productos, 15 mercados), alertas proactivas de precio y clima, landing page (Astro 7 + Tailwind 4) y dashboard admin de 8 vistas (Jinja2 + HTMX + PWA). Backend: 65 archivos en `app/`, 1134 tests.
+Nacido como proyecto estudiantil para Desafío Crea INACAP 2026, hoy es un producto en operación: pipeline E2E de voz (Whisper + LLM + TTS con Tool Calling sobre 10 tools), catálogo completo ODEPA (79 productos, 15 mercados), alertas proactivas de precio y clima, landing page (Astro 7 + Tailwind 4) y dashboard admin de 8 vistas (Jinja2 + HTMX + PWA). Backend: 72 módulos Python en `app/`, 1.664 tests recolectados.
 
 ## Team
 
@@ -35,9 +35,10 @@ Nacido como proyecto estudiantil para Desafío Crea INACAP 2026, hoy es un produ
 ## Hard constraints
 
 - **Stack 100% open-source.** Whisper, LLM, TTS y gateway WhatsApp corren localmente. Sin APIs pagas externas.
-- **Sin app nativa.** WhatsApp ES la app. El agricultor no instala nada.
+- **WhatsApp es la vía principal y suficiente.** Ningún flujo puede exigir instalar algo: todo lo que el productor necesita tiene que resolverse por WhatsApp. La PWA es un complemento opcional, nunca un requisito.
+- **Sin app nativa iOS/Android.** Si hace falta una interfaz instalable, es PWA sobre el mismo backend.
 - **Sin IoT/sensores.** Solo el micrófono del teléfono.
-- **Sin recomendaciones agronómicas.** El LLM entrega datos de precio y clima, no interpreta.
+- **Recomendaciones agronómicas solo por regla citada.** El LLM nunca improvisa un consejo: enruta y verbaliza reglas resueltas de forma determinística desde hechos publicados por INIA/INDAP/ODEPA, y toda respuesta agronómica cita su fuente y su fecha. Si no hay regla con fuente vigente, el sistema dice que no tiene el dato. Precio y clima siguen siendo datos crudos, sin interpretación.
 - **VPS Hetzner CX43** (8 vCPU, 16 GB RAM, 160 GB SSD) — EUR 12,49/mes (~CLP 13.000)
 - **Debe funcionar en hardware degradado.** El peor caso soportado es 1 vCPU / 6 GB RAM: si el producto no responde ahí, no sirve. Todo cambio de rendimiento se valida contra ese piso, no solo contra el VPS.
 - **Costo operativo:** CLP 100-150 por agricultor/mes (sin costos de API WhatsApp)
@@ -45,7 +46,7 @@ Nacido como proyecto estudiantil para Desafío Crea INACAP 2026, hoy es un produ
 - **SQLite.** Sin servidor de DB separado.
 - **Procesamiento síncrono.** Sin Celery/Redis: cada audio se procesa en el request del webhook.
 - **Sin autenticación de usuarios.** Número WhatsApp = identidad.
-- **Audio temporal:** eliminado del VPS en <24h. Transcripciones anonimizadas.
+- **Audio temporal:** eliminado del VPS en <24h. Transcripciones minimizadas y seudonimizadas.
 - **Ley 21.719** (Protección de Datos, dic 2026) — auditoría formal pre-escalamiento.
 - **Código comentado en español** (contexto académico INACAP)
 
@@ -91,7 +92,7 @@ Nacido como proyecto estudiantil para Desafío Crea INACAP 2026, hoy es un produ
 **Implementado y en operación:**
 - WhatsApp audio → transcripción → consulta ODEPA/clima → respuesta de voz
 - **WhatsApp texto → misma consulta → respuesta escrita.** El productor no siempre puede mandar audio (lugar ruidoso, reunión, mala señal), así que el texto es una vía de entrada de primera clase. Salta Whisper y Piper: ~100 ms contra ~11 s del audio
-- Tool Calling con whitelist estricta de 9 tools: `get_price`, `get_price_history`, `calculate_sale_value`, `calculate_margin`, `get_price_spread`, `get_weather`, `get_clima_historico`, `search_corpus`, `register_expense`
+- Tool Calling con whitelist estricta de 10 tools: `get_price`, `get_price_history`, `calculate_sale_value`, `calculate_margin`, `get_price_spread`, `get_weather`, `get_pronostico`, `get_clima_historico`, `search_corpus`, `register_expense`. Esta última cumple su definición de hecho (#170) pero permanece desactivada por `EXPENSE_TRACKING_ENABLED=false` hasta cerrar la revisión operativa y legal de retención. Mientras el gate esté apagado la tool ni siquiera se anuncia en el prompt.
 - Catálogo ODEPA completo: 79 productos, 15 mercados, ~41.000 filas de precios (verificado: 79/79 responden en `get_price`, `get_price_spread`, `calculate_sale_value` y `get_price_history`)
 - Clima actual e histórico, por comuna del productor (`user_prefs.comuna`), no coordenadas fijas
 - Alertas proactivas de precio y clima (helada, lluvia extrema) con rate limit
@@ -104,11 +105,21 @@ Nacido como proyecto estudiantil para Desafío Crea INACAP 2026, hoy es un produ
 - Clima por coordenadas dinámicas (one-time location share de WhatsApp)
 - Cobertura de mercados fuera del catálogo ODEPA
 
+**En construcción** (decidido el 30/07/2026 al revisar las 10 Discussions):
+- Motor de reglas agronómicas con hechos citados y diagnóstico paso a paso
+- Parcelas del agricultor (cultivo, superficie, comuna) con consentimiento propio y TTL
+- PWA offline-first para el agricultor, complementaria a WhatsApp
+- Console web para agrónomos PRODESAL que siguen a varios productores
+- VAD, streaming audible y barge-in sobre el canal IVR en tiempo real
+
 **Fuera de scope:**
 - Multi-idioma (solo español chileno)
 - App nativa iOS/Android
-- Dashboard para agricultores
 - Pagos integrados
+- Planes premium directos al agricultor: el producto es gratis para él
+- Servidor de DB separado: SQLite se mantiene
+- Manifiesto de plugin público sin autenticación
+- Búsqueda de insumos o tiendas cercanas: no hay fuente oficial y obliga a scraping comercial
 
 ## Architecture overview
 
@@ -121,7 +132,7 @@ Productor → WhatsApp (audio) → Open-WA → VPS Hetzner
   │  → Open-WA descarga audio .ogg                     │
   │  → ffmpeg: .ogg → .wav 16kHz mono                │
   │  → Whisper small: .wav → texto                    │
-  │  → LLM con whitelist de 9 tools (ej):              │
+  │  → LLM con whitelist de 10 tools (ej):             │
   │     ├─ get_price(producto, mercado) → SQLite ODEPA│
   │     └─ get_weather(lat, lon) → OpenMeteo API       │
   │  → Piper TTS: texto → .wav                        │
@@ -335,6 +346,7 @@ El trabajo ya no se organiza por fases: es mantención y evolución de un produc
 
 | Tema | Estado |
 |---|---|
+| `register_expense` bloqueado por revisión legal, no por código: tabla `expenses` con TTL por fila, purga programada, consentimiento propio, borrado en revocación, integración con margen y extracción 100% sobre 39 casos | Cerrado técnicamente (30/07/2026) — gate apagado hasta aprobar los 180 días de retención |
 | Whisper `small` es el cuello del camino de voz: ~9 s de los ~11 s del pipeline en 1 vCPU (el camino de texto responde en ~100 ms) | Abierto — siguiente objetivo de latencia |
 | Consulta que nombra un mercado específico no toma el fast-path y cae al LLM (lento en 1 vCPU) | Abierto |
 | `_formatear_pesos` verbaliza centavos: "14.232 coma 14 pesos". El peso chileno no tiene centavos en circulación | Abierto — decisión de redondeo pendiente |

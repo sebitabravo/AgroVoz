@@ -34,7 +34,7 @@ Productor → WhatsApp (audio) → Open-WA → VPS Hetzner CX43
 5. FastAPI (no Django) — más liviano, mejor para APIs asíncronas
 6. Monorepo: backend + landing + admin
 7. Sin Redis/Celery — procesamiento síncrono para MVP
-8. Audio temporal <24h, transcripciones anonimizadas — cumple Ley 21.719
+8. Audio temporal <24h y transcripciones minimizadas/seudonimizadas — auditoría formal Ley 21.719 pendiente
 9. Sin WebSockets — respuesta HTTP síncrona
 10. Sin autenticación de usuarios en MVP — número WhatsApp = identidad
 11. Open-WA en vez de Twilio — self-hosted, gratuito, protocolo WhatsApp Web

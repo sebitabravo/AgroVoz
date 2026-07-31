@@ -4,8 +4,9 @@
 
 ## Visión general
 
-AgroVoz = asistente de voz por WhatsApp para pequeños agricultores.
-Productor envía audio → sistema transcribe → consulta ODEPA/clima → responde con audio.
+AgroVoz = asistente por WhatsApp para pequeños agricultores.
+El productor envía audio o texto → el sistema consulta ODEPA/clima → responde
+por la misma vía. El texto evita Whisper y TTS.
 
 ## Diagrama de arquitectura
 
@@ -46,20 +47,20 @@ Productor envía audio → sistema transcribe → consulta ODEPA/clima → respo
 ## Flujo de datos end-to-end
 
 ```
-1. Agricultor envía audio por WhatsApp
+1. Agricultor envía audio o texto por WhatsApp
 2. Open-WA recibe mensaje → webhook POST /api/v1/webhook/whatsapp
-3. FastAPI extrae media del mensaje (audio .ogg), descarga vía Open-WA API
-4. ffmpeg convierte .ogg → .wav 16kHz mono
-5. Whisper transcribe .wav → texto
+3. Para audio, FastAPI extrae media `.ogg`; para texto usa el contenido validado
+4. Solo audio: ffmpeg convierte `.ogg` → `.wav` 16kHz mono
+5. Solo audio: Whisper transcribe `.wav` → texto
 6. Texto → LLM con Tool Calling:
    - Si pregunta por precio → query SQLite ODEPA
    - Si pregunta por clima → GET OpenMeteo API
-   - Whitelist de 9 tools (ver lista completa en `app/services/` más abajo). Si alucina una tool fuera de la whitelist → fallback.
-7. LLM genera respuesta textual (datos, NO recomendaciones agronómicas)
-8. Piper TTS convierte texto → audio .wav
-9. ffmpeg convierte .wav → .ogg (compatible WhatsApp)
-10. FastAPI envía audio respuesta vía Open-WA API (POST /api/sessions/default/messages/send-audio)
-11. Open-WA entrega audio al agricultor por WhatsApp
+   - Whitelist de 10 tools (ver lista completa en `app/services/` más abajo). Si alucina una tool fuera de la whitelist → fallback.
+7. Fast-path determinista o LLM genera respuesta textual (datos, NO recomendaciones)
+8. Solo audio: Piper TTS convierte texto → audio `.wav`
+9. Solo audio: ffmpeg convierte `.wav` → `.ogg`
+10. FastAPI envía texto o audio por Open-WA y registra entrega efectiva
+11. Tras el envío, elimina el staging libre; el historial opcional exige opt-in
 ```
 
 ## Componentes del backend
@@ -74,7 +75,7 @@ Productor envía audio → sistema transcribe → consulta ODEPA/clima → respo
 
 ### `app/services/` — Capa de negocio
 - `whisper_service.py` — transcripción de audio (descarga, ffmpeg, Whisper)
-- `llm_service.py` — interpretación NL + Tool Calling con whitelist (9 tools: get_price, get_price_spread, get_price_history, calculate_sale_value, calculate_margin, get_weather, get_clima_historico, search_corpus, register_expense) + fallback OpenRouter
+- `llm_service.py` — interpretación NL + Tool Calling con whitelist (10 tools: get_price, get_price_spread, get_price_history, calculate_sale_value, calculate_margin, get_weather, get_pronostico, get_clima_historico, search_corpus, register_expense) + fallback OpenRouter
 - `tts_service.py` — síntesis de voz con Piper TTS
 - `odepa_service.py` — consultas a SQLite ODEPA + sync diario
 - `weather_service.py` — consultas a OpenMeteo API (forecast + histórico)
@@ -85,6 +86,11 @@ Productor envía audio → sistema transcribe → consulta ODEPA/clima → respo
 - `monitor_service.py` — salud de servicios (CPU, RAM, disco, Whisper, LLM, TTS)
 - `alert_service.py` — alertas proactivas de precio y clima
 - `metrics_service.py` — agregación de métricas para dashboard y piloto
+- `delivery_service.py` — estado real de entrega y redacción de contenido transitorio
+- `consultation_history_service.py` — memoria consentida, TTL y borrado auditado
+- `conversation_state.py` — estado efímero y exclusión de turnos concurrentes
+- `indap_credit_service.py` — derivación determinista a fuentes oficiales, sin asesoría
+- `mcp_service.py` — handlers de la RPC administrativa interna feature-gated
 
 ### `app/core/` — Configuración
 - `config.py` — settings con pydantic-settings
@@ -93,12 +99,14 @@ Productor envía audio → sistema transcribe → consulta ODEPA/clima → respo
 
 ### `app/models/` — Datos
 - `odepa_price.py` — modelo SQLAlchemy para tabla de precios ODEPA
-- `consultation.py` — modelo para registro de consultas (métricas, feedback, revisión)
+- `consultation.py` — métricas y staging libre transitorio, nunca memoria canónica
+- `consultation_history.py` — memoria consentida y evidencia append-only de borrado
 - `alert.py` — modelo para alertas proactivas de precio/clima
-- `user_prefs.py` — preferencias del agricultor (comuna, cultivos de interés)
+- `user_prefs.py` — identidad individual/grupal, comuna, cultivos y tres opt-ins separados
 
 ### `app/jobs/` — Tareas programadas
 - `sync_odepa.py` — cron job 06:00 AM: descarga CSV ODEPA → upsert SQLite
+- `purge_consultation_history.py` — purga TTL auditable del historial consentido
 
 ## Componentes del frontend
 
@@ -140,14 +148,18 @@ CREATE TABLE odepa_prices (
 -- Registro de consultas (métricas)
 CREATE TABLE consultations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    phone_hash TEXT NOT NULL,  -- SHA256 del número (anonimizado)
-    query_text TEXT,
-    intent TEXT,               -- 'price', 'weather', 'unknown'
-    product TEXT,
-    mercado TEXT,
-    response_text TEXT,
+    phone_hash TEXT NOT NULL,  -- HMAC-SHA256; seudónimo, no anonimización
+    query_text TEXT NOT NULL,  -- vacío salvo staging consentido
+    intent TEXT,               -- 'precio', 'clima', 'desconocido', ...
+    producto TEXT,
+    response_text TEXT NOT NULL, -- misma política de staging
     latency_ms INTEGER,
     audio_duration_ms INTEGER,
+    delivery_status TEXT NOT NULL DEFAULT 'pending',
+    delivered_at TIMESTAMP,
+    delivery_error_code TEXT,
+    requires_review BOOLEAN NOT NULL DEFAULT 0,
+    is_test BOOLEAN NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -179,8 +191,10 @@ CREATE INDEX idx_consultations_created ON consultations(created_at);
    Cada request se procesa en el mismo hilo. Si latencia >15s, reevaluar.
    Nota: Open-WA incluye su propio Redis internamente (cache de sesiones WhatsApp).
 
-8. **Audio temporal, no permanente.** Eliminar del VPS en <24h. Transcripciones anonimizadas
-   se retienen para fine-tuning. Cumple Ley 21.719.
+8. **Audio temporal y dataset opcional son tratamientos distintos.** El audio operativo
+   se elimina del VPS en <24h. Solo `dataset_consent=true` permite copiar audio y
+   transcripción al dataset rural. Son datos seudonimizados, no anónimos, y esta
+   medida técnica no permite declarar cumplimiento de la Ley 21.719.
 
 9. **Sin WebSockets.** Respuesta síncrona HTTP. Open-WA entrega el webhook y FastAPI
    responde cuando el pipeline termina. Si latencia >15s → reevaluar modo asíncrono.
@@ -242,22 +256,29 @@ CREATE INDEX idx_consultations_created ON consultations(created_at);
     offline para monitoreo en terreno sin internet. El agricultor NO usa PWA
     — sigue en WhatsApp. Público objetivo: equipo AgroVoz, INDAP, PRODESAL.
 
-17. **Corpus INDAP para derivación a crédito (#174).** `corpus/indap_creditos.yaml`
-    contiene información de programas INDAP (crédito corto plazo, enlace, PDI,
-    PRODESAL). La tool `search_corpus` lo indexa automáticamente. El LLM deriva
-    a INDAP solo cuando el agricultor pregunta explícitamente por financiamiento,
-    citando la fuente oficial. Sin recomendaciones financieras.
+17. **Derivación informativa a crédito INDAP (#174).** Un detector determinista
+    precede al LLM y responde solo con un snapshot oficial versionado, fecha de
+    revisión y enlaces allowlisted. No calcula montos/tasas, no evalúa elegibilidad,
+    no pide PII y no recomienda contratar. Para audio, el enlace se envía en un
+    mensaje de texto complementario. La revisión formal de contenido sigue siendo
+    un gate externo.
 
-18. **Soporte grupal PRODESAL (#173).** El sistema soporta grupos de WhatsApp
-    (un número por grupo PRODESAL/comunidad). Cada miembro se identifica por
-    hash de teléfono. Las respuestas son individuales (no broadcast). El
-    administrador PRODESAL puede consultar métricas agregadas del grupo.
+18. **Soporte grupal PRODESAL (#173).** `user_prefs` distingue `individual` y
+    `prodesal_group`; un grupo usa un código slug no sensible y localidad general.
+    El número nunca se reemplaza como identidad interna: `phone_hash` sigue siendo
+    la clave. La API admin conserva transiciones coherentes y el dashboard agrega
+    consultas/entregas/fallos/latencia por grupo sin listar integrantes ni contenido.
 
 19. **Canal IVR de respaldo (#172).** Para agricultores sin smartphone,
-    se contempla un canal de respaldo vía llamada telefónica (IVR) usando
-    Twilio Programmable Voice. Post-MVP: el agricultor llama, dicta su consulta
-    y recibe respuesta de voz. Requiere presupuesto para Twilio (~$0.013/min).
-    No implementado en MVP — documentado como opción futura.
+    existe un spike local reproducible con Asterisk, un dialplan mínimo y
+    locuciones generadas desde ODEPA mediante Piper. El perfil `ivr` no publica
+    puertos ni forma parte del Compose de producción. La prueba local reproduce
+    audio telefónico PCM mono de 8 kHz, pero no equivale a una llamada desde la
+    red pública. Un DID/SIP chileno agrega costo recurrente y requiere
+    autorización operativa/legal; por eso el despliegue PSTN queda bloqueado
+    hasta contar con presupuesto y validación E2E. No se usará Twilio porque
+    contradice el stack open-source y agrega una API paga. Evidencia y decisión:
+    `docs/spike-ivr.md`.
 
 20. **WhatsApp: seguir con Open-WA, no migrar a Kapso (#194).** Se evaluó
     Kapso, WaliChat y Wassenger como APIs WhatsApp que no requieren mantener
@@ -269,11 +290,72 @@ CREATE INDEX idx_consultations_created ON consultations(created_at);
     presupuesto institucional (B2G) que absorba el costo, (c) el costo por
     agricultor se mantiene bajo CLP 150/mes.
 
-21. **MCP server de gestión (#193) — andamiaje post-MVP.** Se creó la base
-    de un MCP server (`app/mcp/router.py`) con autenticación por API key
-    (`secrets.compare_digest` contra `settings.mcp_admin_key`/`mcp_api_key`)
-    y scopes granulares (read / admin:write). **No está montado en `main.py`
-    ni tiene los handlers de tools implementados (son stubs).** Complementa,
-    no reemplaza, el dashboard admin Jinja2+HTMX ya existente. Se activará
-    solo si el equipo valida que prefiere gestionar por Claude Code vs. el
-    dashboard.
+21. **RPC administrativa interna tipo MCP (#193/#200), no MCP estándar.**
+    El contrato existente en `app/mcp/router.py` se mantiene como una API
+    administrativa pequeña (`/mcp/tools`) autenticada por API key y scopes
+    `read` / `admin:write`. No implementa el transporte JSON-RPC ni anuncia
+    compatibilidad con clientes MCP estándar; adoptar ese protocolo exigiría
+    otro ADR y una justificación de dependencia. Complementa, no reemplaza,
+    el dashboard Jinja2+HTMX. Su feature gate queda apagado por defecto y solo
+    puede montarse con dos claves fuertes, distintas y rate limit dedicado.
+    Las herramientas de conversación exponen metadatos operativos acotados:
+    nunca teléfono, `phone_hash`, consulta/respuesta cruda, excepciones, paths
+    ni secretos. La activación productiva requiere provisionar claves en
+    Dokploy y verificar el origen IP detrás de Traefik.
+
+22. **Entrega efectiva separada de clasificación de intent (#207).** Una
+    consulta se persiste primero como `pending`; `AudioService` la cambia a
+    `delivered` solo después de que Open-WA confirma el envío principal, o a
+    `failed` ante un fallo verificable. Los registros históricos permanecen
+    `pending` porque no se puede inventar su resultado. `success_rate` se
+    calcula como `delivered / (delivered + failed)` y excluye `pending` e
+    `is_test=true`. El código de error es una categoría cerrada y nunca guarda
+    mensajes de excepción ni PII.
+
+23. **State machine efímera y feature-gated (#192).** Con
+    `USE_CONVERSATION_STATE=false` el pipeline queda stateless. Al activarla, un
+    registro thread-safe en memoria reclama el turno antes de Whisper/LLM/DB,
+    rechaza concurrencia con respuesta corta y transiciona
+    `RECIBIDA → BUSCANDO → RESPONDIENDO/ACLARANDO → ESPERANDO`. Usa únicamente
+    HMAC válido, reloj monotónico y leases con token; no persiste texto, slots ni
+    estado en SQLite. Timeout por defecto: 30 minutos.
+
+24. **Memoria contextual separada del staging operativo (#195/#201).**
+    `CONSULTATION_HISTORY_ENABLED=false` por defecto y `history_consent` es un
+    opt-in independiente de dataset y alertas. Solo una entrega confirmada puede
+    copiar contenido sustantivo al historial. La fuente en `consultations` se
+    redacta después, los fallos se redactan en la misma transacción y un job
+    horario elimina staging con más de 24 horas. El historial usa TTL configurable
+    de 28 días, borrado auditado e idempotente y comandos WhatsApp cerrados para
+    revocar/borrar sin pasar por el LLM. La revisión jurídica externa sigue siendo
+    obligatoria antes de activar.
+
+25. **Humanización condicionada por el canal WhatsApp (#136/#213).**
+    Las reglas conversacionales, la escalera de recuperación y los indicadores
+    `recording`/`typing` mejoran la espera sin fingir atención humana. El LLM corre
+    en un proceso hijo reiniciable para que un bloqueo nativo no congele FastAPI.
+    No se implementan VAD de fin de habla, streaming audible ni barge-in en
+    WhatsApp: el webhook recibe una grabación ya terminada y la respuesta es otro
+    archivo completo. Esas técnicas se reconsideran solo en un canal síncrono,
+    como IVR. `faster-whisper` o reemplazar Piper exige primero benchmark de WER,
+    CPU, RAM, latencia y calidad sobre 1 vCPU/6 GB. Evidencia:
+    `docs/humanizacion-voz.md`.
+
+26. **Registro de gastos fail-closed (#34/#170).** La tool `register_expense`
+    persiste en la tabla `expenses`: seudonimizada por `phone_hash`, sin
+    teléfono ni texto libre, con `expires_at` congelado por fila al registrar
+    para que un cambio de `EXPENSE_RETENTION_DAYS` no altere lo ya guardado.
+    Exige `expense_consent` propio, independiente del consentimiento de
+    historial y de dataset. La retención se aplica de verdad: la tarea de fondo
+    del lifespan y el job `app/jobs/purge_expenses.py` ejecutan
+    `purge_expired_expenses()`, y ambos corren aunque el gate esté apagado
+    porque suspender escrituras nuevas no suspende la retención de lo ya
+    escrito. Revocar el consentimiento borra los gastos del sujeto; un fallo
+    responde 503 sin reactivar el consentimiento. `calculate_margin` descuenta
+    los gastos vigentes del producto.
+
+    `EXPENSE_TRACKING_ENABLED=false` sigue siendo el default. Mientras el gate
+    esté apagado la tool **no se anuncia en el prompt**: anunciar una tool que
+    el servicio va a rechazar gasta 809 caracteres de prefijo en cada request y
+    quema un round-trip completo de LLM, que en 1 vCPU es el cuello. Encenderlo
+    depende de aprobar la retención de 180 días en revisión legal, no de código.

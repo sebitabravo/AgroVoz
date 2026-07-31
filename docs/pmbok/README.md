@@ -2,7 +2,8 @@
 
 Documentación de gestión de proyecto para la evaluación de INACAP.
 
-**Estado: por escribir.** Este README es el plan; los documentos aún no existen.
+**Estado al 29/07/2026: borrador completo, pendiente de revisión y aprobación.**
+Existen los 11 documentos de gestión y el informe de defensa enumerados abajo.
 
 ## El recorte: 11 documentos, no 27
 
@@ -23,7 +24,8 @@ Quedan **11 documentos + 1 informe de defensa**.
 El proyecto se construyó entre el **16/06/2026 y el 24/07/2026** dejando rastro completo:
 
 ```
-110 commits · 91 issues cerrados · 87 pull requests integrados
+112 commits · 100 issues (86 cerrados, 14 abiertos) ·
+103 pull requests (89 integrados, 4 abiertos, 10 cerrados sin merge)
 ```
 
 Buena parte de la evidencia PMBOK **se extrae, no se inventa**:
@@ -62,26 +64,25 @@ seguido un plan que nunca existió.
 
 ## Los documentos
 
-| # | Documento | Archivo | Fuente principal | Est. |
+| # | Documento | Archivo | Fuente principal | Estado |
 |---|---|---|---|---|
-| 1 | Acta de Constitución | `01-acta-constitucion.md` | `negocio/01`, `negocio/02` | 1 h |
-| 2 | Plan de Dirección del Proyecto | `02-plan-direccion.md` | Git log + `negocio/05` | 3 h |
-| 3 | Enunciado del Alcance + EDT | `03-alcance-edt.md` | `negocio/03`, `negocio/04` | 1,5 h |
-| 4 | Matriz de Trazabilidad | `04-trazabilidad.md` | Issues y PRs | 1 h |
-| 5 | Cronograma e Hitos | `05-cronograma.md` | Git log | 2 h |
-| 6 | Plan de Calidad (ISO 25010) | `06-calidad.md` | Tests, ruff, mypy, CI | 2 h |
-| 7 | Recursos y Matriz RACI | `07-recursos-raci.md` | `negocio/10` + entrevistas al equipo | 2 h |
-| 8 | Registro de Riesgos + Matriz P/I | `08-riesgos.md` | `negocio/07`, `SECURITY.md`, `docs/legal/` | 1,5 h |
-| 9 | Plan de Comunicaciones | `09-comunicaciones.md` | `negocio/11` | 1 h |
-| 10 | Registro de Interesados | `10-interesados.md` | `negocio/09`, `negocio/11` | 1,5 h |
-| 11 | Control de Cambios | `11-control-cambios.md` | PRs integrados | 0,5 h |
-| 12 | Informe Final de Defensa | `12-informe-defensa.md` | Todos los anteriores | 2 h |
+| 1 | Acta de Constitución | `01-acta-constitucion.md` | `negocio/01`, `negocio/02` | Redactado |
+| 2 | Plan de Dirección del Proyecto | `02-plan-direccion.md` | Git log + `negocio/05` | Redactado |
+| 3 | Enunciado del Alcance + EDT | `03-alcance-edt.md` | `negocio/03`, `negocio/04` | Redactado |
+| 4 | Matriz de Trazabilidad | `04-trazabilidad.md` | Issues y PRs | Redactado |
+| 5 | Cronograma e Hitos | `05-cronograma.md` | Git log | Redactado |
+| 6 | Plan de Calidad (ISO 25010) | `06-calidad.md` | Tests, ruff, mypy, CI | Redactado |
+| 7 | Recursos y Matriz RACI | `07-recursos-raci.md` | `negocio/10` + entrevistas al equipo | Redactado |
+| 8 | Registro de Riesgos + Matriz P/I | `08-riesgos.md` | `negocio/07`, `SECURITY.md`, `docs/legal/` | Redactado |
+| 9 | Plan de Comunicaciones | `09-comunicaciones.md` | `negocio/11` | Redactado |
+| 10 | Registro de Interesados | `10-interesados.md` | `negocio/09`, `negocio/11` | Redactado |
+| 11 | Control de Cambios | `11-control-cambios.md` | PRs integrados | Redactado |
+| 12 | Informe Final de Defensa | `12-informe-defensa.md` | Todos los anteriores | Redactado |
 
-**Total estimado: 19-22 horas.**
-
-La estimación de la discussion #137 era de 60-88 horas, pero asumía que el código todavía estaba por
-escribirse. Con el producto terminado y el historial disponible, el grueso es composición y
-extracción, no redacción desde cero.
+La estimación inicial de este recorte era 19–22 horas. La Discussion #137
+estimaba 60–88 horas bajo el supuesto, hoy obsoleto, de que parte importante
+del código aún estaba por escribirse. El borrador no equivale a aprobación
+académica ni a cierre del proyecto.
 
 ## Riesgos conocidos de esta documentación
 
