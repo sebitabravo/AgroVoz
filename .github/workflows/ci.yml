@@ -209,7 +209,16 @@ jobs:
 
       - name: Create .env for compose validation
         if: steps.gate.outputs.skip != 'true'
-        run: cp .env.example .env
+        run: |
+          cp .env.example .env
+          # El servicio ivr del spike (#172) está detrás de profiles: ["ivr"] y
+          # nunca se levanta por defecto, pero `docker compose config` interpola
+          # TODOS los servicios, incluidos los de un profile inactivo. Su
+          # IVR_ARI_PASSWORD usa la forma ${VAR:?...}, así que sin valor este job
+          # falla aunque el servicio no corra. Se inyecta un placeholder: el job
+          # valida sintaxis, no credenciales, y el guard sigue intacto para quien
+          # levante el profile de verdad.
+          echo 'IVR_ARI_PASSWORD=ci-placeholder-no-usar' >> .env
 
       - name: Validate dev compose
         if: steps.gate.outputs.skip != 'true'
