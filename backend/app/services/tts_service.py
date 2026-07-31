@@ -25,6 +25,7 @@ import threading
 import time
 import uuid
 import wave
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -129,6 +130,14 @@ def normalizar_para_voz(texto: str) -> str:
 # para evitar OOM en VPS con 16GB RAM.
 _MAX_PIPER_CHARS = 500
 
+# Tope de fragmentos sintetizados en paralelo (#136). Piper libera el GIL
+# durante la inferencia ONNX, asi que varios fragmentos cortos rinden real
+# en CPU multi-nucleo: medido 1.32x en 3 oraciones sobre hardware de
+# desarrollo. En el piso de 1 vCPU no hay nucleo de sobra para paralelizar,
+# pero tampoco degrada: mismo trabajo total, sin oversubscription porque el
+# tope nunca supera los fragmentos reales de una respuesta.
+_MAX_PARALLEL_CHUNKS = 4
+
 # Regex para dividir texto en oraciones. Preserva el signo de puntuacion
 # como parte de la oracion anterior.
 #
@@ -209,10 +218,7 @@ class TTSService:
 
             model_file = Path(self._model_path)
             if not model_file.exists():
-                raise PiperModelNotFoundError(
-                    "Modelo Piper no encontrado. Descárguelo con "
-                    "scripts/download_models.sh"
-                )
+                raise PiperModelNotFoundError("Modelo Piper no encontrado. Descárguelo con scripts/download_models.sh")
 
             # Lazy import: evita que CI falle si piper-tts no esta instalado.
             from piper import PiperVoice
@@ -549,36 +555,49 @@ class TTSService:
             raise ValueError("El texto a sintetizar no contiene frases validas")
 
         file_tag = uuid.uuid4().hex[:12]
-        wav_paths: list[Path] = []
+        wav_paths = [output_dir / f"tts_{file_tag}_{i:03d}.wav" for i in range(len(chunks))]
 
-        # Sintetizar cada fragmento
-        for i, chunk in enumerate(chunks):
-            wav_path = output_dir / f"tts_{file_tag}_{i:03d}.wav"
+        # Sintetizar fragmentos en paralelo: Piper libera el GIL durante la
+        # inferencia ONNX, asi que varios fragmentos cortos rinden en CPU
+        # multi-nucleo (#136). Los resultados se leen en orden para que un
+        # error se reporte de forma deterministica.
+        workers = min(len(chunks), _MAX_PARALLEL_CHUNKS)
+        executor = ThreadPoolExecutor(max_workers=workers)
+        futures = [
+            executor.submit(self._synthesize_wav, chunk, wav_path)
+            for chunk, wav_path in zip(chunks, wav_paths, strict=True)
+        ]
+
+        error: tuple[int, PiperModelNotFoundError | RuntimeError | OSError | ValueError] | None = None
+        for i, future in enumerate(futures):
             try:
-                self._synthesize_wav(chunk, wav_path)
-                wav_paths.append(wav_path)
-            except PiperModelNotFoundError:
-                # PiperModelNotFoundError se propaga sin wrapper para que
-                # el caller pueda distinguir "modelo no disponible" de
-                # "error de sintesis" y hacer fallback a hello.ogg.
-                wav_path.unlink(missing_ok=True)
-                for p in wav_paths:
-                    p.unlink(missing_ok=True)
-                raise
-            except (RuntimeError, OSError, ValueError) as exc:
-                logger.error(
-                    "Error sintetizando fragmento — index=%d total=%d text_len=%d error=%s",
-                    i + 1,
-                    len(chunks),
-                    len(chunk),
-                    type(exc).__name__,
-                )
-                # Cleanup: eliminar WAV parcial (si _synthesize_wav creo
-                # el archivo pero fallo en writeframes) + WAVs previos
-                wav_path.unlink(missing_ok=True)
-                for p in wav_paths:
-                    p.unlink(missing_ok=True)
-                raise RuntimeError(f"Error al sintetizar fragmento {i + 1}/{len(chunks)}") from exc
+                future.result()
+            except (PiperModelNotFoundError, RuntimeError, OSError, ValueError) as exc:
+                error = (i, exc)
+                break
+
+        # Esperar el cierre ANTES de limpiar: si no se espera, un fragmento
+        # que seguia en curso puede terminar de escribir su WAV justo
+        # despues del unlink, dejando un archivo huerfano en data/audio_temp.
+        executor.shutdown(wait=True, cancel_futures=True)
+
+        if error is not None:
+            error_index, exc = error
+            for p in wav_paths:
+                p.unlink(missing_ok=True)
+            if isinstance(exc, PiperModelNotFoundError):
+                # Se propaga sin wrapper para que el caller pueda distinguir
+                # "modelo no disponible" de "error de sintesis" y hacer
+                # fallback a hello.ogg.
+                raise exc
+            logger.error(
+                "Error sintetizando fragmento — index=%d total=%d text_len=%d error=%s",
+                error_index + 1,
+                len(chunks),
+                len(chunks[error_index]),
+                type(exc).__name__,
+            )
+            raise RuntimeError(f"Error al sintetizar fragmento {error_index + 1}/{len(chunks)}") from exc
 
         # Concatenar fragmentos y convertir a .ogg
         final_wav_path = output_dir / f"tts_{file_tag}_final.wav"

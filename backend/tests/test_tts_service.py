@@ -8,6 +8,7 @@ El split de texto se prueba sin mocks (es logica pura de strings).
 
 import logging
 import subprocess
+import time
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,7 @@ from app.services.tts_service import (
 
 # ───────────────────────── Fixtures compartidas ─────────────────────────
 
+
 @pytest.fixture(autouse=True)
 def _mock_ffmpeg() -> Generator[None, None, None]:
     """Mockea subprocess.run para que CI no necesite ffmpeg.
@@ -33,6 +35,7 @@ def _mock_ffmpeg() -> Generator[None, None, None]:
     subprocess.run (ej: para simular errores de ffmpeg) lo heredan
     naturalmente.
     """
+
     def _mock_run(cmd, *args, **kwargs):  # type: ignore[no-untyped-def]
         # Extraer el ultimo argumento que no es flag: es el output file
         output_path = None
@@ -408,6 +411,46 @@ class TestTTSServiceSynthesize:
         assert "Santiago" not in caplog.text
         assert str(tmp_audio_dir) not in caplog.text
 
+    def test_synthesize_error_en_fragmento_no_deja_wav_huerfano(
+        self,
+        tmp_audio_dir: Path,
+        tmp_path: Path,
+    ) -> None:
+        """Un fragmento lento que sigue en curso al fallar otro no debe
+        sobrevivir a la limpieza (#136: fragmentos ahora se sintetizan
+        en paralelo, no secuencialmente).
+
+        Si la limpieza corriera antes de esperar el cierre del executor,
+        el fragmento lento terminaria de escribir su .wav DESPUES del
+        unlink, dejando un archivo huerfano en data/audio_temp.
+        """
+        model_path = _create_fake_model_file(tmp_path)
+
+        def synthesize_con_fallo(text: str, syn_config: Any = None, **_: Any) -> list[Any]:
+            if "falla" in text:
+                raise RuntimeError("fallo simulado de Piper")
+            time.sleep(0.2)  # el fragmento "lento" sigue en curso cuando el primero ya fallo
+            return _fake_synthesize_text(text)
+
+        mock_voice = MagicMock()
+        mock_voice.synthesize.side_effect = synthesize_con_fallo
+
+        # El fragmento que falla va PRIMERO: el bucle procesa los futures en
+        # orden y hace break al detectar el error, asi que solo un fragmento
+        # de indice MAYOR puede seguir en curso en ese momento.
+        texto = "Este falla altiro. " + ("Este es lento y tarda en escribir su audio. " * 15)
+
+        with patch(
+            "app.services.tts_service.TTSService._load_model",
+            return_value=mock_voice,
+        ):
+            service = TTSService(model_path=str(model_path))
+            with pytest.raises(RuntimeError, match="Error al sintetizar fragmento"):
+                service.synthesize(texto, output_dir=tmp_audio_dir)
+
+        # Ningun .wav debe sobrevivir, ni siquiera el del fragmento lento.
+        assert list(tmp_audio_dir.glob("*.wav")) == []
+
     def test_synthesize_reusa_cache(
         self,
         tmp_audio_dir: Path,
@@ -601,9 +644,7 @@ class TestTTSServiceConversion:
                 side_effect=subprocess.CalledProcessError(
                     1,
                     ["ffmpeg"],
-                    stderr=(
-                        f"secreto-ffmpeg ruta={tmp_path} teléfono=56912345678"
-                    ).encode(),
+                    stderr=(f"secreto-ffmpeg ruta={tmp_path} teléfono=56912345678").encode(),
                 ),
             ),
             pytest.raises(subprocess.CalledProcessError),
