@@ -8,6 +8,7 @@ from app.models.alert import Alert
 from app.models.consultation import Consultation
 from app.models.expense import Expense
 from app.models.odepa_price import OdepaPrice
+from app.models.parcela import Parcela
 from app.models.user_prefs import UserPrefs
 
-__all__ = ["Alert", "Consultation", "Expense", "OdepaPrice", "UserPrefs"]
+__all__ = ["Alert", "Consultation", "Expense", "OdepaPrice", "Parcela", "UserPrefs"]

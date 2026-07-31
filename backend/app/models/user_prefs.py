@@ -50,6 +50,10 @@ class UserPrefs(Base):
     ``expense_consent`` controla datos económicos declarados para #170. También
     es independiente: habilitar historial, dataset o alertas nunca autoriza
     guardar montos y conceptos de gastos.
+
+    ``parcela_consent`` controla el registro de parcelas (cultivo, superficie,
+    comuna) para el motor de reglas agronómicas y el clima por parcela (C5).
+    Igual de independiente: ningún otro consentimiento habilita este.
     """
 
     __tablename__ = "user_prefs"
@@ -97,6 +101,10 @@ class UserPrefs(Base):
             "expense_consent IN (0, 1)",
             name="ck_user_prefs_expense_consent_bool",
         ),
+        CheckConstraint(
+            "parcela_consent IN (0, 1)",
+            name="ck_user_prefs_parcela_consent_bool",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -139,6 +147,13 @@ class UserPrefs(Base):
         default=False,
         server_default="0",
     )
+    # Consentimiento separado para registrar parcelas (cultivo, superficie, comuna) — C5.
+    parcela_consent: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="0",
+    )
     # Cultivos de interés del productor, almacenados como JSON en TEXT.
     # Nullable: se capturan durante el onboarding o via admin (issue #125).
     # Ejemplo: '["papa", "trigo", "tomate"]'
@@ -151,8 +166,9 @@ class UserPrefs(Base):
         alert_consent = self.alert_consent if self.alert_consent is not None else False
         history_consent = self.history_consent if self.history_consent is not None else False
         expense_consent = self.expense_consent if self.expense_consent is not None else False
+        parcela_consent = self.parcela_consent if self.parcela_consent is not None else False
         return (
             f"<UserPrefs(dataset_consent={dataset_consent}, "
             f"alert_consent={alert_consent}, history_consent={history_consent}, "
-            f"expense_consent={expense_consent})>"
+            f"expense_consent={expense_consent}, parcela_consent={parcela_consent})>"
         )

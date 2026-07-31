@@ -76,6 +76,8 @@ WHITELIST_TOOLS = frozenset(
         "get_clima_historico",
         "search_corpus",
         "register_expense",
+        "register_parcela",
+        "get_parcelas",
     }
 )
 
@@ -544,6 +546,54 @@ TOOLS: list[dict[str, object]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "register_parcela",
+            "description": (
+                "USAR para REGISTRAR UNA PARCELA del agricultor. "
+                "Cuando diga que TIENE, SIEMBRA o CULTIVA un terreno con un cultivo, "
+                "superficie y comuna. "
+                "Ej: 'tengo dos hectareas de papa en Traiguen', "
+                "'sembre trigo en cinco hectareas en Victoria'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cultivo": {
+                        "type": "string",
+                        "description": "Cultivo de la parcela (ej: papa, trigo, avena)",
+                    },
+                    "superficie_ha": {
+                        "type": "string",
+                        "description": "Superficie en hectareas (ej: 2, 2.5)",
+                    },
+                    "comuna": {
+                        "type": "string",
+                        "description": "Comuna donde esta la parcela (ej: Traiguen)",
+                    },
+                },
+                "required": ["cultivo", "superficie_ha", "comuna"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_parcelas",
+            "description": (
+                "USAR para CONSULTAR LAS PARCELAS ya registradas del agricultor. "
+                "Cuando pregunte que parcelas tiene, cuantas hectareas declaro, "
+                "o pida un resumen de sus terrenos. "
+                "Ej: 'que parcelas tengo registradas', 'cuantas hectareas de papa tengo'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
 ]
 
 # Subconjuntos de tools por tipo de consulta (TipoConsulta en schemas/variables).
@@ -576,6 +626,8 @@ _TOOLS_CLIMA = frozenset({"get_weather", "get_pronostico", "get_clima_historico"
 # completo del LLM, que en 1 vCPU es el cuello (#170).
 _GATED_TOOLS: dict[str, Callable[[], bool]] = {
     "register_expense": lambda: settings.expense_tracking_enabled,
+    "register_parcela": lambda: settings.parcela_tracking_enabled,
+    "get_parcelas": lambda: settings.parcela_tracking_enabled,
 }
 
 
@@ -848,6 +900,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         get_price_history_for_llm,
         get_price_spread_for_llm,
     )
+    from app.services.parcela_service import get_parcelas_for_llm, register_parcela_for_llm
     from app.services.rag_service import search_corpus_for_llm
     from app.services.weather_service import get_clima_historico, get_pronostico, get_weather
 
@@ -862,6 +915,8 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         "get_clima_historico": get_clima_historico,
         "search_corpus": search_corpus_for_llm,
         "register_expense": register_expense_for_llm,
+        "register_parcela": register_parcela_for_llm,
+        "get_parcelas": get_parcelas_for_llm,
     }
 
 
@@ -913,6 +968,8 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
             "get_price_history",
             "calculate_margin",
             "register_expense",
+            "register_parcela",
+            "get_parcelas",
         )
         and phone_hash
     ):
@@ -943,12 +1000,17 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
             "calculate_sale_value",
             "calculate_margin",
             "register_expense",
+            "register_parcela",
+            "get_parcelas",
         ):
             from app.core.database import SessionLocal
 
+            # register_parcela/get_parcelas no tienen "producto": tienen su
+            # propia validación de campos requeridos más abajo.
+            needs_producto = name not in ("register_parcela", "get_parcelas")
             # Completar defaults para argumentos vacios que el LLM no especifico.
             # Si el producto esta vacio, no podemos consultar nada -> fallback.
-            if not valid_args.get("producto") or not str(valid_args.get("producto", "")).strip():
+            if needs_producto and (not valid_args.get("producto") or not str(valid_args.get("producto", "")).strip()):
                 return "No entendi que producto queres consultar. ¿Podrias repetir el nombre del producto?"
             # calculate_sale_value requiere cantidad_kg; sin ella no hay calculo.
             if name == "calculate_sale_value" and not str(valid_args.get("cantidad_kg", "")).strip():
@@ -969,6 +1031,13 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
                     return "No entendí en qué gastaste. ¿Podrías repetir el concepto?"
                 if not str(valid_args.get("monto", "")).strip():
                     return "No entendí el monto gastado. ¿Podrías repetir cuánto fue?"
+            if name == "register_parcela":
+                if not str(valid_args.get("cultivo", "")).strip():
+                    return "No entendí qué cultivo tiene la parcela. ¿Podrías repetirlo?"
+                if not str(valid_args.get("superficie_ha", "")).strip():
+                    return "No entendí la superficie de la parcela. ¿Podrías repetir cuántas hectáreas son?"
+                if not str(valid_args.get("comuna", "")).strip():
+                    return "No entendí en qué comuna está la parcela. ¿Podrías repetirla?"
             # Mercado/dias son opcionales: cada handler aplica su default.
 
             session = SessionLocal()

@@ -92,9 +92,9 @@ class TestConstantes:
         assert len(NO_RESPONSE_TEXT) > 10
         assert "reformular" in NO_RESPONSE_TEXT.lower()
 
-    def test_whitelist_diez_tools(self) -> None:
+    def test_whitelist_doce_tools(self) -> None:
         """Whitelist: precio, spread, historico, venta, margen, clima actual,
-        pronostico, clima historico, corpus y gastos (10 tools)."""
+        pronostico, clima historico, corpus, gastos y parcelas (12 tools)."""
         assert (
             frozenset(
                 {
@@ -108,6 +108,8 @@ class TestConstantes:
                     "get_clima_historico",
                     "search_corpus",
                     "register_expense",
+                    "register_parcela",
+                    "get_parcelas",
                 }
             )
             == WHITELIST_TOOLS
@@ -117,7 +119,8 @@ class TestConstantes:
         """Las tool definitions siguen el formato OpenAI function-calling."""
         # 5 base + calculate_margin (#155) + search_corpus (#156)
         # + register_expense (#170) + get_price_spread (#171) + get_pronostico
-        assert len(TOOLS) == 10
+        # + register_parcela/get_parcelas (C5)
+        assert len(TOOLS) == 12
         for tool in TOOLS:
             assert tool["type"] == "function"
             fn = tool["function"]
@@ -134,6 +137,19 @@ class TestConstantes:
             assert "register_expense" not in _tool_names(_offered_tools())
         with patch.object(settings, "expense_tracking_enabled", True):
             assert "register_expense" in _tool_names(_offered_tools())
+
+    def test_tools_de_parcela_apagadas_por_gate_no_se_ofrecen(self) -> None:
+        """Fail-closed también significa no anunciar las tools de parcela (C5)."""
+        from app.services.llm_service import _offered_tools, _tool_names
+
+        with patch.object(settings, "parcela_tracking_enabled", False):
+            ofrecidas = _tool_names(_offered_tools())
+            assert "register_parcela" not in ofrecidas
+            assert "get_parcelas" not in ofrecidas
+        with patch.object(settings, "parcela_tracking_enabled", True):
+            ofrecidas = _tool_names(_offered_tools())
+            assert "register_parcela" in ofrecidas
+            assert "get_parcelas" in ofrecidas
 
     def test_seccion_de_tools_omite_la_tool_apagada(self) -> None:
         """El prefijo del prompt no gasta chars en una tool deshabilitada."""

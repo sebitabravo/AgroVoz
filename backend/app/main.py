@@ -47,6 +47,7 @@ logger = logging.getLogger(__name__)
 _CONSULTATION_HISTORY_PURGE_INTERVAL_SECONDS = 24 * 60 * 60
 _CONSULTATION_STAGING_CLEANUP_INTERVAL_SECONDS = 60 * 60
 _EXPENSE_PURGE_INTERVAL_SECONDS = 24 * 60 * 60
+_PARCELA_PURGE_INTERVAL_SECONDS = 24 * 60 * 60
 
 # ContextVar para propagar el request_id a los logs.
 # El middleware lo setea por request; el logging.Filter lo inyecta en cada LogRecord.
@@ -209,6 +210,33 @@ async def _expense_purge_scheduler() -> None:
         await asyncio.sleep(_EXPENSE_PURGE_INTERVAL_SECONDS)
 
 
+async def _parcela_purge_scheduler() -> None:
+    """Purga diariamente las parcelas vencidas según su ``expires_at`` (C5)."""
+    from app.services.parcela_service import (
+        ParcelaOperationError,
+        purge_expired_parcelas,
+    )
+
+    while True:
+        try:
+            records_deleted = await asyncio.to_thread(purge_expired_parcelas)
+            logger.info(
+                "Parcelas scheduler: purga TTL OK — %d registros",
+                records_deleted,
+            )
+        except ParcelaOperationError:
+            logger.error("Parcelas scheduler: purga TTL no confirmada")
+        except Exception as exc:
+            # Boundary de resiliencia: una falla inesperada no debe matar el
+            # scheduler para siempre. CancelledError no se captura.
+            logger.error(
+                "Parcelas scheduler: error inesperado — error=%s",
+                type(exc).__name__,
+            )
+
+        await asyncio.sleep(_PARCELA_PURGE_INTERVAL_SECONDS)
+
+
 def _start_consultation_history_scheduler() -> asyncio.Task[None] | None:
     """Crea la tarea TTL solo cuando el feature gate está habilitado."""
     if not settings.consultation_history_enabled:
@@ -236,6 +264,18 @@ def _start_expense_purge_scheduler() -> asyncio.Task[None]:
     return asyncio.create_task(
         _expense_purge_scheduler(),
         name="expense-ttl",
+    )
+
+
+def _start_parcela_purge_scheduler() -> asyncio.Task[None]:
+    """Crea siempre la purga TTL de parcelas, incluso con el gate apagado.
+
+    Apagar ``parcela_tracking_enabled`` detiene las escrituras nuevas, no la
+    retención de lo ya registrado: las parcelas previas deben seguir venciendo.
+    """
+    return asyncio.create_task(
+        _parcela_purge_scheduler(),
+        name="parcela-ttl",
     )
 
 
@@ -309,10 +349,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     history_purge_task = _start_consultation_history_scheduler()
     staging_cleanup_task = _start_consultation_staging_cleanup_scheduler()
     expense_purge_task = _start_expense_purge_scheduler()
+    parcela_purge_task = _start_parcela_purge_scheduler()
 
     yield
 
     logger.info("AgroVoz deteniendo — liberando conexiones")
+    await _cancel_background_task(parcela_purge_task)
     await _cancel_background_task(expense_purge_task)
     await _cancel_background_task(staging_cleanup_task)
     await _cancel_background_task(history_purge_task)

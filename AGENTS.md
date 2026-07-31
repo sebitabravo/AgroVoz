@@ -92,7 +92,7 @@ Nacido como proyecto estudiantil para Desafío Crea INACAP 2026, hoy es un produ
 **Implementado y en operación:**
 - WhatsApp audio → transcripción → consulta ODEPA/clima → respuesta de voz
 - **WhatsApp texto → misma consulta → respuesta escrita.** El productor no siempre puede mandar audio (lugar ruidoso, reunión, mala señal), así que el texto es una vía de entrada de primera clase. Salta Whisper y Piper: ~100 ms contra ~11 s del audio
-- Tool Calling con whitelist estricta de 10 tools: `get_price`, `get_price_history`, `calculate_sale_value`, `calculate_margin`, `get_price_spread`, `get_weather`, `get_pronostico`, `get_clima_historico`, `search_corpus`, `register_expense`. Esta última cumple su definición de hecho (#170) pero permanece desactivada por `EXPENSE_TRACKING_ENABLED=false` hasta cerrar la revisión operativa y legal de retención. Mientras el gate esté apagado la tool ni siquiera se anuncia en el prompt.
+- Tool Calling con whitelist estricta de 12 tools: `get_price`, `get_price_history`, `calculate_sale_value`, `calculate_margin`, `get_price_spread`, `get_weather`, `get_pronostico`, `get_clima_historico`, `search_corpus`, `register_expense`, `register_parcela`, `get_parcelas`. `register_expense` cumple su definición de hecho (#170) pero permanece desactivada por `EXPENSE_TRACKING_ENABLED=false` hasta cerrar la revisión operativa y legal de retención. `register_parcela`/`get_parcelas` (C5) siguen el mismo patrón: tabla propia, consentimiento independiente, TTL y borrado, apagadas por `PARCELA_TRACKING_ENABLED=false`. Mientras un gate esté apagado, esa tool ni siquiera se anuncia en el prompt.
 - Catálogo ODEPA completo: 79 productos, 15 mercados, ~41.000 filas de precios (verificado: 79/79 responden en `get_price`, `get_price_spread`, `calculate_sale_value` y `get_price_history`)
 - Clima actual e histórico, por comuna del productor (`user_prefs.comuna`), no coordenadas fijas
 - Alertas proactivas de precio y clima (helada, lluvia extrema) con rate limit
@@ -107,7 +107,6 @@ Nacido como proyecto estudiantil para Desafío Crea INACAP 2026, hoy es un produ
 
 **En construcción** (decidido el 30/07/2026 al revisar las 10 Discussions):
 - Motor de reglas agronómicas con hechos citados y diagnóstico paso a paso
-- Parcelas del agricultor (cultivo, superficie, comuna) con consentimiento propio y TTL
 - PWA offline-first para el agricultor, complementaria a WhatsApp
 - Console web para agrónomos PRODESAL que siguen a varios productores
 - VAD, streaming audible y barge-in sobre el canal IVR en tiempo real
