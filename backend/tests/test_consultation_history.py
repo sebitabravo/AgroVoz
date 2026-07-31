@@ -113,6 +113,27 @@ def _seed_user(
         session.commit()
 
 
+def _add_history_row(
+    engine: Engine,
+    phone_hash: str,
+    *,
+    query_text: str,
+    created_at: datetime,
+) -> None:
+    """Inserta una consulta con created_at explícito, para probar el TTL."""
+    with Session(engine) as session:
+        session.add(
+            ConsultationHistory(
+                phone_hash=phone_hash,
+                query_text=query_text,
+                response_text="respuesta",
+                intent="precio",
+                created_at=created_at,
+            )
+        )
+        session.commit()
+
+
 def _count_rows(engine: Engine, model: type[object]) -> int:
     """Cuenta filas de un modelo en la base aislada."""
     with Session(engine) as session:
@@ -1563,9 +1584,12 @@ class TestGetHistory:
 
     def test_get_history_vacio(self, engine: Engine) -> None:
         """Un sujeto sin datos recibe una lista vacía."""
-        with patch(
-            "app.services.consultation_history_service.SessionLocal",
-            lambda: _create_session(engine),
+        with (
+            patch.object(settings, "consultation_history_enabled", True),
+            patch(
+                "app.services.consultation_history_service.SessionLocal",
+                lambda: _create_session(engine),
+            ),
         ):
             result = get_history("no_existe")
 
@@ -1576,12 +1600,83 @@ class TestGetHistory:
         _seed_user(engine, "hash_get", consent=True, history_entries=2)
         _seed_user(engine, "otro_hash", consent=True, history_entries=1)
 
-        with patch(
-            "app.services.consultation_history_service.SessionLocal",
-            lambda: _create_session(engine),
+        with (
+            patch.object(settings, "consultation_history_enabled", True),
+            patch(
+                "app.services.consultation_history_service.SessionLocal",
+                lambda: _create_session(engine),
+            ),
         ):
             result = get_history("hash_get", limit=10)
 
         assert len(result) == 2
         assert result[0]["query"] == "consulta-1"
         assert result[1]["query"] == "consulta-0"
+
+    def test_get_history_sin_gate_no_lee(self, engine: Engine) -> None:
+        """Regresión: devolvía query_text y response_text con el gate apagado."""
+        _seed_user(engine, "hash_get", consent=True, history_entries=2)
+
+        with (
+            patch.object(settings, "consultation_history_enabled", False),
+            patch(
+                "app.services.consultation_history_service.SessionLocal",
+                lambda: _create_session(engine),
+            ),
+        ):
+            assert get_history("hash_get", limit=10) == []
+
+    def test_get_history_sin_consentimiento_no_lee(self, engine: Engine) -> None:
+        """Regresión: no chequeaba el consentimiento del sujeto."""
+        _seed_user(engine, "hash_get", consent=False, history_entries=2)
+
+        with (
+            patch.object(settings, "consultation_history_enabled", True),
+            patch(
+                "app.services.consultation_history_service.SessionLocal",
+                lambda: _create_session(engine),
+            ),
+        ):
+            assert get_history("hash_get", limit=10) == []
+
+    def test_get_history_excluye_filas_vencidas(self, engine: Engine) -> None:
+        """Regresión: una fila pasada del TTL salía hasta que corriera la purga."""
+        _seed_user(engine, "hash_get", consent=True, history_entries=1)
+        _add_history_row(
+            engine,
+            "hash_get",
+            query_text="consulta-vieja",
+            created_at=datetime.now(UTC) - timedelta(days=settings.consultation_history_ttl_days + 1),
+        )
+
+        with (
+            patch.object(settings, "consultation_history_enabled", True),
+            patch(
+                "app.services.consultation_history_service.SessionLocal",
+                lambda: _create_session(engine),
+            ),
+        ):
+            result = get_history("hash_get", limit=10)
+
+        assert [row["query"] for row in result] == ["consulta-0"]
+
+    def test_contexto_reciente_excluye_filas_vencidas(self, engine: Engine) -> None:
+        """Regresión: el contexto que va al LLM tampoco filtraba por TTL."""
+        _add_history_row(
+            engine,
+            "hash_ctx",
+            query_text="consulta-vencida",
+            created_at=datetime.now(UTC) - timedelta(days=settings.consultation_history_ttl_days + 1),
+        )
+        with Session(engine) as session:
+            session.add(UserPrefs(phone_hash="hash_ctx", comuna="Traiguén", history_consent=True))
+            session.commit()
+
+        with (
+            patch.object(settings, "consultation_history_enabled", True),
+            patch(
+                "app.services.consultation_history_service.SessionLocal",
+                lambda: _create_session(engine),
+            ),
+        ):
+            assert get_latest_consultation_context("hash_ctx") is None
