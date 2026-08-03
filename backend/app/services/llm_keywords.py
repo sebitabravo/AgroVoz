@@ -626,7 +626,10 @@ async def _compound_price_block(
             session.close()
 
 
-async def _compound_weather_block(query_text: str) -> tuple[str | None, str]:
+async def _compound_weather_block(
+    query_text: str,
+    phone_hash: str | None,
+) -> tuple[str | None, str]:
     """Obtiene el bloque OpenMeteo de una consulta compuesta."""
     from app.services.weather_service import (
         get_pronostico,
@@ -637,10 +640,23 @@ async def _compound_weather_block(query_text: str) -> tuple[str | None, str]:
     comuna = _extract_comuna_from_query(query_text) or "Traiguén"
     try:
         if any(kw in query_text for kw in _CLIMA_FUTURO_KW):
-            result = await get_pronostico(comuna, dias=2)
+            if phone_hash:
+                try:
+                    result = await get_pronostico(comuna, dias=2, phone_hash=phone_hash)
+                except TypeError as exc:
+                    # Mantiene compatibilidad con handlers sustituidos en
+                    # integraciones/tests antiguas que aún no aceptan phone_hash.
+                    if "phone_hash" not in str(exc):
+                        raise
+                    result = await get_pronostico(comuna, dias=2)
+            else:
+                result = await get_pronostico(comuna, dias=2)
         else:
             coords = resolver_comuna(comuna) or (-38.23, -72.68)
-            result = await get_weather(lat=coords[0], lon=coords[1])
+            if phone_hash:
+                result = await get_weather(lat=coords[0], lon=coords[1], phone_hash=phone_hash)
+            else:
+                result = await get_weather(lat=coords[0], lon=coords[1])
         if result:
             return str(result), ""
         return None, "OpenMeteo no entregó datos para esa consulta."
@@ -665,7 +681,7 @@ async def _force_compound_keyword_tools(
     q = query_text.strip().lower()
     price_result, weather_result = await asyncio.gather(
         _compound_price_block(q, phone_hash),
-        _compound_weather_block(q),
+        _compound_weather_block(q, phone_hash),
     )
     price_data, price_notice = price_result
     weather_data, weather_notice = weather_result
@@ -808,7 +824,15 @@ async def _force_keyword_tool(query_text: str, phone_hash: str | None = None) ->
         try:
             comuna = _extract_comuna_from_query(q) or "Traiguén"
             if es_futuro:
-                result = await get_pronostico(comuna, dias=2)
+                if phone_hash:
+                    try:
+                        result = await get_pronostico(comuna, dias=2, phone_hash=phone_hash)
+                    except TypeError as exc:
+                        if "phone_hash" not in str(exc):
+                            raise
+                        result = await get_pronostico(comuna, dias=2)
+                else:
+                    result = await get_pronostico(comuna, dias=2)
                 herramienta = "get_pronostico"
             else:
                 from app.services.weather_service import resolver_comuna
@@ -819,7 +843,10 @@ async def _force_keyword_tool(query_text: str, phone_hash: str | None = None) ->
                     lat, lon = -38.23, -72.68
                 else:
                     lat, lon = coords
-                result = await get_weather(lat=lat, lon=lon)
+                if phone_hash:
+                    result = await get_weather(lat=lat, lon=lon, phone_hash=phone_hash)
+                else:
+                    result = await get_weather(lat=lat, lon=lon)
                 herramienta = "get_weather"
             if result:
                 logger.info(

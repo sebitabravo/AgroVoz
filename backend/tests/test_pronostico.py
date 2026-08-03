@@ -11,6 +11,7 @@ Deterministicos: sin llamadas reales a OpenMeteo.
 import datetime
 from unittest.mock import AsyncMock, patch
 
+from app.models.user_prefs import UserPrefs
 from app.services.llm_service import TOOLS, WHITELIST_TOOLS, _get_tool_handlers
 from app.services.weather_service import (
     ForecastDay,
@@ -123,6 +124,32 @@ class TestGetPronostico:
         assert "Traiguén" in resp
         assert "12,0 milímetros" in resp
         assert "OpenMeteo" in resp
+
+    async def test_usa_gps_guardado_en_lugar_de_la_comuna(
+        self,
+        db,  # type: ignore[no-untyped-def]
+        monkeypatch,
+    ) -> None:  # type: ignore[no-untyped-def]
+        """El pronóstico consulta la parcela exacta cuando hay ubicación compartida."""
+        phone_hash = "e" * 64
+        db.add(UserPrefs(phone_hash=phone_hash, comuna="Traiguén", lat=-33.45, lng=-70.65))
+        db.commit()
+
+        async def fake_forecast(lat: float, lon: float, days: int) -> list[ForecastDay]:
+            assert lat == -33.45
+            assert lon == -70.65
+            assert days == 1
+            return [_dia("2026-07-27", 4, 17, 0)]
+
+        monkeypatch.setattr(
+            "app.services.weather_service.get_weather_forecast_daily",
+            fake_forecast,
+        )
+
+        response = await get_pronostico("Traiguén", dias=1, phone_hash=phone_hash)
+
+        assert "tu parcela" in response
+        assert "OpenMeteo" in response
 
 
 class TestRegistroEnElLLM:

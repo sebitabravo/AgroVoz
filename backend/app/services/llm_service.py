@@ -301,7 +301,8 @@ TOOLS: list[dict[str, object]] = [
                 "USAR para PREGUNTAS DE CLIMA. "
                 "Cuando el agricultor pregunte por el clima, la temperatura, si va a "
                 "llover, el pronostico del tiempo, etc. "
-                "Usa coordenadas de Traiguen (-38.23, -72.68) si no especifica ubicacion. "
+                "Si el productor compartió una ubicación por WhatsApp, el backend usa esa "
+                "parcela; si no, usa coordenadas de Traiguen (-38.23, -72.68). "
                 "Ej: 'como esta el clima', 'va a llover hoy', 'temperatura en Traiguen'."
             ),
             "parameters": {
@@ -327,6 +328,8 @@ TOOLS: list[dict[str, object]] = [
             "description": (
                 "PRONOSTICO: clima de MANANA o proximos dias. "
                 "NO para clima de ahora (get_weather) ni pasado (get_clima_historico). "
+                "Si existe una ubicación compartida por WhatsApp, se consulta esa parcela "
+                "y la comuna queda como fallback. "
                 "Ej: 'va a llover manana', 'va a helar', 'como viene el tiempo'."
             ),
             "parameters": {
@@ -1023,6 +1026,8 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
             "register_parcela",
             "get_parcelas",
             "get_link_resumen",
+            "get_weather",
+            "get_pronostico",
         )
         and phone_hash
     ):
@@ -1040,7 +1045,8 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
         }
     )
     # search_corpus es tan rapido (<2ms) que no necesita cache.
-    if name in cacheable:
+    cache_enabled = name in cacheable and not (name in {"get_weather", "get_pronostico"} and phone_hash)
+    if cache_enabled:
         cached = _tool_cache.get(name, **valid_args)
         if cached is not None:
             return cached
@@ -1115,7 +1121,7 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
         else:
             logger.info("Tool ejecutada")
         # Cachear resultado para evitar futuras llamadas al LLM.
-        if name in cacheable:
+        if cache_enabled:
             _tool_cache.set(name, str(result), **valid_args)
         return str(result)
     except (RuntimeError, ValueError, OSError, SQLAlchemyError) as exc:
