@@ -348,6 +348,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     preload_model()
 
+    # Precalentar visión solo cuando el gate está activo. Si el artefacto ONNX
+    # no fue provisionado, el servicio queda degradado con respuesta honesta
+    # pero no impide arrancar el backend ni los flujos de audio/texto.
+    from app.services.vision_service import preload_model as preload_vision_model
+
+    preload_vision_model()
+
     # Scheduler ODEPA: sync diario a las 06:00 AM hora local.
     # Tarea de fondo del lifespan. Se cancela automáticamente al detener la app.
     odepa_task = asyncio.create_task(_odepa_scheduler())
