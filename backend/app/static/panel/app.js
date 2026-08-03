@@ -169,7 +169,10 @@
       '<p class="muted">Analizando la imagen localmente…</p>';
     var formData = new FormData();
     formData.append("image", blob, "captura.jpg");
-    fetch("/api/v1/vision/identify", { method: "POST", body: formData })
+    fetch("/api/v1/vision/identify?token=" + encodeURIComponent(token), {
+      method: "POST",
+      body: formData,
+    })
       .then(function (response) {
         return response.json().then(function (payload) {
           if (!response.ok) throw new Error(payload.detail || "No se pudo analizar la imagen.");

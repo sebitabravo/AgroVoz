@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
 from app.core.config import settings
 from app.schemas.vision import VisionAlternativeResponse, VisionIdentifyResponse
+from app.services.panel_service import verify_panel_token
 from app.services.vision_service import (
     VisionDisabledError,
     VisionInferenceError,
@@ -46,6 +47,7 @@ async def _read_image(upload: UploadFile) -> bytes:
 @router.post("/identify", response_model=VisionIdentifyResponse)
 async def identify_image(
     image: UploadFile = _image_file_dep,
+    token: str = Query(..., min_length=1, max_length=160, description="Token firmado del panel."),
     cultivo: str = Query(default="", max_length=50, description="Cultivo conocido, si el productor lo indica."),
     vision_service: VisionService = _vision_service_dep,
 ) -> VisionIdentifyResponse:
@@ -55,6 +57,11 @@ async def identify_image(
             raise HTTPException(
                 status_code=503,
                 detail="La identificación visual todavía no está disponible.",
+            )
+        if verify_panel_token(token) is None:
+            raise HTTPException(
+                status_code=401,
+                detail="Link inválido o vencido. Pide uno nuevo por WhatsApp.",
             )
 
         content_type = (image.content_type or "").split(";", maxsplit=1)[0].lower()
@@ -82,8 +89,7 @@ async def identify_image(
         detected_label=result.detected_label,
         confidence=result.confidence,
         alternatives=[
-            VisionAlternativeResponse(label=item.label, confidence=item.confidence)
-            for item in result.alternatives
+            VisionAlternativeResponse(label=item.label, confidence=item.confidence) for item in result.alternatives
         ],
         message=result.message,
         rule=result.rule,
