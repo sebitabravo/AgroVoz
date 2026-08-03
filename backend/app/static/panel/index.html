@@ -37,6 +37,60 @@
       margin-bottom: 0.75rem;
       font-size: 0.875rem;
     }
+    .camera-preview {
+      position: relative;
+      aspect-ratio: 4 / 3;
+      width: 100%;
+      overflow: hidden;
+      border-radius: 0.5rem;
+      background: #172019;
+      color: #fff;
+      display: grid;
+      place-items: center;
+      margin-bottom: 0.75rem;
+    }
+    .camera-preview video,
+    .camera-preview img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .camera-preview video[hidden],
+    .camera-preview img[hidden] {
+      display: none;
+    }
+    .camera-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .camera-actions button {
+      min-height: 2.75rem;
+      flex: 1 1 10rem;
+      border: 0;
+      border-radius: 0.5rem;
+      padding: 0.625rem 0.75rem;
+      background: #4f7d5a;
+      color: #fff;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .camera-actions button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+    .camera-status {
+      min-height: 1.25rem;
+      margin: 0.75rem 0 0;
+    }
+    .vision-result {
+      margin-top: 0.75rem;
+      border-top: 1px solid #e2ddd0;
+      padding-top: 0.75rem;
+    }
+    .vision-result p { margin: 0.35rem 0; }
+    .vision-result a { color: #315d3b; }
   </style>
 </head>
 <body>
@@ -46,6 +100,27 @@
     <div id="contenido">
       <p class="muted">Cargando…</p>
     </div>
+    <section id="identificar-plaga" class="card" aria-labelledby="titulo-identificar-plaga">
+      <h2 id="titulo-identificar-plaga">Identificar plaga</h2>
+      <p class="muted">Toma una foto de la hoja para consultar la identificación visual.</p>
+      <div class="camera-preview" aria-live="polite">
+        <video id="visor-camara" autoplay playsinline muted hidden aria-label="Vista previa de la cámara"></video>
+        <canvas id="captura-camara" hidden></canvas>
+        <img id="imagen-anotada" hidden alt="Resultado visual de la identificación" />
+        <span id="estado-visor">Presiona «Usar cámara» para comenzar.</span>
+      </div>
+      <div class="camera-actions">
+        <button id="activar-camara" type="button">Usar cámara</button>
+        <button id="capturar-imagen" type="button" disabled>Capturar y analizar</button>
+      </div>
+      <p id="estado-camara" class="muted camera-status" role="status"></p>
+      <div id="resultado-vision" class="vision-result" hidden aria-live="polite">
+        <p><strong>Identificación:</strong> <span id="vision-enfermedad"></span></p>
+        <p><strong>Confianza:</strong> <span id="vision-confianza"></span></p>
+        <p><strong>Fuente INIA:</strong> <span id="vision-fuente"></span></p>
+        <p id="vision-fecha" class="muted"></p>
+      </div>
+    </section>
   </main>
   <script src="/static/panel/app.js"></script>
   <script src="/static/panel/register-sw.js"></script>

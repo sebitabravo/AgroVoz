@@ -72,7 +72,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
         )
-        response.headers["Permissions-Policy"] = "microphone=(), camera=(), geolocation=()"
+        # La cámara solo se habilita dentro del panel del agricultor, donde
+        # el productor inició explícitamente la captura; el resto del backend
+        # mantiene la política cerrada por defecto.
+        camera_policy = "(self)" if request.url.path.startswith("/panel/") else "()"
+        response.headers["Permissions-Policy"] = (
+            f"microphone=(), camera={camera_policy}, geolocation=()"
+        )
         return response
 
 
