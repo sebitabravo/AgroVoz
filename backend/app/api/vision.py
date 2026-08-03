@@ -7,10 +7,11 @@ import base64
 import logging
 import re
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 
 from app.core.config import settings
 from app.schemas.vision import VisionIdentifyResponse
+from app.services.panel_service import verify_panel_token
 from app.services.vision_service import (
     VisionError,
     VisionImageError,
@@ -73,11 +74,18 @@ async def _read_image(image: UploadFile) -> bytes:
 async def identify_vision(
     request: Request,
     image: UploadFile = _vision_file_dep,
+    token: str = Query(..., min_length=1, max_length=160, description="Token firmado del panel."),
     _enabled: None = _vision_enabled_dep,
     service: VisionService = _vision_service_dep,
 ) -> VisionIdentifyResponse:
     """Clasifica una imagen recibida desde la cámara del panel sin persistirla."""
     request_id = getattr(request.state, "request_id", "-")
+    if verify_panel_token(token) is None:
+        await image.close()
+        raise HTTPException(
+            status_code=401,
+            detail="Link inválido o vencido. Pide uno nuevo por WhatsApp.",
+        )
     content_type = image.content_type or ""
     if content_type and not content_type.casefold().startswith("image/"):
         raise HTTPException(status_code=400, detail="El archivo debe ser una imagen.")

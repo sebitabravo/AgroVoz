@@ -181,7 +181,7 @@
     var datos = new FormData();
     datos.append("image", blob, "captura.jpg");
     establecerEstadoCamara("Analizando la imagen…");
-    fetch("/api/v1/vision/identify", {
+    fetch("/api/v1/vision/identify?token=" + encodeURIComponent(token), {
       method: "POST",
       body: datos,
     })

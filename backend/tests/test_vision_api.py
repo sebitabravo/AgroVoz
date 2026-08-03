@@ -9,10 +9,12 @@ from collections.abc import Generator
 import pytest
 from httpx import AsyncClient
 from PIL import Image
+from pydantic import SecretStr
 
 from app import main as app_main
 from app.api import vision as vision_api
 from app.core.config import settings
+from app.services.panel_service import generate_panel_token
 from app.services.vision_service import (
     VisionIdentification,
     VisionImageError,
@@ -20,6 +22,14 @@ from app.services.vision_service import (
     VisionModelUnavailableError,
     VisionPrediction,
 )
+
+_PHONE_HASH = "a" * 64
+
+
+def _panel_token(monkeypatch: pytest.MonkeyPatch) -> str:
+    """Genera un token válido sin depender de secretos del entorno."""
+    monkeypatch.setattr(settings, "panel_link_secret", SecretStr("x" * 32))
+    return generate_panel_token(_PHONE_HASH)
 
 
 def _image_bytes() -> bytes:
@@ -63,8 +73,7 @@ def _identification(confidence: float = 0.94) -> VisionIdentification:
             else "No pude identificar la plaga con suficiente certeza."
         ),
         rule=(
-            "Según INIA. Fuente verificada el 30/07/2026: "
-            "https://enfermedadespapa.inia.cl/tizonTardio.php"
+            "Según INIA. Fuente verificada el 30/07/2026: https://enfermedadespapa.inia.cl/tizonTardio.php"
             if high_confidence
             else ""
         ),
@@ -93,7 +102,7 @@ async def test_identify_vision_retorna_clasificacion_y_fuente(
     monkeypatch.setattr(settings, "vision_enabled", True)
 
     response = await client.post(
-        "/api/v1/vision/identify",
+        f"/api/v1/vision/identify?token={_panel_token(monkeypatch)}",
         files={"image": ("captura.jpg", _image_bytes(), "image/jpeg")},
     )
 
@@ -118,7 +127,7 @@ async def test_identify_vision_gate_apagado_retorna_503(
     monkeypatch.setattr(settings, "vision_enabled", False)
 
     response = await client.post(
-        "/api/v1/vision/identify",
+        "/api/v1/vision/identify?token=gate-apagado",
         files={"image": ("captura.jpg", _image_bytes(), "image/jpeg")},
     )
 
@@ -136,7 +145,7 @@ async def test_identify_vision_rechaza_tipo_no_imagen(
     monkeypatch.setattr(settings, "vision_enabled", True)
 
     response = await client.post(
-        "/api/v1/vision/identify",
+        f"/api/v1/vision/identify?token={_panel_token(monkeypatch)}",
         files={"image": ("captura.txt", b"texto", "text/plain")},
     )
 
@@ -156,7 +165,7 @@ async def test_identify_vision_baja_confianza_no_cita_regla(
     app_main.app.dependency_overrides[vision_api.get_vision_service] = lambda: service  # type: ignore[assignment]
     try:
         response = await client.post(
-            "/api/v1/vision/identify",
+            f"/api/v1/vision/identify?token={_panel_token(monkeypatch)}",
             files={"image": ("captura.jpg", _image_bytes(), "image/jpeg")},
         )
     finally:
@@ -184,7 +193,7 @@ async def test_identify_vision_mapea_fallas_del_servicio(
     app_main.app.dependency_overrides[vision_api.get_vision_service] = lambda: service  # type: ignore[assignment]
     try:
         response = await client.post(
-            "/api/v1/vision/identify",
+            f"/api/v1/vision/identify?token={_panel_token(monkeypatch)}",
             files={"image": ("captura.jpg", _image_bytes(), "image/jpeg")},
         )
     finally:
@@ -195,3 +204,21 @@ async def test_identify_vision_mapea_fallas_del_servicio(
     assert "invalid" not in response.text
     assert "missing" not in response.text
     assert "failed" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_identify_vision_rechaza_token_vencido(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """El panel vencido no puede seguir consumiendo inferencias ONNX."""
+    monkeypatch.setattr(settings, "vision_enabled", True)
+    monkeypatch.setattr(settings, "panel_link_secret", SecretStr("x" * 32))
+    expired = generate_panel_token(_PHONE_HASH, now=1)
+
+    response = await client.post(
+        f"/api/v1/vision/identify?token={expired}",
+        files={"image": ("captura.jpg", _image_bytes(), "image/jpeg")},
+    )
+
+    assert response.status_code == 401
