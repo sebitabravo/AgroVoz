@@ -21,7 +21,7 @@ from typing import ClassVar, Protocol, cast
 import httpx
 import numpy as np
 import onnxruntime as ort
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 
 from app.core.config import settings
 from app.services.agronomic_rules_service import get_agronomic_rule_for_llm
@@ -119,6 +119,16 @@ class VisionClassification:
     def top3(self) -> tuple[VisionPrediction, ...]:
         """Las tres mejores predicciones o menos si el modelo tiene pocas clases."""
         return self.predictions[:_MAX_PREDICTIONS]
+
+
+@dataclass(frozen=True, slots=True)
+class VisionIdentification:
+    """Resultado estructurado para consumidores HTTP y de mensajería."""
+
+    prediction: VisionPrediction
+    response: str
+    rule: str
+    annotated_image: bytes
 
 
 def _humanize_label(label: str) -> str:
@@ -312,13 +322,64 @@ class VisionService:
     def build_response(self, classification: VisionClassification) -> str:
         """Redacta una respuesta honesta y cita la regla vigente si corresponde."""
         top = classification.top
-        if top.confidence < settings.vision_confidence_threshold:
+        rule = self._rule_for_prediction(top)
+        return self._format_response(top, rule)
+
+    @staticmethod
+    def _format_response(prediction: VisionPrediction, rule: str) -> str:
+        """Construye el texto de respuesta a partir de una regla ya resuelta."""
+        if not rule:
             return _LOW_CONFIDENCE_TEXT
 
-        identified = _humanize_label(top.label)
-        rule = get_regla_agronomica(top.disease or top.label, top.crop)
-        confidence_percent = round(top.confidence * 100)
+        identified = _humanize_label(prediction.label)
+        confidence_percent = round(prediction.confidence * 100)
         return f"Identificación visual preliminar: {identified} ({confidence_percent}%). {rule}"
+
+    @staticmethod
+    def _rule_for_prediction(prediction: VisionPrediction) -> str:
+        """Resuelve una regla solo después de superar el umbral de confianza."""
+        if prediction.confidence < settings.vision_confidence_threshold:
+            return ""
+        return get_regla_agronomica(prediction.disease or prediction.label, prediction.crop)
+
+    @staticmethod
+    def annotate_image(image_bytes: bytes, prediction: VisionPrediction) -> bytes:
+        """Agrega una etiqueta textual a la imagen sin afirmar una región enferma."""
+        try:
+            with Image.open(io.BytesIO(image_bytes)) as source:
+                image = source.convert("RGB")
+                image.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
+        except (UnidentifiedImageError, OSError) as exc:
+            raise VisionImageError("La imagen no tiene un formato válido") from exc
+
+        if prediction.confidence < settings.vision_confidence_threshold:
+            label = f"Identificación no concluyente ({round(prediction.confidence * 100)}%)"
+        else:
+            label = f"{_humanize_label(prediction.label)} ({round(prediction.confidence * 100)}%)"
+        draw = ImageDraw.Draw(image)
+        font = ImageFont.load_default()
+        bounds = draw.textbbox((0, 0), label, font=font)
+        banner_height = bounds[3] - bounds[1] + 20
+        draw.rectangle((0, 0, image.width, banner_height), fill=(24, 55, 31))
+        draw.text((10, 10), label, fill=(255, 255, 255), font=font)
+
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=85, optimize=True)
+        return buffer.getvalue()
+
+    def identify(self, image_bytes: bytes) -> VisionIdentification:
+        """Clasifica una imagen y prepara la respuesta visual sin persistirla."""
+        classification = self.classify(image_bytes)
+        prediction = classification.top
+        rule = self._rule_for_prediction(prediction)
+        response = self._format_response(prediction, rule)
+        annotated_image = self.annotate_image(image_bytes, prediction)
+        return VisionIdentification(
+            prediction=prediction,
+            response=response,
+            rule=rule,
+            annotated_image=annotated_image,
+        )
 
     async def process_image(
         self,

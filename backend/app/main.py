@@ -36,6 +36,7 @@ from app.api.demo import router as demo_router
 from app.api.health import router as health_router
 from app.api.panel import router as panel_router
 from app.api.prices import router as prices_router
+from app.api.vision import router as vision_router
 from app.api.weather import router as weather_router
 from app.api.webhooks import router as webhooks_router
 from app.core.config import settings
@@ -463,6 +464,7 @@ app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(prices_router, prefix="/api/v1")
 app.include_router(weather_router, prefix="/api/v1")
+app.include_router(vision_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(demo_router, prefix="/api/v1")
 app.include_router(panel_router, prefix="/api/v1")
