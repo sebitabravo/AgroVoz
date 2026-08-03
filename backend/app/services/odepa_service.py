@@ -150,6 +150,25 @@ class SyncResult:
         return self.insertados + self.actualizados
 
 
+# Una variación igual o superior al 15% es suficientemente brusca para
+# informar al productor. Se mantiene como Decimal para no introducir errores
+# de redondeo en una decisión que puede activar un envío por WhatsApp.
+VARIACION_PRECIO_CRITICA_PCT = Decimal("15")
+
+
+@dataclass(frozen=True)
+class PriceVariation:
+    """Variación crítica de un producto en un mercado ODEPA."""
+
+    producto: str
+    mercado: str
+    fecha: datetime.date
+    precio_anterior: Decimal
+    precio_actual: Decimal
+    unidad: str
+    variacion_pct: Decimal
+
+
 async def download_csv(url: str, timeout: float = _TIMEOUT_SEGUNDOS) -> str:
     """Descarga el CSV ODEPA como texto.
 
@@ -572,6 +591,89 @@ async def sync_odepa(session: Session | None = None) -> SyncResult:
             if not _ok:
                 session.rollback()
             session.close()
+
+
+def calcular_variacion_porcentual(
+    precio_actual: Decimal,
+    precio_anterior: Decimal,
+) -> Decimal | None:
+    """Calcula la variación porcentual con respecto al precio anterior.
+
+    Un precio anterior igual a cero no permite calcular un porcentaje
+    significativo, por lo que retorna ``None`` y el detector omite ese caso.
+    """
+    if precio_anterior == 0:
+        return None
+    return (precio_actual - precio_anterior) / precio_anterior * Decimal("100")
+
+
+def detectar_variaciones_precio(
+    session: Session,
+    umbral_pct: Decimal = VARIACION_PRECIO_CRITICA_PCT,
+    fecha: datetime.date | None = None,
+) -> list[PriceVariation]:
+    """Detecta variaciones críticas entre los dos últimos datos de cada mercado.
+
+    La comparación usa el último dato disponible y el inmediatamente anterior
+    del mismo producto, mercado y unidad. ``fecha`` permite fijar el día del
+    sync en tests y evita alertar con datos posteriores cuando se re-procesa un
+    boletín histórico. Cambiar de unidad invalida la comparación para no
+    confundir, por ejemplo, un saco con un kilo.
+    """
+    if umbral_pct <= 0:
+        raise ValueError("El umbral de variación debe ser mayor a cero")
+
+    registros = list(
+        session.scalars(
+            select(OdepaPrice).order_by(
+                OdepaPrice.producto,
+                OdepaPrice.mercado,
+                OdepaPrice.fecha,
+                OdepaPrice.id,
+            )
+        ).all()
+    )
+    if fecha is not None:
+        registros = [registro for registro in registros if registro.fecha <= fecha]
+
+    agrupados: dict[tuple[str, str], list[OdepaPrice]] = {}
+    for registro in registros:
+        clave = (registro.producto.casefold(), registro.mercado.casefold())
+        agrupados.setdefault(clave, []).append(registro)
+
+    variaciones: list[PriceVariation] = []
+    for grupo in agrupados.values():
+        if len(grupo) < 2:
+            continue
+        actual, anterior = grupo[-1], grupo[-2]
+        if fecha is not None and actual.fecha != fecha:
+            continue
+        if actual.unidad.strip().casefold() != anterior.unidad.strip().casefold():
+            continue
+
+        variacion_pct = calcular_variacion_porcentual(actual.precio_kg, anterior.precio_kg)
+        if variacion_pct is None or abs(variacion_pct) < umbral_pct:
+            continue
+        variaciones.append(
+            PriceVariation(
+                producto=actual.producto,
+                mercado=actual.mercado,
+                fecha=actual.fecha,
+                precio_anterior=anterior.precio_kg,
+                precio_actual=actual.precio_kg,
+                unidad=actual.unidad,
+                variacion_pct=variacion_pct,
+            )
+        )
+
+    return sorted(
+        variaciones,
+        key=lambda variacion: (
+            variacion.fecha,
+            variacion.producto.casefold(),
+            variacion.mercado.casefold(),
+        ),
+    )
 
 
 # ── Funciones de consulta para Tool Calling (Issue #16) ──────────

@@ -14,6 +14,7 @@ Reglas de negocio:
 
 import asyncio
 import datetime
+import json
 import logging
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -34,13 +35,16 @@ from app.core.constants import (
 )
 from app.core.database import SessionLocal
 from app.core.formato import formatear_pesos
+from app.core.rate_limiter import SlidingWindowRateLimiter
 from app.models.alert import Alert
 from app.models.odepa_price import OdepaPrice
 from app.models.user_prefs import UserPrefs
 from app.services.odepa_service import (
+    PriceVariation,
     _es_unidad_kilo,
     _kilos_por_unidad,
     _obtener_registro_referencia,
+    detectar_variaciones_precio,
     format_price_text,
 )
 from app.services.openwa_service import OpenWAService
@@ -253,6 +257,129 @@ async def evaluar_alertas_precio(
     return enviados
 
 
+async def evaluar_variaciones_precio(
+    session: Session,
+    settings_obj: "Settings",
+    fecha: datetime.date | None = None,
+) -> list[str]:
+    """Envia alertas por variaciones críticas a productores suscritos.
+
+    ``cultivos`` define la suscripción y ``alert_consent`` habilita el envío.
+    El chat de destino se recupera de una alerta existente del mismo productor,
+    porque el hash anonimizado no permite derivar un número de WhatsApp. La
+    función usa el mismo gate de consentimiento de ``enviar_alerta`` antes de
+    sintetizar o llamar a Open-WA.
+
+    Args:
+        session: Sesión SQLAlchemy del job de sincronización.
+        settings_obj: Configuración con el rate limit de Open-WA.
+        fecha: Fecha del boletín a evaluar; ``None`` usa el dato más reciente.
+
+    Returns:
+        Lista sin duplicados de phone_hash notificados correctamente.
+    """
+    variaciones = detectar_variaciones_precio(session, fecha=fecha)
+    if not variaciones:
+        return []
+
+    preferencias = list(
+        session.scalars(
+            select(UserPrefs)
+            .where(
+                UserPrefs.alert_consent.is_(True),
+                UserPrefs.cultivos.is_not(None),
+            )
+            .order_by(UserPrefs.phone_hash)
+        ).all()
+    )
+    if not preferencias:
+        return []
+
+    # La cuota es global para Open-WA, no por agricultor: el gateway comparte
+    # una sesión y Meta puede penalizar una ráfaga aunque cambie el destino.
+    limiter = SlidingWindowRateLimiter(lambda: settings_obj.alert_rate_limit_per_minute)
+    enviados: list[str] = []
+    enviados_set: set[str] = set()
+    cultivos_por_hash = {prefs.phone_hash: _cultivos_de_preferencias(prefs) for prefs in preferencias}
+
+    for variacion in variaciones:
+        mensaje = _mensaje_variacion_precio(variacion)
+        for prefs in preferencias:
+            if variacion.producto.casefold() not in cultivos_por_hash[prefs.phone_hash]:
+                continue
+            wa_chat_id = _obtener_wa_chat_id(session, prefs.phone_hash)
+            if wa_chat_id is None:
+                logger.info("Alerta de variación omitida — estado=chat_no_disponible")
+                continue
+            if not await _esperar_rate_limit(limiter):
+                logger.warning("Alerta de variación omitida — estado=rate_limit")
+                continue
+
+            entregada = await enviar_alerta(wa_chat_id, mensaje, prefs.phone_hash)
+            if entregada is not False and prefs.phone_hash not in enviados_set:
+                enviados_set.add(prefs.phone_hash)
+                enviados.append(prefs.phone_hash)
+
+    return enviados
+
+
+def _cultivos_de_preferencias(prefs: UserPrefs) -> set[str]:
+    """Parsea cultivos sin dejar que un JSON corrupto interrumpa el cron."""
+    if not prefs.cultivos:
+        return set()
+    try:
+        datos: object = json.loads(prefs.cultivos)
+    except (json.JSONDecodeError, TypeError):
+        return set()
+    if not isinstance(datos, list):
+        return set()
+    return {cultivo.strip().casefold() for cultivo in datos if isinstance(cultivo, str) and cultivo.strip()}
+
+
+def _obtener_wa_chat_id(session: Session, phone_hash: str) -> str | None:
+    """Obtiene el último chat conocido sin derivarlo desde el hash."""
+    return session.scalar(
+        select(Alert.wa_chat_id)
+        .where(
+            Alert.phone_hash == phone_hash,
+            Alert.wa_chat_id.is_not(None),
+        )
+        .order_by(Alert.id.desc())
+        .limit(1)
+    )
+
+
+async def _esperar_rate_limit(limiter: SlidingWindowRateLimiter) -> bool:
+    """Espera una ventana del gateway y retorna si el envío queda permitido."""
+    retry_after = limiter.check("openwa-proactive-alerts")
+    if retry_after is None:
+        return True
+    await asyncio.sleep(retry_after)
+    return limiter.check("openwa-proactive-alerts") is None
+
+
+def _mensaje_variacion_precio(variacion: PriceVariation) -> str:
+    """Construye una alerta factual con fuente y fecha de ODEPA."""
+    direccion = "subió" if variacion.variacion_pct > 0 else "bajó"
+    porcentaje = abs(variacion.variacion_pct).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    return (
+        f"Alerta AgroVoz: {format_price_text(_registro_de_variacion(variacion))} "
+        f"El precio {direccion} un {porcentaje}% respecto del dato anterior de ODEPA."
+    )
+
+
+def _registro_de_variacion(variacion: PriceVariation) -> OdepaPrice:
+    """Adapta una variación al formateador determinista de precios."""
+    return OdepaPrice(
+        producto=variacion.producto,
+        mercado=variacion.mercado,
+        precio_kg=variacion.precio_actual,
+        unidad=variacion.unidad,
+        fecha=variacion.fecha,
+        fuente="ODEPA",
+    )
+
+
 async def evaluar_alertas_clima(
     session: Session,
     settings_obj: "Settings",
@@ -342,7 +469,7 @@ def _tiene_consentimiento_de_alertas(phone_hash: str) -> bool:
         return False
 
 
-async def enviar_alerta(wa_chat_id: str, mensaje: str, phone_hash: str) -> None:
+async def enviar_alerta(wa_chat_id: str, mensaje: str, phone_hash: str) -> bool:
     """Genera TTS del mensaje y lo envia como audio por Open-WA con retry.
 
     Antes de enviar verifica el opt-in de alertas del productor: sin
@@ -362,7 +489,7 @@ async def enviar_alerta(wa_chat_id: str, mensaje: str, phone_hash: str) -> None:
     """
     if not await asyncio.to_thread(_tiene_consentimiento_de_alertas, phone_hash):
         logger.info("Alerta no enviada — tipo=alerta estado=sin_consentimiento")
-        return
+        return False
 
     tts = TTSService()
     audio_path = ""
@@ -377,7 +504,7 @@ async def enviar_alerta(wa_chat_id: str, mensaje: str, phone_hash: str) -> None:
             try:
                 await openwa.send_audio(wa_chat_id, audio_path)
                 logger.info("Alerta procesada — tipo=alerta estado=enviada")
-                return
+                return True
             except (ConnectionError, OSError, RuntimeError) as exc:
                 if intento < max_intentos:
                     espera_s = 2 ** (intento - 1)  # 1s, 2s, 4s
@@ -403,9 +530,12 @@ async def enviar_alerta(wa_chat_id: str, mensaje: str, phone_hash: str) -> None:
             "Alerta no procesada — tipo=alerta estado=error_inesperado error_type=%s",
             type(exc).__name__,
         )
+        return False
     finally:
         if audio_path:
             Path(audio_path).unlink(missing_ok=True)
+
+    return False
 
 
 def _validar_tope_alertas(session: Session, phone_hash: str) -> None:
