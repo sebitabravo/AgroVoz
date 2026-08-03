@@ -1,0 +1,234 @@
+# Calendario agrícola citado de INIA Carillanca (issue #244).
+#
+# Este snapshot conserva únicamente ventanas transcritas desde las fichas
+# técnico-económicas públicas de Plan Predial. No se completan cultivos con
+# promedios ni se extrapolan fechas entre zonas agroecológicas: cuando no
+# existe una fila verificable para la comuna solicitada, el servicio falla
+# cerrado y dice que no tiene el dato.
+# Cobertura verificable de este snapshot: 22 fichas; 21 corresponden al secano
+# interior del piloto Traiguén y una ficha de papa declara las zonas cubiertas
+# por la propia tabla como "todas". El resto del catálogo de 79 cultivos queda
+# explícitamente sin regla hasta contar con una fuente INIA comprobada.
+version: 1
+verificado_el: "2026-08-03"
+revisar_antes_de: "2027-02-03"
+reglas:
+  - id: "papa_guarda"
+    cultivo: "papa"
+    alias: ["papa", "papa de guarda"]
+    zona: "todas"
+    siembra: "15/09 a 15/10"
+    cosecha: "15/02 a 30/03"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Papa de guarda (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/papa_guarda.pdf"
+    fecha: "2017-03-01"
+
+  - id: "trigo_invernal"
+    cultivo: "trigo"
+    alias: ["trigo", "trigo invernal"]
+    zona: "secano interior"
+    siembra: "15/04 a 30/05"
+    cosecha: "15/01 a 28/02"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Trigo de invierno (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/trigo_invernal.pdf"
+    fecha: "2017-03-01"
+
+  - id: "triticale_invierno"
+    cultivo: "triticale"
+    alias: ["triticale", "triticale de invierno"]
+    zona: "secano interior"
+    siembra: "15/04 a 30/05"
+    cosecha: "01/02 a 28/02"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Triticale de invierno (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/triticale_invierno.pdf"
+    fecha: "2017-03-01"
+
+  - id: "avena"
+    cultivo: "avena"
+    alias: ["avena"]
+    zona: "secano interior"
+    siembra: "01/05 a 30/05"
+    cosecha: "15/01 a 15/02"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Avena (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/avena.pdf"
+    fecha: "2017-03-01"
+
+  - id: "lupino_amargo"
+    cultivo: "lupino amargo"
+    alias: ["lupino amargo"]
+    zona: "secano interior"
+    siembra: "01/04 a 30/04"
+    cosecha: "01/02 a 28/02"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Lupino amargo (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/lupino_amargo.pdf"
+    fecha: "2017-03-01"
+
+  - id: "acelga"
+    cultivo: "acelga"
+    alias: ["acelga"]
+    zona: "secano interior"
+    siembra: "01/09 a 30/09"
+    cosecha: "primer corte 01/12 a 29/12; segundo corte 01/02 a 28/02; tercer corte 01/04 a 30/04"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Acelga (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/acelga.pdf"
+    fecha: "2017-03-01"
+
+  - id: "aji"
+    cultivo: "ají"
+    alias: ["aji", "ají"]
+    zona: "secano interior"
+    siembra: "almácigo del 01/08 al 30/09"
+    cosecha: "19/02 a 30/04"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Ají (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/aji.pdf"
+    fecha: "2017-03-01"
+
+  - id: "arveja_verde"
+    cultivo: "arveja"
+    alias: ["arveja", "arveja para verde"]
+    zona: "secano interior"
+    siembra: "01/06 a 30/08"
+    cosecha: "01/11 a 30/01"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Arveja para verde (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/arveja.pdf"
+    fecha: "2017-03-01"
+
+  - id: "betarraga"
+    cultivo: "betarraga"
+    alias: ["betarraga", "betarraga de mesa"]
+    zona: "secano interior"
+    siembra: "01/09 a 30/09"
+    cosecha: "01/12 a 28/02"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Betarraga (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/betarraga.pdf"
+    fecha: "2017-03-01"
+
+  - id: "brocoli"
+    cultivo: "brócoli"
+    alias: ["brocoli", "brócoli"]
+    zona: "secano interior"
+    siembra: "almácigo del 01/12 al 31/01"
+    cosecha: "22/05 a 04/08"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Brócoli (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/brocoli.pdf"
+    fecha: "2017-03-01"
+
+  - id: "cilantro"
+    cultivo: "cilantro"
+    alias: ["cilantro"]
+    zona: "secano interior"
+    siembra: "01/08 a 30/12"
+    cosecha: "01/10 a 15/03"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Cilantro (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/cilantro.pdf"
+    fecha: "2017-03-01"
+
+  - id: "coliflor"
+    cultivo: "coliflor"
+    alias: ["coliflor"]
+    zona: "secano interior"
+    siembra: "almácigo del 01/12 al 31/01"
+    cosecha: "22/05 a 04/08"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Coliflor (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/coliflor.pdf"
+    fecha: "2017-03-01"
+
+  - id: "espinaca"
+    cultivo: "espinaca"
+    alias: ["espinaca"]
+    zona: "secano interior"
+    siembra: "01/08 a 30/10"
+    cosecha: "01/10 a 20/01"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Espinaca (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/espinaca.pdf"
+    fecha: "2017-03-01"
+
+  - id: "lechuga"
+    cultivo: "lechuga"
+    alias: ["lechuga"]
+    zona: "secano interior"
+    siembra: "almácigo del 15/07 al 15/10"
+    cosecha: "15/01 a 30/01"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Lechuga (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/lechuga.pdf"
+    fecha: "2017-03-01"
+
+  - id: "maiz_dulce"
+    cultivo: "maíz dulce"
+    alias: ["maiz", "maíz", "maiz dulce", "maíz dulce", "choclo"]
+    zona: "secano interior"
+    siembra: "01/10 a 30/10"
+    cosecha: "15/02 a 15/04"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Maíz dulce (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/maiz_dulce.pdf"
+    fecha: "2017-03-01"
+
+  - id: "poroto_granado"
+    cultivo: "poroto granado"
+    alias: ["poroto granado"]
+    zona: "secano interior"
+    siembra: "01/10 a 30/10"
+    cosecha: "15/02 a 15/03"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Poroto granado (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/poroto_granado.pdf"
+    fecha: "2017-03-01"
+
+  - id: "poroto_verde"
+    cultivo: "poroto verde"
+    alias: ["poroto verde"]
+    zona: "secano interior"
+    siembra: "01/10 a 30/10"
+    cosecha: "02/01 a 28/02"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Poroto para verde (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/poroto_verde.pdf"
+    fecha: "2017-03-01"
+
+  - id: "repollo"
+    cultivo: "repollo"
+    alias: ["repollo"]
+    zona: "secano interior"
+    siembra: "almácigo del 01/12 al 31/01"
+    cosecha: "22/05 a 19/07"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Repollo (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/repollo.pdf"
+    fecha: "2017-03-01"
+
+  - id: "tomate"
+    cultivo: "tomate"
+    alias: ["tomate"]
+    zona: "secano interior"
+    siembra: "almácigo del 15/07 al 30/10"
+    cosecha: "15/01 a 30/04"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Tomate (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/tomate.pdf"
+    fecha: "2017-03-01"
+
+  - id: "zanahoria"
+    cultivo: "zanahoria"
+    alias: ["zanahoria"]
+    zona: "secano interior"
+    siembra: "01/10 a 30/11"
+    cosecha: "01/02 a 30/03"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Zanahoria (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/zanahoria.pdf"
+    fecha: "2017-03-01"
+
+  - id: "zapallo_guarda"
+    cultivo: "zapallo de guarda"
+    alias: ["zapallo", "zapallo de guarda"]
+    zona: "secano interior"
+    siembra: "01/10 a 30/10"
+    cosecha: "01/02 a 28/02"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Zapallo de guarda (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/zapallo_guarda.pdf"
+    fecha: "2017-03-01"
+
+  - id: "zapallo_italiano"
+    cultivo: "zapallo italiano"
+    alias: ["zapallo italiano"]
+    zona: "secano interior"
+    siembra: "almácigo del 01/09 al 30/09"
+    cosecha: "01/12 a 28/02"
+    fuente: "INIA Carillanca — Plan Predial, Ficha Técnico-Económica Zapallo italiano (Boletín INIA N° 330)"
+    fuente_url: "https://planpredial.inia.cl/media/documentos/zapallo_italiano.pdf"
+    fecha: "2017-03-01"
