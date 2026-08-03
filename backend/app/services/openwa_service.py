@@ -240,11 +240,32 @@ class OpenWAService:
     async def download_image(self, message_id: str) -> bytes:
         """Descarga una imagen recibida por WhatsApp vía ``decryptMedia``.
 
-        Open-WA expone el mismo endpoint REST de media para audios e imágenes;
-        el método explícito evita que el flujo de visión dependa de detalles
-        internos del gateway y deja claro el contrato del caller.
+        La respuesta se consume por streaming y se corta antes de superar el
+        límite de visión. ``response.content`` no sirve aquí: bufferizaría una
+        carga maliciosa completa antes de que ``VisionService`` pudiera medirla.
         """
-        return await self.download_media(message_id)
+        safe_id = quote(message_id, safe="")
+        session_id = await self._resolve_session_id()
+        url = f"{self._base_url}/api/sessions/{session_id}/messages/{safe_id}/media"
+        max_bytes = settings.vision_image_max_bytes
+
+        async with (
+            httpx.AsyncClient(timeout=self._timeout) as client,
+            client.stream("GET", url, headers=self._headers()) as response,
+        ):
+            response.raise_for_status()
+            declared_size = response.headers.get("content-length")
+            if declared_size is not None and int(declared_size) > max_bytes:
+                raise ValueError("La imagen excede el tamaño máximo permitido")
+
+            content = bytearray()
+            async for chunk in response.aiter_bytes():
+                content.extend(chunk)
+                if len(content) > max_bytes:
+                    raise ValueError("La imagen excede el tamaño máximo permitido")
+
+        logger.info("Imagen descargada — size_bytes=%d", len(content))
+        return bytes(content)
 
     async def send_typing_indicator(self, target: str, state: str = "recording") -> None:
         """Muestra o limpia el indicador de escritura/grabando en WhatsApp.

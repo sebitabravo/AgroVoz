@@ -108,14 +108,42 @@ def test_build_response_alcanzar_umbral_cita_regla_y_fuente(
 
     def fake_rule(symptom: str, crop: str) -> str:
         captured.append((symptom, crop))
-        return "Fuente INIA verificada el 01/01/2026: https://inia.cl/regla"
+        return "Fuente verificada el 01/01/2026: INIA, https://inia.cl/regla"
 
     monkeypatch.setattr("app.services.vision_service.get_agronomic_rule_for_llm", fake_rule)
     response = service.build_response(service.classify(_image_bytes()))
 
-    assert captured == [("tizon tardio", "Papa")]
+    assert captured == [("manchas marrones en las hojas", "Papa")]
     assert "80%" in response
-    assert "Fuente INIA" in response
+    assert "Fuente verificada el" in response
+
+
+def test_build_response_integra_corpus_real_sin_mock(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """La etiqueta técnica se traduce al síntoma que resuelve la regla INIA."""
+    monkeypatch.setattr(settings, "vision_confidence_threshold", 0.8)
+    monkeypatch.setattr(settings, "agronomic_rules_enabled", True)
+    labels_path = tmp_path / "labels.json"
+    labels_path.write_text(json.dumps(["Papa___tizon_tardio"]), encoding="utf-8")
+
+    service = VisionService(session=_FakeSession([1.0]), labels_path=labels_path)
+    response = service.build_response(service.classify(_image_bytes()))
+
+    assert "tizón tardío" in response
+    assert "Fuente verificada el" in response
+    assert "https://enfermedadespapa.inia.cl/tizonTardio.php" in response
+
+
+def test_classify_rechaza_imagen_con_demasiados_pixeles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Una imagen comprimida no puede expandirse sin límite en RAM."""
+    monkeypatch.setattr("app.services.vision_service._MAX_IMAGE_PIXELS", 16)
+
+    with pytest.raises(VisionImageError, match="píxeles"):
+        VisionService(session=_FakeSession([1.0])).classify(_image_bytes())
 
 
 def test_classify_rechaza_imagen_vacia() -> None:
@@ -146,7 +174,7 @@ async def test_process_whatsapp_image_descarga_clasifica_y_envia(
     service = VisionService(session=session, labels_path=labels_path)
     monkeypatch.setattr(
         "app.services.vision_service.get_agronomic_rule_for_llm",
-        lambda *_args, **_kwargs: "Fuente INIA verificada el 01/01/2026: https://inia.cl/regla",
+        lambda *_args, **_kwargs: "Fuente verificada el 01/01/2026: INIA, https://inia.cl/regla",
     )
 
     response = await service.process_whatsapp_image(

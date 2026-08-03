@@ -11,6 +11,7 @@ httpx.AsyncClient se mockea para no tocar la red ni el gateway real.
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
@@ -237,15 +238,51 @@ async def test_download_media_url_encodea_message_id_con_arroba(
 async def test_download_image_reutiliza_endpoint_de_media(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Las imágenes usan el endpoint REST que Open-WA respalda con decryptMedia."""
-    service = OpenWAService()
-    media = AsyncMock(return_value=b"IMAGE_BYTES")
-    monkeypatch.setattr(service, "download_media", media)
+    """Las imágenes usan streaming acotado sobre el endpoint decryptMedia."""
+    monkeypatch.setattr(settings, "vision_image_max_bytes", 1024)
+    response = Mock(headers={"content-length": "11"})
+    response.raise_for_status = Mock()
 
-    result = await service.download_image("image-message")
+    async def chunks() -> AsyncIterator[bytes]:
+        yield b"IMAGE_"
+        yield b"BYTES"
+
+    response.aiter_bytes = chunks
+    stream_context = AsyncMock()
+    stream_context.__aenter__.return_value = response
+    client = AsyncMock()
+    client.stream = Mock(return_value=stream_context)
+    _patch_async_client(monkeypatch, client)
+    OpenWAService._cached_session_id = "sess-1"
+
+    result = await OpenWAService().download_image("image-message")
 
     assert result == b"IMAGE_BYTES"
-    media.assert_awaited_once_with("image-message")
+
+
+@pytest.mark.asyncio
+async def test_download_image_corta_stream_que_supera_limite(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Un gateway sin Content-Length tampoco puede agotar la RAM del backend."""
+    monkeypatch.setattr(settings, "vision_image_max_bytes", 4)
+    response = Mock(headers={})
+    response.raise_for_status = Mock()
+
+    async def chunks() -> AsyncIterator[bytes]:
+        yield b"123"
+        yield b"45"
+
+    response.aiter_bytes = chunks
+    stream_context = AsyncMock()
+    stream_context.__aenter__.return_value = response
+    client = AsyncMock()
+    client.stream = Mock(return_value=stream_context)
+    _patch_async_client(monkeypatch, client)
+    OpenWAService._cached_session_id = "sess-1"
+
+    with pytest.raises(ValueError, match="tamaño máximo"):
+        await OpenWAService().download_image("image-message")
 
 
 # ── send_typing_indicator ──────────────────────────────────────
