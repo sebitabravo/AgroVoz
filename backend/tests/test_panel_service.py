@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+from decimal import Decimal
 
 import pytest
 from pydantic import SecretStr
@@ -10,11 +11,13 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.alert import Alert
+from app.models.odepa_price import OdepaPrice
 from app.models.parcela import Parcela
 from app.models.user_prefs import UserPrefs
 from app.services.panel_service import (
     PanelLinkError,
     generate_panel_token,
+    get_panel_price_history,
     get_panel_link_for_llm,
     get_panel_summary,
     verify_panel_token,
@@ -22,6 +25,28 @@ from app.services.panel_service import (
 
 _PHONE_HASH = "a" * 64
 _NOW = 1_800_000_000
+_REFERENCE_DATE = datetime.date(2026, 8, 3)
+
+
+def _insertar_precio(
+    db: Session,
+    *,
+    producto: str = "papa",
+    mercado: str = "Vega Modelo de Temuco",
+    precio: str = "1200",
+    fecha: datetime.date = _REFERENCE_DATE,
+    unidad: str = "kg",
+) -> None:
+    """Inserta un dato ODEPA determinista para las pruebas del panel."""
+    db.add(
+        OdepaPrice(
+            producto=producto,
+            mercado=mercado,
+            precio_kg=Decimal(precio),
+            unidad=unidad,
+            fecha=fecha,
+        )
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -292,3 +317,68 @@ class TestGetPanelSummary:
 
         assert summary is not None
         assert summary.cultivos == []
+
+
+class TestGetPanelPriceHistory:
+    """Historial ODEPA filtrado por identidad, cultivo y ventana temporal."""
+
+    def test_retorna_28_dias_del_mercado_de_la_comuna(self, db: Session) -> None:
+        db.add(UserPrefs(phone_hash=_PHONE_HASH, comuna="Traiguén", cultivos='["papa", "trigo"]'))
+        _insertar_precio(db, fecha=_REFERENCE_DATE - datetime.timedelta(days=27), precio="1000")
+        _insertar_precio(db, fecha=_REFERENCE_DATE - datetime.timedelta(days=7), precio="1150")
+        _insertar_precio(db, fecha=_REFERENCE_DATE, precio="1200")
+        _insertar_precio(db, fecha=_REFERENCE_DATE - datetime.timedelta(days=28), precio="500")
+        _insertar_precio(db, producto="trigo", precio="900")
+        _insertar_precio(db, mercado="Vega de Osorno", precio="300")
+        db.commit()
+
+        history = get_panel_price_history(db, _PHONE_HASH, reference_date=_REFERENCE_DATE)
+
+        assert history is not None
+        assert history.desde == _REFERENCE_DATE - datetime.timedelta(days=27)
+        assert history.hasta == _REFERENCE_DATE
+        assert len(history.cultivos) == 2
+        papa = history.cultivos[0]
+        assert papa.cultivo == "papa"
+        assert papa.mercado == "Vega Modelo de Temuco"
+        assert papa.unidad == "kg"
+        assert [(point.fecha, point.precio) for point in papa.precios] == [
+            (_REFERENCE_DATE - datetime.timedelta(days=27), Decimal("1000.00")),
+            (_REFERENCE_DATE - datetime.timedelta(days=7), Decimal("1150.00")),
+            (_REFERENCE_DATE, Decimal("1200.00")),
+        ]
+
+    def test_no_mezcla_unidades_y_omite_otro_mercado(self, db: Session) -> None:
+        db.add(UserPrefs(phone_hash=_PHONE_HASH, comuna="Traiguén", cultivos='["papa"]'))
+        _insertar_precio(db, fecha=_REFERENCE_DATE - datetime.timedelta(days=1), precio="1200")
+        _insertar_precio(db, fecha=_REFERENCE_DATE, precio="900", unidad="$/saco 25 kilos")
+        db.add(
+            OdepaPrice(
+                producto="papa",
+                mercado="Vega de Osorno",
+                precio_kg=Decimal("9999"),
+                unidad="kg",
+                fecha=_REFERENCE_DATE,
+                fuente="ODEPA",
+            )
+        )
+        db.commit()
+
+        history = get_panel_price_history(db, _PHONE_HASH, reference_date=_REFERENCE_DATE)
+
+        assert history is not None
+        assert len(history.cultivos) == 1
+        assert history.cultivos[0].unidad == "$/saco 25 kilos"
+        assert [point.precio for point in history.cultivos[0].precios] == [Decimal("900.00")]
+
+    def test_sin_preferencias_retorna_none(self, db: Session) -> None:
+        assert get_panel_price_history(db, _PHONE_HASH, reference_date=_REFERENCE_DATE) is None
+
+    def test_sin_datos_retorna_historial_vacio(self, db: Session) -> None:
+        db.add(UserPrefs(phone_hash=_PHONE_HASH, comuna="Traiguén", cultivos='["papa"]'))
+        db.commit()
+
+        history = get_panel_price_history(db, _PHONE_HASH, reference_date=_REFERENCE_DATE)
+
+        assert history is not None
+        assert history.cultivos == []
