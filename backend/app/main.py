@@ -342,11 +342,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.debug,
     )
 
-    # Pre-cargar modelo LLM en background (~6s en VPS CX43).
-    # Evita cold start timeout en el primer request al pipeline.
+    # Precalentar el modelo LLM antes de aceptar tráfico (~6s en VPS CX43).
+    # El handshake ocurre fuera del event loop y evita el cold start del primer
+    # request; si el modelo no existe, llm_service conserva el fallback mock.
     from app.services.llm_service import preload_model
 
-    preload_model()
+    await asyncio.to_thread(preload_model, wait=True)
 
     # Scheduler ODEPA: sync diario a las 06:00 AM hora local.
     # Tarea de fondo del lifespan. Se cancela automáticamente al detener la app.
@@ -371,6 +372,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from app.services.openrouter_service import close_http_client as _close_openrouter_client
 
     await _close_openrouter_client()
+    from app.services.llm_service import reset_model
+
+    reset_model()
 
 
 def _mount_mcp_router(application: FastAPI) -> None:

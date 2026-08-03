@@ -768,16 +768,22 @@ class LlmCircuitOpenError(LlmGuardError):
     """Circuit breaker activo: se evita usar LLM temporalmente."""
 
 
-def preload_model() -> None:
-    """Inicia en background el proceso que carga el modelo LLM.
+def preload_model(*, wait: bool = False) -> None:
+    """Precalienta el proceso que carga el modelo LLM.
 
     Llamar desde el ciclo de vida de FastAPI (startup) para que el modelo
     esté listo antes de que llegue la primera consulta. En VPS CX43 tarda
     ~6s cargar el GGUF de 3GB en RAM.
 
     FastAPI nunca importa ni ejecuta llama.cpp: el thread solo espera el
-    handshake del proceso ``spawn``. Si falla, ``answer`` conserva su fallback.
+    handshake del proceso ``spawn``. En el lifespan ``wait=True`` confirma el
+    handshake antes de aceptar tráfico; el dashboard conserva ``wait=False``
+    para relanzar la carga sin bloquear su request. Si falla, ``answer``
+    conserva su fallback.
     """
+    if wait:
+        _get_model()
+        return
     threading.Thread(target=_get_model, daemon=True, name="llm-preload").start()
 
 
@@ -1514,6 +1520,13 @@ async def answer(
         if forced:
             return forced
         return "Estoy teniendo problemas para responder. ¿Podrías preguntar de nuevo más breve?"
+    except LlmCircuitOpenError:
+        # El timeout ya aisló y mató el proceso hijo. No devolver "ocupado"
+        # durante el cooldown: eso contaminaba las consultas siguientes con un
+        # mensaje de cola aunque el lock nativo ya estuviera liberado.
+        logger.warning("Circuit breaker LLM activo — usando respuesta degradada")
+        forced = await _force_keyword_tool(query_text, phone_hash=phone_hash)
+        return forced or FALLBACK_TEXT
     except LlmGuardError as exc:
         logger.warning(
             "LLM no disponible temporalmente — error=%s",
