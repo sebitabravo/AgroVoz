@@ -14,6 +14,7 @@ import datetime
 import io
 import logging
 import re
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -592,6 +593,37 @@ async def sync_odepa(session: Session | None = None) -> SyncResult:
 # ── Funciones de consulta para Tool Calling (Issue #16) ──────────
 
 
+def _normalizar_producto_busqueda(producto: str) -> str:
+    """Quita tildes para que el habla no dependa del catálogo acentuado."""
+    descompuesto = unicodedata.normalize("NFD", producto.strip().lower())
+    return "".join(
+        caracter for caracter in descompuesto if unicodedata.category(caracter) != "Mn"
+    )
+
+
+def _variantes_producto_sin_tilde(
+    session: Session,
+    producto: str,
+    mercado_norm: str | None = None,
+) -> list[str]:
+    """Encuentra variantes acentuadas consultando solo el catálogo distinto.
+
+    SQLite no tiene una función ``unaccent`` portable. El catálogo ODEPA es
+    pequeño (79 productos), por lo que comparar sus nombres únicos en Python
+    evita recorrer todo el histórico cuando el agricultor omite una tilde.
+    """
+    q_catalogo = select(OdepaPrice.producto).distinct()
+    if mercado_norm is not None:
+        q_catalogo = q_catalogo.where(func.lower(OdepaPrice.mercado) == mercado_norm)
+
+    buscado = _normalizar_producto_busqueda(producto)
+    return [
+        nombre
+        for nombre in session.scalars(q_catalogo).all()
+        if _normalizar_producto_busqueda(nombre) == buscado
+    ]
+
+
 def query_latest_price(session: Session, producto: str, mercado: str) -> OdepaPrice | None:
     """Busca el precio más reciente para un producto en un mercado.
 
@@ -618,7 +650,24 @@ def query_latest_price(session: Session, producto: str, mercado: str) -> OdepaPr
         .order_by(OdepaPrice.fecha.desc())
         .limit(1)
     )
-    return session.scalars(q).first()
+    resultado = session.scalars(q).first()
+    if resultado is not None:
+        return resultado
+
+    # El CSV puede guardar "maíz" aunque el usuario diga "maiz".
+    variantes = _variantes_producto_sin_tilde(session, producto, mercado_norm)
+    if not variantes:
+        return None
+    q_variante = (
+        select(OdepaPrice)
+        .where(
+            OdepaPrice.producto.in_(variantes),
+            func.lower(OdepaPrice.mercado) == mercado_norm,
+        )
+        .order_by(OdepaPrice.fecha.desc())
+        .limit(1)
+    )
+    return session.scalars(q_variante).first()
 
 
 def query_latest_by_product(session: Session, producto: str) -> dict[str, OdepaPrice]:
@@ -637,6 +686,17 @@ def query_latest_by_product(session: Session, producto: str) -> dict[str, OdepaP
         .order_by(OdepaPrice.mercado, OdepaPrice.fecha.desc())
     )
     rows = session.scalars(q).all()
+    if not rows:
+        # Fallback acento-insensible acotado a los nombres distintos del CSV.
+        variantes = _variantes_producto_sin_tilde(session, producto)
+        if variantes:
+            q_variante = (
+                select(OdepaPrice)
+                .where(OdepaPrice.producto.in_(variantes))
+                .order_by(OdepaPrice.mercado, OdepaPrice.fecha.desc())
+            )
+            rows = session.scalars(q_variante).all()
+
     # Primera fila por mercado = la más reciente (orden desc por fecha)
     seen: set[str] = set()
     result: dict[str, OdepaPrice] = {}
