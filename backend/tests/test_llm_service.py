@@ -92,10 +92,10 @@ class TestConstantes:
         assert len(NO_RESPONSE_TEXT) > 10
         assert "reformular" in NO_RESPONSE_TEXT.lower()
 
-    def test_whitelist_catorce_tools(self) -> None:
+    def test_whitelist_quince_tools(self) -> None:
         """Whitelist: precio, spread, historico, venta, margen, clima actual,
         pronostico, clima historico, corpus, gastos, parcelas, reglas
-        agronomicas y link del panel (14 tools)."""
+        agronomicas, link del panel y reporte PDF (15 tools)."""
         assert (
             frozenset(
                 {
@@ -113,6 +113,7 @@ class TestConstantes:
                     "get_parcelas",
                     "get_regla_agronomica",
                     "get_link_resumen",
+                    "get_reporte_pdf",
                 }
             )
             == WHITELIST_TOOLS
@@ -123,8 +124,8 @@ class TestConstantes:
         # 5 base + calculate_margin (#155) + search_corpus (#156)
         # + register_expense (#170) + get_price_spread (#171) + get_pronostico
         # + register_parcela/get_parcelas (C5) + get_regla_agronomica (C1+C2)
-        # + get_link_resumen (C3)
-        assert len(TOOLS) == 14
+        # + get_link_resumen (C3) + get_reporte_pdf (#240)
+        assert len(TOOLS) == 15
         for tool in TOOLS:
             assert tool["type"] == "function"
             fn = tool["function"]
@@ -172,6 +173,15 @@ class TestConstantes:
             assert "get_link_resumen" not in _tool_names(_offered_tools())
         with patch.object(settings, "farmer_panel_enabled", True):
             assert "get_link_resumen" in _tool_names(_offered_tools())
+
+    def test_tool_de_reporte_pdf_apagada_por_gate_no_se_ofrece(self) -> None:
+        """El reporte no aumenta el prompt mientras el gate está apagado."""
+        from app.services.llm_service import _offered_tools, _tool_names
+
+        with patch.object(settings, "pdf_reports_enabled", False):
+            assert "get_reporte_pdf" not in _tool_names(_offered_tools())
+        with patch.object(settings, "pdf_reports_enabled", True):
+            assert "get_reporte_pdf" in _tool_names(_offered_tools())
 
     def test_seccion_de_tools_omite_la_tool_apagada(self) -> None:
         """El prefijo del prompt no gasta chars en una tool deshabilitada."""

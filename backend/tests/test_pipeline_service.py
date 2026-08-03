@@ -286,6 +286,34 @@ class TestIsResumenQuery:
         assert AgroVozPipeline._is_resumen_query("dame mi resumen por favor") is True
 
 
+class TestIsReportePdfQuery:
+    """Detecta pedidos de archivo sin cambiar el resumen histórico corto."""
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "mándame un resumen de la semana",
+            "envíame un informe en PDF",
+            "quiero mi reporte semanal de precios y clima",
+            "reporte semanal",
+        ],
+    )
+    def test_detecta_pedido_explicito(self, query: str) -> None:
+        assert AgroVozPipeline._is_reporte_pdf_query(query) is True
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "resumen",
+            "dame mi resumen",
+            "precio de la papa",
+            "no quiero un reporte semanal",
+        ],
+    )
+    def test_no_confunde_resumen_historico_con_pdf(self, query: str) -> None:
+        assert AgroVozPipeline._is_reporte_pdf_query(query) is False
+
+
 # ── _is_explicit_history_query ─────────────────────────────────────
 
 
@@ -1720,6 +1748,54 @@ class TestProcess:
         # Verificar que se guardo la consulta con intent "resumen".
         assert len(save_calls) == 1
         assert save_calls[0]["intent"] == "resumen"
+
+    async def test_reporte_pdf_entrega_path_temporal_desde_pipeline(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """El pedido explícito evita el LLM y deja el PDF para AudioService."""
+        _mock_first_contact(monkeypatch, is_first=False)
+        save_calls = _mock_db_save(monkeypatch)
+        report_path = tmp_path / "agrovoz-test-reporte.pdf"
+        report_path.write_bytes(b"%PDF-test")
+
+        async def no_alerta(
+            _text: str,
+            _phone_hash: str,
+            _chat_id: str | None,
+        ) -> tuple[None, None]:
+            return None, None
+
+        async def fake_report(_phone_hash: str) -> tuple[str, str]:
+            return "Listo, te envío el reporte semanal en PDF.", str(report_path)
+
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_handle_alert_commands",
+            staticmethod(no_alerta),
+        )
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_generate_report_response",
+            staticmethod(fake_report),
+        )
+
+        result = await AgroVozPipeline().process(
+            wav_path=None,
+            audio_duration_ms=0,
+            message_id="test-reporte-pdf",
+            chat_id_hash="f" * 64,
+            request_id="req-reporte-pdf",
+            texto_directo="mándame un resumen de la semana",
+            generar_audio=False,
+        )
+
+        assert result.text_response == "Listo, te envío el reporte semanal en PDF."
+        assert result.intent == "resumen"
+        assert result.report_pdf_path == str(report_path)
+        assert save_calls[0]["intent"] == "resumen"
+        report_path.unlink()
 
     async def test_historial_explicito_es_compartido_por_audio_y_texto(
         self,
