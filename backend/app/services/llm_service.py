@@ -75,6 +75,7 @@ WHITELIST_TOOLS = frozenset(
         "get_pronostico",
         "get_clima_historico",
         "search_corpus",
+        "get_programas_indap",
         "register_expense",
         "register_parcela",
         "get_parcelas",
@@ -101,7 +102,7 @@ _GENERATION_TIMEOUT = 25.0
 _LLM_CIRCUIT_COOLDOWN_SECONDS = 90.0
 _LLM_BUSY_TEXT = "Estoy procesando otra consulta ahora. ¿Podrías intentar de nuevo en un momento?"
 
-# Contexto máximo del modelo (tokens). Con las 10 tools actuales, el system
+# Contexto máximo del modelo (tokens). Con las tools actuales, el system
 # prompt completo + tools ya
 # ocupa ~2771 tokens medidos con el tokenizer real de Qwen2.5 — n_ctx=1024
 # y n_ctx=2048 NO alcanzan ni para el primer prompt (ValueError instantaneo
@@ -124,7 +125,7 @@ _N_CTX = 4096
 # scheduler en maquinas grandes sin beneficio real para un 3B en CPU.
 _N_THREADS: int = min(os.cpu_count() or 4, 8)
 
-# Tamano de lote para prompt eval. El prompt fijo (system + 10 tools) ronda los
+# Tamano de lote para prompt eval. El prompt fijo (system + tools disponibles) ronda los
 # 2700 tokens y se evalua en lotes: un batch mas grande procesa mas tokens por
 # pasada y reduce el overhead por lote, que es donde se va el tiempo cuando hay
 # poca CPU. Ver _preload_prompt_cache() para el otro lado del problema.
@@ -514,6 +515,30 @@ TOOLS: list[dict[str, object]] = [
     {
         "type": "function",
         "function": {
+            "name": "get_programas_indap",
+            "description": (
+                "USAR para consultar PROGRAMAS DE FOMENTO Y CREDITO de INDAP "
+                "en La Araucanía. Entrega únicamente información pública sobre "
+                "objetivo, requisitos generales y forma de postular. "
+                "NUNCA evalúa elegibilidad ni recomienda un programa, monto o tasa. "
+                "Ej: 'qué programa hay para un motocultivador', "
+                "'cómo pido un crédito INDAP', 'qué apoyo ofrece PRODESAL'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "consulta": {
+                        "type": "string",
+                        "description": "Pregunta del agricultor sobre programas INDAP.",
+                    },
+                },
+                "required": ["consulta"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "register_expense",
             "description": (
                 "USAR para REGISTRAR GASTOS del agricultor. "
@@ -643,12 +668,12 @@ TOOLS: list[dict[str, object]] = [
 ]
 
 # Subconjuntos de tools por tipo de consulta (TipoConsulta en schemas/variables).
-# Las 10 definiciones juntas pesan ~2000 tokens y se re-inyectan en cada consulta:
+# Las definiciones juntas pesan ~2000 tokens y se re-inyectan en cada consulta:
 # es el grueso del prompt y, con poca CPU, el grueso de la latencia. El pipeline
 # ya clasifica la consulta ANTES de llamar al LLM (_extract_variables), asi que
 # mandamos solo las tools del dominio consultado.
 #
-# "ambos" y "desconocido" reciben las 10: si no sabemos qué pregunta, recortar
+# "ambos" y "desconocido" reciben todas: si no sabemos qué pregunta, recortar
 # tools le sacaria capacidad al modelo. Solo recortamos cuando hay certeza.
 #
 # search_corpus va en ambos subconjuntos: responde dudas de contexto agricola
@@ -942,6 +967,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
     """
     from app.services.agronomic_rules_service import get_agronomic_rule_for_llm
     from app.services.expense_service import register_expense_for_llm
+    from app.services.indap_credit_service import get_programas_indap
     from app.services.odepa_service import (
         calculate_margin_for_llm,
         calculate_sale_value_for_llm,
@@ -964,6 +990,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         "get_pronostico": get_pronostico,
         "get_clima_historico": get_clima_historico,
         "search_corpus": search_corpus_for_llm,
+        "get_programas_indap": get_programas_indap,
         "register_expense": register_expense_for_llm,
         "register_parcela": register_parcela_for_llm,
         "get_parcelas": get_parcelas_for_llm,
@@ -1304,7 +1331,7 @@ def _build_messages(
         system_tip: Instrucción adicional opcional para el system prompt.
         consulta_tipo: Tipo detectado por el pipeline ("precio", "clima",
                        "ambos", "desconocido"). Recorta el bloque de tools al
-                       dominio consultado. None o desconocido = las 10 tools.
+                       dominio consultado. None o desconocido = todas las tools.
     """
     # El bloque de tools va inmediatamente despues del system prompt para que el
     # prefijo quede estable y reusable por el cache KV. Todo lo variable

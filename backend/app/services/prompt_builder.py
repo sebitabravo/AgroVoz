@@ -80,7 +80,8 @@ HERRAMIENTAS = (
     "precio=get_price; pasado=get_price_history; venta=calculate_sale_value; "
     "margen=calculate_margin; mercados=get_price_spread; clima=get_weather; "
     "histórico=get_clima_historico; documentos=search_corpus; "
-    "gasto=register_expense. Usa la herramienta antes de reformular."
+    "programas INDAP=get_programas_indap; gasto=register_expense. "
+    "Usa la herramienta antes de reformular."
 )
 
 

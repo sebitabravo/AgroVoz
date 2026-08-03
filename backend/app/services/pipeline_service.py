@@ -803,11 +803,20 @@ class AgroVozPipeline:
                     "resumen",
                 )
 
-        # P0 #174: crédito se detecta ANTES de saludo, extracción de producto,
-        # fuzzy matching, RAG y LLM. Sin esta precedencia, frases reales como
-        # "crédito para semillas" y "documento que habla de crédito" caían en
-        # precio por similitudes para→pera y habla→haba.
-        from app.services.indap_credit_service import get_indap_credit_referral
+        # P0 #174/#245: crédito y programas se detectan ANTES de saludo,
+        # extracción de producto, fuzzy matching, RAG y LLM. Sin esta
+        # precedencia, "programa para un motocultivador" podía caer en clima
+        # o en precio por similitudes del texto transcrito.
+        from app.services.indap_credit_service import (
+            get_indap_credit_referral,
+            get_programas_indap,
+            is_programas_indap_query,
+        )
+
+        if is_programas_indap_query(transcribed_text):
+            logger.info("Derivación informativa INDAP de programas sin LLM")
+            _marcar("fast_path_programas_indap")
+            return get_programas_indap(transcribed_text), "credito"
 
         credit_referral = get_indap_credit_referral(transcribed_text)
         if credit_referral is not None:
