@@ -21,7 +21,9 @@ import yaml
 logger = logging.getLogger(__name__)
 
 _CORPUS_PATH = Path(__file__).resolve().parents[2] / "corpus" / "indap_creditos.yaml"
+_PROGRAMS_CORPUS_PATH = Path(__file__).resolve().parents[2] / "corpus" / "indap_programas_araucania.yaml"
 _INDAP_ROOT_URL = "https://www.indap.gob.cl/"
+_INDAP_REGION_URL = "https://www.indap.gob.cl/la-araucania"
 _ALLOWED_INDAP_HOSTS = frozenset({"indap.gob.cl", "www.indap.gob.cl"})
 _URL_RE = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 _URL_TRAILING_PUNCTUATION = ".,;:!?)]}"
@@ -86,15 +88,64 @@ _LIMITS_TEXT = (
     "INDAP debe revisar los requisitos de cada solicitud. "
     "AgroVoz no puede decir si calificas ni recomendar un programa o monto."
 )
+_LOCAL_OFFICE_TEXT = (
+    "Para revisar requisitos y postular, consulta la Agencia de Área Traiguén "
+    "de INDAP, Riveros #1059, Traiguén. Teléfono 45 250 6151. "
+    f"Oficinas y horarios: {_INDAP_REGION_URL}"
+)
 _SAFE_FALLBACK = (
     "Para no entregarte información financiera desactualizada, no puedo "
     "detallar programas en este momento. Consulta directamente a INDAP en "
-    f"{_INDAP_ROOT_URL} o en tu Agencia de Área. {_LIMITS_TEXT}"
+    f"{_INDAP_ROOT_URL} o en tu Agencia de Área. {_LOCAL_OFFICE_TEXT}. {_LIMITS_TEXT}"
 )
 _OUT_OF_SCOPE_RESPONSE = (
     "AgroVoz no entrega información sobre tarjetas, hipotecarios ni créditos "
     "de consumo. Solo deriva a información pública de financiamiento agrícola "
     f"de INDAP. {_LIMITS_TEXT}"
+)
+_PROGRAM_REQUIRED_IDS = frozenset(
+    {
+        "programa_desarrollo_inversiones",
+        "programa_desarrollo_local_prodesal",
+        "servicio_asesoria_tecnica_sat",
+        "programa_alianzas_productivas_pap",
+        "credito_corto_plazo",
+        "credito_largo_plazo",
+        "transicion_agricultura_sostenible_tas",
+    }
+)
+_PROGRAM_QUERY_MARKERS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        ("motocultivador", "maquinaria", "equipamiento", "infraestructura", "inversion"),
+        ("programa_desarrollo_inversiones", "credito_largo_plazo"),
+    ),
+    (("prodesal",), ("programa_desarrollo_local_prodesal",)),
+    (("sat", "asesoria tecnica", "asesoria"), ("servicio_asesoria_tecnica_sat",)),
+    (("pap", "alianza", "poder comprador", "mercado"), ("programa_alianzas_productivas_pap",)),
+    (("verde", "sostenible", "sustentable", "bioinsumo"), ("transicion_agricultura_sostenible_tas",)),
+    (("semilla", "insumo", "capital de trabajo", "corto plazo"), ("credito_corto_plazo",)),
+    (("credito", "prestamo", "financiamiento"), ("credito_corto_plazo", "credito_largo_plazo")),
+)
+_PROGRAM_INTENT_MARKERS = (
+    "programa",
+    "subsidio",
+    "fomento",
+    "financiamiento",
+    "prodesal",
+    "motocultivador",
+    "maquinaria",
+    "equipamiento",
+    "asesoria",
+    "alianza",
+    "sostenible",
+    "sustentable",
+    "financiamiento verde",
+)
+_PROGRAM_OVERVIEW_IDS = (
+    "programa_desarrollo_inversiones",
+    "programa_desarrollo_local_prodesal",
+    "credito_corto_plazo",
+    "credito_largo_plazo",
 )
 
 
@@ -214,7 +265,12 @@ def _parse_document(raw_document: object) -> _CreditDocument:
     )
 
 
-def _load_catalog(corpus_path: Path, today: date) -> _CreditCatalog:
+def _load_catalog(
+    corpus_path: Path,
+    today: date,
+    *,
+    required_ids: frozenset[str] | None = None,
+) -> _CreditCatalog:
     """Carga el snapshot y rechaza fuentes vencidas, futuras o inválidas."""
     raw: object = yaml.safe_load(corpus_path.read_text(encoding="utf-8"))
     root = _as_mapping(raw)
@@ -237,13 +293,15 @@ def _load_catalog(corpus_path: Path, today: date) -> _CreditCatalog:
             raise ValueError("id de documento duplicado")
         documents[document.document_id] = document
 
-    required_ids = {
-        "credito_corto_plazo",
-        "credito_largo_plazo",
-        "programa_desarrollo_inversiones",
-        "acreditacion_indap",
-    }
-    if not required_ids.issubset(documents):
+    expected_ids = required_ids or frozenset(
+        {
+            "credito_corto_plazo",
+            "credito_largo_plazo",
+            "programa_desarrollo_inversiones",
+            "acreditacion_indap",
+        }
+    )
+    if not expected_ids.issubset(documents):
         raise ValueError("corpus INDAP incompleto")
 
     return _CreditCatalog(
@@ -258,7 +316,7 @@ def _format_source(document: _CreditDocument, verified_on: date) -> str:
     verified = verified_on.strftime("%d/%m/%Y")
     return (
         f"{document.text} {_LIMITS_TEXT} Fuente oficial verificada el "
-        f"{verified}: {document.title}, {document.source_url}"
+        f"{verified}: {document.title}, {document.source_url}. {_LOCAL_OFFICE_TEXT}"
     )
 
 
@@ -281,8 +339,96 @@ def _format_overview(catalog: _CreditCatalog) -> str:
     return (
         "INDAP publica información oficial sobre créditos agrícolas de corto "
         f"y largo plazo. {_LIMITS_TEXT} Fuentes verificadas el {verified}: "
-        f"{short_term.source_url} y {long_term.source_url}"
+        f"{short_term.source_url} y {long_term.source_url}. {_LOCAL_OFFICE_TEXT}"
     )
+
+
+def _select_program_documents(query: str, catalog: _CreditCatalog) -> tuple[_CreditDocument, ...]:
+    """Selecciona hechos del catálogo sin convertirlos en recomendación."""
+    selected_ids: list[str] = []
+    for markers, document_ids in _PROGRAM_QUERY_MARKERS:
+        if any(marker in query for marker in markers):
+            selected_ids.extend(document_ids)
+
+    if not selected_ids:
+        selected_ids.extend(_PROGRAM_OVERVIEW_IDS)
+
+    documents: list[_CreditDocument] = []
+    for document_id in selected_ids:
+        document = catalog.documents.get(document_id)
+        if document is not None and document not in documents:
+            documents.append(document)
+    return tuple(documents)
+
+
+def is_programas_indap_query(query_text: str) -> bool:
+    """Indica si una consulta pide programas de fomento INDAP."""
+    normalized = _normalizar(query_text)
+    if any(marker in normalized for marker in _OUT_OF_SCOPE_MARKERS):
+        return False
+    return any(marker in normalized for marker in _PROGRAM_INTENT_MARKERS)
+
+
+def _format_programs(catalog: _CreditCatalog, query: str) -> str:
+    """Construye una respuesta breve con fuente y derivación local."""
+    documents = _select_program_documents(query, catalog)
+    verified = catalog.verified_on.strftime("%d/%m/%Y")
+    blocks = [
+        "Información pública de programas INDAP en La Araucanía. "
+        f"Catálogo revisado el {verified}."
+    ]
+    for document in documents:
+        blocks.append(
+            f"{document.title}: {document.text} Fuente oficial INDAP: {document.source_url}."
+        )
+    blocks.append(
+        f"{_LOCAL_OFFICE_TEXT}. {_LIMITS_TEXT} La oficina debe confirmar la vigencia, "
+        "requisitos y plazos del instrumento antes de cualquier postulación."
+    )
+    return " ".join(blocks)
+
+
+_PROGRAM_SAFE_FALLBACK = (
+    "No puedo detallar programas INDAP porque el catálogo local no está vigente o no se "
+    "pudo leer. Consulta la oferta oficial en "
+    f"{_INDAP_ROOT_URL} y {_LOCAL_OFFICE_TEXT}. {_LIMITS_TEXT}"
+)
+
+
+def get_programas_indap(
+    consulta: str = "",
+    *,
+    today: date | None = None,
+    corpus_path: Path | None = None,
+) -> str:
+    """Deriva a programas INDAP de La Araucanía sin evaluar elegibilidad.
+
+    Args:
+        consulta: Texto de la pregunta o transcripción del agricultor.
+        today: Fecha inyectable para probar la vigencia del snapshot.
+        corpus_path: Snapshot alternativo para pruebas deterministas.
+
+    Returns:
+        Respuesta factual con fuente oficial INDAP y oficina local, o un
+        fallback seguro si el catálogo está vencido o es inválido.
+    """
+    normalized_query = _normalizar(consulta)
+    if any(marker in normalized_query for marker in _OUT_OF_SCOPE_MARKERS):
+        return _OUT_OF_SCOPE_RESPONSE
+
+    effective_today = today or date.today()
+    effective_path = corpus_path or _PROGRAMS_CORPUS_PATH
+    try:
+        catalog = _load_catalog(
+            effective_path,
+            effective_today,
+            required_ids=_PROGRAM_REQUIRED_IDS,
+        )
+    except (OSError, TypeError, ValueError, yaml.YAMLError):
+        logger.warning("Catálogo de programas INDAP inválido o vencido — fallback seguro")
+        return _PROGRAM_SAFE_FALLBACK
+
+    return _format_programs(catalog, normalized_query)
 
 
 def get_corpus_metadata(*, corpus_path: Path | None = None) -> tuple[date, date] | None:
@@ -344,7 +490,7 @@ def get_indap_credit_referral(
         accreditation = catalog.documents["acreditacion_indap"]
         return (
             f"{_LIMITS_TEXT} La acreditación tampoco garantiza acceso a un "
-            "instrumento. Consulta directamente a INDAP o a tu Agencia de Área. "
+            f"instrumento. {_LOCAL_OFFICE_TEXT}. "
             f"Fuente oficial: {accreditation.source_url}"
         )
 

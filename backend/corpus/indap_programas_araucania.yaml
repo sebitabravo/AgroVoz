@@ -1,0 +1,115 @@
+# Corpus INDAP — derivación informativa de programas en La Araucanía.
+#
+# Este snapshot contiene únicamente descripciones publicadas por INDAP. La
+# fecha es la revisión local del contenido, no una promesa de convocatoria:
+# cada oficina debe confirmar requisitos, cupos y plazos antes de postular.
+version: 1
+region: "La Araucanía"
+verificado_el: "2026-08-03"
+revisar_antes_de: "2026-09-02"
+oficina_local:
+  nombre: "Agencia de Área Traiguén"
+  direccion: "Riveros #1059, Traiguén, La Araucanía"
+  telefono: "45 250 6151"
+  whatsapp: "+56 9 9997 3524"
+  fuente_url: "https://www.indap.gob.cl/la-araucania"
+documentos:
+  - id: "programa_desarrollo_inversiones"
+    titulo: "Programa de Desarrollo de Inversiones (PDI)"
+    categoria: "fomento"
+    fuente: "INDAP Chile — Programa de Desarrollo de Inversiones"
+    fuente_url: "https://www.indap.gob.cl/plataforma-de-servicios/programa-desarrollo-de-inversiones-pdi"
+    fecha: "2026-08-03"
+    etiquetas: ["inversion", "equipamiento", "maquinaria", "infraestructura", "motocultivador"]
+    chunks:
+      - texto: >
+          INDAP describe el PDI como un instrumento de fomento que entrega
+          incentivos económicos no reembolsables para cofinanciar inversiones
+          y potenciar procesos productivos y comerciales. La postulación y
+          sus períodos dependen de cada llamado regional.
+
+  - id: "programa_desarrollo_local_prodesal"
+    titulo: "Programa de Desarrollo Local (PRODESAL)"
+    categoria: "fomento"
+    fuente: "INDAP Chile — Programa de Desarrollo Local PRODESAL"
+    fuente_url: "https://www.indap.gob.cl/plataforma-de-servicios/programa-de-desarrollo-local-prodesal"
+    fecha: "2026-08-03"
+    etiquetas: ["prodesal", "asesoria", "capital de trabajo", "activos productivos"]
+    chunks:
+      - texto: >
+          PRODESAL contempla asesoría técnica, capital de trabajo e
+          inversiones de activos productivos, según la tipología de
+          microproductor. La solicitud puede iniciarse durante todo el año en
+          la Agencia de Área más cercana, en línea o en la oficina PRODESAL
+          de la municipalidad o entidad ejecutora.
+
+  - id: "servicio_asesoria_tecnica_sat"
+    titulo: "Servicio de Asesoría Técnica (SAT)"
+    categoria: "fomento"
+    fuente: "INDAP Chile — Servicio de Asesoría Técnica SAT"
+    fuente_url: "https://www.indap.gob.cl/plataforma-de-servicios/servicio-de-asesoria-tecnica-sat"
+    fecha: "2026-08-03"
+    etiquetas: ["sat", "asesoria tecnica", "negocio", "inversion"]
+    chunks:
+      - texto: >
+          El SAT entrega asesoría técnica y contempla cofinanciamiento para
+          activos productivos orientados a mejorar negocios silvoagropecuarios
+          o conexos. La solicitud puede iniciarse durante todo el año en una
+          Agencia de Área o en línea; INDAP revisa la admisibilidad.
+
+  - id: "programa_alianzas_productivas_pap"
+    titulo: "Programa de Alianzas Productivas (PAP)"
+    categoria: "fomento"
+    fuente: "INDAP Chile — Programa de Alianzas Productivas PAP"
+    fuente_url: "https://www.indap.gob.cl/plataforma-de-servicios/programa-de-alianzas-productivas-pap"
+    fecha: "2026-08-03"
+    etiquetas: ["pap", "alianzas", "mercado", "poder comprador", "comercializacion"]
+    chunks:
+      - texto: >
+          El PAP busca que usuarios de INDAP accedan a mejores alternativas
+          comerciales y nuevos mercados mediante relaciones con poderes
+          compradores. El programa informa que la postulación puede iniciarse
+          durante todo el año, según las condiciones publicadas por INDAP.
+
+  - id: "credito_corto_plazo"
+    titulo: "Crédito Corto Plazo"
+    categoria: "credito"
+    fuente: "INDAP Chile — Crédito Corto Plazo"
+    fuente_url: "https://www.indap.gob.cl/plataforma-de-servicios/credito-corto-plazo"
+    fecha: "2026-08-03"
+    etiquetas: ["credito", "prestamo", "capital de trabajo", "insumos", "semillas"]
+    chunks:
+      - texto: >
+          El Crédito Corto Plazo financia total o parcialmente capital de
+          trabajo para actividades agrícolas y se otorga por un plazo máximo
+          de 359 días. La Agencia de Área debe confirmar los requisitos y el
+          mecanismo de solicitud aplicable.
+
+  - id: "credito_largo_plazo"
+    titulo: "Crédito Largo Plazo"
+    categoria: "credito"
+    fuente: "INDAP Chile — Crédito Largo Plazo"
+    fuente_url: "https://www.indap.gob.cl/plataforma-de-servicios/credito-largo-plazo"
+    fecha: "2026-08-03"
+    etiquetas: ["credito", "prestamo", "inversion", "maquinaria", "equipamiento"]
+    chunks:
+      - texto: >
+          El Crédito Largo Plazo financia total o parcialmente inversiones y
+          el capital de trabajo definido en el proyecto, con plazos desde 360
+          días hasta 10 años. La Agencia de Área debe confirmar los requisitos
+          y el mecanismo de solicitud aplicable.
+
+  - id: "transicion_agricultura_sostenible_tas"
+    titulo: "Transición a la Agricultura Sostenible (TAS)"
+    categoria: "fomento"
+    fuente: "INDAP Chile — Transición a la Agricultura Sostenible TAS"
+    fuente_url: "https://www.indap.gob.cl/plataforma-de-servicios/transicion-la-agricultura-sostenible-tas"
+    fecha: "2026-08-03"
+    etiquetas: ["tas", "sostenibilidad", "sustentable", "verde", "bioinsumos"]
+    chunks:
+      - texto: >
+          El programa TAS entrega asesoría especializada, capacitaciones e
+          incentivos económicos para acompañar la transición hacia sistemas
+          silvoagropecuarios sostenibles. INDAP indica que está presente en
+          las regiones del país y que la postulación depende de los territorios
+          donde se implemente el programa.
