@@ -20,7 +20,7 @@ def test_panel_activa_camara_trasera_y_envia_multipart() -> None:
     javascript = (_STATIC_PANEL / "app.js").read_text(encoding="utf-8")
 
     assert 'getUserMedia({ video: { facingMode: "environment" }, audio: false })' in javascript
-    assert 'fetch("/api/v1/vision/identify"' in javascript
+    assert 'fetch("/api/v1/vision/identify?token=" + encodeURIComponent(token)' in javascript
     assert 'formData.append("image"' in javascript
     assert "Fuente INIA" in javascript
 
