@@ -92,10 +92,10 @@ class TestConstantes:
         assert len(NO_RESPONSE_TEXT) > 10
         assert "reformular" in NO_RESPONSE_TEXT.lower()
 
-    def test_whitelist_catorce_tools(self) -> None:
+    def test_whitelist_quince_tools(self) -> None:
         """Whitelist: precio, spread, historico, venta, margen, clima actual,
         pronostico, clima historico, corpus, gastos, parcelas, reglas
-        agronomicas y link del panel (14 tools)."""
+        agronomicas, programas INDAP y link del panel (15 tools)."""
         assert (
             frozenset(
                 {
@@ -108,6 +108,7 @@ class TestConstantes:
                     "get_pronostico",
                     "get_clima_historico",
                     "search_corpus",
+                    "get_programas_indap",
                     "register_expense",
                     "register_parcela",
                     "get_parcelas",
@@ -123,8 +124,8 @@ class TestConstantes:
         # 5 base + calculate_margin (#155) + search_corpus (#156)
         # + register_expense (#170) + get_price_spread (#171) + get_pronostico
         # + register_parcela/get_parcelas (C5) + get_regla_agronomica (C1+C2)
-        # + get_link_resumen (C3)
-        assert len(TOOLS) == 14
+        # + get_link_resumen (C3) + get_programas_indap (#245)
+        assert len(TOOLS) == 15
         for tool in TOOLS:
             assert tool["type"] == "function"
             fn = tool["function"]
@@ -267,7 +268,7 @@ class TestLlmConfig:
         inflan el prompt sin querer. Ratio medido ~3.26 chars/token con el
         tokenizer de Qwen2.5 (ver test_n_ctx_alcanza_para_prompt_con_siete_tools).
 
-        Con 10 tools (se sumo get_pronostico) son ~10359 chars ≈ ~3178 tokens.
+        Con las tools disponibles son ~10359 chars ≈ ~3178 tokens.
         Sumado al peor caso de tool_response (~360 tokens de search_corpus) da
         ~3538, y deja ~558 tokens de margen dentro de n_ctx=4096 para la query
         y la respuesta — que esta capada en max_tokens=128. Entra con holgura.
