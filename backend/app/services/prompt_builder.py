@@ -33,10 +33,7 @@ LIMITES = (
 
 # ── Sección 3: Ejemplos ─────────────────────────────────────────────
 
-EJEMPLOS = (
-    "EJ: precio → tool, unidad y fuente; "
-    "clima → tool, lugar, condición y fuente."
-)
+EJEMPLOS = "EJ: precio → tool, unidad y fuente; clima → tool, lugar, condición y fuente."
 
 # ── Sección 4: Reglas de comportamiento ─────────────────────────────
 
@@ -79,7 +76,8 @@ HERRAMIENTAS = (
     "HERRAMIENTAS DISPONIBLES:\n"
     "precio=get_price; pasado=get_price_history; venta=calculate_sale_value; "
     "margen=calculate_margin; mercados=get_price_spread; clima=get_weather; "
-    "histórico=get_clima_historico; documentos=search_corpus; "
+    "histórico=get_clima_historico; comparación_multianual=get_clima_historico_multianual; "
+    "documentos=search_corpus; "
     "gasto=register_expense. Usa la herramienta antes de reformular."
 )
 
@@ -90,6 +88,13 @@ def build_system_prompt() -> str:
     Returns:
         System prompt listo para pasar al LLM.
     """
-    return "\n".join([
-        CONTEXTO, LIMITES, EJEMPLOS, REGLAS, DERIVACION, HERRAMIENTAS,
-    ])
+    return "\n".join(
+        [
+            CONTEXTO,
+            LIMITES,
+            EJEMPLOS,
+            REGLAS,
+            DERIVACION,
+            HERRAMIENTAS,
+        ]
+    )

@@ -92,10 +92,10 @@ class TestConstantes:
         assert len(NO_RESPONSE_TEXT) > 10
         assert "reformular" in NO_RESPONSE_TEXT.lower()
 
-    def test_whitelist_catorce_tools(self) -> None:
+    def test_whitelist_quince_tools(self) -> None:
         """Whitelist: precio, spread, historico, venta, margen, clima actual,
         pronostico, clima historico, corpus, gastos, parcelas, reglas
-        agronomicas y link del panel (14 tools)."""
+        agronomicas, histórico multianual y link del panel (15 tools)."""
         assert (
             frozenset(
                 {
@@ -107,6 +107,7 @@ class TestConstantes:
                     "get_weather",
                     "get_pronostico",
                     "get_clima_historico",
+                    "get_clima_historico_multianual",
                     "search_corpus",
                     "register_expense",
                     "register_parcela",
@@ -123,8 +124,8 @@ class TestConstantes:
         # 5 base + calculate_margin (#155) + search_corpus (#156)
         # + register_expense (#170) + get_price_spread (#171) + get_pronostico
         # + register_parcela/get_parcelas (C5) + get_regla_agronomica (C1+C2)
-        # + get_link_resumen (C3)
-        assert len(TOOLS) == 14
+        # + get_link_resumen (C3) + histórico multianual (#247)
+        assert len(TOOLS) == 15
         for tool in TOOLS:
             assert tool["type"] == "function"
             fn = tool["function"]
