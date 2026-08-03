@@ -243,7 +243,7 @@
     establecerEstadoCamara("Solicitando permiso para usar la cámara…");
     navigator.mediaDevices
       .getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
+        video: { facingMode: "environment" },
         audio: false,
       })
       .then(function (stream) {
