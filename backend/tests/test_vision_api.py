@@ -10,9 +10,9 @@ import pytest
 from httpx import AsyncClient
 from PIL import Image
 
+from app import main as app_main
 from app.api import vision as vision_api
 from app.core.config import settings
-from app.main import app
 from app.services.vision_service import (
     VisionIdentification,
     VisionImageError,
@@ -76,11 +76,11 @@ def _identification(confidence: float = 0.94) -> VisionIdentification:
 def service_override() -> Generator[_StubVisionService, None, None]:
     """Inyecta un clasificador determinista y deja limpio el estado global."""
     service = _StubVisionService(_identification())
-    app.dependency_overrides[vision_api.get_vision_service] = lambda: service  # type: ignore[assignment]
+    app_main.app.dependency_overrides[vision_api.get_vision_service] = lambda: service  # type: ignore[assignment]
     try:
         yield service
     finally:
-        app.dependency_overrides.pop(vision_api.get_vision_service, None)
+        app_main.app.dependency_overrides.pop(vision_api.get_vision_service, None)
 
 
 @pytest.mark.asyncio
@@ -153,14 +153,14 @@ async def test_identify_vision_baja_confianza_no_cita_regla(
     """Una predicción bajo el umbral se entrega como no concluyente."""
     monkeypatch.setattr(settings, "vision_enabled", True)
     service = _StubVisionService(_identification(confidence=0.79))
-    app.dependency_overrides[vision_api.get_vision_service] = lambda: service  # type: ignore[assignment]
+    app_main.app.dependency_overrides[vision_api.get_vision_service] = lambda: service  # type: ignore[assignment]
     try:
         response = await client.post(
             "/api/v1/vision/identify",
             files={"image": ("captura.jpg", _image_bytes(), "image/jpeg")},
         )
     finally:
-        app.dependency_overrides.pop(vision_api.get_vision_service, None)
+        app_main.app.dependency_overrides.pop(vision_api.get_vision_service, None)
 
     assert response.status_code == 200
     assert response.json()["identificada"] is False
@@ -181,14 +181,14 @@ async def test_identify_vision_mapea_fallas_del_servicio(
     """Las fallas del modelo no filtran detalles internos al navegador."""
     monkeypatch.setattr(settings, "vision_enabled", True)
     service = _StubVisionService(error)
-    app.dependency_overrides[vision_api.get_vision_service] = lambda: service  # type: ignore[assignment]
+    app_main.app.dependency_overrides[vision_api.get_vision_service] = lambda: service  # type: ignore[assignment]
     try:
         response = await client.post(
             "/api/v1/vision/identify",
             files={"image": ("captura.jpg", _image_bytes(), "image/jpeg")},
         )
     finally:
-        app.dependency_overrides.pop(vision_api.get_vision_service, None)
+        app_main.app.dependency_overrides.pop(vision_api.get_vision_service, None)
 
     expected_status = 400 if isinstance(error, VisionImageError) else 503
     assert response.status_code == expected_status
