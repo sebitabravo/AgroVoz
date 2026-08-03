@@ -307,6 +307,7 @@ class AudioService:
 
         ogg_path: Path | None = None
         wav_path: Path | None = None
+        report_pdf_path: Path | None = None
 
         try:
             # Validar bytes de audio antes de cualquier procesamiento
@@ -378,6 +379,7 @@ class AudioService:
             )
 
             consultation_id = pipeline_result.consultation_id
+            report_pdf_path = Path(pipeline_result.report_pdf_path) if pipeline_result.report_pdf_path else None
             response_ogg_path: str | None = pipeline_result.audio_path if pipeline_result.audio_path else None
             has_primary_response = response_ogg_path is not None
 
@@ -459,6 +461,9 @@ class AudioService:
                     if response_ogg_path != str(_HELLO_OGG_PATH):
                         Path(response_ogg_path).unlink(missing_ok=True)
 
+            if report_pdf_path is not None:
+                await self._enviar_reporte_pdf(openwa, chat_id, report_pdf_path, request_id)
+
             # Limpiar indicador "grabando..." SIEMPRE (fix #105: evita que
             # quede activo cuando response_ogg_path es None — ej: hello.ogg
             # no existe y TTS no genero audio).
@@ -505,6 +510,8 @@ class AudioService:
                 ogg_path.unlink(missing_ok=True)
             if wav_path is not None:
                 wav_path.unlink(missing_ok=True)
+            if report_pdf_path is not None:
+                report_pdf_path.unlink(missing_ok=True)
 
     @staticmethod
     async def _enviar_fuentes_indap(
@@ -529,6 +536,24 @@ class AudioService:
             logger.info("Fuentes INDAP enviadas — code=indap_sources_sent")
         except (httpx.HTTPError, OSError, RuntimeError, TypeError, ValueError):
             logger.warning("Fuentes INDAP no enviadas — code=indap_sources_send_failed")
+
+    @staticmethod
+    async def _enviar_reporte_pdf(
+        openwa: OpenWAService,
+        chat_id: str,
+        report_path: Path,
+        request_id: str,
+    ) -> None:
+        """Envía el PDF y lo elimina aun cuando Open-WA falle."""
+        from app.services.report_service import REPORT_CAPTION, REPORT_FILENAME
+
+        try:
+            await openwa.send_file(chat_id, str(report_path), REPORT_FILENAME, REPORT_CAPTION)
+            logger.info("Reporte PDF enviado — request_id=%s", request_id)
+        except (httpx.HTTPError, OSError, RuntimeError, TypeError, ValueError):
+            logger.warning("Reporte PDF no enviado — request_id=%s", request_id)
+        finally:
+            report_path.unlink(missing_ok=True)
 
     @staticmethod
     async def _enviar_aviso_responsabilidad(
@@ -598,6 +623,7 @@ class AudioService:
         )
 
         openwa = OpenWAService()
+        report_pdf_path: Path | None = None
         try:
             # "typing" y no "recording": la respuesta va escrita, no es audio.
             await openwa.send_typing_indicator(chat_id, "typing")
@@ -615,6 +641,7 @@ class AudioService:
                 generar_audio=False,
             )
             consultation_id = resultado.consultation_id
+            report_pdf_path = Path(resultado.report_pdf_path) if resultado.report_pdf_path else None
 
             # Aviso de responsabilidad ANTES de la primera respuesta, igual que
             # en el camino de audio. Quien escribe no recibe bienvenida hablada,
@@ -633,6 +660,8 @@ class AudioService:
                     raise
                 await _mark_delivery_delivered(consultation_id)
                 await _save_delivered_history(consultation_id)
+                if report_pdf_path is not None:
+                    await self._enviar_reporte_pdf(openwa, chat_id, report_pdf_path, request_id)
                 logger.info(
                     "Respuesta de texto enviada — message_id=%s intent=%s e2e_ms=%d request_id=%s",
                     message_id,
@@ -665,6 +694,8 @@ class AudioService:
             )
             raise
         finally:
+            if report_pdf_path is not None:
+                report_pdf_path.unlink(missing_ok=True)
             try:
                 await openwa.send_typing_indicator(chat_id, "paused")
             except (httpx.HTTPError, OSError, RuntimeError):

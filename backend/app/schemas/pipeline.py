@@ -44,6 +44,13 @@ class AudioResponse(BaseModel):
         description="True si es el primer mensaje de este número. Dispara el aviso de responsabilidad.",
     )
 
+    # Reporte semanal (#240): el archivo solo vive durante el envío por
+    # WhatsApp y AudioService lo elimina siempre en un bloque finally.
+    report_pdf_path: str | None = Field(
+        default=None,
+        description="Ruta temporal del reporte PDF pendiente de envío, si aplica.",
+    )
+
     model_config = {
         "json_schema_extra": {
             "examples": [
@@ -58,6 +65,7 @@ class AudioResponse(BaseModel):
                     "tts_ms": 1300,
                     "welcome_audio_path": None,
                     "es_primer_contacto": False,
+                    "report_pdf_path": None,
                 }
             ]
         },
