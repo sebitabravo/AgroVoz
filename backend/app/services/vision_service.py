@@ -30,9 +30,17 @@ from app.services.openwa_service import OpenWAService
 logger = logging.getLogger(__name__)
 
 _IMAGE_SIZE = 224
+_MAX_IMAGE_PIXELS = 20_000_000
 _IMAGE_MEAN = (0.485, 0.456, 0.406)
 _IMAGE_STD = (0.229, 0.224, 0.225)
 _MAX_PREDICTIONS = 3
+
+# PlantVillage usa etiquetas técnicas, mientras el corpus INIA resuelve
+# descripciones observables. Solo se traducen combinaciones verificadas; una
+# etiqueta sin mapping falla cerrado en vez de improvisar un síntoma.
+_RULE_SYMPTOMS: dict[tuple[str, str], str] = {
+    ("papa", "tizon tardio"): "manchas marrones en las hojas",
+}
 
 _LOW_CONFIDENCE_TEXT = (
     "No pude identificar la plaga o enfermedad con suficiente certeza. "
@@ -229,11 +237,13 @@ class VisionService:
         """Decodifica, normaliza y redimensiona la imagen al tensor del modelo."""
         try:
             with Image.open(io.BytesIO(image_bytes)) as source:
+                if source.width * source.height > _MAX_IMAGE_PIXELS:
+                    raise VisionImageError("La imagen excede el límite de píxeles")
                 image = source.convert("RGB").resize(
                     (_IMAGE_SIZE, _IMAGE_SIZE),
                     Image.Resampling.BILINEAR,
                 )
-        except (UnidentifiedImageError, OSError) as exc:
+        except (Image.DecompressionBombError, UnidentifiedImageError, OSError) as exc:
             raise VisionImageError("La imagen no tiene un formato válido") from exc
 
         array = np.asarray(image, dtype=np.float32) / 255.0
@@ -340,7 +350,13 @@ class VisionService:
         """Resuelve una regla solo después de superar el umbral de confianza."""
         if prediction.confidence < settings.vision_confidence_threshold:
             return ""
-        return get_regla_agronomica(prediction.disease or prediction.label, prediction.crop)
+        symptom = _RULE_SYMPTOMS.get((prediction.crop.casefold(), prediction.disease.casefold()))
+        if symptom is None:
+            return ""
+        rule = get_regla_agronomica(symptom, prediction.crop)
+        if "Fuente verificada el" not in rule or "https://" not in rule:
+            return ""
+        return rule
 
     @staticmethod
     def annotate_image(image_bytes: bytes, prediction: VisionPrediction) -> bytes:
