@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import io
 from collections.abc import Generator
+from dataclasses import replace
 
 import pytest
 from httpx import AsyncClient
@@ -175,6 +176,29 @@ async def test_identify_vision_baja_confianza_no_cita_regla(
     assert response.json()["identificada"] is False
     assert response.json()["fuente_inia"] is None
     assert "suficiente" in response.json()["mensaje"]
+
+
+@pytest.mark.asyncio
+async def test_identify_vision_alta_confianza_sin_regla_falla_cerrado(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Una etiqueta sin cita INIA no se presenta como identificación confirmada."""
+    monkeypatch.setattr(settings, "vision_enabled", True)
+    service = _StubVisionService(replace(_identification(), rule=""))
+    app_main.app.dependency_overrides[vision_api.get_vision_service] = lambda: service  # type: ignore[assignment]
+    try:
+        response = await client.post(
+            f"/api/v1/vision/identify?token={_panel_token(monkeypatch)}",
+            files={"image": ("captura.jpg", _image_bytes(), "image/jpeg")},
+        )
+    finally:
+        app_main.app.dependency_overrides.pop(vision_api.get_vision_service, None)
+
+    assert response.status_code == 200
+    assert response.json()["confianza"] == pytest.approx(0.94)
+    assert response.json()["identificada"] is False
+    assert response.json()["fuente_inia"] is None
 
 
 @pytest.mark.asyncio

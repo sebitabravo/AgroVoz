@@ -118,7 +118,12 @@ async def identify_vision(
 
     source, source_url, source_date = _parse_citation(identification.rule)
     prediction = identification.prediction
-    identified = prediction.confidence >= settings.vision_confidence_threshold
+    identified = (
+        prediction.confidence >= settings.vision_confidence_threshold
+        and source is not None
+        and source_url is not None
+        and source_date is not None
+    )
     encoded_image = base64.b64encode(identification.annotated_image).decode("ascii")
     return VisionIdentifyResponse(
         enfermedad=prediction.disease or prediction.label,
