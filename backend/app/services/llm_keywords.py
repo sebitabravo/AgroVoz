@@ -14,6 +14,7 @@ import asyncio
 import difflib
 import logging
 import re
+import unicodedata
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
@@ -126,6 +127,90 @@ _CORPUS_KEYWORDS = [
     "información general", "informacion general",
     "censo agropecuario", "caracterizacion",
 ]
+
+# Keywords del directorio. Se resuelven antes que precio/clima cuando el LLM
+# no genera una llamada, para que una consulta de oficina siga siendo útil en
+# el piso de hardware sin pagar otra inferencia.
+_DIRECTORIO_KEYWORDS = (
+    "indap",
+    "prodesal",
+    "cooperativa",
+    "cooperativas",
+    "oficina de area",
+    "oficina de área",
+    "agencia de area",
+    "agencia de área",
+    "directorio agricola",
+    "directorio agrícola",
+)
+
+_DIRECTORIO_COMUNAS = (
+    "padre las casas",
+    "teodoro schmidt",
+    "nueva imperial",
+    "puerto saavedra",
+    "curacautin",
+    "curacautín",
+    "curarrehue",
+    "pitrufquen",
+    "pitrufquén",
+    "collipulli",
+    "villarrica",
+    "lonquimay",
+    "traiguen",
+    "traiguén",
+    "galvarino",
+    "lautaro",
+    "loncoche",
+    "puren",
+    "purén",
+    "temuco",
+    "tolten",
+    "toltén",
+    "vilcun",
+    "vilcún",
+    "angol",
+    "carahue",
+    "cunco",
+    "pucon",
+    "pucón",
+    "hualpin",
+    "hualpín",
+    "lumaco",
+    "cholchol",
+    "ercilla",
+    "melipeuco",
+    "freire",
+    "gorbea",
+    "renaico",
+    "los sauces",
+    "victoria",
+)
+
+
+def _normalizar_sin_tildes(texto: str) -> str:
+    """Normaliza texto para detectar comunas en transcripciones."""
+    decomposed = unicodedata.normalize("NFKD", texto.casefold())
+    return "".join(char for char in decomposed if not unicodedata.combining(char))
+
+
+def _extract_directorio_comuna(query: str) -> str | None:
+    """Extrae una comuna conocida para el fallback del directorio."""
+    normalized = _normalizar_sin_tildes(query)
+    for comuna in sorted(_DIRECTORIO_COMUNAS, key=len, reverse=True):
+        if _normalizar_sin_tildes(comuna) in normalized:
+            return comuna
+    return None
+
+
+def _extract_directorio_tipo(query: str) -> str | None:
+    """Determina el tipo de sede mencionado por el agricultor."""
+    normalized = _normalizar_sin_tildes(query)
+    if "cooperativ" in normalized:
+        return "cooperativa"
+    if "prodesal" in normalized:
+        return "prodesal"
+    return "indap"
 
 
 def _detect_greeting(query: str) -> bool:
@@ -684,16 +769,46 @@ async def _force_compound_keyword_tools(
     return "\n\n".join(blocks)
 
 
+async def _force_directorio_tool(query_text: str) -> str | None:
+    """Resuelve el directorio por keywords cuando el LLM no llama la tool."""
+    q = query_text.strip().lower()
+    if not any(keyword in q for keyword in _DIRECTORIO_KEYWORDS):
+        return None
+
+    comuna = _extract_directorio_comuna(q)
+    if comuna is None:
+        return None
+
+    from app.core.database import SessionLocal
+    from app.services.directorio_agricola_service import get_directorio_agricola
+
+    tipo = _extract_directorio_tipo(q)
+    session = SessionLocal()
+    try:
+        result = await asyncio.to_thread(get_directorio_agricola, session, comuna, tipo)
+        logger.info("Fallback tool forzado — tool=get_directorio_agricola")
+        return result
+    except (SQLAlchemyError, RuntimeError, ValueError, OSError) as exc:
+        logger.warning(
+            "Error en fallback directorio — error=%s",
+            type(exc).__name__,
+        )
+        return None
+    finally:
+        session.close()
+
+
 async def _force_keyword_tool(query_text: str, phone_hash: str | None = None) -> str | None:
-    """Orquestador de fallback por keywords: venta → precio → clima.
+    """Orquestador de fallback por keywords: directorio → venta → precio → clima.
 
     Cuando el LLM no genera <tool_call>, detectamos keywords en la consulta
     para forzar la tool correspondiente directamente sin pasar por el LLM.
 
     Orden de precedencia:
-    1. Venta (N kilos de producto) -> calculate_sale_value
-    2. Precio (producto agrícola, presente/pasado) -> get_price/get_price_history
-    3. Clima (keywords climáticos) -> get_weather
+    1. Directorio (sede y comuna) -> get_directorio_agricola
+    2. Venta (N kilos de producto) -> calculate_sale_value
+    3. Precio (producto agrícola, presente/pasado) -> get_price/get_price_history
+    4. Clima (keywords climáticos) -> get_weather
 
     Args:
         query_text: Texto de la consulta del agricultor.
@@ -708,7 +823,12 @@ async def _force_keyword_tool(query_text: str, phone_hash: str | None = None) ->
         get_price_history_for_llm,
     )
 
-    # 0. Detectar "N kilos de producto" -> calculate_sale_value (Issue #104).
+    # 0. Directorio agrícola: dirección y teléfono solo desde el snapshot local.
+    forced = await _force_directorio_tool(query_text)
+    if forced:
+        return forced
+
+    # 0.5. Detectar "N kilos de producto" -> calculate_sale_value (Issue #104).
     # Va antes que el bloque de precio: la cantidad de kilos es señal
     # fuerte de cálculo de venta y el LLM no debe hacer la multiplicación.
     forced = await _force_sale_value_tool(query_text)
