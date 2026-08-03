@@ -350,6 +350,20 @@ class TestExtractProducto:
         """Productos con acento matchean (limón, brócoli)."""
         assert AgroVozPipeline._extract_producto("precio del limón") == "limón"
 
+    def test_no_confunde_papaya_con_papa(self) -> None:
+        assert AgroVozPipeline._extract_producto("calendario de papaya") is None
+
+    @pytest.mark.parametrize(
+        ("query", "expected"),
+        [
+            ("siembra de zapallo italiano", "zapallo italiano"),
+            ("cosecha de poroto verde", "poroto verde"),
+            ("siembra de poroto granado", "poroto granado"),
+        ],
+    )
+    def test_prioriza_producto_compuesto(self, query: str, expected: str) -> None:
+        assert AgroVozPipeline._extract_producto(query) == expected
+
 
 # ── _generate_response ─────────────────────────────────────────────
 

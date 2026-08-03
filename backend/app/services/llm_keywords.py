@@ -39,9 +39,11 @@ _COMMON_PRODUCTS = [
     "palta", "naranja", "limón", "limon", "manzana", "pera",
     "kiwi", "uva", "durazno", "ciruela", "frutilla", "sandía",
     "sandia", "melón", "melon", "repollo", "acelga", "espinaca",
-    "brocoli", "brócoli", "coliflor", "zapallo", "camote",
+    "brocoli", "brócoli", "coliflor", "zapallo italiano",
+    "zapallo de guarda", "zapallo", "camote",
     "betarraga", "rabanito", "rúcula", "rucula", "cilantro",
-    "perejil", "apio", "puerro", "choclo", "poroto", "arveja",
+    "perejil", "apio", "puerro", "choclo", "poroto granado",
+    "poroto verde", "poroto", "arveja",
     "haba", "pepino", "pimentón", "pimenton", "ají", "aji",
     "maíz", "maiz", "trigo", "arroz",
 ]
@@ -331,10 +333,10 @@ def _extract_product_from_query(query: str) -> str | None:
     """
     query_lower = query.lower()
 
-    # 1. Substring exacto: ordenar por largo descendente para que "pimentón"
-    # matchee antes que "pimenton" y "sandía" antes que "sandia".
+    # 1. Coincidencia exacta por límites de palabra. Un substring simple
+    # confundía "papaya" con "papa" y cultivos compuestos con el genérico.
     for product in sorted(_COMMON_PRODUCTS, key=len, reverse=True):
-        if product in query_lower:
+        if re.search(rf"(?<!\w){re.escape(product)}(?!\w)", query_lower):
             return product
 
     # 2. Fuzzy match como fallback: detectar typos sin strict substring match.
@@ -346,10 +348,15 @@ def _extract_product_from_query(query: str) -> str | None:
     tokens = [t for t in tokens if t and len(t) > 2 and t not in _PALABRAS_NO_PRODUCTO]
 
     for token in tokens:
-        # Buscar el producto más similar usando difflib.
+        # Restringir a una edición de longitud: "papaya" no es un typo de
+        # "papa", pero "pap" y "celga" siguen tolerados.
+        candidates = [
+            product for product in _COMMON_PRODUCTS
+            if " " not in product and abs(len(product) - len(token)) <= 1
+        ]
         matches = difflib.get_close_matches(
             token,
-            _COMMON_PRODUCTS,
+            candidates,
             n=1,  # Solo el mejor match.
             cutoff=0.75,  # Umbral para evitar falsos positivos.
         )

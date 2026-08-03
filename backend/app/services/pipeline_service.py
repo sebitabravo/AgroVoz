@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 import unicodedata
 from pathlib import Path
@@ -597,10 +598,10 @@ class AgroVozPipeline:
             Nombre del producto en minúscula, o None.
         """
         q = query_text.strip().lower()
-        # Ordenar por largo descendente para que "pimentón" matchee antes
-        # que "pimenton" y "sandía" antes que "sandia".
+        # Priorizar nombres compuestos y exigir límites de palabra. El
+        # substring simple confundía, por ejemplo, "papaya" con "papa".
         for product in sorted(_COMMON_PRODUCTS, key=len, reverse=True):
-            if product in q:
+            if re.search(rf"(?<!\w){re.escape(product)}(?!\w)", q):
                 return product
         return None
 
