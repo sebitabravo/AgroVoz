@@ -28,7 +28,7 @@ class TestExtractedVariablesSchema:
 
     def test_consulta_tipo_valores_validos(self) -> None:
         """consulta_tipo solo acepta valores del Literal."""
-        for tipo in ("precio", "clima", "ambos", "desconocido"):
+        for tipo in ("precio", "clima", "agronomica", "ambos", "desconocido"):
             v = ExtractedVariables(consulta_tipo=tipo)  # type: ignore[arg-type]
             assert v.consulta_tipo == tipo
 
@@ -90,3 +90,16 @@ class TestExtractVariablesDegradacion:
         """Keyword de precio sin producto explícito igual infiere 'precio'."""
         result = AgroVozPipeline._extract_variables("¿cuánto cuesta el kilo?")
         assert result.consulta_tipo == "precio"
+
+    def test_consulta_calendario_es_agronomica(self) -> None:
+        """El nombre del cultivo no deriva una consulta de precio por sí solo."""
+        result = AgroVozPipeline._extract_variables("¿cuándo siembro trigo en Traiguén?")
+
+        assert result.producto == "trigo"
+        assert result.consulta_tipo == "agronomica"
+
+    def test_pedido_de_calendario_sin_verbo_es_agronomico(self) -> None:
+        result = AgroVozPipeline._extract_variables("calendario agrícola del trigo en Traiguén")
+
+        assert result.producto == "trigo"
+        assert result.consulta_tipo == "agronomica"

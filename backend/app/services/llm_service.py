@@ -8,9 +8,10 @@ Tools disponibles (whitelist):
   - get_price(producto, mercado)              -> odepa_service.get_price_for_llm()
   - get_price_history(producto, dias)         -> odepa_service.get_price_history_for_llm()
   - calculate_sale_value(producto, kg, mercado) -> odepa_service.calculate_sale_value_for_llm()
-   - get_weather(lat, lon)                      -> weather_service.get_weather()
-   - get_pronostico(comuna, dias)               -> weather_service.get_pronostico()
-   - get_clima_historico(comuna, metrica)       -> weather_service.get_clima_historico()
+  - get_weather(lat, lon)                      -> weather_service.get_weather()
+  - get_pronostico(comuna, dias)               -> weather_service.get_pronostico()
+  - get_clima_historico(comuna, metrica)       -> weather_service.get_clima_historico()
+  - get_calendario_agricola(producto, comuna) -> agricultural_calendar_service.get_calendario_agricola()
 
 Si el LLM intenta usar cualquier otra tool, se responde con texto
 de fallback. Si no entiende la query, pide reformular.
@@ -79,6 +80,7 @@ WHITELIST_TOOLS = frozenset(
         "register_parcela",
         "get_parcelas",
         "get_regla_agronomica",
+        "get_calendario_agricola",
         "get_link_resumen",
     }
 )
@@ -101,7 +103,7 @@ _GENERATION_TIMEOUT = 25.0
 _LLM_CIRCUIT_COOLDOWN_SECONDS = 90.0
 _LLM_BUSY_TEXT = "Estoy procesando otra consulta ahora. ¿Podrías intentar de nuevo en un momento?"
 
-# Contexto máximo del modelo (tokens). Con las 10 tools actuales, el system
+# Contexto máximo del modelo (tokens). Con las tools actuales, el system
 # prompt completo + tools ya
 # ocupa ~2771 tokens medidos con el tokenizer real de Qwen2.5 — n_ctx=1024
 # y n_ctx=2048 NO alcanzan ni para el primer prompt (ValueError instantaneo
@@ -124,7 +126,7 @@ _N_CTX = 4096
 # scheduler en maquinas grandes sin beneficio real para un 3B en CPU.
 _N_THREADS: int = min(os.cpu_count() or 4, 8)
 
-# Tamano de lote para prompt eval. El prompt fijo (system + 10 tools) ronda los
+# Tamano de lote para prompt eval. El prompt fijo (system + tools) ronda los
 # 2700 tokens y se evalua en lotes: un batch mas grande procesa mas tokens por
 # pasada y reduce el overhead por lote, que es donde se va el tiempo cuando hay
 # poca CPU. Ver _preload_prompt_cache() para el otro lado del problema.
@@ -627,6 +629,32 @@ TOOLS: list[dict[str, object]] = [
     {
         "type": "function",
         "function": {
+            "name": "get_calendario_agricola",
+            "description": (
+                "USAR para consultar ventanas de SIEMBRA, PLANTACIÓN o COSECHA "
+                "por cultivo y comuna. Solo entrega calendarios publicados por INIA "
+                "con fuente y fecha; si no hay una regla, informa que no tiene el dato. "
+                "NUNCA inventes fechas ni generalices entre comunas."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "producto": {
+                        "type": "string",
+                        "description": "Cultivo consultado (ej: papa, trigo, maíz)",
+                    },
+                    "comuna": {
+                        "type": "string",
+                        "description": "Comuna del agricultor (ej: Traiguén)",
+                    },
+                },
+                "required": ["producto", "comuna"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_link_resumen",
             "description": (
                 "USAR cuando el agricultor pida VER, MANDAR o ENVIAR un resumen, panel o link "
@@ -643,12 +671,13 @@ TOOLS: list[dict[str, object]] = [
 ]
 
 # Subconjuntos de tools por tipo de consulta (TipoConsulta en schemas/variables).
-# Las 10 definiciones juntas pesan ~2000 tokens y se re-inyectan en cada consulta:
+# Las definiciones juntas pesan ~2000 tokens y se re-inyectan en cada consulta:
 # es el grueso del prompt y, con poca CPU, el grueso de la latencia. El pipeline
 # ya clasifica la consulta ANTES de llamar al LLM (_extract_variables), asi que
 # mandamos solo las tools del dominio consultado.
 #
-# "ambos" y "desconocido" reciben las 10: si no sabemos qué pregunta, recortar
+# "ambos" y "desconocido" reciben el conjunto completo: si no sabemos qué
+# pregunta, recortar
 # tools le sacaria capacidad al modelo. Solo recortamos cuando hay certeza.
 #
 # search_corpus va en ambos subconjuntos: responde dudas de contexto agricola
@@ -665,6 +694,7 @@ _TOOLS_PRECIO = frozenset(
     }
 )
 _TOOLS_CLIMA = frozenset({"get_weather", "get_pronostico", "get_clima_historico", "search_corpus"})
+_TOOLS_AGRONOMICA = frozenset({"get_calendario_agricola", "get_regla_agronomica"})
 
 
 # Tools apagadas por feature gate: no se anuncian. Ofrecer una tool que el
@@ -675,6 +705,7 @@ _GATED_TOOLS: dict[str, Callable[[], bool]] = {
     "register_parcela": lambda: settings.parcela_tracking_enabled,
     "get_parcelas": lambda: settings.parcela_tracking_enabled,
     "get_regla_agronomica": lambda: settings.agronomic_rules_enabled,
+    "get_calendario_agricola": lambda: settings.agronomic_rules_enabled,
     "get_link_resumen": lambda: settings.farmer_panel_enabled,
 }
 
@@ -739,6 +770,7 @@ _TOOLS_SECTION = _render_tools_section()
 _TOOLS_SECTION_POR_TIPO: dict[str, str] = {
     "precio": _render_tools_section(_TOOLS_PRECIO),
     "clima": _render_tools_section(_TOOLS_CLIMA),
+    "agronomica": _render_tools_section(_TOOLS_AGRONOMICA),
     "ambos": _TOOLS_SECTION,
     "desconocido": _TOOLS_SECTION,
 }
@@ -940,6 +972,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
     Los imports son lazy para evitar dependencias circulares y permitir
     que el modulo llm_service.py sea importable sin DB ni servicios.
     """
+    from app.services.agricultural_calendar_service import get_calendario_agricola
     from app.services.agronomic_rules_service import get_agronomic_rule_for_llm
     from app.services.expense_service import register_expense_for_llm
     from app.services.odepa_service import (
@@ -968,6 +1001,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         "register_parcela": register_parcela_for_llm,
         "get_parcelas": get_parcelas_for_llm,
         "get_regla_agronomica": get_agronomic_rule_for_llm,
+        "get_calendario_agricola": get_calendario_agricola,
         "get_link_resumen": get_panel_link_for_llm,
     }
 
@@ -1304,7 +1338,7 @@ def _build_messages(
         system_tip: Instrucción adicional opcional para el system prompt.
         consulta_tipo: Tipo detectado por el pipeline ("precio", "clima",
                        "ambos", "desconocido"). Recorta el bloque de tools al
-                       dominio consultado. None o desconocido = las 10 tools.
+                       dominio consultado. None o desconocido = todas las tools.
     """
     # El bloque de tools va inmediatamente despues del system prompt para que el
     # prefijo quede estable y reusable por el cache KV. Todo lo variable

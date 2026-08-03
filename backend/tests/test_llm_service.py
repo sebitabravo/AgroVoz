@@ -92,10 +92,10 @@ class TestConstantes:
         assert len(NO_RESPONSE_TEXT) > 10
         assert "reformular" in NO_RESPONSE_TEXT.lower()
 
-    def test_whitelist_catorce_tools(self) -> None:
+    def test_whitelist_quince_tools(self) -> None:
         """Whitelist: precio, spread, historico, venta, margen, clima actual,
         pronostico, clima historico, corpus, gastos, parcelas, reglas
-        agronomicas y link del panel (14 tools)."""
+        agronomicas, calendario y link del panel (15 tools)."""
         assert (
             frozenset(
                 {
@@ -112,6 +112,7 @@ class TestConstantes:
                     "register_parcela",
                     "get_parcelas",
                     "get_regla_agronomica",
+                    "get_calendario_agricola",
                     "get_link_resumen",
                 }
             )
@@ -123,8 +124,8 @@ class TestConstantes:
         # 5 base + calculate_margin (#155) + search_corpus (#156)
         # + register_expense (#170) + get_price_spread (#171) + get_pronostico
         # + register_parcela/get_parcelas (C5) + get_regla_agronomica (C1+C2)
-        # + get_link_resumen (C3)
-        assert len(TOOLS) == 14
+        # + get_calendario_agricola (#244) + get_link_resumen (C3)
+        assert len(TOOLS) == 15
         for tool in TOOLS:
             assert tool["type"] == "function"
             fn = tool["function"]
@@ -163,6 +164,15 @@ class TestConstantes:
             assert "get_regla_agronomica" not in _tool_names(_offered_tools())
         with patch.object(settings, "agronomic_rules_enabled", True):
             assert "get_regla_agronomica" in _tool_names(_offered_tools())
+
+    def test_tool_de_calendario_apagada_por_gate_no_se_ofrece(self) -> None:
+        """El calendario citado comparte el gate de reglas agronómicas."""
+        from app.services.llm_service import _offered_tools, _tool_names
+
+        with patch.object(settings, "agronomic_rules_enabled", False):
+            assert "get_calendario_agricola" not in _tool_names(_offered_tools())
+        with patch.object(settings, "agronomic_rules_enabled", True):
+            assert "get_calendario_agricola" in _tool_names(_offered_tools())
 
     def test_tool_de_link_resumen_apagada_por_gate_no_se_ofrece(self) -> None:
         """Fail-closed también significa no anunciar la tool del panel (C3)."""
