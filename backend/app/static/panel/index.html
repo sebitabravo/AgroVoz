@@ -13,7 +13,7 @@
     body {
       font-family: system-ui, -apple-system, sans-serif;
       margin: 0;
-      padding: 1.5rem;
+      padding: 1rem;
       background: #fbfaf7;
       color: #1f2a20;
     }
@@ -28,6 +28,34 @@
     }
     .card h2 { font-size: 0.95rem; margin: 0 0 0.5rem; }
     .muted { color: #6b6b6b; font-size: 0.875rem; }
+    .camera-card { overflow: hidden; }
+    .viewfinder {
+      width: 100%;
+      max-height: 24rem;
+      aspect-ratio: 4 / 3;
+      object-fit: cover;
+      background: #1f2a20;
+      border-radius: 0.4rem;
+      margin: 0.75rem 0;
+    }
+    .button-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.75rem 0; }
+    button, .file-label {
+      border: 0;
+      border-radius: 0.4rem;
+      background: #4f7d5a;
+      color: #fff;
+      cursor: pointer;
+      font: inherit;
+      min-height: 2.75rem;
+      padding: 0.65rem 0.85rem;
+    }
+    button:disabled { background: #9aa79b; cursor: not-allowed; }
+    .file-label { display: inline-flex; align-items: center; }
+    .file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .captured-image { width: 100%; border-radius: 0.4rem; margin-top: 0.75rem; }
+    .camera-status, .vision-result { margin-top: 0.75rem; }
+    .camera-status[role="alert"] { color: #8a3d24; }
+    .source { border-top: 1px solid #e2ddd0; margin-top: 0.75rem; padding-top: 0.75rem; }
     #estado-offline {
       display: none;
       background: #fff4e0;
@@ -46,6 +74,24 @@
     <div id="contenido">
       <p class="muted">Cargando…</p>
     </div>
+    <section class="card camera-card" id="identificar-plaga" aria-labelledby="identificar-plaga-titulo">
+      <h2 id="identificar-plaga-titulo">Identificar plaga</h2>
+      <p class="muted">Activa la cámara trasera, centra una hoja y captura una imagen para analizarla.</p>
+      <p class="camera-status" id="camara-estado" role="status" aria-live="polite">La cámara se activa solo cuando la solicites.</p>
+      <video class="viewfinder" id="camara-viewfinder" autoplay playsinline muted hidden></video>
+      <canvas id="camara-canvas" hidden></canvas>
+      <div class="button-row">
+        <button id="activar-camara" type="button">Activar cámara</button>
+        <button id="capturar-imagen" type="button" disabled hidden>Capturar y analizar</button>
+        <button id="detener-camara" type="button" hidden>Detener cámara</button>
+        <label class="file-label" for="imagen-galeria">Elegir una foto</label>
+        <input class="file-input" id="imagen-galeria" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" />
+      </div>
+      <img class="captured-image" id="imagen-capturada" alt="Imagen capturada para identificar" hidden />
+      <div class="vision-result" id="resultado-vision" role="status" aria-live="polite">
+        <p class="muted">El resultado aparecerá aquí después de capturar una imagen.</p>
+      </div>
+    </section>
   </main>
   <script src="/static/panel/app.js"></script>
   <script src="/static/panel/register-sw.js"></script>

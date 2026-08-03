@@ -77,6 +77,145 @@
       '<p class="muted">' + escaparHtml(mensaje) + "</p>";
   }
 
+  var cameraStream = null;
+  var capturedObjectUrl = "";
+
+  function mostrarEstadoCamara(mensaje, esError) {
+    var estado = document.getElementById("camara-estado");
+    estado.textContent = mensaje;
+    estado.setAttribute("role", esError ? "alert" : "status");
+  }
+
+  function detenerCamara() {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(function (track) {
+        track.stop();
+      });
+      cameraStream = null;
+    }
+    document.getElementById("camara-viewfinder").hidden = true;
+    document.getElementById("capturar-imagen").hidden = true;
+    document.getElementById("capturar-imagen").disabled = true;
+    document.getElementById("detener-camara").hidden = true;
+  }
+
+  function activarCamara() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      mostrarEstadoCamara("Tu navegador requiere HTTPS para usar la cámara.", true);
+      return;
+    }
+    mostrarEstadoCamara("Solicitando permiso para la cámara trasera…", false);
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: "environment" }, audio: false })
+      .then(function (stream) {
+        cameraStream = stream;
+        var viewfinder = document.getElementById("camara-viewfinder");
+        viewfinder.srcObject = stream;
+        viewfinder.hidden = false;
+        document.getElementById("capturar-imagen").hidden = false;
+        document.getElementById("capturar-imagen").disabled = false;
+        document.getElementById("detener-camara").hidden = false;
+        mostrarEstadoCamara("Centra la hoja y captura cuando esté enfocada.", false);
+      })
+      .catch(function () {
+        mostrarEstadoCamara("No pude abrir la cámara. Puedes elegir una foto del dispositivo.", true);
+      });
+  }
+
+  function mostrarImagenCapturada(blob) {
+    if (capturedObjectUrl) URL.revokeObjectURL(capturedObjectUrl);
+    capturedObjectUrl = URL.createObjectURL(blob);
+    var image = document.getElementById("imagen-capturada");
+    image.src = capturedObjectUrl;
+    image.hidden = false;
+  }
+
+  function renderizarResultadoVision(resultado) {
+    var resultadoElement = document.getElementById("resultado-vision");
+    var porcentaje = Math.round(Number(resultado.confidence || 0) * 100);
+    var titulo = resultado.classification || "No identificado con certeza";
+    var candidato = resultado.classification
+      ? ""
+      : '<p class="muted">Etiqueta candidata: ' + escaparHtml(resultado.detected_label || "sin dato") + "</p>";
+    var cita = "";
+    if (resultado.source) {
+      cita = '<p class="source"><strong>Fuente INIA:</strong> ' + escaparHtml(resultado.source);
+      if (resultado.source_url && /^https:\/\//i.test(resultado.source_url)) {
+        cita +=
+          ' — <a href="' +
+          escaparHtml(resultado.source_url) +
+          '" target="_blank" rel="noopener">ver fuente</a>';
+      }
+      cita += "</p>";
+    }
+    if (resultado.rule) {
+      cita += '<p class="muted">' + escaparHtml(resultado.rule) + "</p>";
+    }
+    resultadoElement.innerHTML =
+      "<p><strong>" +
+      escaparHtml(titulo) +
+      "</strong> — confianza " +
+      porcentaje +
+      "%</p><p>" +
+      escaparHtml(resultado.message || "") +
+      "</p>" +
+      candidato +
+      cita;
+  }
+
+  function enviarImagen(blob) {
+    mostrarImagenCapturada(blob);
+    document.getElementById("resultado-vision").innerHTML =
+      '<p class="muted">Analizando la imagen localmente…</p>';
+    var formData = new FormData();
+    formData.append("image", blob, "captura.jpg");
+    fetch("/api/v1/vision/identify", { method: "POST", body: formData })
+      .then(function (response) {
+        return response.json().then(function (payload) {
+          if (!response.ok) throw new Error(payload.detail || "No se pudo analizar la imagen.");
+          return payload;
+        });
+      })
+      .then(renderizarResultadoVision)
+      .catch(function (error) {
+        document.getElementById("resultado-vision").innerHTML =
+          '<p class="muted">' + escaparHtml(error.message) + "</p>";
+      });
+  }
+
+  function capturarImagen() {
+    var viewfinder = document.getElementById("camara-viewfinder");
+    if (!cameraStream || !viewfinder.videoWidth || !viewfinder.videoHeight) {
+      mostrarEstadoCamara("Espera a que la cámara enfoque antes de capturar.", true);
+      return;
+    }
+    var canvas = document.getElementById("camara-canvas");
+    canvas.width = viewfinder.videoWidth;
+    canvas.height = viewfinder.videoHeight;
+    canvas.getContext("2d").drawImage(viewfinder, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(function (blob) {
+      if (blob) enviarImagen(blob);
+    }, "image/jpeg", 0.85);
+  }
+
+  function elegirImagen(event) {
+    var files = event.target.files;
+    if (files && files[0]) {
+      detenerCamara();
+      enviarImagen(files[0]);
+    }
+  }
+
+  function inicializarCamara() {
+    document.getElementById("activar-camara").addEventListener("click", activarCamara);
+    document.getElementById("capturar-imagen").addEventListener("click", capturarImagen);
+    document.getElementById("detener-camara").addEventListener("click", detenerCamara);
+    document.getElementById("imagen-galeria").addEventListener("change", elegirImagen);
+    window.addEventListener("pagehide", detenerCamara);
+  }
+
+  inicializarCamara();
+
   var token = extraerToken();
   if (!token) {
     mostrarError("Link inválido. Pide uno nuevo por WhatsApp.");

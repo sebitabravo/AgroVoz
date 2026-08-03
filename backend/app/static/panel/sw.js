@@ -10,7 +10,7 @@
  * MISMA duracion del link (ver panel_link_ttl_hours en el backend). No
  * persiste indefinidamente ni se comparte con otro origen.
  */
-const CACHE_NAME = "agrovoz-panel-v1";
+const CACHE_NAME = "agrovoz-panel-v2";
 const SHELL_ASSETS = [
   "/static/panel/manifest.json",
   "/static/panel/register-sw.js",
