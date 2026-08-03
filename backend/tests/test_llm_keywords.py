@@ -204,6 +204,10 @@ class TestExtractProductFromQuery:
         assert _extract_product_from_query("precio del maiz") == "maiz"
         assert _extract_product_from_query("precio del plátano") == "plátano"
 
+    def test_temperatura_no_se_confunde_con_pera(self) -> None:
+        """El producto no puede aparecer como parte de otra palabra."""
+        assert _extract_product_from_query("qué temperatura hace en Temuco") is None
+
 
 class TestExtractMercadoFromQuery:
     """Alias de mercados, regiones y comunas se resuelven de forma determinista."""
@@ -217,6 +221,9 @@ class TestExtractMercadoFromQuery:
 
     def test_comuna_se_resuelve_al_mercado_mas_cercano(self) -> None:
         assert _extract_mercado_from_query("precio de papa cerca de Traiguen") == "Vega Modelo de Temuco"
+
+    def test_conce_se_resuelve_a_vega_monumental(self) -> None:
+        assert _extract_mercado_from_query("precio de papa en conce") == "vega monumental"
 
 
 class TestParseMontoJergaChilena:

@@ -46,6 +46,11 @@ _COMMON_PRODUCTS = [
     "maíz choclero", "maiz choclero", "maíz", "maiz", "lenteja", "trigo", "arroz",
 ]
 
+
+def _contains_product_keyword(query: str, product: str) -> bool:
+    """Comprueba el producto como palabra, no dentro de otra palabra."""
+    return re.search(rf"(?<!\w){re.escape(product)}(?!\w)", query) is not None
+
 # Regex determinista para detección de venta (Issue #104): captura "N kilos"
 # con producto cercano. El "de" es opcional: "50 kilos de papa" y
 # "cuanto vale 50 kilos papa" deben ambos disparar calculate_sale_value.
@@ -269,6 +274,9 @@ _MERCADO_ALIASES: tuple[tuple[str, str], ...] = (
     ("octava region", "Vega Monumental de Concepción"),
     ("la octava", "Vega Monumental de Concepción"),
     ("vega central", "vega central"),
+    ("concepción", "vega monumental"),
+    ("concepcion", "vega monumental"),
+    ("conce", "vega monumental"),
     ("lo valledor", "valledor"),
     ("vega modelo", "vega modelo"),
     ("puerto montt", "puerto montt"),
@@ -357,7 +365,7 @@ def _extract_product_from_query(query: str) -> str | None:
     # 1. Substring exacto: ordenar por largo descendente para que "pimentón"
     # matchee antes que "pimenton" y "sandía" antes que "sandia".
     for product in sorted(_COMMON_PRODUCTS, key=len, reverse=True):
-        if product in query_lower:
+        if _contains_product_keyword(query_lower, product):
             return product
 
     # 2. Fuzzy match como fallback: detectar typos sin strict substring match.
@@ -398,6 +406,8 @@ def _extract_product_mentions(query: str) -> list[str]:
         if start < 0:
             continue
         end = start + len(product)
+        if not _contains_product_keyword(query_lower, product):
+            continue
         if any(start < previous_end and end > previous_start for previous_start, previous_end, _ in matches):
             continue
         matches.append((start, end, product))
