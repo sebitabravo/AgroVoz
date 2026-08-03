@@ -8,7 +8,7 @@ ni datos de integrantes.
 
 import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, Integer, String, Text, func
+from sqlalchemy import Boolean, CheckConstraint, Float, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -105,6 +105,18 @@ class UserPrefs(Base):
             "parcela_consent IN (0, 1)",
             name="ck_user_prefs_parcela_consent_bool",
         ),
+        CheckConstraint(
+            "(lat IS NULL AND lng IS NULL) OR (lat IS NOT NULL AND lng IS NOT NULL)",
+            name="ck_user_prefs_location_pair",
+        ),
+        CheckConstraint(
+            "lat IS NULL OR lat BETWEEN -90.0 AND 90.0",
+            name="ck_user_prefs_lat_range",
+        ),
+        CheckConstraint(
+            "lng IS NULL OR lng BETWEEN -180.0 AND 180.0",
+            name="ck_user_prefs_lng_range",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -125,6 +137,10 @@ class UserPrefs(Base):
     # Comuna del productor (ej: "Traiguén"). Nullable: el onboarding por voz
     # es stretch; en el piloto se setea via admin despues del primer contacto.
     comuna: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Ubicación compartida explícitamente por WhatsApp para consultar el clima
+    # de la parcela exacta. Ambos campos son nulos o se guardan como pareja.
+    lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lng: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Consentimiento explicito para retener audio en el dataset de voz rural.
     # Default False: privacidad por defecto (#96).
     dataset_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
