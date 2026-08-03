@@ -47,6 +47,19 @@ COMUNA_TO_MERCADO: dict[str, str] = {
     "padre las casas": "Vega Modelo de Temuco",
     "nueva imperial": "Vega Modelo de Temuco",
     "lautaro": "Vega Modelo de Temuco",
+    "victoria": "Vega Modelo de Temuco",
+    "carahue": "Vega Modelo de Temuco",
+    "saavedra": "Vega Modelo de Temuco",
+    "curacautín": "Vega Modelo de Temuco",
+    "curacautin": "Vega Modelo de Temuco",
+    "freire": "Vega Modelo de Temuco",
+    "gorbea": "Vega Modelo de Temuco",
+    "perquenco": "Vega Modelo de Temuco",
+    "vilcún": "Vega Modelo de Temuco",
+    "vilcun": "Vega Modelo de Temuco",
+    "teodoro schmidt": "Vega Modelo de Temuco",
+    "toltén": "Vega Modelo de Temuco",
+    "tolten": "Vega Modelo de Temuco",
     "villarrica": "Vega Modelo de Temuco",
     "pucón": "Vega Modelo de Temuco",
     "pucon": "Vega Modelo de Temuco",
@@ -75,6 +88,8 @@ COMUNA_TO_MERCADO: dict[str, str] = {
     "san antonio": "Vega de Valparaíso",
     # Región Metropolitana
     "santiago": "Mercado Mayorista Lo Valledor de Santiago",
+    "estación central": "Vega Central",
+    "estacion central": "Vega Central",
     "maipú": "Mercado Mayorista Lo Valledor de Santiago",
     "maipu": "Mercado Mayorista Lo Valledor de Santiago",
     "puente alto": "Mercado Mayorista Lo Valledor de Santiago",
@@ -853,8 +868,18 @@ def get_price_for_llm(
                     )
                 return format_price_text(registro_local)
 
-        # Fallback: Lo Valledor (comportamiento original, Issue #83).
-        return format_price_text(_select_registro_referencia(precios_por_mercado))
+        # Fallback nacional: declarar la referencia evita que el productor
+        # confunda Lo Valledor con un precio local cuando no hay ubicación.
+        registro_referencia = _select_registro_referencia(precios_por_mercado)
+        referencia = (
+            "Lo Valledor de Santiago"
+            if "valledor" in registro_referencia.mercado.lower()
+            else registro_referencia.mercado
+        )
+        return (
+            f"Referencia nacional (sin mercado local): {referencia}. "
+            f"{format_price_text(registro_referencia)}"
+        )
 
     # Mercado hablado ("vega central", "valledor"): exacto o substring.
     try:
