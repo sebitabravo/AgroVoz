@@ -7,6 +7,7 @@ y delega el procesamiento de audio al AudioService.
 
 import base64
 import logging
+import math
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import JSONResponse
@@ -65,6 +66,30 @@ def _is_text_message(payload: WebhookPayload) -> bool:
         return False
     cuerpo = payload.data.body.strip()
     return bool(cuerpo) and len(cuerpo) <= _MAX_TEXTO_CHARS
+
+
+def _is_location_message(payload: WebhookPayload) -> bool:
+    """Determina si Open-WA entregó un pin de ubicación."""
+    return payload.data.type == "location"
+
+
+def _extract_location(payload: WebhookPayload) -> tuple[float, float] | None:
+    """Extrae y valida latitud/longitud de las variantes del payload."""
+    data = payload.data
+    nested = data.location
+    lat = data.lat if data.lat is not None else data.latitude
+    lng = data.lng if data.lng is not None else data.longitude
+    if nested is not None:
+        if lat is None:
+            lat = nested.lat if nested.lat is not None else nested.latitude
+        if lng is None:
+            lng = nested.lng if nested.lng is not None else nested.longitude
+
+    if lat is None or lng is None or not (math.isfinite(lat) and math.isfinite(lng)):
+        return None
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lng <= 180.0):
+        return None
+    return lat, lng
 
 
 def _extract_audio_bytes(payload: WebhookPayload) -> bytes | None:
@@ -154,7 +179,38 @@ async def webhook_whatsapp(
             content={"status": "received", "message_id": message_id_safe},
         )
 
-    # Ni voz ni texto (imagen, sticker, ubicacion, ...): fuera de alcance.
+    if _is_location_message(payload):
+        location = _extract_location(payload)
+        if location is None:
+            logger.info(
+                "Ubicación sin coordenadas válidas ignorada — message_id=%s request_id=%s",
+                message_id_safe,
+                request_id,
+            )
+            return JSONResponse(
+                status_code=200,
+                content={"status": "ignored", "reason": "ubicacion_invalida"},
+            )
+
+        lat, lng = location
+        logger.info(
+            "Ubicación recibida — message_id=%s request_id=%s",
+            message_id_safe,
+            request_id,
+        )
+        background_tasks.add_task(
+            audio_service.process_location,
+            lat=lat,
+            lng=lng,
+            chat_id=chat_id,
+            request_id=request_id,
+        )
+        return JSONResponse(
+            status_code=200,
+            content={"status": "received", "message_id": message_id_safe},
+        )
+
+    # Ni voz, texto ni ubicación (imagen, sticker, ...): fuera de alcance.
     if not _is_voice_message(payload):
         logger.info(
             "Mensaje no-audio ignorado — message_id=%s type=%s has_body=%s request_id=%s",
