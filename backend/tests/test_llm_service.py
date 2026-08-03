@@ -743,6 +743,29 @@ class TestAnswerGuardasLlm:
         assert heartbeat_completed is True
         assert result == FALLBACK_TEXT
 
+    async def test_fallback_keyword_precede_carga_y_timeout_del_llm(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Una consulta de precio conocida no espera el timeout del LLM."""
+        llamadas: list[str] = []
+
+        async def _forced(*args: object, **kwargs: object) -> str:
+            llamadas.append("keyword")
+            return "Papa está a 900 pesos el kilo según ODEPA."
+
+        def _get_model_no_deberia_correr() -> object:
+            llamadas.append("modelo")
+            raise AssertionError("el preflight debía responder antes de cargar el modelo")
+
+        monkeypatch.setattr("app.services.llm_service._force_keyword_tool", _forced)
+        monkeypatch.setattr("app.services.llm_service._get_model", _get_model_no_deberia_correr)
+
+        result = await answer("a cuanto esta la papa", consulta_tipo="precio")
+
+        assert result == "Papa está a 900 pesos el kilo según ODEPA."
+        assert llamadas == ["keyword"]
+
     async def test_answer_delega_inferencia_al_worker(
         self,
         monkeypatch: pytest.MonkeyPatch,

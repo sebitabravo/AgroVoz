@@ -933,6 +933,98 @@ async def _run_llm_completion(
     return response
 
 
+async def _preflight_keyword_tool(
+    query_text: str,
+    phone_hash: str | None,
+    consulta_tipo: str | None,
+    system_tip: str | None,
+) -> str | None:
+    """Resuelve una consulta determinista antes de cargar o invocar el LLM.
+
+    El pipeline ya usa fast-path para preguntas simples. Este segundo control
+    cubre las consultas que por longitud o contexto no pasan ese gate, pero
+    cuyo resultado sigue siendo un dato crudo de ODEPA/OpenMeteo. Así no se
+    espera el timeout de 25 segundos para ejecutar una tool conocida.
+    """
+    if system_tip is not None or consulta_tipo not in {"precio", "clima"}:
+        return None
+
+    q = query_text.strip().lower()
+    if not q:
+        return None
+
+    # No adelantar una consulta compuesta o explicativa: esos casos sí pueden
+    # necesitar el razonamiento del LLM (el pipeline maneja precio + clima
+    # antes de llegar acá).
+    bloqueantes = (
+        " y ademas",
+        " y además",
+        " tambien",
+        " también",
+        " o sea",
+        " por que",
+        " por qué",
+        " porque",
+        " conviene",
+        " me sirve",
+        " comparado",
+        " diferencia",
+        " deberia",
+        " debería",
+        " recomend",
+    )
+    normalizado = f" {q.replace('¿', ' ').replace('¡', ' ')} "
+    if any(marca in normalizado for marca in bloqueantes):
+        return None
+
+    if consulta_tipo == "precio":
+        indicadores: tuple[str, ...] = (
+            "precio",
+            "cuanto",
+            "cuánto",
+            "cuesta",
+            "vale",
+            "kilo",
+            "saco",
+            "luca",
+            "peso",
+            "vender",
+            "vendi",
+            "vendí",
+            "comprar",
+            "estaba",
+            "ayer",
+            "semana pasada",
+            "hace ",
+        )
+    else:
+        indicadores = (
+            "clima",
+            "tiempo",
+            "lluvia",
+            "llover",
+            "temperatura",
+            "frio",
+            "frío",
+            "calor",
+            "helada",
+            "viento",
+            "pronostico",
+            "pronóstico",
+            "grados",
+        )
+    if not any(indicador in q for indicador in indicadores):
+        return None
+
+    try:
+        return await _force_keyword_tool(q, phone_hash=phone_hash)
+    except (SQLAlchemyError, OSError, RuntimeError, ValueError, TimeoutError) as exc:
+        logger.warning(
+            "Preflight keyword no disponible — error=%s",
+            type(exc).__name__,
+        )
+        return None
+
 # ── Tool dispatcher ─────────────────────────────────────────────────
 
 # Tipos para la tabla de herramientas.
@@ -1373,6 +1465,16 @@ async def answer(
     """
     if not query_text or not query_text.strip():
         return NO_RESPONSE_TEXT
+
+    forced_preflight = await _preflight_keyword_tool(
+        query_text,
+        phone_hash,
+        consulta_tipo,
+        system_tip,
+    )
+    if forced_preflight:
+        logger.info("Fallback keyword ejecutado antes del LLM — tipo=%s", consulta_tipo)
+        return forced_preflight
 
     # La carga/reinicialización del hijo puede esperar hasta el timeout de
     # startup. Nunca bloquear el event loop del webhook mientras ocurre.
