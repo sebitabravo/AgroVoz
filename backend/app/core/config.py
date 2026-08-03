@@ -113,6 +113,15 @@ class Settings(BaseSettings):
     # ── Modelos IA (paths) ───────────────
     piper_model_path: str = "models/es_MX-claude-high.onnx"
 
+    # Modelo local de visión para la identificación desde WhatsApp o la PWA.
+    # El gate queda apagado y las rutas vacías hasta provisionar un modelo y
+    # su catálogo de etiquetas verificados en el VPS.
+    vision_enabled: bool = False
+    vision_model_path: str = ""
+    vision_labels_path: str = ""
+    vision_confidence_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
+    vision_max_image_bytes: int = Field(default=5 * 1024 * 1024, ge=1)
+
     # ── OpenRouter (fallback LLM remoto) ─
     # Vacio por defecto: el fallback esta DESHABILITADO hasta que se configure
     # una API key explicitamente. Se usa SOLO si el LLM local (Qwen2.5-3B) no

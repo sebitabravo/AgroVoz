@@ -14,6 +14,8 @@ faster-whisper==1.2.1
 # quede validado en el VPS y en el piso de 1 vCPU.
 openai-whisper==20250625
 piper-tts==1.6.0
+onnxruntime==1.27.0
+Pillow==11.3.0
 llama-cpp-python>=0.3.34
 jinja2==3.1.6
 itsdangerous==2.2.0

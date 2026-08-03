@@ -54,6 +54,16 @@ class _CatalogoReglas:
     reglas: tuple[_Regla, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class AgronomicRuleCitation:
+    """Regla citada que puede mostrarse fuera del flujo conversacional."""
+
+    text: str
+    source: str
+    source_url: str
+    verified_on: date
+
+
 def _normalizar(text: str) -> str:
     """Normaliza tildes y espacios para una detección determinista."""
     decomposed = unicodedata.normalize("NFKD", text.casefold())
@@ -138,6 +148,51 @@ def _format_regla(regla: _Regla, verified_on: date) -> str:
     )
 
 
+def _find_rule(catalog: _CatalogoReglas, sintoma: str, cultivo: str) -> _Regla | None:
+    """Encuentra una regla sin relajar el filtro de cultivo."""
+    candidatas = catalog.reglas
+    if cultivo:
+        candidatas = tuple(regla for regla in candidatas if regla.cultivo == cultivo)
+
+    for regla in candidatas:
+        if any(sintoma_regla in sintoma for sintoma_regla in regla.sintomas):
+            return regla
+    return None
+
+
+def get_agronomic_rule_citation(
+    sintoma: str,
+    cultivo: str = "",
+    *,
+    today: date | None = None,
+    corpus_path: Path | None = None,
+) -> AgronomicRuleCitation | None:
+    """Devuelve una regla vigente y sus metadatos para una respuesta visual.
+
+    La ausencia de gate, de match o de un snapshot vigente se representa como
+    ``None`` para que el caller pueda fallar cerrado sin inventar una cita.
+    """
+    if not settings.agronomic_rules_enabled or not sintoma.strip():
+        return None
+
+    effective_today = today or date.today()
+    effective_path = corpus_path or _CORPUS_PATH
+    try:
+        catalog = _load_catalog(effective_path, effective_today)
+    except (OSError, TypeError, ValueError, yaml.YAMLError):
+        return None
+
+    regla = _find_rule(catalog, _normalizar(sintoma), _normalizar(cultivo) if cultivo else "")
+    if regla is None:
+        return None
+    return AgronomicRuleCitation(
+        text=_format_regla(regla, catalog.verified_on),
+        source=regla.fuente,
+        source_url=regla.fuente_url,
+        verified_on=catalog.verified_on,
+    )
+
+
 def get_agronomic_rule_for_llm(
     sintoma: str = "",
     cultivo: str = "",
@@ -173,12 +228,5 @@ def get_agronomic_rule_for_llm(
     except (OSError, TypeError, ValueError, yaml.YAMLError):
         return _SAFE_FALLBACK
 
-    candidatas = catalog.reglas
-    if normalized_cultivo:
-        candidatas = tuple(regla for regla in candidatas if regla.cultivo == normalized_cultivo)
-
-    for regla in candidatas:
-        if any(sintoma_regla in normalized_sintoma for sintoma_regla in regla.sintomas):
-            return _format_regla(regla, catalog.verified_on)
-
-    return _NO_MATCH_TEXT
+    regla = _find_rule(catalog, normalized_sintoma, normalized_cultivo)
+    return _format_regla(regla, catalog.verified_on) if regla else _NO_MATCH_TEXT
