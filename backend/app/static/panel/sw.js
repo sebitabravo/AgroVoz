@@ -10,11 +10,12 @@
  * MISMA duracion del link (ver panel_link_ttl_hours en el backend). No
  * persiste indefinidamente ni se comparte con otro origen.
  */
-const CACHE_NAME = "agrovoz-panel-v1";
+const CACHE_NAME = "agrovoz-panel-v2";
 const SHELL_ASSETS = [
   "/static/panel/manifest.json",
   "/static/panel/register-sw.js",
   "/static/panel/app.js",
+  "/static/chart.umd.min.js",
   "/static/icon-192.png",
   "/static/icon-512.png",
 ];
@@ -51,7 +52,8 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Resumen del productor: network-first, cae a la ultima copia offline.
+  // Resumen y precios (/api/v1/panel/{token}/prices): network-first, caen a
+  // la última copia offline.
   // La clave de cache incluye el token completo: un dispositivo compartido
   // nunca sirve el resumen cacheado de OTRO link.
   if (url.pathname.startsWith("/api/v1/panel/")) {

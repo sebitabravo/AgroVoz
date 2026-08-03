@@ -52,3 +52,24 @@ async def test_shell_html_bloqueado_si_gate_apagado(
     resp = await client.get("/panel/un-token-cualquiera")
 
     assert resp.status_code == 503
+
+
+async def test_shell_incluye_grafico_de_precios_local(client: AsyncClient) -> None:
+    """El shell incluye Chart.js local y el canvas para funcionar sin CDN."""
+    resp = await client.get("/static/panel/index.html")
+
+    assert resp.status_code == 200
+    assert '<section class="card" aria-labelledby="precios-titulo">' in resp.text
+    assert '<canvas id="grafico-precios"' in resp.text
+    assert '<script src="/static/chart.umd.min.js"></script>' in resp.text
+    assert "@media (max-width: 360px)" in resp.text
+
+
+async def test_service_worker_cachea_chart_y_historial_de_precios(client: AsyncClient) -> None:
+    """El SW guarda Chart.js y la respuesta /prices para consultas sin señal."""
+    resp = await client.get("/panel/sw.js")
+
+    assert resp.status_code == 200
+    assert 'const CACHE_NAME = "agrovoz-panel-v2"' in resp.text
+    assert '"/static/chart.umd.min.js"' in resp.text
+    assert "/api/v1/panel/{token}/prices" in resp.text
