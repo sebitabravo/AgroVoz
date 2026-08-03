@@ -34,9 +34,7 @@ def _reset_session_cache() -> object:
     OpenWAService._cached_session_id = prev
 
 
-def _patch_async_client(
-    monkeypatch: pytest.MonkeyPatch, mock_client: AsyncMock
-) -> None:
+def _patch_async_client(monkeypatch: pytest.MonkeyPatch, mock_client: AsyncMock) -> None:
     """Reemplaza httpx.AsyncClient por un context manager que retorna mock_client."""
     mock_ctx = AsyncMock()
     mock_ctx.__aenter__.return_value = mock_client
@@ -65,9 +63,7 @@ async def test_resolve_session_id_descubre_primera_ready(
     monkeypatch.setattr(settings, "openwa_api_key", "k")
 
     client = AsyncMock()
-    client.get.return_value = _mock_response(
-        [{"id": "sess-1", "status": "ready"}]
-    )
+    client.get.return_value = _mock_response([{"id": "sess-1", "status": "ready"}])
     _patch_async_client(monkeypatch, client)
 
     service = OpenWAService()
@@ -86,9 +82,7 @@ async def test_resolve_session_id_acepta_status_active(
     monkeypatch.setattr(settings, "openwa_api_key", "k")
 
     client = AsyncMock()
-    client.get.return_value = _mock_response(
-        [{"id": "sess-active", "status": "active"}]
-    )
+    client.get.return_value = _mock_response([{"id": "sess-active", "status": "active"}])
     _patch_async_client(monkeypatch, client)
 
     service = OpenWAService()
@@ -104,9 +98,7 @@ async def test_resolve_session_id_cachea_evita_segundo_http(
     monkeypatch.setattr(settings, "openwa_api_key", "k")
 
     client = AsyncMock()
-    client.get.return_value = _mock_response(
-        [{"id": "sess-cached", "status": "ready"}]
-    )
+    client.get.return_value = _mock_response([{"id": "sess-cached", "status": "ready"}])
     _patch_async_client(monkeypatch, client)
 
     service = OpenWAService()
@@ -241,6 +233,21 @@ async def test_download_media_url_encodea_message_id_con_arroba(
     assert "true_569@c.us" not in called_url
 
 
+@pytest.mark.asyncio
+async def test_download_image_reutiliza_endpoint_de_media(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Las imágenes usan el endpoint REST que Open-WA respalda con decryptMedia."""
+    service = OpenWAService()
+    media = AsyncMock(return_value=b"IMAGE_BYTES")
+    monkeypatch.setattr(service, "download_media", media)
+
+    result = await service.download_image("image-message")
+
+    assert result == b"IMAGE_BYTES"
+    media.assert_awaited_once_with("image-message")
+
+
 # ── send_typing_indicator ──────────────────────────────────────
 
 
@@ -318,6 +325,7 @@ def test_base_url_sin_trailing_slash(monkeypatch: pytest.MonkeyPatch) -> None:
 
 # ── resolve_contact_phone (fix P0: LID resolution) ─────────────────
 
+
 @pytest.mark.asyncio
 async def test_resolve_contact_phone_exitoso(
     monkeypatch: pytest.MonkeyPatch,
@@ -371,9 +379,7 @@ async def test_resolve_contact_phone_http_error_no_lanza(
 
     client = AsyncMock()
     resp = Mock()
-    resp.raise_for_status = Mock(
-        side_effect=httpx.ConnectError("gateway down")
-    )
+    resp.raise_for_status = Mock(side_effect=httpx.ConnectError("gateway down"))
     client.get.return_value = resp
     _patch_async_client(monkeypatch, client)
     OpenWAService._cached_session_id = "sess-1"
