@@ -60,7 +60,9 @@ por la misma vía. El texto evita Whisper y TTS.
 8. Solo audio: Piper TTS convierte texto → audio `.wav`
 9. Solo audio: ffmpeg convierte `.wav` → `.ogg`
 10. FastAPI envía texto o audio por Open-WA y registra entrega efectiva
-11. Tras el envío, elimina el staging libre; el historial opcional exige opt-in
+11. El cron diario sincroniza ODEPA, compara los dos últimos datos por producto/mercado y detecta variaciones absolutas ≥15%; solo prepara avisos para `cultivos` suscritos con `alert_consent=true`
+12. El job entrega esos avisos por Open-WA mediante un rate limit global configurable; el mensaje conserva el precio crudo, la fecha y la fuente ODEPA
+13. Tras el envío, elimina el staging libre; el historial opcional exige opt-in
 ```
 
 ## Componentes del backend
@@ -77,7 +79,7 @@ por la misma vía. El texto evita Whisper y TTS.
 - `whisper_service.py` — transcripción de audio (descarga, ffmpeg, Whisper)
 - `llm_service.py` — interpretación NL + Tool Calling con whitelist (10 tools: get_price, get_price_spread, get_price_history, calculate_sale_value, calculate_margin, get_weather, get_pronostico, get_clima_historico, search_corpus, register_expense) + fallback OpenRouter
 - `tts_service.py` — síntesis de voz con Piper TTS
-- `odepa_service.py` — consultas a SQLite ODEPA + sync diario
+- `odepa_service.py` — consultas a SQLite ODEPA, sync diario y detector determinista de variaciones
 - `weather_service.py` — consultas a OpenMeteo API (forecast + histórico)
 - `pipeline_service.py` — orquestador del pipeline end-to-end
 - `openwa_service.py` — cliente HTTP para Open-WA API (enviar/recibir mensajes, webhooks)
@@ -102,10 +104,10 @@ por la misma vía. El texto evita Whisper y TTS.
 - `consultation.py` — métricas y staging libre transitorio, nunca memoria canónica
 - `consultation_history.py` — memoria consentida y evidencia append-only de borrado
 - `alert.py` — modelo para alertas proactivas de precio/clima
-- `user_prefs.py` — identidad individual/grupal, comuna, cultivos y tres opt-ins separados
+- `user_prefs.py` — identidad individual/grupal, comuna, cultivos y consentimientos separados
 
 ### `app/jobs/` — Tareas programadas
-- `sync_odepa.py` — cron job 06:00 AM: descarga CSV ODEPA → upsert SQLite
+- `sync_odepa.py` — cron job 06:00 AM: descarga CSV ODEPA → upsert SQLite → evalúa alertas configuradas y variaciones críticas
 - `purge_consultation_history.py` — purga TTL auditable del historial consentido
 
 ## Componentes del frontend
@@ -366,3 +368,14 @@ CREATE INDEX idx_consultations_created ON consultations(created_at);
     - **Ubicación GPS por WhatsApp:** Procesamiento de mensajes `type="location"` para clima preciso por parcela.
     - **Reglas citadas de valor agregado:** Reapertura de calendarios agrícolas por zona (fuente INIA citada), derivación a programas de crédito INDAP (datos públicos) y directorio de cooperativas por comuna (Open Data datos.gob.cl).
     - **Reportes PDF (`PDF_REPORTS_ENABLED=false`):** Generación de resumen semanal PDF enviado vía Open-WA `sendFile`.
+
+28. **Variación brusca de precios ODEPA (#248).** El cron conserva el
+    procesamiento síncrono y compara el dato más reciente con el anterior del
+    mismo producto, mercado y unidad; un cambio absoluto de al menos 15% se
+    considera crítico. Los destinatarios se resuelven desde `user_prefs.cultivos`
+    y `alert_consent`, y el `wa_chat_id` se reutiliza desde una alerta existente:
+    el hash HMAC no permite derivar un número de WhatsApp. La entrega usa el
+    mismo TTS/Open-WA local, con una cuota global configurable
+    (`ALERT_RATE_LIMIT_PER_MINUTE`) para evitar ráfagas y sin agregar Redis,
+    Celery ni APIs pagas. El mensaje solo informa precio, variación, fecha y
+    fuente ODEPA; no contiene recomendación agronómica.
