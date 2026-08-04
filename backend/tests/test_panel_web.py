@@ -70,6 +70,21 @@ async def test_service_worker_cachea_chart_y_historial_de_precios(client: AsyncC
     resp = await client.get("/panel/sw.js")
 
     assert resp.status_code == 200
-    assert 'const CACHE_NAME = "agrovoz-panel-v2"' in resp.text
+    assert 'const CACHE_NAME = "agrovoz-panel-v3"' in resp.text
     assert '"/static/chart.umd.min.js"' in resp.text
     assert "/api/v1/panel/{token}/prices" in resp.text
+
+
+async def test_service_worker_no_sirve_datos_despues_de_vencer_token(
+    client: AsyncClient,
+) -> None:
+    """El fallback offline respeta el expiry firmado y purga 401/403."""
+    resp = await client.get("/panel/sw.js")
+
+    assert resp.status_code == 200
+    assert "function tokenExpiryMs(pathname)" in resp.text
+    assert "!isFreshPanelUrl(url)" in resp.text
+    assert "purgeExpiredPanelEntries()" in resp.text
+    assert "purgePanelToken(panelTokenFromPath(url.pathname))" in resp.text
+    assert "response.status === 401 || response.status === 403" in resp.text
+    assert "await cache.put(event.request, response.clone())" in resp.text
