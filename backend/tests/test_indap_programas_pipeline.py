@@ -23,6 +23,7 @@ async def test_audio_indap_transcribe_deriva_a_programas_y_sintetiza(
     wav_path = tmp_path / "consulta.wav"
     wav_path.write_bytes(b"wav")
     tts_path = tmp_path / "respuesta.ogg"
+    synthesized: list[str] = []
 
     def fake_transcribe(_self: object, _audio_path: str) -> dict[str, object]:
         return {
@@ -33,7 +34,8 @@ async def test_audio_indap_transcribe_deriva_a_programas_y_sintetiza(
         }
 
     class FakeTTS:
-        def synthesize(self, _text: str) -> str:
+        def synthesize(self, text: str) -> str:
+            synthesized.append(text)
             return str(tts_path)
 
     async def no_alerta(
@@ -74,3 +76,6 @@ async def test_audio_indap_transcribe_deriva_a_programas_y_sintetiza(
     assert "Programa de Desarrollo de Inversiones" in result.text_response
     assert "Riveros #1059" in result.text_response
     assert "Fuente oficial INDAP:" in result.text_response
+    assert len(synthesized) == 1
+    assert len(synthesized[0]) <= 600
+    assert "https://" not in synthesized[0]

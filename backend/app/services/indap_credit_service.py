@@ -126,20 +126,25 @@ _PROGRAM_QUERY_MARKERS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
     (("semilla", "insumo", "capital de trabajo", "corto plazo"), ("credito_corto_plazo",)),
     (("credito", "prestamo", "financiamiento"), ("credito_corto_plazo", "credito_largo_plazo")),
 )
-_PROGRAM_INTENT_MARKERS = (
+_PROGRAM_CONTEXT_MARKERS = (
     "programa",
     "subsidio",
     "fomento",
-    "financiamiento",
+    "postular",
+    "postulacion",
+    "beneficio",
+    "apoyo indap",
+)
+_PROGRAM_STRONG_MARKERS = (
     "prodesal",
-    "motocultivador",
-    "maquinaria",
-    "equipamiento",
-    "asesoria",
-    "alianza",
-    "sostenible",
-    "sustentable",
-    "financiamiento verde",
+    "programa de desarrollo de inversiones",
+    "servicio de asesoria tecnica",
+    "alianzas productivas",
+    "transicion a la agricultura sostenible",
+    "pdi",
+    "sat",
+    "pap",
+    "tas",
 )
 _PROGRAM_OVERVIEW_IDS = (
     "programa_desarrollo_inversiones",
@@ -366,24 +371,54 @@ def is_programas_indap_query(query_text: str) -> bool:
     normalized = _normalizar(query_text)
     if any(marker in normalized for marker in _OUT_OF_SCOPE_MARKERS):
         return False
-    return any(marker in normalized for marker in _PROGRAM_INTENT_MARKERS)
+    if any(re.search(rf"(?<!\w){re.escape(marker)}(?!\w)", normalized) for marker in _PROGRAM_STRONG_MARKERS):
+        return True
+    has_context = any(marker in normalized for marker in _PROGRAM_CONTEXT_MARKERS)
+    has_explicit_credit = any(marker in normalized for marker in ("credito", "prestamo"))
+    if has_explicit_credit and not has_context:
+        return False
+    has_indap = re.search(r"(?<!\w)indap(?!\w)", normalized) is not None
+    if has_context and has_indap:
+        return True
+    has_program_topic = any(
+        marker in normalized
+        for markers, _document_ids in _PROGRAM_QUERY_MARKERS
+        for marker in markers
+    )
+    has_financial_context = any(marker in normalized for marker in ("financiamiento", "credito", "prestamo"))
+    return (has_context or has_financial_context) and has_program_topic
+
+
+def format_indap_response_for_voice(text: str, max_chars: int = 600) -> str:
+    """Quita URLs del audio y acota la locución; las fuentes van por texto."""
+    without_urls = _URL_RE.sub("", text)
+    normalized = " ".join(without_urls.split())
+    if len(normalized) <= max_chars:
+        return normalized
+    cutoff = normalized.rfind(". ", 0, max_chars)
+    if cutoff < max_chars // 2:
+        cutoff = max_chars - 1
+    return normalized[: cutoff + 1].rstrip() + ("" if normalized[cutoff] == "." else ".")
 
 
 def _format_programs(catalog: _CreditCatalog, query: str) -> str:
     """Construye una respuesta breve con fuente y derivación local."""
     documents = _select_program_documents(query, catalog)
     verified = catalog.verified_on.strftime("%d/%m/%Y")
-    blocks = [
-        "Información pública de programas INDAP en La Araucanía. "
-        f"Catálogo revisado el {verified}."
-    ]
-    for document in documents:
-        blocks.append(
-            f"{document.title}: {document.text} Fuente oficial INDAP: {document.source_url}."
+    if not any(marker in query for markers, _ids in _PROGRAM_QUERY_MARKERS for marker in markers):
+        return (
+            "INDAP publica programas de inversión, PRODESAL, asesoría técnica, "
+            "comercialización, sostenibilidad y crédito agrícola. Dime cuál de "
+            "esas áreas buscas para darte uno o dos instrumentos. "
+            f"Catálogo revisado el {verified}. {_LOCAL_OFFICE_TEXT}. {_LIMITS_TEXT}"
         )
+
+    blocks = [f"Información pública de INDAP en La Araucanía, revisada el {verified}."]
+    for document in documents:
+        summary = document.text.split(". ", 1)[0].rstrip(".") + "."
+        blocks.append(f"{document.title}: {summary} Fuente oficial INDAP: {document.source_url}.")
     blocks.append(
-        f"{_LOCAL_OFFICE_TEXT}. {_LIMITS_TEXT} La oficina debe confirmar la vigencia, "
-        "requisitos y plazos del instrumento antes de cualquier postulación."
+        f"{_LOCAL_OFFICE_TEXT}. {_LIMITS_TEXT} La oficina debe confirmar vigencia, requisitos y plazos."
     )
     return " ".join(blocks)
 

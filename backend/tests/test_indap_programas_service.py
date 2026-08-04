@@ -8,7 +8,11 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from app.services.indap_credit_service import get_programas_indap
+from app.services.indap_credit_service import (
+    format_indap_response_for_voice,
+    get_programas_indap,
+    is_programas_indap_query,
+)
 
 _CATALOG_DATE = date(2026, 8, 3)
 
@@ -64,3 +68,27 @@ def test_credito_fuera_de_alcance_no_se_deriva_a_programas() -> None:
 
     assert "no entrega información sobre tarjetas, hipotecarios" in response
     assert "Programa de Desarrollo de Inversiones" not in response
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Necesito asesoría sobre una plaga",
+        "¿Cómo hago agricultura sostenible?",
+        "Busco una alianza para vender papas",
+        "¿Qué maquinaria sirve para sembrar?",
+    ],
+)
+def test_marcadores_ambiguos_no_secuestran_consultas(query: str) -> None:
+    """Sin contexto INDAP/programa, los términos genéricos siguen al pipeline normal."""
+    assert is_programas_indap_query(query) is False
+
+
+def test_resumen_general_pide_aclaracion_y_audio_no_lee_urls() -> None:
+    """La respuesta genérica no enumera cuatro fichas ni vocaliza enlaces."""
+    response = get_programas_indap("¿Qué programas tiene INDAP?", today=_CATALOG_DATE)
+    voice = format_indap_response_for_voice(response)
+
+    assert "Dime cuál" in response
+    assert len(voice) <= 600
+    assert "https://" not in voice
