@@ -219,6 +219,33 @@ def validate_openwa_hmac(body: bytes, signature: str, secret: str) -> bool:
     return hmac_mod.compare_digest(expected, signature)
 
 
+async def _read_limited_webhook_body(request: Request) -> bytes:
+    """Consume el stream ASGI sin bufferizar más que el máximo permitido."""
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_size = int(content_length)
+        except ValueError as err:
+            raise HTTPException(status_code=400, detail="Content-Length inválido") from err
+        if declared_size < 0:
+            raise HTTPException(status_code=400, detail="Content-Length inválido")
+        if declared_size > MAX_WEBHOOK_BODY_SIZE:
+            raise HTTPException(status_code=413, detail="Payload demasiado grande")
+
+    body = bytearray()
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > MAX_WEBHOOK_BODY_SIZE:
+            logger.warning(
+                "Webhook rechazado: stream excede tamaño máximo — size_bytes>%d",
+                MAX_WEBHOOK_BODY_SIZE,
+            )
+            raise HTTPException(status_code=413, detail="Payload demasiado grande")
+        body.extend(chunk)
+    return bytes(body)
+
+
 async def verify_openwa_webhook(request: Request) -> dict[str, object]:
     """Dependencia de FastAPI: valida HMAC del webhook y retorna el payload parseado.
 
@@ -235,12 +262,7 @@ async def verify_openwa_webhook(request: Request) -> dict[str, object]:
         HTTPException 401: Si la firma HMAC está ausente o es inválida.
         HTTPException 400: Si el body no es JSON válido.
     """
-    body = await request.body()
-
-    # Validar tamaño máximo de payload para prevenir DoS por RAM bombing.
-    if len(body) > MAX_WEBHOOK_BODY_SIZE:
-        logger.warning("Webhook rechazado: body excede tamaño máximo — size_bytes=%d", len(body))
-        raise HTTPException(status_code=413, detail="Payload demasiado grande")
+    body = await _read_limited_webhook_body(request)
 
     # Dev mode: sin secret configurado, aceptar sin validación HMAC.
     if not settings.openwa_webhook_secret:
