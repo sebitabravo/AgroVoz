@@ -4,12 +4,73 @@ import time
 import warnings
 
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from httpx import ASGITransport, AsyncClient
 from starlette.responses import Response as StarletteResponse
 
 from app.core.config import Settings, settings
-from app.core.security import RateLimitMiddleware, reset_rate_limiter_for_tests
+from app.core.security import (
+    RateLimitMiddleware,
+    _read_limited_webhook_body,
+    reset_rate_limiter_for_tests,
+)
+
+
+async def test_webhook_body_chunked_se_corta_antes_de_bufferizar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """El receive ASGI deja de consumirse apenas cruza el límite real."""
+    monkeypatch.setattr("app.core.security.MAX_WEBHOOK_BODY_SIZE", 4)
+    messages = iter(
+        [
+            {"type": "http.request", "body": b"123", "more_body": True},
+            {"type": "http.request", "body": b"45", "more_body": True},
+            {"type": "http.request", "body": b"no-debe-leerse", "more_body": False},
+        ]
+    )
+    consumed = 0
+
+    async def receive() -> dict[str, object]:
+        nonlocal consumed
+        consumed += 1
+        return next(messages)
+
+    request = Request({"type": "http", "method": "POST", "path": "/webhook", "headers": []}, receive)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _read_limited_webhook_body(request)
+
+    assert exc_info.value.status_code == 413
+    assert consumed == 2
+
+
+async def test_webhook_content_length_grande_rechaza_sin_leer_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Content-Length permite un fast-reject, pero no reemplaza el conteo chunked."""
+    monkeypatch.setattr("app.core.security.MAX_WEBHOOK_BODY_SIZE", 4)
+    consumed = False
+
+    async def receive() -> dict[str, object]:
+        nonlocal consumed
+        consumed = True
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/webhook",
+            "headers": [(b"content-length", b"5")],
+        },
+        receive,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _read_limited_webhook_body(request)
+
+    assert exc_info.value.status_code == 413
+    assert consumed is False
 
 
 async def test_rate_limit_bloquea_despues_de_n_requests(
