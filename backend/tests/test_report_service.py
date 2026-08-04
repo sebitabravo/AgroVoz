@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import os
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -20,6 +21,7 @@ from app.services.report_service import (
     ReportPrice,
     WeeklyReportData,
     generate_weekly_report,
+    purge_stale_reports,
     render_weekly_report,
 )
 from app.services.weather_service import ForecastDay
@@ -64,6 +66,26 @@ def test_render_weekly_report_escribe_pdf_con_fuentes_y_datos(tmp_path: Path) ->
     assert contenido.startswith(b"%PDF")
     assert b"ODEPA" in contenido
     assert b"OpenMeteo" in contenido
+
+
+def test_purge_stale_reports_elimina_antes_de_24_horas(tmp_path: Path) -> None:
+    """El scheduler horario conserva margen antes del límite de 24 h."""
+    now = datetime.datetime(2026, 8, 3, 12, tzinfo=datetime.UTC)
+    stale = tmp_path / "reporte_vencido.pdf"
+    fresh = tmp_path / "reporte_reciente.pdf"
+    unrelated = tmp_path / "otro.pdf"
+    for path in (stale, fresh, unrelated):
+        path.write_bytes(b"%PDF-test")
+    os.utime(stale, (now.timestamp() - 22 * 60 * 60 - 1, now.timestamp() - 22 * 60 * 60 - 1))
+    os.utime(fresh, (now.timestamp() - 60, now.timestamp() - 60))
+    os.utime(unrelated, (now.timestamp() - 48 * 60 * 60, now.timestamp() - 48 * 60 * 60))
+
+    deleted = purge_stale_reports(tmp_path, now)
+
+    assert deleted == 1
+    assert not stale.exists()
+    assert fresh.exists()
+    assert unrelated.exists()
 
 
 @pytest.mark.asyncio

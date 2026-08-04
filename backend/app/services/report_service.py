@@ -42,6 +42,7 @@ REPORT_FILENAME = "agrovoz-reporte-semanal.pdf"
 REPORT_CAPTION = "Reporte semanal de precios ODEPA y clima OpenMeteo."
 REPORT_FORECAST_DAYS = 5
 REPORT_TOOL_SIGNAL = "__AGROVOZ_REPORT_PDF__"
+REPORT_TEMP_MAX_AGE_SECONDS = 22 * 60 * 60
 _DEFAULT_COMUNA = "Traiguén"
 
 
@@ -309,6 +310,29 @@ def _new_report_path(output_dir: Path | None) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(prefix="reporte_", suffix=".pdf", dir=directory, delete=False) as handle:
         return Path(handle.name)
+
+
+def purge_stale_reports(
+    output_dir: Path | None = None,
+    now: datetime.datetime | None = None,
+) -> int:
+    """Elimina reportes con 22 horas y deja margen al scheduler horario."""
+    directory = output_dir or Path(__file__).resolve().parent.parent.parent / "data" / "report_temp"
+    if not directory.exists():
+        return 0
+    current = now or datetime.datetime.now(datetime.UTC)
+    cutoff = current.timestamp() - REPORT_TEMP_MAX_AGE_SECONDS
+    deleted = 0
+    for report_path in directory.glob("reporte_*.pdf"):
+        try:
+            if report_path.stat().st_mtime <= cutoff:
+                report_path.unlink()
+                deleted += 1
+        except FileNotFoundError:
+            continue
+        except OSError:
+            logger.warning("Reporte temporal vencido no eliminado")
+    return deleted
 
 
 async def generate_weekly_report(
