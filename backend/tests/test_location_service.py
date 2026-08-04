@@ -8,7 +8,12 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.phone_hash import hash_phone
 from app.models.user_prefs import UserPrefs
-from app.services.location_service import UserLocation, get_user_location, save_user_location
+from app.services.location_service import (
+    UserLocation,
+    clear_user_location,
+    get_user_location,
+    save_user_location,
+)
 
 
 def test_guardar_ubicacion_crea_preferencias_y_es_recuperable(db) -> None:  # type: ignore[no-untyped-def]
@@ -35,6 +40,45 @@ def test_guardar_ubicacion_actualiza_pin_anterior(db) -> None:  # type: ignore[n
     assert len(prefs) == 1
     assert prefs[0].lat == pytest.approx(-33.45)
     assert prefs[0].lng == pytest.approx(-70.65)
+
+
+def test_revocar_ubicacion_borra_coordenadas_y_conserva_preferencias(db) -> None:  # type: ignore[no-untyped-def]
+    """La revocación elimina lat/lng sin destruir comuna u onboarding."""
+    phone_hash = "d" * 64
+    prefs = UserPrefs(phone_hash=phone_hash, comuna="Traiguén", lat=-38.2, lng=-72.6)
+    db.add(prefs)
+    db.commit()
+
+    assert clear_user_location(phone_hash) is True
+    db.expire_all()
+
+    stored = db.scalar(select(UserPrefs).where(UserPrefs.phone_hash == phone_hash))
+    assert stored is not None
+    assert stored.lat is None
+    assert stored.lng is None
+    assert stored.comuna == "Traiguén"
+    assert get_user_location(phone_hash) is None
+
+
+@pytest.mark.asyncio
+async def test_orden_whatsapp_revoca_ubicacion_guardada(db) -> None:  # type: ignore[no-untyped-def]
+    """Texto y audio comparten el fast-path explícito de revocación."""
+    from app.services.pipeline_service import AgroVozPipeline
+
+    phone_hash = "e" * 64
+    save_user_location(phone_hash, -38.2, -72.6)
+    origin = [""]
+
+    response, intent = await AgroVozPipeline._generate_response(
+        "Por favor, borra mi ubicación",
+        phone_hash,
+        origin,
+    )
+
+    assert response == "Listo. Eliminé la ubicación GPS guardada de tu parcela."
+    assert intent == "clima"
+    assert origin == ["ubicacion_borrada"]
+    assert get_user_location(phone_hash) is None
 
 
 @pytest.mark.parametrize(

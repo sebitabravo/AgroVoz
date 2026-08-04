@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.core import database
 from app.core.phone_hash import validate_phone_hash
@@ -79,5 +79,26 @@ def get_user_location(phone_hash: str | None) -> UserLocation | None:
         if prefs is None or prefs.lat is None or prefs.lng is None:
             return None
         return UserLocation(lat=float(prefs.lat), lng=float(prefs.lng))
+    finally:
+        session.close()
+
+
+def clear_user_location(phone_hash: str) -> bool:
+    """Revoca el pin GPS guardado sin borrar otras preferencias del contacto."""
+    if not validate_phone_hash(phone_hash):
+        raise ValueError("phone_hash inválido")
+
+    session = database.SessionLocal()
+    try:
+        prefs = session.scalar(select(UserPrefs).where(UserPrefs.phone_hash == phone_hash))
+        if prefs is None or (prefs.lat is None and prefs.lng is None):
+            return False
+        prefs.lat = None
+        prefs.lng = None
+        session.commit()
+        return True
+    except SQLAlchemyError:
+        session.rollback()
+        raise
     finally:
         session.close()
