@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 _IMAGE_SIZE = 224
 _MAX_IMAGE_PIXELS = 20_000_000
+_ALLOWED_IMAGE_FORMATS = frozenset({"JPEG", "PNG", "WEBP"})
 _IMAGE_MEAN = (0.485, 0.456, 0.406)
 _IMAGE_STD = (0.229, 0.224, 0.225)
 _MAX_PREDICTIONS = 3
@@ -237,6 +238,8 @@ class VisionService:
         """Decodifica, normaliza y redimensiona la imagen al tensor del modelo."""
         try:
             with Image.open(io.BytesIO(image_bytes)) as source:
+                if source.format not in _ALLOWED_IMAGE_FORMATS:
+                    raise VisionImageError("La imagen usa un formato no permitido")
                 if source.width * source.height > _MAX_IMAGE_PIXELS:
                     raise VisionImageError("La imagen excede el límite de píxeles")
                 image = source.convert("RGB").resize(

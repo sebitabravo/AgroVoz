@@ -146,6 +146,16 @@ def test_classify_rechaza_imagen_con_demasiados_pixeles(
         VisionService(session=_FakeSession([1.0])).classify(_image_bytes())
 
 
+def test_classify_rechaza_formato_real_no_permitido() -> None:
+    """El decoder valida bytes reales y no confía en el MIME del multipart."""
+    image = Image.new("RGB", (8, 4), color=(80, 120, 40))
+    buffer = io.BytesIO()
+    image.save(buffer, format="GIF")
+
+    with pytest.raises(VisionImageError, match="formato no permitido"):
+        VisionService(session=_FakeSession([1.0])).classify(buffer.getvalue())
+
+
 def test_classify_rechaza_imagen_vacia() -> None:
     """El servicio nunca intenta inferir bytes vacíos."""
     service = VisionService(session=_FakeSession([1.0]))

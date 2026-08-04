@@ -7,13 +7,99 @@ import pytest
 from fastapi import FastAPI, HTTPException, Request
 from httpx import ASGITransport, AsyncClient
 from starlette.responses import Response as StarletteResponse
+from starlette.types import Message, Receive, Scope, Send
 
 from app.core.config import Settings, settings
 from app.core.security import (
     RateLimitMiddleware,
+    VisionUploadGuardMiddleware,
     _read_limited_webhook_body,
     reset_rate_limiter_for_tests,
 )
+from app.services.panel_service import generate_panel_token
+
+
+async def test_guard_visual_rechaza_token_antes_de_leer_multipart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Un cliente anónimo no alcanza el spool de Starlette."""
+    monkeypatch.setattr(settings, "vision_enabled", True)
+    consumed = False
+
+    async def receive() -> Message:
+        nonlocal consumed
+        consumed = True
+        return {"type": "http.request", "body": b"payload", "more_body": False}
+
+    messages: list[Message] = []
+
+    async def send(message: Message) -> None:
+        messages.append(message)
+
+    async def inner(_scope: Scope, _receive: Receive, _send: Send) -> None:
+        raise AssertionError("el parser no debe ejecutarse")
+
+    scope: Scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/vision/identify",
+        "query_string": b"token=invalido",
+        "headers": [],
+    }
+
+    await VisionUploadGuardMiddleware(inner)(scope, receive, send)
+
+    assert consumed is False
+    assert messages[0]["status"] == 401
+
+
+async def test_guard_visual_corta_stream_chunked_antes_del_parser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sin Content-Length, el receive acotado corta el multipart real."""
+    from pydantic import SecretStr
+
+    monkeypatch.setattr(settings, "vision_enabled", True)
+    monkeypatch.setattr(settings, "vision_image_max_bytes", 4)
+    monkeypatch.setattr(settings, "panel_link_secret", SecretStr("x" * 32))
+    token = generate_panel_token("a" * 64)
+    chunks = iter(
+        [
+            {"type": "http.request", "body": b"a" * 65_536, "more_body": True},
+            {"type": "http.request", "body": b"xxxxx", "more_body": False},
+        ]
+    )
+    consumed = 0
+
+    async def receive() -> Message:
+        nonlocal consumed
+        consumed += 1
+        return next(chunks)
+
+    messages: list[Message] = []
+
+    async def send(message: Message) -> None:
+        messages.append(message)
+
+    async def inner(scope: Scope, guarded_receive: Receive, send_response: Send) -> None:
+        del scope, send_response
+        while True:
+            message = await guarded_receive()
+            if not message.get("more_body", False):
+                break
+
+    scope: Scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/vision/identify",
+        "query_string": f"token={token}".encode(),
+        "headers": [],
+    }
+
+    await VisionUploadGuardMiddleware(inner)(scope, receive, send)
+
+    assert consumed == 2
+    assert messages[0]["status"] == 413
 
 
 async def test_webhook_body_chunked_se_corta_antes_de_bufferizar(
