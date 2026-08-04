@@ -1333,6 +1333,18 @@ class AgroVozPipeline:
         dentro de la coroutine (Python no permite asignar nonlocal
         en closures anidadas de forma limpia).
         """
+        if chat_id and chat_id_hash and chat_id_hash != "sin_chat":
+            try:
+                from app.services.alert_service import remember_price_variation_route
+
+                await asyncio.to_thread(
+                    remember_price_variation_route,
+                    chat_id_hash,
+                    chat_id,
+                )
+            except (SQLAlchemyError, RuntimeError, OSError, ValueError):
+                logger.warning("Ruta de alertas proactivas no actualizada")
+
         # ── Etapa 0: Onboarding — deteccion de primer contacto (#86) ─
         # Si el phone_hash no tiene consultas previas, se sintetiza un
         # audio de bienvenida (TTS de texto fijo, sin LLM). AudioService

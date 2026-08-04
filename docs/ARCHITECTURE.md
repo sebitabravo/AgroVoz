@@ -370,12 +370,17 @@ CREATE INDEX idx_consultations_created ON consultations(created_at);
     - **Reportes PDF (`PDF_REPORTS_ENABLED=false`):** Generación de resumen semanal PDF enviado vía Open-WA `sendFile`.
 
 28. **Variación brusca de precios ODEPA (#248).** El cron conserva el
-    procesamiento síncrono y compara el dato más reciente con el anterior del
-    mismo producto, mercado y unidad; un cambio absoluto de al menos 15% se
-    considera crítico. Los destinatarios se resuelven desde `user_prefs.cultivos`
-    y `alert_consent`, y el `wa_chat_id` se reutiliza desde una alerta existente:
-    el hash HMAC no permite derivar un número de WhatsApp. La entrega usa el
-    mismo TTS/Open-WA local, con una cuota global configurable
+    procesamiento síncrono y una ventana SQL limita la lectura a los dos datos
+    más recientes del mismo producto, mercado y unidad; un cambio absoluto de
+    al menos 15% se considera crítico. Los destinatarios se resuelven desde
+    `user_prefs.cultivos` y `alert_consent`. Como el hash HMAC no permite
+    derivar el número, el siguiente mensaje entrante autenticado de un contacto
+    con opt-in aprende su `wa_chat_id`; un registro interno inactivo de
+    `Alert(tipo="variacion_precio")` conserva esa ruta y un digest opaco del
+    último conjunto entregado. Así un reintento del mismo boletín es idempotente
+    sin guardar contenido libre ni crear otra tabla/migración. La entrega agrupa
+    hasta tres variaciones por agricultor y usa el mismo TTS/Open-WA local, con
+    una cuota global configurable
     (`ALERT_RATE_LIMIT_PER_MINUTE`) para evitar ráfagas y sin agregar Redis,
     Celery ni APIs pagas. El mensaje solo informa precio, variación, fecha y
     fuente ODEPA; no contiene recomendación agronómica.

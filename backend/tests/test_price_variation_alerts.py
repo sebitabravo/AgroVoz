@@ -15,7 +15,7 @@ from app.jobs import sync_odepa as sync_job
 from app.models.alert import Alert
 from app.models.odepa_price import OdepaPrice
 from app.models.user_prefs import UserPrefs
-from app.services.alert_service import evaluar_variaciones_precio
+from app.services.alert_service import evaluar_variaciones_precio, remember_price_variation_route
 from app.services.odepa_service import SyncResult, detectar_variaciones_precio
 
 _MERCADO = "Mercado Mayorista Lo Valledor de Santiago"
@@ -114,6 +114,25 @@ class TestDetectarVariacionesPrecio:
 
         assert detectar_variaciones_precio(db, fecha=_FECHA_ACTUAL) == []
 
+    def test_compara_dos_ultimos_de_la_misma_unidad(self, db: Session) -> None:
+        """Una presentación intermedia distinta no oculta el par comparable."""
+        _agregar_precio(db, "papa", "100", _FECHA_ANTERIOR)
+        _agregar_precio(
+            db,
+            "papa",
+            "9000",
+            _FECHA_ANTERIOR + datetime.timedelta(days=1),
+            unidad="saco 25 kilos",
+        )
+        fecha_actual = _FECHA_ANTERIOR + datetime.timedelta(days=2)
+        _agregar_precio(db, "papa", "120", fecha_actual)
+
+        variaciones = detectar_variaciones_precio(db, fecha=fecha_actual)
+
+        assert len(variaciones) == 1
+        assert variaciones[0].precio_anterior == Decimal("100.00")
+        assert variaciones[0].precio_actual == Decimal("120.00")
+
 
 class TestEvaluarVariacionesPrecio:
     """Filtro por cultivo/consentimiento y entrega por Open-WA."""
@@ -175,6 +194,36 @@ class TestEvaluarVariacionesPrecio:
 
         assert enviados == []
         enviar.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_aprende_destino_desde_contacto_con_consentimiento(self, db: Session) -> None:
+        _agregar_precio(db, "papa", "100", _FECHA_ANTERIOR)
+        _agregar_precio(db, "papa", "120", _FECHA_ACTUAL)
+        phone_hash = "9" * 64
+        _agregar_suscriptor(db, phone_hash)
+
+        assert remember_price_variation_route(phone_hash, "56966666666@c.us", db) is True
+        with patch("app.services.alert_service.enviar_alerta", new=AsyncMock(return_value=True)) as enviar:
+            enviados = await evaluar_variaciones_precio(db, settings, fecha=_FECHA_ACTUAL)
+
+        assert enviados == [phone_hash]
+        enviar.assert_awaited_once()
+        assert enviar.await_args.args[0] == "56966666666@c.us"
+
+    @pytest.mark.asyncio
+    async def test_repetir_mismo_boletin_no_duplica_envio(self, db: Session) -> None:
+        _agregar_precio(db, "papa", "100", _FECHA_ANTERIOR)
+        _agregar_precio(db, "papa", "120", _FECHA_ACTUAL)
+        phone_hash = "8" * 64
+        _agregar_suscriptor(db, phone_hash, wa_chat_id="56977777777@c.us")
+
+        with patch("app.services.alert_service.enviar_alerta", new=AsyncMock(return_value=True)) as enviar:
+            primero = await evaluar_variaciones_precio(db, settings, fecha=_FECHA_ACTUAL)
+            segundo = await evaluar_variaciones_precio(db, settings, fecha=_FECHA_ACTUAL)
+
+        assert primero == [phone_hash]
+        assert segundo == []
+        enviar.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_rate_limit_omite_segundo_envio_sin_reventar_el_job(

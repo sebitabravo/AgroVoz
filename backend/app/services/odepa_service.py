@@ -623,32 +623,52 @@ def detectar_variaciones_precio(
     if umbral_pct <= 0:
         raise ValueError("El umbral de variación debe ser mayor a cero")
 
+    filtros = []
+    if fecha is not None:
+        filtros.append(OdepaPrice.fecha <= fecha)
+
+    # Rankear en SQLite evita materializar todo el histórico en RAM. La unidad
+    # forma parte de la partición: se comparan los dos últimos datos realmente
+    # compatibles aunque el mercado haya publicado otra presentación después.
+    ranking = func.row_number().over(
+        partition_by=(
+            func.lower(OdepaPrice.producto),
+            func.lower(OdepaPrice.mercado),
+            func.lower(func.trim(OdepaPrice.unidad)),
+        ),
+        order_by=(OdepaPrice.fecha.desc(), OdepaPrice.id.desc()),
+    ).label("ranking")
+    ranked = select(OdepaPrice.id.label("price_id"), ranking).where(*filtros).subquery()
     registros = list(
         session.scalars(
-            select(OdepaPrice).order_by(
+            select(OdepaPrice)
+            .join(ranked, ranked.c.price_id == OdepaPrice.id)
+            .where(ranked.c.ranking <= 2)
+            .order_by(
                 OdepaPrice.producto,
                 OdepaPrice.mercado,
-                OdepaPrice.fecha,
-                OdepaPrice.id,
+                OdepaPrice.unidad,
+                OdepaPrice.fecha.desc(),
+                OdepaPrice.id.desc(),
             )
         ).all()
     )
-    if fecha is not None:
-        registros = [registro for registro in registros if registro.fecha <= fecha]
 
-    agrupados: dict[tuple[str, str], list[OdepaPrice]] = {}
+    agrupados: dict[tuple[str, str, str], list[OdepaPrice]] = {}
     for registro in registros:
-        clave = (registro.producto.casefold(), registro.mercado.casefold())
+        clave = (
+            registro.producto.casefold(),
+            registro.mercado.casefold(),
+            registro.unidad.strip().casefold(),
+        )
         agrupados.setdefault(clave, []).append(registro)
 
     variaciones: list[PriceVariation] = []
     for grupo in agrupados.values():
         if len(grupo) < 2:
             continue
-        actual, anterior = grupo[-1], grupo[-2]
+        actual, anterior = grupo[0], grupo[1]
         if fecha is not None and actual.fecha != fecha:
-            continue
-        if actual.unidad.strip().casefold() != anterior.unidad.strip().casefold():
             continue
 
         variacion_pct = calcular_variacion_porcentual(actual.precio_kg, anterior.precio_kg)

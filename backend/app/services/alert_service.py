@@ -14,6 +14,7 @@ Reglas de negocio:
 
 import asyncio
 import datetime
+import hashlib
 import json
 import logging
 from decimal import ROUND_HALF_UP, Decimal
@@ -35,6 +36,7 @@ from app.core.constants import (
 )
 from app.core.database import SessionLocal
 from app.core.formato import formatear_pesos
+from app.core.phone_hash import validate_phone_hash
 from app.core.rate_limiter import SlidingWindowRateLimiter
 from app.models.alert import Alert
 from app.models.odepa_price import OdepaPrice
@@ -61,6 +63,8 @@ logger = logging.getLogger(__name__)
 
 # Tope de alertas activas por productor (anti-spam y control de superficie).
 MAX_ALERTAS_ACTIVAS = 5
+_VARIATION_ROUTE_TYPE = "variacion_precio"
+_VARIATION_EVENT_DIGEST_CHARS = 20
 
 
 # (CONDICIONES_VALIDAS, UMBRALES_CLIMA_VALIDOS, HELADA_UMBRAL_C, LLUVIA_EXTREMA_UMBRAL_MM
@@ -69,6 +73,51 @@ MAX_ALERTAS_ACTIVAS = 5
 
 class AlertServiceError(ValueError):
     """Error de validacion o regla de negocio en alertas."""
+
+
+def remember_price_variation_route(
+    phone_hash: str,
+    wa_chat_id: str,
+    session: Session | None = None,
+) -> bool:
+    """Guarda la ruta mínima solo para un opt-in vigente de variaciones.
+
+    El hash no es reversible. Por eso la ruta se aprende desde un mensaje
+    entrante autenticado y se conserva en un registro interno de ``Alert``.
+    """
+    if not validate_phone_hash(phone_hash) or not _is_valid_wa_chat_id(wa_chat_id):
+        return False
+
+    owns_session = session is None
+    db = session or SessionLocal()
+    try:
+        prefs = db.scalar(select(UserPrefs).where(UserPrefs.phone_hash == phone_hash))
+        route = _get_variation_route(db, phone_hash)
+        if prefs is None or prefs.alert_consent is not True or not _cultivos_de_preferencias(prefs):
+            if route is not None:
+                db.delete(route)
+                db.commit()
+            return False
+
+        if route is None:
+            route = Alert(
+                phone_hash=phone_hash,
+                wa_chat_id=wa_chat_id,
+                tipo=_VARIATION_ROUTE_TYPE,
+                activa=False,
+            )
+            db.add(route)
+        elif route.wa_chat_id != wa_chat_id:
+            route.wa_chat_id = wa_chat_id
+        db.commit()
+        return True
+    except SQLAlchemyError:
+        db.rollback()
+        logger.error("Ruta de alerta de variación no persistida")
+        return False
+    finally:
+        if owns_session:
+            db.close()
 
 
 async def create_price_alert(
@@ -299,26 +348,40 @@ async def evaluar_variaciones_precio(
     # una sesión y Meta puede penalizar una ráfaga aunque cambie el destino.
     limiter = SlidingWindowRateLimiter(lambda: settings_obj.alert_rate_limit_per_minute)
     enviados: list[str] = []
-    enviados_set: set[str] = set()
     cultivos_por_hash = {prefs.phone_hash: _cultivos_de_preferencias(prefs) for prefs in preferencias}
 
-    for variacion in variaciones:
-        mensaje = _mensaje_variacion_precio(variacion)
-        for prefs in preferencias:
-            if variacion.producto.casefold() not in cultivos_por_hash[prefs.phone_hash]:
-                continue
-            wa_chat_id = _obtener_wa_chat_id(session, prefs.phone_hash)
-            if wa_chat_id is None:
-                logger.info("Alerta de variación omitida — estado=chat_no_disponible")
-                continue
-            if not await _esperar_rate_limit(limiter):
-                logger.warning("Alerta de variación omitida — estado=rate_limit")
-                continue
+    for prefs in preferencias:
+        relevantes = [
+            variacion
+            for variacion in variaciones
+            if variacion.producto.casefold() in cultivos_por_hash[prefs.phone_hash]
+        ]
+        if not relevantes:
+            continue
 
-            entregada = await enviar_alerta(wa_chat_id, mensaje, prefs.phone_hash)
-            if entregada is not False and prefs.phone_hash not in enviados_set:
-                enviados_set.add(prefs.phone_hash)
-                enviados.append(prefs.phone_hash)
+        route = _ensure_variation_route_from_existing_alert(session, prefs.phone_hash)
+        if route is None or route.wa_chat_id is None:
+            logger.info("Alerta de variación omitida — estado=chat_no_disponible")
+            continue
+        mensaje = _mensaje_variaciones_precio(relevantes)
+        event_digest = _variation_event_digest(mensaje)
+        if route.umbral_clima == event_digest:
+            logger.info("Alerta de variación omitida — estado=evento_ya_entregado")
+            continue
+        if not await _esperar_rate_limit(limiter):
+            logger.warning("Alerta de variación omitida — estado=rate_limit")
+            continue
+
+        entregada = await enviar_alerta(
+            route.wa_chat_id,
+            mensaje,
+            prefs.phone_hash,
+        )
+        if entregada is not False:
+            route.umbral_clima = event_digest
+            route.last_triggered_at = datetime.datetime.now()
+            session.commit()
+            enviados.append(prefs.phone_hash)
 
     return enviados
 
@@ -336,9 +399,33 @@ def _cultivos_de_preferencias(prefs: UserPrefs) -> set[str]:
     return {cultivo.strip().casefold() for cultivo in datos if isinstance(cultivo, str) and cultivo.strip()}
 
 
-def _obtener_wa_chat_id(session: Session, phone_hash: str) -> str | None:
-    """Obtiene el último chat conocido sin derivarlo desde el hash."""
+def _is_valid_wa_chat_id(wa_chat_id: str) -> bool:
+    """Acepta únicamente IDs directos de Open-WA, sin normalizar texto libre."""
+    if len(wa_chat_id) > 50:
+        return False
+    suffix = "@lid" if wa_chat_id.endswith("@lid") else "@c.us"
+    return wa_chat_id.endswith(suffix) and wa_chat_id.removesuffix(suffix).isdigit()
+
+
+def _get_variation_route(session: Session, phone_hash: str) -> Alert | None:
+    """Obtiene el cursor de destino/idempotencia de variaciones."""
     return session.scalar(
+        select(Alert)
+        .where(
+            Alert.phone_hash == phone_hash,
+            Alert.tipo == _VARIATION_ROUTE_TYPE,
+        )
+        .order_by(Alert.id.desc())
+        .limit(1)
+    )
+
+
+def _ensure_variation_route_from_existing_alert(session: Session, phone_hash: str) -> Alert | None:
+    """Migra perezosamente una ruta histórica sin duplicar el chat en memoria."""
+    route = _get_variation_route(session, phone_hash)
+    if route is not None:
+        return route
+    wa_chat_id = session.scalar(
         select(Alert.wa_chat_id)
         .where(
             Alert.phone_hash == phone_hash,
@@ -347,6 +434,22 @@ def _obtener_wa_chat_id(session: Session, phone_hash: str) -> str | None:
         .order_by(Alert.id.desc())
         .limit(1)
     )
+    if wa_chat_id is None:
+        return None
+    route = Alert(
+        phone_hash=phone_hash,
+        wa_chat_id=wa_chat_id,
+        tipo=_VARIATION_ROUTE_TYPE,
+        activa=False,
+    )
+    session.add(route)
+    session.commit()
+    return route
+
+
+def _variation_event_digest(mensaje: str) -> str:
+    """Identifica exactamente el contenido entregable sin persistirlo."""
+    return hashlib.sha256(mensaje.encode("utf-8")).hexdigest()[:_VARIATION_EVENT_DIGEST_CHARS]
 
 
 async def _esperar_rate_limit(limiter: SlidingWindowRateLimiter) -> bool:
@@ -366,6 +469,17 @@ def _mensaje_variacion_precio(variacion: PriceVariation) -> str:
         f"Alerta AgroVoz: {format_price_text(_registro_de_variacion(variacion))} "
         f"El precio {direccion} un {porcentaje}% respecto del dato anterior de ODEPA."
     )
+
+
+def _mensaje_variaciones_precio(variaciones: list[PriceVariation]) -> str:
+    """Agrupa hasta tres eventos para una sola entrega idempotente y acotada."""
+    ordenadas = sorted(variaciones, key=lambda value: abs(value.variacion_pct), reverse=True)
+    visibles = ordenadas[:3]
+    mensaje = " ".join(_mensaje_variacion_precio(item) for item in visibles)
+    restantes = len(ordenadas) - len(visibles)
+    if restantes:
+        mensaje += f" Hay {restantes} variaciones adicionales en tus cultivos registrados."
+    return mensaje
 
 
 def _registro_de_variacion(variacion: PriceVariation) -> OdepaPrice:
