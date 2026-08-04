@@ -882,6 +882,7 @@ class HistoricalYearSummary:
     precipitacion_total_mm: float | None
     dias_helada: int | None
     temporada: str | None = None
+    hasta_mes_dia: tuple[int, int] | None = None
 
 
 def _normalizar_temporada(temporada: str | None) -> str | None:
@@ -929,7 +930,12 @@ def _normalizar_metrica(metrica: str | None) -> str | None:
     return aliases.get(sin_tildes)
 
 
-def _historical_year_bounds(years: int, anio: int | None) -> tuple[int, int]:
+def _historical_year_bounds(
+    years: int,
+    anio: int | None,
+    *,
+    today: datetime.date | None = None,
+) -> tuple[int, int]:
     """Resuelve el rango de años completos solicitado.
 
     Sin año explícito se consultan los últimos años completos. Con ``anio``
@@ -937,10 +943,10 @@ def _historical_year_bounds(years: int, anio: int | None) -> tuple[int, int]:
     ejemplo, 2023 y 2024 sin depender de la fecha actual del servidor.
     """
     years = min(max(years, 1), _HISTORICAL_MAX_YEARS)
-    current_year = datetime.date.today().year
+    current_year = (today or datetime.date.today()).year
     end_year = current_year - 1 if anio is None else anio
-    if end_year < _ARCHIVE_FIRST_YEAR or end_year >= current_year:
-        raise ValueError(f"Año fuera de rango; debe estar entre {_ARCHIVE_FIRST_YEAR} y {current_year - 1}")
+    if end_year < _ARCHIVE_FIRST_YEAR or end_year > current_year:
+        raise ValueError(f"Año fuera de rango; debe estar entre {_ARCHIVE_FIRST_YEAR} y {current_year}")
     start_year = end_year - years + 1
     if start_year < _ARCHIVE_FIRST_YEAR:
         raise ValueError(f"El rango histórico no puede comenzar antes de {_ARCHIVE_FIRST_YEAR}")
@@ -1030,6 +1036,7 @@ async def fetch_historico(
     years: int = 1,
     temporada: str | None = None,
     anio: int | None = None,
+    today: datetime.date | None = None,
 ) -> list[HistoricalYearSummary]:
     """Consulta el histórico climático de OpenMeteo Archive.
 
@@ -1064,7 +1071,8 @@ async def fetch_historico(
 
     years = min(max(years, 1), _HISTORICAL_MAX_YEARS)
     temporada_normalizada = _normalizar_temporada(temporada)
-    start_year, end_year = _historical_year_bounds(years, anio)
+    effective_today = today or datetime.date.today()
+    start_year, end_year = _historical_year_bounds(years, anio, today=effective_today)
 
     cached = _historical_cache_get(
         lat,
@@ -1081,6 +1089,16 @@ async def fetch_historico(
         end_year,
         temporada_normalizada,
     )
+    period_end: tuple[int, int] | None = None
+    if end_year == effective_today.year:
+        archive_cutoff = effective_today - datetime.timedelta(days=5)
+        if archive_cutoff.year != end_year:
+            raise ValueError("El archivo histórico aún no tiene datos del año actual")
+        if archive_cutoff < start_date:
+            raise ValueError("El periodo actual todavía no tiene datos históricos disponibles")
+        if archive_cutoff < end_date:
+            end_date = archive_cutoff
+            period_end = (end_date.month, end_date.day)
 
     data = await _fetch_historical_data(lat, lon, start_date, end_date)
     summaries = _parse_historical_response(
@@ -1088,6 +1106,7 @@ async def fetch_historico(
         start_year,
         end_year,
         temporada=temporada_normalizada,
+        period_end=period_end,
     )
 
     _historical_cache_set(
@@ -1162,6 +1181,7 @@ def _parse_historical_response(
     start_year: int,
     end_year: int,
     temporada: str | None = None,
+    period_end: tuple[int, int] | None = None,
 ) -> list[HistoricalYearSummary]:
     """Parsea la respuesta de OpenMeteo Archive a resúmenes anuales.
 
@@ -1200,6 +1220,8 @@ def _parse_historical_response(
             continue
 
         if meses_temporada is not None and fecha.month not in meses_temporada:
+            continue
+        if period_end is not None and (fecha.month, fecha.day) > period_end:
             continue
 
         # En verano, diciembre pertenece al verano del año siguiente.
@@ -1253,6 +1275,7 @@ def _parse_historical_response(
                 precipitacion_total_mm=precipitacion_total,
                 dias_helada=dias_helada,
                 temporada=temporada_normalizada,
+                hasta_mes_dia=period_end,
             )
         )
 
@@ -1261,9 +1284,15 @@ def _parse_historical_response(
 
 def _periodo_historico_label(summary: HistoricalYearSummary) -> str:
     """Devuelve la etiqueta hablada de un año o temporada."""
-    if summary.temporada is not None:
-        return f"el {summary.temporada} de {summary.year}"
-    return f"el año {summary.year}"
+    label = (
+        f"el {summary.temporada} de {summary.year}"
+        if summary.temporada is not None
+        else f"el año {summary.year}"
+    )
+    if summary.hasta_mes_dia is not None:
+        month, day = summary.hasta_mes_dia
+        label += f" hasta el {day:02d}/{month:02d}"
+    return label
 
 
 def _comparar_lluvia(

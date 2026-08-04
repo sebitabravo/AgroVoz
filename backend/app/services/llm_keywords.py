@@ -11,6 +11,7 @@ fuzzy matching para tolerancia a typos en nombres de productos.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import difflib
 import logging
 import re
@@ -441,16 +442,18 @@ def _extract_historico_request(query: str) -> tuple[int, str | None, int | None,
 
     year_match = _HISTORICAL_YEAR_RE.search(q)
     anio = int(year_match.group()) if year_match is not None else None
-    anos = (
-        1
-        if anio is not None or any(marca in q for marca in ("año pasado", "ano pasado", "año anterior", "ano anterior"))
-        else 3
-    )
+    current_markers = ("este año", "este ano", "año actual", "ano actual")
+    previous_markers = ("año pasado", "ano pasado", "año anterior", "ano anterior", "el anterior")
+    if any(marker in q for marker in current_markers):
+        anio = datetime.date.today().year
+        anos = 2 if any(marker in q for marker in previous_markers) else 1
+    else:
+        anos = 1 if anio is not None or any(marker in q for marker in previous_markers) else 3
 
     metrica: str | None = None
     if "helad" in q:
         metrica = "heladas"
-    elif "lluv" in q or "precipit" in q:
+    elif "lluv" in q or "llov" in q or "precipit" in q:
         metrica = "lluvia"
     elif "temperatura" in q:
         metrica = "temperatura"

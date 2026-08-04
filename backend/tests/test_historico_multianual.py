@@ -1,5 +1,6 @@
 """Pruebas deterministas del resumen climático histórico multianual."""
 
+import datetime
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -171,3 +172,54 @@ def test_fallback_extrae_temporada_anio_y_metrica() -> None:
     params = _extract_historico_request("¿Cuántas heladas hubo en el invierno de 2024 en Traiguén?")
 
     assert params == (1, "invierno", 2024, "heladas")
+
+
+def test_fallback_extrae_este_anio_comparado_con_anterior() -> None:
+    """El caso motivador pide dos periodos e incluye el año actual."""
+    params = _extract_historico_request("¿Llovió más este año que el anterior en Traiguén?")
+
+    assert params == (2, None, datetime.date.today().year, "lluvia")
+
+
+@pytest.mark.asyncio
+async def test_fetch_actual_compara_mismo_periodo_con_reloj_inyectado(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Año actual y anterior se cortan en el mismo día disponible del Archive."""
+    _clear_historical_cache()
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "daily": {
+                    "time": ["2025-07-29", "2025-08-01", "2026-07-29"],
+                    "temperature_2m_max": [10.0, 20.0, 12.0],
+                    "temperature_2m_min": [2.0, 4.0, 3.0],
+                    "precipitation_sum": [10.0, 99.0, 15.0],
+                }
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr("app.services.weather_service._http_client", client)
+    try:
+        summaries = await fetch_historico(
+            -38.23,
+            -72.68,
+            years=2,
+            anio=2026,
+            today=datetime.date(2026, 8, 3),
+        )
+    finally:
+        await client.aclose()
+
+    assert requests[0].url.params["start_date"] == "2025-01-01"
+    assert requests[0].url.params["end_date"] == "2026-07-29"
+    assert [summary.precipitacion_total_mm for summary in summaries] == [10.0, 15.0]
+    assert all(summary.hasta_mes_dia == (7, 29) for summary in summaries)
+    text = _format_historico_text(summaries, "Traiguén", metrica="lluvia")
+    assert "hasta el 29/07" in text
+    assert "50% más" in text
