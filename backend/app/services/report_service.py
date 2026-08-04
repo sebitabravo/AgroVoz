@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 REPORT_FILENAME = "agrovoz-reporte-semanal.pdf"
 REPORT_CAPTION = "Reporte semanal de precios ODEPA y clima OpenMeteo."
 REPORT_FORECAST_DAYS = 5
+REPORT_TOOL_SIGNAL = "__AGROVOZ_REPORT_PDF__"
 _DEFAULT_COMUNA = "Traiguén"
 
 
@@ -346,9 +347,9 @@ async def generate_weekly_report(
 
 
 def get_reporte_pdf_for_llm(phone_hash: str = "") -> str:
-    """Confirma la tool del LLM sin exponer paths temporales ni datos privados."""
+    """Devuelve una señal interna para que el pipeline genere el adjunto."""
     if not settings.pdf_reports_enabled:
         return "Los reportes PDF todavía no están habilitados."
     if not validate_phone_hash(phone_hash):
         return "No pude asociar el reporte de forma segura."
-    return "Prepararé tu reporte semanal de precios ODEPA y clima OpenMeteo para enviarlo por WhatsApp."
+    return REPORT_TOOL_SIGNAL

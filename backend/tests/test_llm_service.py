@@ -13,7 +13,7 @@ import asyncio
 import logging
 import os
 import threading
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -937,6 +937,39 @@ class TestAnswerGuardasLlm:
         assert arguments_secret not in caplog.text
         assert "get_price" in caplog.text
         assert "JSONDecodeError" in caplog.text
+
+    async def test_tool_reporte_devuelve_senal_sin_promesa_del_llm(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El pipeline, no otra vuelta del modelo, recibe el intent de adjunto."""
+        from app.services.report_service import REPORT_TOOL_SIGNAL
+
+        completion = AsyncMock(
+            return_value={
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '<tool_call>{"name":"get_reporte_pdf",'
+                                '"arguments":{}}</tool_call>'
+                            )
+                        }
+                    }
+                ]
+            }
+        )
+        monkeypatch.setattr("app.services.llm_service._get_model", lambda: object())
+        monkeypatch.setattr("app.services.llm_service._run_llm_completion", completion)
+        monkeypatch.setattr(
+            "app.services.llm_service._execute_tool",
+            AsyncMock(return_value=REPORT_TOOL_SIGNAL),
+        )
+
+        result = await answer("necesito el documento que ofreciste", phone_hash="a" * 64)
+
+        assert result == REPORT_TOOL_SIGNAL
+        completion.assert_awaited_once()
 
     async def test_loop_agotado_no_loguea_query_ni_tool_call(
         self,

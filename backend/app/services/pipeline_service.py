@@ -1269,6 +1269,7 @@ class AgroVozPipeline:
         llm_ms_ref = [0]
         tts_ms_ref = [0]
         welcome_ogg_ref: list[str | None] = [None]
+        report_pdf_ref: list[str | None] = [None]
         primer_contacto_ref: list[bool] = [False]
         conversation_lease, conversation_busy = _claim_conversation(chat_id_hash)
 
@@ -1304,6 +1305,7 @@ class AgroVozPipeline:
                         llm_ms_ref=llm_ms_ref,
                         tts_ms_ref=tts_ms_ref,
                         welcome_ogg_ref=welcome_ogg_ref,
+                        report_pdf_ref=report_pdf_ref,
                         primer_contacto_ref=primer_contacto_ref,
                         texto_directo=texto_directo,
                         generar_audio=generar_audio,
@@ -1336,8 +1338,15 @@ class AgroVozPipeline:
 
             if conversation_lease is not None and conversation_lease.transition(ConversationState.ESPERANDO_CONSULTA):
                 conversation_lease.finish()
+            # Solo al devolver AudioResponse se transfiere el ownership del PDF
+            # al caller, que lo elimina después de intentar el envío.
+            report_pdf_ref[0] = None
             return response
         finally:
+            # Si el pipeline fue cancelado, expiró o falló después de crear el
+            # reporte, el path nunca llegó a AudioService: todavía es nuestro.
+            if report_pdf_ref[0]:
+                Path(report_pdf_ref[0]).unlink(missing_ok=True)
             # En timeout, cancelación o excepción se retira solo la sesión que
             # aún pertenece a esta lease. Una sesión reemplazante queda intacta.
             if conversation_lease is not None:
@@ -1356,6 +1365,7 @@ class AgroVozPipeline:
         llm_ms_ref: list[int],
         tts_ms_ref: list[int],
         welcome_ogg_ref: list[str | None],
+        report_pdf_ref: list[str | None],
         primer_contacto_ref: list[bool],
         texto_directo: str | None = None,
         generar_audio: bool = True,
@@ -1546,6 +1556,7 @@ class AgroVozPipeline:
                     origen_ref: list[str] = ["desconocido"]
                     if self._is_reporte_pdf_query(transcribed_text):
                         response_text, report_pdf_path = await self._generate_report_response(chat_id_hash)
+                        report_pdf_ref[0] = report_pdf_path
                         intent = "resumen"
                         origen_ref[0] = "reporte_pdf"
                     else:
@@ -1556,6 +1567,13 @@ class AgroVozPipeline:
                             chat_id_hash,
                             origen_ref,
                         )
+                        from app.services.report_service import REPORT_TOOL_SIGNAL
+
+                        if response_text == REPORT_TOOL_SIGNAL:
+                            response_text, report_pdf_path = await self._generate_report_response(chat_id_hash)
+                            report_pdf_ref[0] = report_pdf_path
+                            intent = "resumen"
+                            origen_ref[0] = "reporte_pdf_tool"
                     llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
 
                     if intent == "resumen":

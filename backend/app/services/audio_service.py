@@ -428,8 +428,24 @@ class AudioService:
             if pipeline_result.es_primer_contacto:
                 await self._enviar_aviso_responsabilidad(openwa, chat_id, request_id)
 
-            # Enviar respuesta de audio
-            if response_ogg_path:
+            # Un reporte se adjunta antes de verbalizar que quedó listo. Así un
+            # fallo de Open-WA no deja una confirmación falsa en el chat.
+            report_sent = True
+            if report_pdf_path is not None:
+                report_sent = await self._enviar_reporte_pdf(openwa, chat_id, report_pdf_path, request_id)
+                report_pdf_path = None
+                if not report_sent:
+                    await _mark_delivery_failed(consultation_id, "openwa_send_failed")
+                    try:
+                        await openwa.send_text(
+                            chat_id,
+                            "No pude adjuntar el reporte ahora. ¿Probamos de nuevo más tarde?",
+                        )
+                    except (httpx.HTTPError, OSError, RuntimeError, TypeError, ValueError):
+                        logger.warning("Aviso de fallo del reporte no enviado — request_id=%s", request_id)
+
+            # Enviar respuesta de audio solo si el adjunto requerido llegó.
+            if response_ogg_path and report_sent:
                 try:
                     await openwa.send_audio(chat_id, response_ogg_path)
                     if has_primary_response:
@@ -460,9 +476,8 @@ class AudioService:
                     # (P2: cleanup garantizado, no solo en path exitoso)
                     if response_ogg_path != str(_HELLO_OGG_PATH):
                         Path(response_ogg_path).unlink(missing_ok=True)
-
-            if report_pdf_path is not None:
-                await self._enviar_reporte_pdf(openwa, chat_id, report_pdf_path, request_id)
+            elif response_ogg_path and response_ogg_path != str(_HELLO_OGG_PATH):
+                Path(response_ogg_path).unlink(missing_ok=True)
 
             # Limpiar indicador "grabando..." SIEMPRE (fix #105: evita que
             # quede activo cuando response_ogg_path es None — ej: hello.ogg
@@ -543,15 +558,17 @@ class AudioService:
         chat_id: str,
         report_path: Path,
         request_id: str,
-    ) -> None:
-        """Envía el PDF y lo elimina aun cuando Open-WA falle."""
+    ) -> bool:
+        """Envía el PDF, informa el resultado y siempre elimina el temporal."""
         from app.services.report_service import REPORT_CAPTION, REPORT_FILENAME
 
         try:
             await openwa.send_file(chat_id, str(report_path), REPORT_FILENAME, REPORT_CAPTION)
             logger.info("Reporte PDF enviado — request_id=%s", request_id)
+            return True
         except (httpx.HTTPError, OSError, RuntimeError, TypeError, ValueError):
             logger.warning("Reporte PDF no enviado — request_id=%s", request_id)
+            return False
         finally:
             report_path.unlink(missing_ok=True)
 
@@ -649,6 +666,20 @@ class AudioService:
             if resultado.es_primer_contacto:
                 await self._enviar_aviso_responsabilidad(openwa, chat_id, request_id)
 
+            if report_pdf_path is not None:
+                report_sent = await self._enviar_reporte_pdf(openwa, chat_id, report_pdf_path, request_id)
+                report_pdf_path = None
+                if not report_sent:
+                    await _mark_delivery_failed(consultation_id, "openwa_send_failed")
+                    try:
+                        await openwa.send_text(
+                            chat_id,
+                            "No pude adjuntar el reporte ahora. ¿Probamos de nuevo más tarde?",
+                        )
+                    except (httpx.HTTPError, OSError, RuntimeError, TypeError, ValueError):
+                        logger.warning("Aviso de fallo del reporte no enviado — request_id=%s", request_id)
+                    return
+
             if resultado.text_response:
                 try:
                     await openwa.send_text(chat_id, resultado.text_response)
@@ -660,8 +691,6 @@ class AudioService:
                     raise
                 await _mark_delivery_delivered(consultation_id)
                 await _save_delivered_history(consultation_id)
-                if report_pdf_path is not None:
-                    await self._enviar_reporte_pdf(openwa, chat_id, report_pdf_path, request_id)
                 logger.info(
                     "Respuesta de texto enviada — message_id=%s intent=%s e2e_ms=%d request_id=%s",
                     message_id,

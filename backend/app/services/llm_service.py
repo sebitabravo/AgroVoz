@@ -1496,6 +1496,11 @@ async def answer(
 
                 # Ejecutar tool.
                 tool_result = await _execute_tool(fn_name, fn_args, phone_hash=phone_hash)
+                if fn_name == "get_reporte_pdf":
+                    from app.services.report_service import REPORT_TOOL_SIGNAL
+
+                    if tool_result == REPORT_TOOL_SIGNAL:
+                        return REPORT_TOOL_SIGNAL
 
                 # Envolver resultado en <tool_response> (formato nativo Qwen2.5).
                 messages.append(
@@ -1642,6 +1647,11 @@ async def answer_via_openrouter(
                     if name in WHITELIST_TOOLS
                     else FALLBACK_TEXT
                 )
+                if name == "get_reporte_pdf":
+                    from app.services.report_service import REPORT_TOOL_SIGNAL
+
+                    if result == REPORT_TOOL_SIGNAL:
+                        return REPORT_TOOL_SIGNAL
                 messages.append(
                     {
                         "role": "tool",
