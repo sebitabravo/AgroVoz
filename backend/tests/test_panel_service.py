@@ -17,8 +17,8 @@ from app.models.user_prefs import UserPrefs
 from app.services.panel_service import (
     PanelLinkError,
     generate_panel_token,
-    get_panel_price_history,
     get_panel_link_for_llm,
+    get_panel_price_history,
     get_panel_summary,
     verify_panel_token,
 )
