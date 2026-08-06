@@ -41,6 +41,20 @@ async def test_shell_html_se_sirve_para_cualquier_token(client: AsyncClient) -> 
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/html")
     assert "AgroVoz" in resp.text
+    assert 'id="identificar-plaga"' in resp.text
+    assert "camera=(self)" in resp.headers["permissions-policy"]
+
+
+async def test_cliente_pwa_captura_y_envia_imagen_de_la_camara(client: AsyncClient) -> None:
+    """El shell incluye el contrato de captura para la cámara trasera móvil."""
+    resp = await client.get("/static/panel/app.js")
+
+    assert resp.status_code == 200
+    assert "getUserMedia" in resp.text
+    assert 'facingMode: "environment"' in resp.text
+    assert 'fetch("/api/v1/vision/identify?token=" + encodeURIComponent(token)' in resp.text
+    assert 'datos.append("image", blob, "captura.jpg")' in resp.text
+    assert "camera=()" in resp.headers["permissions-policy"]
 
 
 async def test_shell_html_bloqueado_si_gate_apagado(

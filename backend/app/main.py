@@ -36,6 +36,7 @@ from app.api.demo import router as demo_router
 from app.api.health import router as health_router
 from app.api.panel import router as panel_router
 from app.api.prices import router as prices_router
+from app.api.vision import router as vision_router
 from app.api.weather import router as weather_router
 from app.api.webhooks import router as webhooks_router
 from app.core.config import settings
@@ -44,6 +45,7 @@ from app.core.security import (
     ALLOWED_HOSTS,
     RateLimitMiddleware,
     SecurityHeadersMiddleware,
+    VisionUploadGuardMiddleware,
 )
 from app.panel_web import router as panel_web_router
 
@@ -409,7 +411,8 @@ app = FastAPI(
 # el más externo (outermost).
 #
 # Orden de procesamiento del request (outermost → innermost):
-#   CORSMiddleware → RequestID → SecurityHeaders → TrustedHost → RateLimit → AdminAuth → GZip → app
+#   CORS → RequestID → SecurityHeaders → TrustedHost → RateLimit → AdminAuth
+#   → VisionUploadGuard → GZip → app
 #
 # - CORSMiddleware es el MÁS EXTERNO (agregado último): debe responder OPTIONS
 #   preflight antes que cualquier otro middleware, especialmente TrustedHost
@@ -425,6 +428,8 @@ app = FastAPI(
 # - AdminAuthMiddleware protege /admin/* (excepto login) con cookie firmada.
 #   RequestID, SecurityHeaders, TrustedHost y RateLimit lo envuelven, así que
 #   cubren incluso los redirects de auth.
+# - VisionUploadGuard autentica y acota la ruta multipart antes de que el
+#   parser de FastAPI escriba un UploadFile temporal.
 # - GZipMiddleware es el MÁS INTERNO: se agrega primero (insert(0)), recibe la
 #   respuesta cruda de la app y la comprime antes que la envuelvan los
 #   middlewares externos. Se ubica adentro para recibir el body sin la división
@@ -434,6 +439,7 @@ app = FastAPI(
 #   comprime; es inofensivo para el MVP porque el audio se responde vía Open-WA,
 #   no como response HTTP directa.
 app.add_middleware(GZipMiddleware, minimum_size=500)
+app.add_middleware(VisionUploadGuardMiddleware)
 app.add_middleware(AdminAuthMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
@@ -463,6 +469,7 @@ app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(prices_router, prefix="/api/v1")
 app.include_router(weather_router, prefix="/api/v1")
+app.include_router(vision_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(demo_router, prefix="/api/v1")
 app.include_router(panel_router, prefix="/api/v1")

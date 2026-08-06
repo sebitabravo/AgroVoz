@@ -88,3 +88,4 @@ logs/
 .codegraph/
 openspec/
 .worktrees/
+.claude-rdd/
