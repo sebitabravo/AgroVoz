@@ -196,6 +196,23 @@ class TestEvaluarVariacionesPrecio:
         enviar.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_no_promueve_wa_chat_id_de_grupo_a_ruta_de_envio(self, db: Session) -> None:
+        """Una alerta histórica con chat de grupo no se convierte en broadcast."""
+        _agregar_precio(db, "papa", "100", _FECHA_ANTERIOR)
+        _agregar_precio(db, "papa", "120", _FECHA_ACTUAL)
+        phone_hash = "7" * 64
+        _agregar_suscriptor(db, phone_hash, wa_chat_id="123456789-987654321@g.us")
+
+        with patch(
+            "app.services.alert_service.enviar_alerta",
+            new=AsyncMock(),
+        ) as enviar:
+            enviados = await evaluar_variaciones_precio(db, settings, fecha=_FECHA_ACTUAL)
+
+        assert enviados == []
+        enviar.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_aprende_destino_desde_contacto_con_consentimiento(self, db: Session) -> None:
         _agregar_precio(db, "papa", "100", _FECHA_ANTERIOR)
         _agregar_precio(db, "papa", "120", _FECHA_ACTUAL)
