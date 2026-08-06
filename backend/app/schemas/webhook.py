@@ -10,8 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class WebhookMedia(BaseModel):
     """Archivo multimedia adjunto al mensaje.
 
-    Para mensajes de voz (type=voice), Open-WA incluye el audio como
-    base64 inline en `data`, no como URL para descargar.
+    Los audios pueden llegar como base64 inline. Para imágenes el servicio
+    usa el ``message_id`` y descarga el media con la API REST de Open-WA.
     """
 
     mimetype: str = ""

@@ -2,7 +2,7 @@
 
 Endpoint POST /api/v1/webhook/whatsapp que Open-WA llama cuando
 llega un mensaje. Valida firma HMAC, detecta tipo de mensaje,
-y delega el procesamiento de audio al AudioService.
+y delega el procesamiento de audio o imagen al servicio correspondiente.
 """
 
 import base64
@@ -13,9 +13,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
+from app.core.config import settings
 from app.core.security import verify_openwa_webhook
 from app.schemas.webhook import WebhookPayload
 from app.services.audio_service import AudioService, sanitize_message_id
+from app.services.vision_service import VisionService
 
 router = APIRouter(tags=["webhooks"])
 logger = logging.getLogger(__name__)
@@ -30,8 +32,14 @@ def get_audio_service() -> AudioService:
     return AudioService()
 
 
+def get_vision_service() -> VisionService:
+    """Factory del servicio de visión para inyección y tests del webhook."""
+    return VisionService()
+
+
 # Dependencias a nivel de modulo para cumplir con B008 (no calls en argument defaults).
 _audio_service_dep = Depends(get_audio_service)
+_vision_service_dep = Depends(get_vision_service)
 _verify_openwa_dep = Depends(verify_openwa_webhook)
 
 
@@ -92,6 +100,11 @@ def _extract_location(payload: WebhookPayload) -> tuple[float, float] | None:
     return lat, lng
 
 
+def _is_image_message(payload: WebhookPayload) -> bool:
+    """Determina si Open-WA reportó una imagen recibida por WhatsApp."""
+    return payload.data.type.casefold() == "image"
+
+
 def _extract_audio_bytes(payload: WebhookPayload) -> bytes | None:
     """Extrae el audio base64 inline del payload del webhook.
 
@@ -116,14 +129,15 @@ async def webhook_whatsapp(
     background_tasks: BackgroundTasks,
     raw_payload: dict[str, object] = _verify_openwa_dep,
     audio_service: AudioService = _audio_service_dep,
+    vision_service: VisionService = _vision_service_dep,
 ) -> JSONResponse:
     """Endpoint que recibe mensajes de WhatsApp via webhook de Open-WA.
 
     Flujo:
     1. Validar firma HMAC (hecho por la dependencia verify_openwa_webhook).
     2. Parsear payload -> WebhookPayload.
-    3. Detectar tipo de mensaje (voice vs text vs otro).
-    4. Si es voice: delegar procesamiento al AudioService en background.
+    3. Detectar tipo de mensaje (voice, text, image u otro).
+    4. Si es voice o image: delegar al servicio correspondiente en background.
     5. Si es otro: log + ignorar por ahora.
     6. Retornar 200 rapido (ack a Open-WA).
 
@@ -210,7 +224,36 @@ async def webhook_whatsapp(
             content={"status": "received", "message_id": message_id_safe},
         )
 
-    # Ni voz, texto ni ubicación (imagen, sticker, ...): fuera de alcance.
+    if _is_image_message(payload):
+        if not settings.vision_enabled:
+            logger.info(
+                "Visión deshabilitada — message_id=%s request_id=%s",
+                message_id_safe,
+                request_id,
+            )
+            return JSONResponse(
+                status_code=200,
+                content={"status": "ignored", "reason": "vision_deshabilitada"},
+            )
+        if not raw_message_id:
+            logger.warning("Imagen sin message_id — request_id=%s", request_id)
+            return JSONResponse(
+                status_code=200,
+                content={"status": "ignored", "reason": "imagen_sin_id"},
+            )
+
+        background_tasks.add_task(
+            vision_service.process_whatsapp_image,
+            message_id=raw_message_id,
+            chat_id=chat_id,
+            request_id=request_id,
+        )
+        return JSONResponse(
+            status_code=200,
+            content={"status": "received", "message_id": message_id_safe},
+        )
+
+    # Ni voz, texto, ubicación ni imagen (sticker, ...): fuera de alcance.
     if not _is_voice_message(payload):
         logger.info(
             "Mensaje no-audio ignorado — message_id=%s type=%s has_body=%s request_id=%s",

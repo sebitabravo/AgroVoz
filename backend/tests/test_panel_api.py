@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import datetime
 from collections.abc import Generator
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -12,8 +14,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
+from app.models.odepa_price import OdepaPrice
 from app.models.parcela import Parcela
 from app.models.user_prefs import UserPrefs
+from app.services import panel_service
 from app.services.panel_service import generate_panel_token
 
 _PHONE_HASH = "a" * 64
@@ -51,8 +55,23 @@ async def test_gate_apagado_retorna_503(client: AsyncClient, monkeypatch: pytest
     assert resp.status_code == 503
 
 
+async def test_precios_gate_apagado_retorna_503(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "farmer_panel_enabled", False)
+    token = generate_panel_token(_PHONE_HASH)
+
+    resp = await client.get(f"/api/v1/panel/{token}/prices")
+
+    assert resp.status_code == 503
+
+
 async def test_token_invalido_retorna_401(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/panel/token-invalido")
+
+    assert resp.status_code == 401
+
+
+async def test_precios_token_invalido_retorna_401(client: AsyncClient) -> None:
+    resp = await client.get("/api/v1/panel/token-invalido/prices")
 
     assert resp.status_code == 401
 
@@ -91,6 +110,65 @@ async def test_token_valido_retorna_resumen(
     assert data["cultivos"] == ["papa"]
     assert data["parcelas"] == []
     assert data["alertas"] == []
+
+
+async def test_token_valido_retorna_historial_precios(
+    client: AsyncClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fecha_referencia = datetime.date(2026, 8, 3)
+    monkeypatch.setattr(panel_service, "_panel_today", lambda: fecha_referencia)
+    with next(_session_test_db(tmp_path)) as db:
+        db.add(UserPrefs(phone_hash=_PHONE_HASH, comuna="Traiguén", cultivos='["papa"]'))
+        db.add_all(
+            [
+                OdepaPrice(
+                    producto="papa",
+                    mercado="Vega Modelo de Temuco",
+                    precio_kg=Decimal("1000"),
+                    unidad="kg",
+                    fecha=fecha_referencia - datetime.timedelta(days=27),
+                ),
+                OdepaPrice(
+                    producto="papa",
+                    mercado="Vega Modelo de Temuco",
+                    precio_kg=Decimal("1200"),
+                    unidad="kg",
+                    fecha=fecha_referencia,
+                ),
+                OdepaPrice(
+                    producto="papa",
+                    mercado="Vega Modelo de Temuco",
+                    precio_kg=Decimal("500"),
+                    unidad="kg",
+                    fecha=fecha_referencia - datetime.timedelta(days=28),
+                ),
+            ]
+        )
+        db.commit()
+
+    token = generate_panel_token(_PHONE_HASH)
+
+    resp = await client.get(f"/api/v1/panel/{token}/prices")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["desde"] == "2026-07-07"
+    assert data["hasta"] == "2026-08-03"
+    assert data["dias"] == 28
+    assert data["cultivos"] == [
+        {
+            "cultivo": "papa",
+            "mercado": "Vega Modelo de Temuco",
+            "unidad": "kg",
+            "fuente": "ODEPA",
+            "precios": [
+                {"fecha": "2026-07-07", "precio": 1000.0},
+                {"fecha": "2026-08-03", "precio": 1200.0},
+            ],
+        }
+    ]
 
 
 async def test_incluye_parcelas_con_gate_y_consentimiento(
