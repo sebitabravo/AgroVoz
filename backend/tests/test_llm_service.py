@@ -92,10 +92,10 @@ class TestConstantes:
         assert len(NO_RESPONSE_TEXT) > 10
         assert "reformular" in NO_RESPONSE_TEXT.lower()
 
-    def test_whitelist_catorce_tools(self) -> None:
+    def test_whitelist_quince_tools(self) -> None:
         """Whitelist: precio, spread, historico, venta, margen, clima actual,
         pronostico, clima historico, corpus, gastos, parcelas, reglas
-        agronomicas y link del panel (14 tools)."""
+        agronomicas, link del panel y directorio agrícola (15 tools)."""
         assert (
             frozenset(
                 {
@@ -113,6 +113,7 @@ class TestConstantes:
                     "get_parcelas",
                     "get_regla_agronomica",
                     "get_link_resumen",
+                    "get_directorio_agricola",
                 }
             )
             == WHITELIST_TOOLS
@@ -123,8 +124,8 @@ class TestConstantes:
         # 5 base + calculate_margin (#155) + search_corpus (#156)
         # + register_expense (#170) + get_price_spread (#171) + get_pronostico
         # + register_parcela/get_parcelas (C5) + get_regla_agronomica (C1+C2)
-        # + get_link_resumen (C3)
-        assert len(TOOLS) == 14
+        # + get_link_resumen (C3) + get_directorio_agricola (#246)
+        assert len(TOOLS) == 15
         for tool in TOOLS:
             assert tool["type"] == "function"
             fn = tool["function"]
@@ -202,17 +203,17 @@ class TestLlmConfig:
     el impacto, estos tests fallan.
     """
 
-    def test_n_ctx_alcanza_para_prompt_con_siete_tools(self) -> None:
-        """n_ctx debe cubrir el prompt real: system+tools (~2771 tokens
+    def test_n_ctx_alcanza_para_prompt_con_tools(self) -> None:
+        """n_ctx debe cubrir el prompt real: system+tools
 
         medidos con el tokenizer real de Qwen2.5) + tool_response de RAG
-        (peor caso, ~360 tokens) + margen para query/respuesta.
+        (peor caso) + margen para query/respuesta.
 
         n_ctx=1024 y 2048 NO alcanzaban ni para el primer prompt (crash
         ValueError instantaneo de llama-cpp-python). n_ctx=3072 alcanzaba
         para la 1a llamada pero no para la 2a vuelta del loop con
         tool_response de search_corpus inyectado. 4096 es el minimo medido
-        que no revienta con las 7 tools actuales.
+        que no revienta con las tools actuales.
 
         RIESGO SIN VALIDAR EN VPS (gate #100, overrideado): medido en
         Apple M3 con Metal (mejor caso, no representativo del VPS CX43 sin
@@ -221,9 +222,9 @@ class TestLlmConfig:
         asumir que la latencia sigue siendo aceptable.
         """
         assert _N_CTX >= 4096, (
-            f"_N_CTX={_N_CTX} no alcanza para el prompt con 7 tools "
-            "(~2771 tokens) + tool_response de RAG (~3171 tokens en la "
-            "2a vuelta). Medir tokens reales con el tokenizer antes de bajarlo."
+            f"_N_CTX={_N_CTX} no alcanza para el prompt con las tools actuales "
+            "+ tool_response de RAG. Medir tokens reales con el tokenizer "
+            "antes de bajarlo."
         )
 
     def test_n_threads_sigue_a_los_cores_sin_sobresuscribir(self) -> None:
@@ -267,7 +268,7 @@ class TestLlmConfig:
         inflan el prompt sin querer. Ratio medido ~3.26 chars/token con el
         tokenizer de Qwen2.5 (ver test_n_ctx_alcanza_para_prompt_con_siete_tools).
 
-        Con 10 tools (se sumo get_pronostico) son ~10359 chars ≈ ~3178 tokens.
+        Con las tools actuales son aproximadamente 10k caracteres.
         Sumado al peor caso de tool_response (~360 tokens de search_corpus) da
         ~3538, y deja ~558 tokens de margen dentro de n_ctx=4096 para la query
         y la respuesta — que esta capada en max_tokens=128. Entra con holgura.

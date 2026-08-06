@@ -56,7 +56,8 @@ por la misma vía. El texto evita Whisper y TTS.
 7. Texto → LLM con Tool Calling:
    - Si pregunta por precio → query SQLite ODEPA
    - Si pregunta por clima → GET OpenMeteo API
-   - Whitelist de 10 tools (ver lista completa en `app/services/` más abajo). Si alucina una tool fuera de la whitelist → fallback.
+   - Si busca una oficina o cooperativa → query SQLite `directorio_agricola`
+   - Whitelist de 15 tools (ver lista completa en `app/services/` más abajo). Si alucina una tool fuera de la whitelist → fallback.
 8. Fast-path determinista o LLM genera respuesta textual (datos crudos de precio/clima, o reglas citadas de fuente oficial)
 9. Solo audio: Piper TTS convierte texto → audio `.wav`
 10. Solo audio: ffmpeg convierte `.wav` → `.ogg`
@@ -76,7 +77,7 @@ por la misma vía. El texto evita Whisper y TTS.
 
 ### `app/services/` — Capa de negocio
 - `whisper_service.py` — transcripción de audio (descarga, ffmpeg, Whisper)
-- `llm_service.py` — interpretación NL + Tool Calling con whitelist (10 tools: get_price, get_price_spread, get_price_history, calculate_sale_value, calculate_margin, get_weather, get_pronostico, get_clima_historico, search_corpus, register_expense) + fallback OpenRouter
+- `llm_service.py` — interpretación NL + Tool Calling con whitelist (15 tools: precios, clima, corpus, gastos, parcelas, reglas, panel y `get_directorio_agricola`) + fallback OpenRouter
 - `tts_service.py` — síntesis de voz con Piper TTS
 - `odepa_service.py` — consultas a SQLite ODEPA + sync diario
 - `weather_service.py` — consultas a OpenMeteo API (forecast + histórico)
@@ -92,6 +93,7 @@ por la misma vía. El texto evita Whisper y TTS.
 - `consultation_history_service.py` — memoria consentida, TTL y borrado auditado
 - `conversation_state.py` — estado efímero y exclusión de turnos concurrentes
 - `indap_credit_service.py` — derivación determinista a fuentes oficiales, sin asesoría
+- `directorio_agricola_service.py` — contactos públicos de INDAP, PRODESAL y cooperativas por comuna
 - `mcp_service.py` — handlers de la RPC administrativa interna feature-gated
 
 ### `app/core/` — Configuración
@@ -105,6 +107,7 @@ por la misma vía. El texto evita Whisper y TTS.
 - `consultation_history.py` — memoria consentida y evidencia append-only de borrado
 - `alert.py` — modelo para alertas proactivas de precio/clima
 - `user_prefs.py` — identidad individual/grupal, comuna, GPS opcional, cultivos y consentimientos separados
+- `directorio_agricola.py` — snapshot SQLite de sedes y contactos públicos por comuna
 
 ### `app/jobs/` — Tareas programadas
 - `sync_odepa.py` — cron job 06:00 AM: descarga CSV ODEPA → upsert SQLite
@@ -169,6 +172,23 @@ CREATE TABLE consultations (
 CREATE INDEX idx_odepa_producto ON odepa_prices(producto, fecha);
 CREATE INDEX idx_odepa_mercado ON odepa_prices(mercado, fecha);
 CREATE INDEX idx_consultations_created ON consultations(created_at);
+
+-- Directorio público de sedes agrícolas (snapshot versionado)
+CREATE TABLE directorio_agricola (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    comuna TEXT NOT NULL,
+    tipo TEXT NOT NULL,  -- 'indap', 'prodesal' o 'cooperativa'
+    nombre TEXT NOT NULL,
+    direccion TEXT,
+    telefono TEXT,
+    horario TEXT,
+    fuente TEXT NOT NULL,
+    fuente_url TEXT NOT NULL,
+    fecha_fuente TEXT,
+    verificado_el DATE NOT NULL
+);
+CREATE INDEX idx_directorio_comuna ON directorio_agricola(comuna);
+CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
 ```
 
 ## Decisiones de arquitectura (NO CAMBIAR)
@@ -366,7 +386,7 @@ CREATE INDEX idx_consultations_created ON consultations(created_at);
     Se reevaluaron las restricciones para impulsar el producto post-piloto:
     - **Visión por computador (`VISION_ENABLED=false`):** Procesamiento de imágenes `type="image"` vía Open-WA `decryptMedia` y modelos ONNX locales (MobileNetV3 ~15 MB). Mantiene el hard constraint agronómico: la inferencia clasifica el cultivo/enfermedad determinísticamente y la respuesta verbaliza la regla citada INIA vigente.
     - **Ubicación GPS por WhatsApp:** Procesamiento de mensajes `type="location"`; `lat`/`lng` se validan, se guardan como pareja opcional en `user_prefs` por `phone_hash` y `get_weather`/`get_pronostico` los priorizan sobre la comuna. El webhook confirma el cambio y entrega el pronóstico de OpenMeteo para la parcela. El pin anterior se reemplaza al compartir uno nuevo y queda sujeto al TTL específico de ubicación documentado en la decisión 28.
-    - **Reglas citadas de valor agregado:** Reapertura de calendarios agrícolas por zona (fuente INIA citada), derivación a programas de crédito INDAP (datos públicos) y directorio de cooperativas por comuna (Open Data datos.gob.cl).
+    - **Reglas citadas de valor agregado:** Reapertura de calendarios agrícolas por zona (fuente INIA citada), derivación a programas de crédito INDAP (datos públicos) y directorio de cooperativas por comuna (snapshot local de Open Data datos.gob.cl e INDAP; los campos ausentes en la fuente no se completan).
     - **Reportes PDF (`PDF_REPORTS_ENABLED=false`):** Generación de resumen semanal PDF enviado vía Open-WA `sendFile`.
 
 28. **Ubicación GPS con consentimiento separado, TTL y minimización de salida (#239).**
