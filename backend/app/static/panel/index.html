@@ -4,20 +4,21 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AgroVoz — Mi resumen</title>
-  <meta name="description" content="Tu resumen de AgroVoz: comuna, cultivos, parcelas y alertas." />
+  <meta name="description" content="Tu resumen de AgroVoz: comuna, cultivos, precios, parcelas y alertas." />
   <link rel="manifest" href="/static/panel/manifest.json" />
   <link rel="icon" href="/static/favicon.svg" />
   <meta name="theme-color" content="#4f7d5a" />
   <style>
     :root { color-scheme: light; }
+    * { box-sizing: border-box; }
     body {
       font-family: system-ui, -apple-system, sans-serif;
       margin: 0;
-      padding: 1.5rem;
+      padding: 1rem;
       background: #fbfaf7;
       color: #1f2a20;
     }
-    main { max-width: 32rem; margin: 0 auto; }
+    main { max-width: 32rem; width: 100%; margin: 0 auto; }
     h1 { font-size: 1.25rem; color: #4f7d5a; }
     .card {
       background: #fff;
@@ -28,6 +29,13 @@
     }
     .card h2 { font-size: 0.95rem; margin: 0 0 0.5rem; }
     .muted { color: #6b6b6b; font-size: 0.875rem; }
+    .chart-wrap { position: relative; width: 100%; height: 14rem; }
+    .price-list { padding-left: 1.25rem; margin-bottom: 0; font-size: 0.8rem; }
+    @media (max-width: 360px) {
+      body { padding: 0.75rem; }
+      .card { padding: 0.75rem; }
+      .chart-wrap { height: 12rem; }
+    }
     #estado-offline {
       display: none;
       background: #fff4e0;
@@ -46,7 +54,16 @@
     <div id="contenido">
       <p class="muted">Cargando…</p>
     </div>
+    <section class="card" aria-labelledby="precios-titulo">
+      <h2 id="precios-titulo">Mis Precios</h2>
+      <p id="estado-precios" class="muted" aria-live="polite">Cargando precios ODEPA…</p>
+      <div class="chart-wrap">
+        <canvas id="grafico-precios" role="img" aria-label="Evolución de precios de mis cultivos"></canvas>
+      </div>
+      <div id="detalle-precios"></div>
+    </section>
   </main>
+  <script src="/static/chart.umd.min.js"></script>
   <script src="/static/panel/app.js"></script>
   <script src="/static/panel/register-sw.js"></script>
 </body>
