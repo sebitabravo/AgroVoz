@@ -14,6 +14,7 @@ from app.core.security import (
     RateLimitMiddleware,
     VisionUploadGuardMiddleware,
     _read_limited_webhook_body,
+    _VisionPayloadTooLargeError,
     reset_rate_limiter_for_tests,
 )
 from app.services.panel_service import generate_panel_token
@@ -82,11 +83,18 @@ async def test_guard_visual_corta_stream_chunked_antes_del_parser(
         messages.append(message)
 
     async def inner(scope: Scope, guarded_receive: Receive, send_response: Send) -> None:
-        del scope, send_response
-        while True:
-            message = await guarded_receive()
-            if not message.get("more_body", False):
-                break
+        try:
+            while True:
+                message = await guarded_receive()
+                if not message.get("more_body", False):
+                    break
+        except _VisionPayloadTooLargeError:
+            # FastAPI convierte el corte del receive durante el parseo multipart
+            # en un 400 genérico antes de devolverlo al middleware externo.
+            await StarletteResponse(
+                "There was an error parsing the body",
+                status_code=400,
+            )(scope, guarded_receive, send_response)
 
     scope: Scope = {
         "type": "http",

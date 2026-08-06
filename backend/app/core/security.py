@@ -114,11 +114,32 @@ class VisionUploadGuardMiddleware:
             if message["type"] == "http.request":
                 consumed += len(message.get("body", b""))
                 if consumed > max_request_bytes:
+                    scope.setdefault("state", {})["vision_oversize"] = True
                     raise _VisionPayloadTooLargeError
             return message
 
+        oversize_response_rewritten = False
+
+        async def guarded_send(message: Message) -> None:
+            nonlocal oversize_response_rewritten
+            if message["type"] == "http.response.start":
+                state = scope.get("state", {})
+                if state.get("vision_oversize") and message["status"] != 413:
+                    # FastAPI convierte el error del parser multipart en 400;
+                    # el corte preventivo ya demostró que corresponde 413.
+                    oversize_response_rewritten = True
+                    response = JSONResponse(
+                        status_code=413,
+                        content={"detail": "La imagen excede el tamaño máximo permitido."},
+                    )
+                    await response(scope, receive, send)
+                    return
+            if oversize_response_rewritten and message["type"] == "http.response.body":
+                return
+            await send(message)
+
         try:
-            await self.app(scope, capped_receive, send)
+            await self.app(scope, capped_receive, guarded_send)
         except _VisionPayloadTooLargeError:
             await self._reject(scope, receive, send, 413, "La imagen excede el tamaño máximo permitido.")
 
