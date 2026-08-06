@@ -24,7 +24,7 @@ import os
 import sys
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, Literal, cast
@@ -53,7 +53,7 @@ class PreflightConfig:
 
     backend_url: str
     openwa_url: str
-    api_key: str
+    api_key: str = field(repr=False)
     timeout_seconds: float
 
 
@@ -112,8 +112,10 @@ def _elapsed_ms(started_at: float) -> float:
     return round((time.perf_counter() - started_at) * 1000, 1)
 
 
-def _http_error_code(error: httpx.HTTPError) -> str:
+def _http_error_code(error: httpx.HTTPError | httpx.InvalidURL) -> str:
     """Clasifica errores de red sin copiar su mensaje potencialmente sensible."""
+    if isinstance(error, httpx.InvalidURL):
+        return "invalid_url"
     if isinstance(error, httpx.TimeoutException):
         return "timeout"
     if isinstance(error, httpx.ConnectError):
@@ -126,7 +128,7 @@ def _check_backend(client: httpx.Client, config: PreflightConfig) -> CheckResult
     started_at = time.perf_counter()
     try:
         response = client.get(f"{config.backend_url}/api/v1/health?probe=liveness")
-    except httpx.HTTPError as error:
+    except (httpx.HTTPError, httpx.InvalidURL) as error:
         return CheckResult(
             check_id="backend_liveness",
             status="failed",
@@ -188,7 +190,7 @@ def _check_openwa(client: httpx.Client, config: PreflightConfig) -> CheckResult:
             f"{config.openwa_url}/api/sessions",
             headers={"X-API-Key": config.api_key},
         )
-    except httpx.HTTPError as error:
+    except (httpx.HTTPError, httpx.InvalidURL) as error:
         return CheckResult(
             check_id="openwa_session",
             status="blocked",

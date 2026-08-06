@@ -157,3 +157,22 @@ def test_run_preflight_bloquea_sesion_sin_qr_autenticado(
 
     assert report.status == "blocked"
     assert report.checks[1].error_code == "session_not_ready"
+
+
+def test_run_preflight_sanea_url_invalida_sin_excepcion() -> None:
+    """Una URL mal formada produce checks saneados en vez de un traceback."""
+    config = PreflightConfig(
+        backend_url="http://[::1",
+        openwa_url="http://[::1",
+        api_key="test-key",
+        timeout_seconds=1,
+    )
+
+    report = run_preflight(config)
+
+    assert report.status == "failed"
+    assert [check.status for check in report.checks] == ["failed", "blocked"]
+    assert [check.error_code for check in report.checks] == [
+        "invalid_url",
+        "invalid_url",
+    ]
