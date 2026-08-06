@@ -94,6 +94,16 @@ class Settings(BaseSettings):
     llm_model_path: str = "models/qwen2.5-3b-q4_k_m.gguf"
     piper_voice: str = "es_MX-claude-high"
 
+    # Vision por computador para mensajes de imagen de WhatsApp (#238).
+    # Se mantiene apagada por defecto hasta provisionar un modelo ONNX
+    # validado; sin modelo disponible el servicio falla cerrado y no inventa
+    # un diagnóstico.
+    vision_enabled: bool = False
+    vision_model_path: str = "models/vision/plant_disease_mobilenetv3.onnx"
+    vision_labels_path: str = "models/vision/plant_disease_labels.json"
+    vision_confidence_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
+    vision_image_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1, le=25 * 1024 * 1024)
+
     # ── Admin ────────────────────────────
     # API key para el dashboard admin. Default de dev — validar en prod.
     admin_api_key: str = "dev-admin-key"

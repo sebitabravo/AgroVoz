@@ -12,6 +12,7 @@
 | [`humanizacion-voz.md`](./humanizacion-voz.md) | Decisión por propuesta de humanización para el canal WhatsApp |
 | [`spike-kapso.md`](./spike-kapso.md) | Evaluación de Kapso como alternativa de gateway |
 | [`spike-ivr.md`](./spike-ivr.md) | Prueba local Asterisk y decisión de costo PSTN |
+| [`vision-model.md`](./vision-model.md) | Contrato y configuración del modelo ONNX de imágenes de WhatsApp |
 
 ## Negocio
 

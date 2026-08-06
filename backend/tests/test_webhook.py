@@ -23,9 +23,7 @@ from app.services.tts_service import PiperModelNotFoundError
 
 
 @pytest.fixture(autouse=True)
-def _no_correr_pipeline_en_tests_de_endpoint(
-    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _no_correr_pipeline_en_tests_de_endpoint(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """Impide que los tests del ENDPOINT disparen el pipeline real en background.
 
     Los ``test_webhook_*`` verifican HMAC y routing, no el procesamiento. Desde
@@ -57,9 +55,7 @@ def _load_fixture(name: str) -> dict[str, object]:
 
 def _compute_hmac(body: bytes, secret: str) -> str:
     """Calcula HMAC-SHA256 como Open-WA: formato 'sha256=<hex>'."""
-    hex_digest = hmac_mod.new(
-        secret.encode("utf-8"), body, hashlib.sha256
-    ).hexdigest()
+    hex_digest = hmac_mod.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
     return f"sha256={hex_digest}"
 
 
@@ -77,9 +73,7 @@ async def test_webhook_sin_firma_retorna_401(
 
     payload = _load_fixture("voice_message")
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://testserver"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.post(
             "/api/v1/webhook/whatsapp",
             json=payload,
@@ -102,9 +96,7 @@ async def test_webhook_firma_invalida_retorna_401(
     payload = _load_fixture("voice_message")
     body = json.dumps(payload).encode("utf-8")
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://testserver"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.post(
             "/api/v1/webhook/whatsapp",
             content=body,
@@ -132,9 +124,7 @@ async def test_webhook_firma_mayuscula_es_valida(
     body = json.dumps(payload).encode("utf-8")
     signature = _compute_hmac(body, "test-secret").upper()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://testserver"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.post(
             "/api/v1/webhook/whatsapp",
             content=body,
@@ -165,9 +155,7 @@ async def test_webhook_firma_valida_voice_retorna_200(
     body = json.dumps(payload).encode("utf-8")
     signature = _compute_hmac(body, "test-secret")
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://testserver"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.post(
             "/api/v1/webhook/whatsapp",
             content=body,
@@ -205,22 +193,16 @@ async def test_webhook_mensaje_texto_retorna_200_ignorado(
 
     procesados: list[str] = []
 
-    async def fake_process_text(
-        _self: object, texto: str, chat_id: str, request_id: str
-    ) -> None:
+    async def fake_process_text(_self: object, texto: str, chat_id: str, request_id: str) -> None:
         procesados.append(texto)
 
-    monkeypatch.setattr(
-        "app.services.audio_service.AudioService.process_text", fake_process_text
-    )
+    monkeypatch.setattr("app.services.audio_service.AudioService.process_text", fake_process_text)
 
     payload = _load_fixture("text_message")
     body = json.dumps(payload).encode("utf-8")
     signature = _compute_hmac(body, "test-secret")
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://testserver"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.post(
             "/api/v1/webhook/whatsapp",
             content=body,
@@ -243,7 +225,7 @@ async def test_webhook_mensaje_texto_retorna_200_ignorado(
 async def test_webhook_mensaje_image_ignorado(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Mensaje con type=image debe ser ignorado."""
+    """Con el gate apagado, una imagen no se descarga ni se procesa."""
     from app.main import app
 
     monkeypatch.setattr(settings, "openwa_webhook_secret", "test-secret")
@@ -252,9 +234,7 @@ async def test_webhook_mensaje_image_ignorado(
     body = json.dumps(payload).encode("utf-8")
     signature = _compute_hmac(body, "test-secret")
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://testserver"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.post(
             "/api/v1/webhook/whatsapp",
             content=body,
@@ -267,6 +247,56 @@ async def test_webhook_mensaje_image_ignorado(
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ignored"
+    assert data["reason"] == "vision_deshabilitada"
+
+
+@pytest.mark.asyncio
+async def test_webhook_mensaje_image_descarga_y_delega_a_vision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Con visión activa, el webhook delega el message_id a Open-WA + ONNX."""
+    from app.main import app
+
+    monkeypatch.setattr(settings, "openwa_webhook_secret", "test-secret")
+    monkeypatch.setattr(settings, "vision_enabled", True)
+    procesadas: list[tuple[str, str, str]] = []
+
+    async def fake_process_image(
+        _self: object,
+        message_id: str,
+        chat_id: str,
+        request_id: str,
+    ) -> None:
+        procesadas.append((message_id, chat_id, request_id))
+
+    monkeypatch.setattr(
+        "app.services.vision_service.VisionService.process_whatsapp_image",
+        fake_process_image,
+    )
+
+    payload = _load_fixture("image_message")
+    body = json.dumps(payload).encode("utf-8")
+    signature = _compute_hmac(body, "test-secret")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.post(
+            "/api/v1/webhook/whatsapp",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-OpenWA-Signature": signature,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "received", "message_id": "false_test_image_001"}
+    assert procesadas == [
+        (
+            "false_test_image_001",
+            "248069442560050@lid",
+            response.headers["X-Request-ID"],
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -282,9 +312,7 @@ async def test_webhook_mensaje_voice_sin_media_ignorado(
     body = json.dumps(payload).encode("utf-8")
     signature = _compute_hmac(body, "test-secret")
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://testserver"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.post(
             "/api/v1/webhook/whatsapp",
             content=body,
@@ -324,9 +352,7 @@ async def test_webhook_payload_invalido_retorna_200_ignorado(
     body = json.dumps(payload).encode("utf-8")
     signature = _compute_hmac(body, "test-secret")
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://testserver"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.post(
             "/api/v1/webhook/whatsapp",
             content=body,
@@ -355,9 +381,7 @@ async def test_webhook_body_no_json_retorna_400(
     body = b"esto no es json"
     signature = _compute_hmac(body, "test-secret")
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://testserver"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.post(
             "/api/v1/webhook/whatsapp",
             content=body,
@@ -385,9 +409,7 @@ async def test_webhook_secret_vacio_acepta_sin_validar(
 
     payload = _load_fixture("text_message")
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://testserver"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.post(
             "/api/v1/webhook/whatsapp",
             json=payload,
@@ -578,6 +600,7 @@ def test_sanitize_message_id_whatsapp_id_real() -> None:
     assert result.startswith("true_")
     assert result.endswith("@c.us")
     import hashlib
+
     expected_hash = hashlib.sha256(b"56912345678").hexdigest()[:12]
     assert result == f"true_{expected_hash}@c.us_3EB0A5F6C8D9_{expected_hash}@c.us"
 
@@ -810,12 +833,8 @@ def _mock_tts_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     (modelo no descargado, primer deploy, etc).
     """
 
-    def fake_synthesize_fail(
-        _self: object, text: str, output_dir: str | Path | None = None
-    ) -> str:
-        raise PiperModelNotFoundError(
-            "Modelo Piper no encontrado (mock para test)"
-        )
+    def fake_synthesize_fail(_self: object, text: str, output_dir: str | Path | None = None) -> str:
+        raise PiperModelNotFoundError("Modelo Piper no encontrado (mock para test)")
 
     monkeypatch.setattr(
         "app.services.pipeline_service.TTSService.synthesize",
@@ -832,9 +851,7 @@ def _mock_tts_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
     fake_ogg_path = tmp_path / "tts_mock_output.ogg"
     fake_ogg_path.write_bytes(b"FAKE_TTS_OGG")
 
-    def fake_synthesize_success(
-        _self: object, text: str, output_dir: str | Path | None = None
-    ) -> str:
+    def fake_synthesize_success(_self: object, text: str, output_dir: str | Path | None = None) -> str:
         return str(fake_ogg_path)
 
     monkeypatch.setattr(
@@ -941,6 +958,7 @@ async def test_audio_service_send_audio_falla_logs_pero_no_crashea(
     from app.services.audio_service import AudioService
 
     caplog.set_level(logging.INFO, logger="app.services.audio_service")
+
     def fake_convert(input_path: Path, output_path: Path) -> None:
         output_path.write_bytes(b"FAKE_WAV_DATA")
 
@@ -957,9 +975,7 @@ async def test_audio_service_send_audio_falla_logs_pero_no_crashea(
     async def fake_send_audio_error(
         _self: object, target: str, audio_path: str, caption: str | None = None
     ) -> dict[str, object]:
-        raise httpx.ConnectError(
-            f"secreto-audio target={target} path={audio_path}"
-        )
+        raise httpx.ConnectError(f"secreto-audio target={target} path={audio_path}")
 
     monkeypatch.setattr(
         "app.services.openwa_service.OpenWAService.send_audio",
@@ -1194,7 +1210,7 @@ def test_compute_hmac_consistente() -> None:
     sig2 = _compute_hmac(body, "secret")
     assert sig1 == sig2
     assert sig1.startswith("sha256=")
-    hex_part = sig1[len("sha256="):]
+    hex_part = sig1[len("sha256=") :]
     assert len(hex_part) == 64  # SHA-256 hex digest
 
 

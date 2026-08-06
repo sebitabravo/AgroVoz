@@ -211,7 +211,7 @@ class OpenWAService:
             return None
 
     async def download_media(self, message_id: str) -> bytes:
-        """Descarga el archivo de audio de un mensaje vía la API de Open-WA.
+        """Descarga media de un mensaje vía la API REST de Open-WA.
 
         Args:
             message_id: ID del mensaje en Open-WA (ej: "true_56912345678@c.us_3EB0...").
@@ -219,7 +219,7 @@ class OpenWAService:
                        que Open-WA requiere (como '@' en IDs de WhatsApp).
 
         Returns:
-            Contenido binario del archivo de audio (.ogg).
+            Contenido binario del archivo multimedia (audio, imagen, etc.).
 
         Raises:
             httpx.HTTPError: Si la API de Open-WA no responde o retorna error.
@@ -232,10 +232,40 @@ class OpenWAService:
             response = await client.get(url, headers=self._headers())
             response.raise_for_status()
             logger.info(
-                "Audio descargado — size_bytes=%d",
+                "Media descargada — size_bytes=%d",
                 len(response.content),
             )
             return response.content
+
+    async def download_image(self, message_id: str) -> bytes:
+        """Descarga una imagen recibida por WhatsApp vía ``decryptMedia``.
+
+        La respuesta se consume por streaming y se corta antes de superar el
+        límite de visión. ``response.content`` no sirve aquí: bufferizaría una
+        carga maliciosa completa antes de que ``VisionService`` pudiera medirla.
+        """
+        safe_id = quote(message_id, safe="")
+        session_id = await self._resolve_session_id()
+        url = f"{self._base_url}/api/sessions/{session_id}/messages/{safe_id}/media"
+        max_bytes = settings.vision_image_max_bytes
+
+        async with (
+            httpx.AsyncClient(timeout=self._timeout) as client,
+            client.stream("GET", url, headers=self._headers()) as response,
+        ):
+            response.raise_for_status()
+            declared_size = response.headers.get("content-length")
+            if declared_size is not None and int(declared_size) > max_bytes:
+                raise ValueError("La imagen excede el tamaño máximo permitido")
+
+            content = bytearray()
+            async for chunk in response.aiter_bytes():
+                content.extend(chunk)
+                if len(content) > max_bytes:
+                    raise ValueError("La imagen excede el tamaño máximo permitido")
+
+        logger.info("Imagen descargada — size_bytes=%d", len(content))
+        return bytes(content)
 
     async def send_typing_indicator(self, target: str, state: str = "recording") -> None:
         """Muestra o limpia el indicador de escritura/grabando en WhatsApp.
