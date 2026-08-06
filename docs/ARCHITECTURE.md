@@ -365,6 +365,20 @@ CREATE INDEX idx_consultations_created ON consultations(created_at);
 27. **Ampliación de alcance post-MVP y reevaluación de restricciones (#238-#248).**
     Se reevaluaron las restricciones para impulsar el producto post-piloto:
     - **Visión por computador (`VISION_ENABLED=false`):** Procesamiento de imágenes `type="image"` vía Open-WA `decryptMedia` y modelos ONNX locales (MobileNetV3 ~15 MB). Mantiene el hard constraint agronómico: la inferencia clasifica el cultivo/enfermedad determinísticamente y la respuesta verbaliza la regla citada INIA vigente.
-    - **Ubicación GPS por WhatsApp:** Procesamiento de mensajes `type="location"`; `lat`/`lng` se validan, se guardan como pareja opcional en `user_prefs` por `phone_hash` y `get_weather`/`get_pronostico` los priorizan sobre la comuna. El webhook confirma el cambio y entrega el pronóstico de OpenMeteo para la parcela. El pin anterior se reemplaza al compartir uno nuevo y queda sujeto al ciclo de borrado de `user_prefs`.
+    - **Ubicación GPS por WhatsApp:** Procesamiento de mensajes `type="location"`; `lat`/`lng` se validan, se guardan como pareja opcional en `user_prefs` por `phone_hash` y `get_weather`/`get_pronostico` los priorizan sobre la comuna. El webhook confirma el cambio y entrega el pronóstico de OpenMeteo para la parcela. El pin anterior se reemplaza al compartir uno nuevo y queda sujeto al TTL específico de ubicación documentado en la decisión 28.
     - **Reglas citadas de valor agregado:** Reapertura de calendarios agrícolas por zona (fuente INIA citada), derivación a programas de crédito INDAP (datos públicos) y directorio de cooperativas por comuna (Open Data datos.gob.cl).
     - **Reportes PDF (`PDF_REPORTS_ENABLED=false`):** Generación de resumen semanal PDF enviado vía Open-WA `sendFile`.
+
+28. **Ubicación GPS con consentimiento separado, TTL y minimización de salida (#239).**
+    `location_sharing_enabled=false` deja las nuevas escrituras fail-closed y
+    `location_consent` es independiente de dataset, historial, gastos, parcelas
+    y alertas. El pin se guarda en `user_prefs` junto a
+    `location_updated_at`; cada actualización reemplaza el pin anterior y un
+    scheduler/job diario limpia `lat`, `lng` y el timestamp cuando superan
+    `location_retention_days` (180 días por defecto), incluso si el gate se
+    apaga. Revocar el consentimiento por admin limpia el pin sin borrar la fila
+    ni otras preferencias. El valor preciso queda solo en SQLite; antes de
+    enviar coordenadas a OpenMeteo se redondean a dos decimales para no revelar
+    el punto exacto. Si el productor menciona una comuna o coordenadas
+    explícitas, esa ubicación tiene prioridad sobre el GPS guardado; si no,
+    se usa el pin consentido y luego Traiguén como default.

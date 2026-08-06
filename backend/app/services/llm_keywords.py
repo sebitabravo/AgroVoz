@@ -637,7 +637,7 @@ async def _compound_weather_block(
         resolver_comuna,
     )
 
-    comuna = _extract_comuna_from_query(query_text) or "Traiguén"
+    comuna = _extract_comuna_from_query(query_text)
     try:
         if any(kw in query_text for kw in _CLIMA_FUTURO_KW):
             if phone_hash:
@@ -652,11 +652,18 @@ async def _compound_weather_block(
             else:
                 result = await get_pronostico(comuna, dias=2)
         else:
-            coords = resolver_comuna(comuna) or (-38.23, -72.68)
-            if phone_hash:
-                result = await get_weather(lat=coords[0], lon=coords[1], phone_hash=phone_hash)
+            if comuna is not None:
+                coords = resolver_comuna(comuna) or (-38.23, -72.68)
+                if phone_hash:
+                    result = await get_weather(
+                        lat=coords[0],
+                        lon=coords[1],
+                        phone_hash=phone_hash,
+                    )
+                else:
+                    result = await get_weather(lat=coords[0], lon=coords[1])
             else:
-                result = await get_weather(lat=coords[0], lon=coords[1])
+                result = await get_weather(phone_hash=phone_hash) if phone_hash else await get_weather()
         if result:
             return str(result), ""
         return None, "OpenMeteo no entregó datos para esa consulta."
@@ -822,7 +829,7 @@ async def _force_keyword_tool(query_text: str, phone_hash: str | None = None) ->
         es_futuro = any(kw in q for kw in _CLIMA_FUTURO_KW)
 
         try:
-            comuna = _extract_comuna_from_query(q) or "Traiguén"
+            comuna = _extract_comuna_from_query(q)
             if es_futuro:
                 if phone_hash:
                     try:
@@ -835,18 +842,21 @@ async def _force_keyword_tool(query_text: str, phone_hash: str | None = None) ->
                     result = await get_pronostico(comuna, dias=2)
                 herramienta = "get_pronostico"
             else:
-                from app.services.weather_service import resolver_comuna
+                if comuna is not None:
+                    from app.services.weather_service import resolver_comuna
 
-                coords = resolver_comuna(comuna)
-                if coords is None:
-                    # Traiguén: default del piloto si la comuna no está mapeada.
-                    lat, lon = -38.23, -72.68
+                    coords = resolver_comuna(comuna)
+                    if coords is None:
+                        # Traiguén: default del piloto si la comuna no está mapeada.
+                        lat, lon = -38.23, -72.68
+                    else:
+                        lat, lon = coords
+                    if phone_hash:
+                        result = await get_weather(lat=lat, lon=lon, phone_hash=phone_hash)
+                    else:
+                        result = await get_weather(lat=lat, lon=lon)
                 else:
-                    lat, lon = coords
-                if phone_hash:
-                    result = await get_weather(lat=lat, lon=lon, phone_hash=phone_hash)
-                else:
-                    result = await get_weather(lat=lat, lon=lon)
+                    result = await get_weather(phone_hash=phone_hash) if phone_hash else await get_weather()
                 herramienta = "get_weather"
             if result:
                 logger.info(

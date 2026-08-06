@@ -297,6 +297,37 @@ def test_extract_location_rechaza_coordenadas_fuera_de_rango() -> None:
 
 
 @pytest.mark.asyncio
+async def test_audio_service_location_informa_consentimiento_faltante(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """WhatsApp recibe una explicación honesta cuando el gate está apagado."""
+    from app.services.audio_service import AudioService
+    from app.services.openwa_service import OpenWAService
+
+    mensajes: list[str] = []
+
+    async def fake_send_text(_self: OpenWAService, _target: str, message: str) -> dict[str, object]:
+        mensajes.append(message)
+        return {"status": "sent"}
+
+    monkeypatch.setattr(settings, "location_sharing_enabled", False)
+    monkeypatch.setattr(OpenWAService, "send_text", fake_send_text)
+    monkeypatch.setattr(OpenWAService, "send_typing_indicator", AsyncMock())
+
+    await AudioService().process_location(
+        lat=-38.24,
+        lng=-72.69,
+        chat_id="56912345678@c.us",
+        request_id="request-location-consent",
+    )
+
+    assert len(mensajes) == 1
+    assert "consentimiento explícito" in mensajes[0]
+    assert "no hay un opt-in por voz" in mensajes[0]
+    assert "No guardé tu ubicación" in mensajes[0]
+
+
+@pytest.mark.asyncio
 async def test_webhook_mensaje_image_ignorado(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -12,7 +12,7 @@ _BACKEND_DIR = Path(__file__).resolve().parent.parent
 _ALEMBIC_INI = _BACKEND_DIR / "alembic.ini"
 _MIGRATIONS_DIR = _BACKEND_DIR / "migrations"
 _PREVIOUS_REVISION = "b3f8e2a91c47"
-_CURRENT_REVISION = "c5d9e7f1a2b3"
+_CURRENT_REVISION = "f6a1c2d3e4b5"
 
 
 def _alembic_config(database_path: Path) -> Config:
@@ -51,13 +51,17 @@ def test_upgrade_preserva_legacy_y_guarda_coordenadas(tmp_path: Path) -> None:
     command.upgrade(config, _CURRENT_REVISION)
 
     columns = {column["name"] for column in inspect(engine).get_columns("user_prefs")}
-    assert {"lat", "lng"} <= columns
+    assert {"lat", "lng", "location_consent", "location_updated_at"} <= columns
     with engine.begin() as connection:
         legacy = connection.execute(
             text("SELECT lat, lng FROM user_prefs WHERE phone_hash = :phone_hash"),
             {"phone_hash": "a" * 64},
         ).one()
         assert legacy == (None, None)
+        assert connection.execute(
+            text("SELECT location_consent, location_updated_at FROM user_prefs WHERE phone_hash = :phone_hash"),
+            {"phone_hash": "a" * 64},
+        ).one() == (0, None)
         connection.execute(
             text(
                 """
@@ -69,12 +73,19 @@ def test_upgrade_preserva_legacy_y_guarda_coordenadas(tmp_path: Path) -> None:
                     alert_consent,
                     history_consent,
                     expense_consent,
-                    parcela_consent
+                    parcela_consent,
+                    location_consent,
+                    location_updated_at
                 )
-                VALUES (:phone_hash, :lat, :lng, 0, 0, 0, 0, 0)
+                VALUES (:phone_hash, :lat, :lng, 0, 0, 0, 0, 0, 1, :updated_at)
                 """
             ),
-            {"phone_hash": "b" * 64, "lat": -33.45, "lng": -70.65},
+            {
+                "phone_hash": "b" * 64,
+                "lat": -33.45,
+                "lng": -70.65,
+                "updated_at": "2026-08-01 00:00:00",
+            },
         )
 
     invalid_coordinates = [
@@ -133,10 +144,12 @@ def test_downgrade_elimina_coordenadas_y_conserva_fila(tmp_path: Path) -> None:
             {"phone_hash": "f" * 64},
         )
 
-    command.downgrade(config, _PREVIOUS_REVISION)
+    command.downgrade(config, "c5d9e7f1a2b3")
     columns = {column["name"] for column in inspect(engine).get_columns("user_prefs")}
-    assert "lat" not in columns
-    assert "lng" not in columns
+    assert "lat" in columns
+    assert "lng" in columns
+    assert "location_consent" not in columns
+    assert "location_updated_at" not in columns
     with engine.connect() as connection:
         stored_hash = connection.execute(
             text("SELECT phone_hash FROM user_prefs WHERE phone_hash = :phone_hash"),
@@ -144,4 +157,3 @@ def test_downgrade_elimina_coordenadas_y_conserva_fila(tmp_path: Path) -> None:
         ).scalar_one()
     assert stored_hash == "f" * 64
     engine.dispose()
-

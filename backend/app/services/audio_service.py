@@ -686,18 +686,30 @@ class AudioService:
         chat_id_hash = hash_phone(chat_id, settings.phone_hash_pepper) if chat_id else "sin_chat"
         openwa = OpenWAService()
         try:
-            from app.services.location_service import save_user_location
+            from app.services.location_service import LocationConsentError, save_user_location
             from app.services.weather_service import get_pronostico
 
             await asyncio.to_thread(save_user_location, chat_id_hash, lat, lng)
             forecast = await get_pronostico(
-                "tu parcela",
                 dias=2,
                 phone_hash=chat_id_hash,
             )
             response = f"Ubicación de tu parcela actualizada.\n\n{forecast}"
             await openwa.send_text(chat_id, response)
             logger.info("Ubicación guardada y pronóstico enviado — request_id=%s", request_id)
+        except LocationConsentError:
+            # El opt-in todavía se gestiona por el equipo durante onboarding;
+            # no inventar un comando de voz que el producto aún no soporta.
+            try:
+                await openwa.send_text(
+                    chat_id,
+                    "Para guardar tu ubicación necesito tu consentimiento explícito. "
+                    "Por ahora este consentimiento lo activa el equipo AgroVoz durante "
+                    "el onboarding; no hay un opt-in por voz disponible todavía. "
+                    "Contactá al equipo o esperá ese flujo. No guardé tu ubicación.",
+                )
+            except (httpx.HTTPError, OSError, RuntimeError, ValueError):
+                logger.error("No se pudo informar falta de consentimiento — request_id=%s", request_id)
         except (
             httpx.HTTPError,
             OSError,

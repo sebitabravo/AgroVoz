@@ -301,8 +301,9 @@ TOOLS: list[dict[str, object]] = [
                 "USAR para PREGUNTAS DE CLIMA. "
                 "Cuando el agricultor pregunte por el clima, la temperatura, si va a "
                 "llover, el pronostico del tiempo, etc. "
-                "Si el productor compartió una ubicación por WhatsApp, el backend usa esa "
-                "parcela; si no, usa coordenadas de Traiguen (-38.23, -72.68). "
+                "Si el productor menciona una ubicación, pasar lat y lon explícitos; "
+                "si no menciona lugar, OMITIR ambos parámetros para que el backend "
+                "use el GPS guardado o el default de Traiguen. "
                 "Ej: 'como esta el clima', 'va a llover hoy', 'temperatura en Traiguen'."
             ),
             "parameters": {
@@ -310,14 +311,17 @@ TOOLS: list[dict[str, object]] = [
                 "properties": {
                     "lat": {
                         "type": "number",
-                        "description": "Latitud en grados decimales (-90 a 90). Default: -38.23 para Traiguen.",
+                        "description": "Latitud en grados decimales (-90 a 90). OMITIR si no se especifica ubicación.",
                     },
                     "lon": {
                         "type": "number",
-                        "description": "Longitud en grados decimales (-180 a 180). Default: -72.68 para Traiguen.",
+                        "description": (
+                            "Longitud en grados decimales (-180 a 180). "
+                            "OMITIR si no se especifica ubicación."
+                        ),
                     },
                 },
-                "required": ["lat", "lon"],
+                "required": [],
             },
         },
     },
@@ -328,8 +332,9 @@ TOOLS: list[dict[str, object]] = [
             "description": (
                 "PRONOSTICO: clima de MANANA o proximos dias. "
                 "NO para clima de ahora (get_weather) ni pasado (get_clima_historico). "
-                "Si existe una ubicación compartida por WhatsApp, se consulta esa parcela "
-                "y la comuna queda como fallback. "
+                "Si el productor menciona una comuna, pasarla explícitamente y tendrá "
+                "prioridad sobre el GPS guardado. Si no menciona ubicación, OMITIR comuna "
+                "para que el backend use el GPS guardado o Traiguen como default. "
                 "Ej: 'va a llover manana', 'va a helar', 'como viene el tiempo'."
             ),
             "parameters": {
@@ -339,7 +344,7 @@ TOOLS: list[dict[str, object]] = [
                         "type": "string",
                         "description": (
                             "Nombre de la comuna chilena (ej: Traiguen, Temuco, Santiago). "
-                            "Usar Traiguen si no se especifica ubicacion."
+                            "OMITIR por completo si el productor no especifica ubicación."
                         ),
                     },
                     "dias": {
@@ -350,7 +355,7 @@ TOOLS: list[dict[str, object]] = [
                         ),
                     },
                 },
-                "required": ["comuna"],
+                "required": [],
             },
         },
     },

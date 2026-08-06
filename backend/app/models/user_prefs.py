@@ -54,6 +54,10 @@ class UserPrefs(Base):
     ``parcela_consent`` controla el registro de parcelas (cultivo, superficie,
     comuna) para el motor de reglas agronómicas y el clima por parcela (C5).
     Igual de independiente: ningún otro consentimiento habilita este.
+
+    ``location_consent`` controla la retención del pin GPS compartido por
+    WhatsApp. También es independiente y usa ``location_updated_at`` como
+    origen del TTL porque lat/lng se reutilizan en esta misma fila.
     """
 
     __tablename__ = "user_prefs"
@@ -104,6 +108,10 @@ class UserPrefs(Base):
         CheckConstraint(
             "parcela_consent IN (0, 1)",
             name="ck_user_prefs_parcela_consent_bool",
+        ),
+        CheckConstraint(
+            "location_consent IN (0, 1)",
+            name="ck_user_prefs_location_consent_bool",
         ),
         CheckConstraint(
             "(lat IS NULL AND lng IS NULL) OR (lat IS NOT NULL AND lng IS NOT NULL)",
@@ -170,6 +178,17 @@ class UserPrefs(Base):
         default=False,
         server_default="0",
     )
+    # Consentimiento separado para retener la ubicación GPS compartida.
+    # Default False: una ubicación precisa requiere opt-in explícito.
+    location_consent: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="0",
+    )
+    # Momento UTC naive de la última actualización del pin; es la base del TTL
+    # porque lat/lng viven en esta fila y no tienen una fila propia.
+    location_updated_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True)
     # Cultivos de interés del productor, almacenados como JSON en TEXT.
     # Nullable: se capturan durante el onboarding o via admin (issue #125).
     # Ejemplo: '["papa", "trigo", "tomate"]'
@@ -183,8 +202,10 @@ class UserPrefs(Base):
         history_consent = self.history_consent if self.history_consent is not None else False
         expense_consent = self.expense_consent if self.expense_consent is not None else False
         parcela_consent = self.parcela_consent if self.parcela_consent is not None else False
+        location_consent = self.location_consent if self.location_consent is not None else False
         return (
             f"<UserPrefs(dataset_consent={dataset_consent}, "
             f"alert_consent={alert_consent}, history_consent={history_consent}, "
-            f"expense_consent={expense_consent}, parcela_consent={parcela_consent})>"
+            f"expense_consent={expense_consent}, parcela_consent={parcela_consent}, "
+            f"location_consent={location_consent})>"
         )
