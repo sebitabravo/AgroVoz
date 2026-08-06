@@ -711,7 +711,10 @@ async def _compound_price_block(
             session.close()
 
 
-async def _compound_weather_block(query_text: str) -> tuple[str | None, str]:
+async def _compound_weather_block(
+    query_text: str,
+    phone_hash: str | None,
+) -> tuple[str | None, str]:
     """Obtiene el bloque OpenMeteo de una consulta compuesta."""
     from app.services.weather_service import (
         get_pronostico,
@@ -719,13 +722,33 @@ async def _compound_weather_block(query_text: str) -> tuple[str | None, str]:
         resolver_comuna,
     )
 
-    comuna = _extract_comuna_from_query(query_text) or "Traiguén"
+    comuna = _extract_comuna_from_query(query_text)
     try:
         if any(kw in query_text for kw in _CLIMA_FUTURO_KW):
-            result = await get_pronostico(comuna, dias=2)
+            if phone_hash:
+                try:
+                    result = await get_pronostico(comuna, dias=2, phone_hash=phone_hash)
+                except TypeError as exc:
+                    # Mantiene compatibilidad con handlers sustituidos en
+                    # integraciones/tests antiguas que aún no aceptan phone_hash.
+                    if "phone_hash" not in str(exc):
+                        raise
+                    result = await get_pronostico(comuna, dias=2)
+            else:
+                result = await get_pronostico(comuna, dias=2)
         else:
-            coords = resolver_comuna(comuna) or (-38.23, -72.68)
-            result = await get_weather(lat=coords[0], lon=coords[1])
+            if comuna is not None:
+                coords = resolver_comuna(comuna) or (-38.23, -72.68)
+                if phone_hash:
+                    result = await get_weather(
+                        lat=coords[0],
+                        lon=coords[1],
+                        phone_hash=phone_hash,
+                    )
+                else:
+                    result = await get_weather(lat=coords[0], lon=coords[1])
+            else:
+                result = await get_weather(phone_hash=phone_hash) if phone_hash else await get_weather()
         if result:
             return str(result), ""
         return None, "OpenMeteo no entregó datos para esa consulta."
@@ -750,7 +773,7 @@ async def _force_compound_keyword_tools(
     q = query_text.strip().lower()
     price_result, weather_result = await asyncio.gather(
         _compound_price_block(q, phone_hash),
-        _compound_weather_block(q),
+        _compound_weather_block(q, phone_hash),
     )
     price_data, price_notice = price_result
     weather_data, weather_notice = weather_result
@@ -926,20 +949,34 @@ async def _force_keyword_tool(query_text: str, phone_hash: str | None = None) ->
         es_futuro = any(kw in q for kw in _CLIMA_FUTURO_KW)
 
         try:
-            comuna = _extract_comuna_from_query(q) or "Traiguén"
+            comuna = _extract_comuna_from_query(q)
             if es_futuro:
-                result = await get_pronostico(comuna, dias=2)
+                if phone_hash:
+                    try:
+                        result = await get_pronostico(comuna, dias=2, phone_hash=phone_hash)
+                    except TypeError as exc:
+                        if "phone_hash" not in str(exc):
+                            raise
+                        result = await get_pronostico(comuna, dias=2)
+                else:
+                    result = await get_pronostico(comuna, dias=2)
                 herramienta = "get_pronostico"
             else:
-                from app.services.weather_service import resolver_comuna
+                if comuna is not None:
+                    from app.services.weather_service import resolver_comuna
 
-                coords = resolver_comuna(comuna)
-                if coords is None:
-                    # Traiguén: default del piloto si la comuna no está mapeada.
-                    lat, lon = -38.23, -72.68
+                    coords = resolver_comuna(comuna)
+                    if coords is None:
+                        # Traiguén: default del piloto si la comuna no está mapeada.
+                        lat, lon = -38.23, -72.68
+                    else:
+                        lat, lon = coords
+                    if phone_hash:
+                        result = await get_weather(lat=lat, lon=lon, phone_hash=phone_hash)
+                    else:
+                        result = await get_weather(lat=lat, lon=lon)
                 else:
-                    lat, lon = coords
-                result = await get_weather(lat=lat, lon=lon)
+                    result = await get_weather(phone_hash=phone_hash) if phone_hash else await get_weather()
                 herramienta = "get_weather"
             if result:
                 logger.info(

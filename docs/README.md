@@ -8,9 +8,11 @@
 |---|---|
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Arquitectura, esquema de base de datos, decisiones técnicas |
 | [`DEV-GUIDE.md`](./DEV-GUIDE.md) | Guía de desarrollo y setup local |
+| [`validacion-operativa.md`](./validacion-operativa.md) | Checklist y preflight saneado para E2E real de Open-WA (#214) |
 | [`humanizacion-voz.md`](./humanizacion-voz.md) | Decisión por propuesta de humanización para el canal WhatsApp |
 | [`spike-kapso.md`](./spike-kapso.md) | Evaluación de Kapso como alternativa de gateway |
 | [`spike-ivr.md`](./spike-ivr.md) | Prueba local Asterisk y decisión de costo PSTN |
+| [`vision-model.md`](./vision-model.md) | Contrato y configuración del modelo ONNX de imágenes de WhatsApp |
 
 ## Negocio
 

@@ -303,7 +303,7 @@ TOOLS: list[dict[str, object]] = [
                 "USAR para PREGUNTAS DE CLIMA. "
                 "Cuando el agricultor pregunte por el clima, la temperatura, si va a "
                 "llover, el pronostico del tiempo, etc. "
-                "Usa coordenadas de Traiguen (-38.23, -72.68) si no especifica ubicacion. "
+                "Si menciona ubicación, pasar lat/lon; si no, OMITIR ambos (usa GPS o Traiguen). "
                 "Ej: 'como esta el clima', 'va a llover hoy', 'temperatura en Traiguen'."
             ),
             "parameters": {
@@ -311,14 +311,14 @@ TOOLS: list[dict[str, object]] = [
                 "properties": {
                     "lat": {
                         "type": "number",
-                        "description": "Latitud en grados decimales (-90 a 90). Default: -38.23 para Traiguen.",
+                        "description": "Latitud (-90 a 90). OMITIR si no hay ubicación explícita.",
                     },
                     "lon": {
                         "type": "number",
-                        "description": "Longitud en grados decimales (-180 a 180). Default: -72.68 para Traiguen.",
+                        "description": "Longitud (-180 a 180). OMITIR si no hay ubicación explícita.",
                     },
                 },
-                "required": ["lat", "lon"],
+                "required": [],
             },
         },
     },
@@ -329,6 +329,7 @@ TOOLS: list[dict[str, object]] = [
             "description": (
                 "PRONOSTICO: clima de MANANA o proximos dias. "
                 "NO para clima de ahora (get_weather) ni pasado (get_clima_historico). "
+                "Si menciona comuna, pasarla (prioridad sobre GPS). Si no, OMITIR (usa GPS o Traiguen). "
                 "Ej: 'va a llover manana', 'va a helar', 'como viene el tiempo'."
             ),
             "parameters": {
@@ -336,10 +337,7 @@ TOOLS: list[dict[str, object]] = [
                 "properties": {
                     "comuna": {
                         "type": "string",
-                        "description": (
-                            "Nombre de la comuna chilena (ej: Traiguen, Temuco, Santiago). "
-                            "Usar Traiguen si no se especifica ubicacion."
-                        ),
+                        "description": "Comuna chilena (ej: Traiguen, Temuco, Santiago). OMITIR si no se especifica.",
                     },
                     "dias": {
                         "type": "integer",
@@ -349,7 +347,7 @@ TOOLS: list[dict[str, object]] = [
                         ),
                     },
                 },
-                "required": ["comuna"],
+                "required": [],
             },
         },
     },
@@ -1052,6 +1050,8 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
             "register_parcela",
             "get_parcelas",
             "get_link_resumen",
+            "get_weather",
+            "get_pronostico",
         )
         and phone_hash
     ):
@@ -1069,7 +1069,8 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
         }
     )
     # search_corpus es tan rapido (<2ms) que no necesita cache.
-    if name in cacheable:
+    cache_enabled = name in cacheable and not (name in {"get_weather", "get_pronostico"} and phone_hash)
+    if cache_enabled:
         cached = _tool_cache.get(name, **valid_args)
         if cached is not None:
             return cached
@@ -1147,7 +1148,7 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
         else:
             logger.info("Tool ejecutada")
         # Cachear resultado para evitar futuras llamadas al LLM.
-        if name in cacheable:
+        if cache_enabled:
             _tool_cache.set(name, str(result), **valid_args)
         return str(result)
     except (RuntimeError, ValueError, OSError, SQLAlchemyError) as exc:

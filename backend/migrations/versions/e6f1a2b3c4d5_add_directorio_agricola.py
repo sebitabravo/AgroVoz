@@ -14,7 +14,7 @@ import yaml
 from alembic import op
 
 revision: str = "e6f1a2b3c4d5"
-down_revision: str | None = "b3f8e2a91c47"
+down_revision: str | None = "f6a1c2d3e4b5"
 branch_labels: str | tuple[str, ...] | None = None
 depends_on: str | tuple[str, ...] | None = None
 

@@ -47,21 +47,22 @@ por la misma vía. El texto evita Whisper y TTS.
 ## Flujo de datos end-to-end
 
 ```
-1. Agricultor envía audio o texto por WhatsApp
+1. Agricultor envía audio, texto o una ubicación por WhatsApp
 2. Open-WA recibe mensaje → webhook POST /api/v1/webhook/whatsapp
-3. Para audio, FastAPI extrae media `.ogg`; para texto usa el contenido validado
-4. Solo audio: ffmpeg convierte `.ogg` → `.wav` 16kHz mono
-5. Solo audio: Whisper transcribe `.wav` → texto
-6. Texto → LLM con Tool Calling:
+3. Para `type="location"`, FastAPI valida `lat`/`lng`, actualiza `user_prefs` por `phone_hash` y consulta el pronóstico de la parcela
+4. Para audio, FastAPI extrae media `.ogg`; para texto usa el contenido validado
+5. Solo audio: ffmpeg convierte `.ogg` → `.wav` 16kHz mono
+6. Solo audio: Whisper transcribe `.wav` → texto
+7. Texto → LLM con Tool Calling:
    - Si pregunta por precio → query SQLite ODEPA
    - Si pregunta por clima → GET OpenMeteo API
    - Si busca una oficina o cooperativa → query SQLite `directorio_agricola`
    - Whitelist de 15 tools (ver lista completa en `app/services/` más abajo). Si alucina una tool fuera de la whitelist → fallback.
-7. Fast-path determinista o LLM genera respuesta textual (datos crudos de precio/clima, o reglas citadas de fuente oficial)
-8. Solo audio: Piper TTS convierte texto → audio `.wav`
-9. Solo audio: ffmpeg convierte `.wav` → `.ogg`
-10. FastAPI envía texto o audio por Open-WA y registra entrega efectiva
-11. Tras el envío, elimina el staging libre; el historial opcional exige opt-in
+8. Fast-path determinista o LLM genera respuesta textual (datos crudos de precio/clima, o reglas citadas de fuente oficial)
+9. Solo audio: Piper TTS convierte texto → audio `.wav`
+10. Solo audio: ffmpeg convierte `.wav` → `.ogg`
+11. FastAPI envía texto o audio por Open-WA y registra entrega efectiva
+12. Tras el envío, elimina el staging libre; el historial opcional exige opt-in
 ```
 
 ## Componentes del backend
@@ -80,6 +81,7 @@ por la misma vía. El texto evita Whisper y TTS.
 - `tts_service.py` — síntesis de voz con Piper TTS
 - `odepa_service.py` — consultas a SQLite ODEPA + sync diario
 - `weather_service.py` — consultas a OpenMeteo API (forecast + histórico)
+- `location_service.py` — persistencia de coordenadas compartidas, seudonimizadas por `phone_hash`
 - `pipeline_service.py` — orquestador del pipeline end-to-end
 - `openwa_service.py` — cliente HTTP para Open-WA API (enviar/recibir mensajes, webhooks)
 - `rag_service.py` — retrieval de documentos oficiales con TF-IDF + citations
@@ -104,7 +106,7 @@ por la misma vía. El texto evita Whisper y TTS.
 - `consultation.py` — métricas y staging libre transitorio, nunca memoria canónica
 - `consultation_history.py` — memoria consentida y evidencia append-only de borrado
 - `alert.py` — modelo para alertas proactivas de precio/clima
-- `user_prefs.py` — identidad individual/grupal, comuna, cultivos y tres opt-ins separados
+- `user_prefs.py` — identidad individual/grupal, comuna, GPS opcional, cultivos y consentimientos separados
 - `directorio_agricola.py` — snapshot SQLite de sedes y contactos públicos por comuna
 
 ### `app/jobs/` — Tareas programadas
@@ -383,6 +385,20 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
 27. **Ampliación de alcance post-MVP y reevaluación de restricciones (#238-#248).**
     Se reevaluaron las restricciones para impulsar el producto post-piloto:
     - **Visión por computador (`VISION_ENABLED=false`):** Procesamiento de imágenes `type="image"` vía Open-WA `decryptMedia` y modelos ONNX locales (MobileNetV3 ~15 MB). Mantiene el hard constraint agronómico: la inferencia clasifica el cultivo/enfermedad determinísticamente y la respuesta verbaliza la regla citada INIA vigente.
-    - **Ubicación GPS por WhatsApp:** Procesamiento de mensajes `type="location"` para clima preciso por parcela.
+    - **Ubicación GPS por WhatsApp:** Procesamiento de mensajes `type="location"`; `lat`/`lng` se validan, se guardan como pareja opcional en `user_prefs` por `phone_hash` y `get_weather`/`get_pronostico` los priorizan sobre la comuna. El webhook confirma el cambio y entrega el pronóstico de OpenMeteo para la parcela. El pin anterior se reemplaza al compartir uno nuevo y queda sujeto al TTL específico de ubicación documentado en la decisión 28.
     - **Reglas citadas de valor agregado:** Reapertura de calendarios agrícolas por zona (fuente INIA citada), derivación a programas de crédito INDAP (datos públicos) y directorio de cooperativas por comuna (snapshot local de Open Data datos.gob.cl e INDAP; los campos ausentes en la fuente no se completan).
     - **Reportes PDF (`PDF_REPORTS_ENABLED=false`):** Generación de resumen semanal PDF enviado vía Open-WA `sendFile`.
+
+28. **Ubicación GPS con consentimiento separado, TTL y minimización de salida (#239).**
+    `location_sharing_enabled=false` deja las nuevas escrituras fail-closed y
+    `location_consent` es independiente de dataset, historial, gastos, parcelas
+    y alertas. El pin se guarda en `user_prefs` junto a
+    `location_updated_at`; cada actualización reemplaza el pin anterior y un
+    scheduler/job diario limpia `lat`, `lng` y el timestamp cuando superan
+    `location_retention_days` (180 días por defecto), incluso si el gate se
+    apaga. Revocar el consentimiento por admin limpia el pin sin borrar la fila
+    ni otras preferencias. El valor preciso queda solo en SQLite; antes de
+    enviar coordenadas a OpenMeteo se redondean a dos decimales para no revelar
+    el punto exacto. Si el productor menciona una comuna o coordenadas
+    explícitas, esa ubicación tiene prioridad sobre el GPS guardado; si no,
+    se usa el pin consentido y luego Traiguén como default.
