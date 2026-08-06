@@ -30,7 +30,8 @@ persona usando información adicional. AgroVoz no los denomina anónimos.
 | Canal WhatsApp | Número/chat ID, audio o texto y metadatos del mensaje | Meta y Open-WA procesan el mensaje para entregarlo. El backend recibe el identificador durante la solicitud. |
 | Audio temporal | Archivos `.ogg` y `.wav` de entrada/salida | Se eliminan del VPS en menos de 24 horas en el flujo normal. Deben verificarse fallos, backups y cleanup. |
 | Registro operativo `consultations` | `phone_hash`, intent, producto, tiempos, feedback, fecha y estado de entrega; query/respuesta solo como staging consentido | Sin `history_consent` el contenido queda vacío. Con opt-in se redacta tras entrega/fallo y un job horario elimina staging mayor a 24 horas. Los metadatos aún no tienen TTL aprobado. |
-| Preferencias | Hash, tipo de identidad, código de grupo, comuna/localidad, cultivos y opt-ins | Se guardan sin un TTL automático definido. |
+| Preferencias | Hash, tipo de identidad, código de grupo, comuna/localidad, cultivos y opt-ins | Se guardan sin un TTL automático definido. `location_consent` es separado y no habilita otros tratamientos. |
+| Ubicación GPS, solo con opt-in | `lat`, `lng` y fecha de actualización del pin | `location_consent` y `LOCATION_SHARING_ENABLED` son necesarios para nuevas escrituras. El pin se limpia tras 180 días desde su última actualización, sin borrar las demás preferencias. |
 | Dataset de voz, solo con opt-in | Copia de audio, transcripción y metadatos técnicos | `dataset_consent` permite crear una copia distinta al audio temporal. Su plazo y borrado E2E deben cerrarse antes de recolectar. |
 | Registro de gastos, feature apagada | Monto, concepto, producto, fecha y hash | Tabla `expenses` con `expense_consent` propio, TTL de 180 días congelado por fila, purga programada y borrado del sujeto al revocar. `EXPENSE_TRACKING_ENABLED=false` impide nuevas escrituras. Falta aprobar el plazo de retención antes de activarlo. |
 | Memoria contextual, feature apagada | Query, respuesta, intent, producto y referencia a la consulta fuente | `consultation_history` exige `history_consent`, separado del dataset y alertas; tiene TTL configurable de 28 días y borrado auditado. Falta aprobación externa antes de activarlo. |
@@ -52,6 +53,7 @@ Esta tabla es una hipótesis de trabajo sujeta a revisión jurídica:
 | Conservar un dataset de voz para evaluar o mejorar Whisper | Consentimiento específico de dataset | Debe cubrir expresamente audio y transcripción. |
 | Recordar la última consulta durante 28 días | Consentimiento específico de memoria contextual | `history_consent` existe; la feature sigue bloqueada hasta aprobar onboarding y revisión externa. |
 | Enviar alertas sin una pregunta inmediata | Consentimiento específico de alertas | Campo separado existente; falta cerrar eliminación del identificador directo. |
+| Consultar clima usando un pin GPS guardado | Consentimiento específico de ubicación | `location_consent` es independiente de dataset, historial, gastos, parcelas y alertas. El flujo de opt-in se gestiona por el equipo durante onboarding; todavía no existe activación por voz. |
 | Métricas y seguridad | Interés legítimo sujeto a ponderación, minimización y revisión | No se ha documentado la ponderación. |
 
 Aceptar una finalidad opcional no implica aceptar otra.
@@ -76,7 +78,7 @@ Por lo tanto, no se afirma que AgroVoz “nunca guarda el número” ni que las 
 | WhatsApp/Meta | Mensajes, audio, identificadores y metadatos del canal | Roles, retención y condiciones deben incorporarse a la revisión. |
 | Open-WA autohospedado | Sesión del canal y mensajes necesarios para operar | Revisar acceso, sesión y backups. |
 | Hetzner, Alemania | VPS con backend, SQLite, archivos temporales, modelos y logs | **Transferencia internacional pendiente de documentación y mecanismo.** |
-| Open-Meteo | Coordenadas de una comuna para consultar clima | No debe recibir hash, texto ni coordenadas precisas del productor. |
+| Open-Meteo | Coordenadas redondeadas a 2 decimales para consultar clima | No recibe hash, texto ni coordenadas precisas del productor; antes de cada llamada las coordenadas se redondean a 2 decimales (aprox. 1,1 km). |
 | ODEPA | No recibe datos del productor | AgroVoz descarga datos abiertos. |
 | MCP | Potencial acceso según tools | `MCP_ENABLED=false`; no activar sin inventario, autorización y revisión. |
 | Registro de gastos | Datos económicos declarados por el productor | `EXPENSE_TRACKING_ENABLED=false`; controles técnicos completos, pendiente aprobación del plazo de retención. |
@@ -93,6 +95,7 @@ devolución o supresión.
 | Activar memoria contextual | `history_consent` | Independiente; feature apagada hasta aprobación externa. |
 | Recibir alertas proactivas | `alert_consent` | Falta cerrar retención y eliminación de `wa_chat_id`. |
 | Registrar gastos | `expense_consent` | Independiente; revocarlo borra los gastos. Feature apagada hasta aprobar el plazo de retención. |
+| Guardar ubicación GPS | `location_consent` | Independiente; revocarlo limpia el pin. Feature apagada hasta aprobar onboarding y revisión legal. Retención técnica provisional: 180 días. |
 
 La memoria contextual usa además `CONSULTATION_HISTORY_ENABLED=false` y un TTL de 28 días. El estado
 conversacional (`USE_CONVERSATION_STATE=false`), gastos

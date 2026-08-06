@@ -16,6 +16,7 @@ import uuid
 from pathlib import Path
 
 import httpx
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
 from app.core.phone_hash import hash_phone
@@ -669,3 +670,60 @@ class AudioService:
                 await openwa.send_typing_indicator(chat_id, "paused")
             except (httpx.HTTPError, OSError, RuntimeError):
                 logger.debug("No se pudo limpiar indicador typing")
+
+    async def process_location(
+        self,
+        lat: float,
+        lng: float,
+        chat_id: str,
+        request_id: str,
+    ) -> None:
+        """Guarda un pin GPS y responde con el pronóstico de esa parcela.
+
+        Compartir ubicación es una acción explícita del productor: reemplaza
+        el pin anterior y no necesita activar audio, Whisper ni Piper.
+        """
+        chat_id_hash = hash_phone(chat_id, settings.phone_hash_pepper) if chat_id else "sin_chat"
+        openwa = OpenWAService()
+        try:
+            from app.services.location_service import LocationConsentError, save_user_location
+            from app.services.weather_service import get_pronostico
+
+            await asyncio.to_thread(save_user_location, chat_id_hash, lat, lng)
+            forecast = await get_pronostico(
+                dias=2,
+                phone_hash=chat_id_hash,
+            )
+            response = f"Ubicación de tu parcela actualizada.\n\n{forecast}"
+            await openwa.send_text(chat_id, response)
+            logger.info("Ubicación guardada y pronóstico enviado — request_id=%s", request_id)
+        except LocationConsentError:
+            # El opt-in todavía se gestiona por el equipo durante onboarding;
+            # no inventar un comando de voz que el producto aún no soporta.
+            try:
+                await openwa.send_text(
+                    chat_id,
+                    "Para guardar tu ubicación necesito tu consentimiento explícito. "
+                    "Por ahora este consentimiento lo activa el equipo AgroVoz durante "
+                    "el onboarding; no hay un opt-in por voz disponible todavía. "
+                    "Contactá al equipo o esperá ese flujo. No guardé tu ubicación.",
+                )
+            except (httpx.HTTPError, OSError, RuntimeError, ValueError):
+                logger.error("No se pudo informar falta de consentimiento — request_id=%s", request_id)
+        except (
+            httpx.HTTPError,
+            OSError,
+            RuntimeError,
+            SQLAlchemyError,
+            TypeError,
+            ValueError,
+            TimeoutError,
+        ):
+            # No se registra el pin ni el chat ID en claro; solo el request_id
+            # ya sanitizado por el middleware ayuda a investigar el fallo.
+            logger.error("Error procesando ubicación — request_id=%s", request_id)
+        finally:
+            try:
+                await openwa.send_typing_indicator(chat_id, "paused")
+            except (httpx.HTTPError, OSError, RuntimeError, ValueError):
+                logger.debug("No se pudo limpiar indicador de ubicación")

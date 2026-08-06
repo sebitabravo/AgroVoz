@@ -222,6 +222,94 @@ async def test_webhook_mensaje_texto_retorna_200_ignorado(
 
 
 @pytest.mark.asyncio
+async def test_webhook_mensaje_ubicacion_extrae_coordenadas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Un pin location se delega con lat/lng y no cae en el descarte de audio."""
+    from app.main import app
+
+    monkeypatch.setattr(settings, "openwa_webhook_secret", "test-secret")
+    recibidos: list[tuple[float, float, str]] = []
+
+    async def fake_process_location(
+        _self: object,
+        lat: float,
+        lng: float,
+        chat_id: str,
+        request_id: str,
+    ) -> None:
+        recibidos.append((lat, lng, chat_id))
+
+    monkeypatch.setattr(
+        "app.services.audio_service.AudioService.process_location",
+        fake_process_location,
+    )
+
+    payload = _load_fixture("location_message")
+    body = json.dumps(payload).encode("utf-8")
+    signature = _compute_hmac(body, "test-secret")
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        response = await client.post(
+            "/api/v1/webhook/whatsapp",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-OpenWA-Signature": signature,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "received"
+    assert recibidos == [(-38.2412, -72.6911, "248069442560050@lid")]
+
+
+def test_extract_location_rechaza_coordenadas_fuera_de_rango() -> None:
+    """El payload no puede usar un pin que OpenMeteo rechazaría."""
+    from app.api.webhooks import _extract_location
+    from app.schemas.webhook import WebhookPayload
+
+    payload = WebhookPayload.model_validate(
+        {"data": {"type": "location", "lat": 91, "lng": -72.0}}
+    )
+
+    assert _extract_location(payload) is None
+
+
+@pytest.mark.asyncio
+async def test_audio_service_location_informa_consentimiento_faltante(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """WhatsApp recibe una explicación honesta cuando el gate está apagado."""
+    from app.services.audio_service import AudioService
+    from app.services.openwa_service import OpenWAService
+
+    mensajes: list[str] = []
+
+    async def fake_send_text(_self: OpenWAService, _target: str, message: str) -> dict[str, object]:
+        mensajes.append(message)
+        return {"status": "sent"}
+
+    monkeypatch.setattr(settings, "location_sharing_enabled", False)
+    monkeypatch.setattr(OpenWAService, "send_text", fake_send_text)
+    monkeypatch.setattr(OpenWAService, "send_typing_indicator", AsyncMock())
+
+    await AudioService().process_location(
+        lat=-38.24,
+        lng=-72.69,
+        chat_id="56912345678@c.us",
+        request_id="request-location-consent",
+    )
+
+    assert len(mensajes) == 1
+    assert "consentimiento explícito" in mensajes[0]
+    assert "no hay un opt-in por voz" in mensajes[0]
+    assert "No guardé tu ubicación" in mensajes[0]
+
+
+@pytest.mark.asyncio
 async def test_webhook_mensaje_image_ignorado(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

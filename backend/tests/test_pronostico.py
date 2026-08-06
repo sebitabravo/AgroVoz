@@ -11,6 +11,7 @@ Deterministicos: sin llamadas reales a OpenMeteo.
 import datetime
 from unittest.mock import AsyncMock, patch
 
+from app.models.user_prefs import UserPrefs
 from app.services.llm_service import TOOLS, WHITELIST_TOOLS, _get_tool_handlers
 from app.services.weather_service import (
     ForecastDay,
@@ -123,6 +124,64 @@ class TestGetPronostico:
         assert "Traiguén" in resp
         assert "12,0 milímetros" in resp
         assert "OpenMeteo" in resp
+
+    async def test_comuna_explicita_prioriza_sobre_gps_guardado(
+        self,
+        db,  # type: ignore[no-untyped-def]
+        monkeypatch,
+    ) -> None:  # type: ignore[no-untyped-def]
+        """Una comuna explícita no queda pisada por el GPS guardado."""
+        phone_hash = "e" * 64
+        db.add(
+            UserPrefs(
+                phone_hash=phone_hash,
+                comuna="Traiguén",
+                lat=-38.23,
+                lng=-72.68,
+                location_consent=True,
+            )
+        )
+        db.commit()
+
+        async def fake_forecast(lat: float, lon: float, days: int) -> list[ForecastDay]:
+            assert lat == -33.45
+            assert lon == -70.65
+            assert days == 1
+            return [_dia("2026-07-27", 4, 17, 0)]
+
+        monkeypatch.setattr(
+            "app.services.weather_service.get_weather_forecast_daily",
+            fake_forecast,
+        )
+
+        response = await get_pronostico("Santiago", dias=1, phone_hash=phone_hash)
+
+        assert "Santiago" in response
+        assert "tu parcela" not in response
+        assert "OpenMeteo" in response
+
+    async def test_sin_comuna_usa_gps_guardado(self, db, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        """Sin ubicación explícita, el pronóstico sí usa el pin guardado."""
+        phone_hash = "f" * 64
+        db.add(
+            UserPrefs(
+                phone_hash=phone_hash,
+                lat=-38.23,
+                lng=-72.68,
+                location_consent=True,
+            )
+        )
+        db.commit()
+
+        async def fake_forecast(lat: float, lon: float, days: int) -> list[ForecastDay]:
+            assert lat == -38.23
+            assert lon == -72.68
+            return [_dia("2026-07-27", 4, 17, 0)]
+
+        monkeypatch.setattr("app.services.weather_service.get_weather_forecast_daily", fake_forecast)
+        response = await get_pronostico(None, dias=1, phone_hash=phone_hash)
+
+        assert "tu parcela" in response
 
 
 class TestRegistroEnElLLM:

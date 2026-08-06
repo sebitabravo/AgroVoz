@@ -222,6 +222,12 @@ class Settings(BaseSettings):
     parcela_tracking_enabled: bool = False
     # Retención técnica: un ciclo agrícola completo (temporada a temporada).
     parcela_retention_days: int = Field(default=365, ge=1, le=730)
+    # Compartir ubicación GPS queda apagado hasta validar onboarding y revisión
+    # legal. El consentimiento de ubicación es independiente del de parcelas.
+    location_sharing_enabled: bool = False
+    # Retención técnica provisional: un ciclo corto, porque el pin cambia más
+    # seguido que una parcela registrada.
+    location_retention_days: int = Field(default=180, ge=1, le=365)
     # Motor de reglas agronómicas citadas (C1+C2). No persiste datos
     # personales, pero es una capacidad nueva con riesgo real de
     # responsabilidad si un diagnóstico resulta incorrecto: queda apagada

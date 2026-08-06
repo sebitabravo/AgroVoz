@@ -29,6 +29,17 @@ class WebhookContact(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class WebhookLocation(BaseModel):
+    """Coordenadas de ubicación, según la variante del payload de Open-WA."""
+
+    lat: float | None = None
+    lng: float | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+
+    model_config = ConfigDict(extra="allow")
+
+
 class WebhookMessageData(BaseModel):
     """Datos del mensaje dentro del campo `data` del webhook de Open-WA.
 
@@ -55,6 +66,13 @@ class WebhookMessageData(BaseModel):
     is_lid_sender: bool = Field(default=False, alias="isLidSender")
     contact: WebhookContact = Field(default_factory=WebhookContact)
     media: WebhookMedia | None = None
+    # Open-WA envía GPS directamente en data; ``location`` cubre gateways que
+    # agrupan los mismos campos dentro de un objeto anidado.
+    lat: float | None = None
+    lng: float | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    location: WebhookLocation | None = None
 
     model_config = ConfigDict(
         extra="allow",
