@@ -1,0 +1,537 @@
+# Snapshot público para issue #246.
+#
+# Las sedes INDAP se verificaron contra la página regional el 03/08/2026.
+# El registro de cooperativas de datos.gob.cl declara como última actualización
+# el 25/01/2013 y por eso la respuesta pide confirmar vigencia antes de viajar.
+# El plan regional de INDAP solo acredita presencia de PRODESAL por comuna; no
+# publica teléfonos ni direcciones de esas oficinas, así que esos campos quedan
+# ausentes en vez de completar datos no respaldados.
+version: 1
+verificado_el: "2026-08-03"
+sedes:
+  -
+    tipo: "indap"
+    comuna: "Temuco"
+    nombre: "Dirección Regional INDAP La Araucanía"
+    direccion: "Bilbao #931, Temuco"
+    telefono: "45 250 6043"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Angol"
+    nombre: "Agencia de Área Angol — INDAP"
+    direccion: "Prat #191 (piso 2), Angol"
+    telefono: "45 250 6346"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Carahue"
+    nombre: "Agencia de Área Carahue — INDAP"
+    direccion: "Lautaro #136, Carahue"
+    telefono: "45 250 6335"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Collipulli"
+    nombre: "Agencia de Área Collipulli — INDAP"
+    direccion: "O'Higgins #170, Collipulli"
+    telefono: "45 250 6316"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Cunco"
+    nombre: "Agencia de Área Cunco — INDAP"
+    direccion: "Teodoro Schmidt #732, Cunco"
+    telefono: "45 250 6307"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Curacautín"
+    nombre: "Agencia de Área Curacautín — INDAP"
+    direccion: "Manuel Rodríguez #460, Curacautín"
+    telefono: "45 250 6300"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Curarrehue"
+    nombre: "Agencia de Área Curarrehue — INDAP"
+    direccion: "O'Higgins #1048, Curarrehue"
+    telefono: "45 250 6210"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Galvarino"
+    nombre: "Agencia de Área Galvarino — INDAP"
+    direccion: "Fresia #470, Galvarino"
+    telefono: "45 250 6285"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Lautaro"
+    nombre: "Agencia de Área Lautaro — INDAP"
+    direccion: "Sargento Aldea #135, Lautaro"
+    telefono: "45 250 6270"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Loncoche"
+    nombre: "Agencia de Área Loncoche — INDAP"
+    direccion: "Manuel Montt #459, Loncoche"
+    telefono: "45 250 6261"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Lonquimay"
+    nombre: "Agencia de Área Lonquimay — INDAP"
+    direccion: "Colón #840, Lonquimay"
+    telefono: "45 250 6252"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Nueva Imperial"
+    nombre: "Agencia de Área Nueva Imperial — INDAP"
+    direccion: "Sotomayor #75, Imperial, Araucanía"
+    telefono: "45 250 6248"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Padre las Casas"
+    nombre: "Agencia de Área Padre las Casas — INDAP"
+    direccion: "Petersen #250, Padre las Casas"
+    telefono: "45 299 2946"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Pitrufquén"
+    nombre: "Agencia de Área Pitrufquén — INDAP"
+    direccion: "Santa María #821, Pitrufquén"
+    telefono: "45 250 6219"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Pucón"
+    nombre: "Agencia de Área Pucón — INDAP"
+    direccion: "Adolfo Kachele 335, Pucón"
+    telefono: "45 250 6211"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Puerto Saavedra"
+    nombre: "Agencia de Área Puerto Saavedra — INDAP"
+    direccion: "Carlos Condell #085, Puerto Saavedra"
+    telefono: "45 250 6201"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Purén"
+    nombre: "Agencia de Área Purén — INDAP"
+    direccion: "Quiroga #436, Purén"
+    telefono: "45 250 6347"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Temuco"
+    nombre: "Agencia de Área Temuco — INDAP"
+    direccion: "Las Encinas #01000, Temuco"
+    telefono: "45 250 6125"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Teodoro Schmidt"
+    nombre: "Agencia de Área Teodoro Schmidt — INDAP"
+    direccion: "O'Higgins #305, Teodoro Schmidt"
+    telefono: "45 250 6132"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Toltén"
+    nombre: "Agencia de Área Toltén — INDAP"
+    direccion: "José María Caro #561, Toltén"
+    telefono: "45 250 6231"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Traiguén"
+    nombre: "Agencia de Área Traiguén — INDAP"
+    direccion: "Riveros #1059, Traiguén"
+    telefono: "45 250 6151"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Victoria"
+    nombre: "Agencia de Área Victoria — INDAP"
+    direccion: "Gorostiaga #270, Victoria, Araucanía"
+    telefono: "45 250 6147"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Vilcún"
+    nombre: "Agencia de Área Vilcún — INDAP"
+    direccion: "O'Higgins #450, Vilcún"
+    telefono: "45 250 6162"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Villarrica"
+    nombre: "Agencia de Área Villarrica — INDAP"
+    direccion: "General Urrutia #233, Villarrica"
+    telefono: "45 250 6172"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Hualpín"
+    nombre: "Oficina de Área Hualpín — INDAP"
+    direccion: "Huichaqueo esquina Caupolicán, Hualpín"
+    telefono: "45 250 6102"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+  -
+    tipo: "indap"
+    comuna: "Lumaco"
+    nombre: "Oficina de Área Lumaco — INDAP"
+    direccion: "Manuel Rodríguez #368 A, Lumaco"
+    telefono: "45 250 6156"
+    horario: "En definición, según INDAP"
+    fuente: "INDAP La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/la-araucania"
+    fecha_fuente: null
+
+  # INDAP acredita la presencia del programa por comuna, pero no publica
+  # contactos locales en esta fuente. El servicio explicita los faltantes.
+  -
+    tipo: "prodesal"
+    comuna: "Cunco"
+    nombre: "Programa de Desarrollo Local PRODESAL"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "INDAP — Plan regional La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/sites/default/files/2025-04/11.La-Araucania-Plan-Regional-Sustentabilidad-y-Transicion-Agroeocologica.pdf"
+    fecha_fuente: "2022-10"
+  -
+    tipo: "prodesal"
+    comuna: "Curacautín"
+    nombre: "Programa de Desarrollo Local PRODESAL"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "INDAP — Plan regional La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/sites/default/files/2025-04/11.La-Araucania-Plan-Regional-Sustentabilidad-y-Transicion-Agroeocologica.pdf"
+    fecha_fuente: "2022-10"
+  -
+    tipo: "prodesal"
+    comuna: "Pitrufquén"
+    nombre: "Programa de Desarrollo Local PRODESAL"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "INDAP — Plan regional La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/sites/default/files/2025-04/11.La-Araucania-Plan-Regional-Sustentabilidad-y-Transicion-Agroeocologica.pdf"
+    fecha_fuente: "2022-10"
+  -
+    tipo: "prodesal"
+    comuna: "Pucón"
+    nombre: "Programa de Desarrollo Local PRODESAL"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "INDAP — Plan regional La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/sites/default/files/2025-04/11.La-Araucania-Plan-Regional-Sustentabilidad-y-Transicion-Agroeocologica.pdf"
+    fecha_fuente: "2022-10"
+  -
+    tipo: "prodesal"
+    comuna: "Teodoro Schmidt"
+    nombre: "Programa de Desarrollo Local PRODESAL"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "INDAP — Plan regional La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/sites/default/files/2025-04/11.La-Araucania-Plan-Regional-Sustentabilidad-y-Transicion-Agroeocologica.pdf"
+    fecha_fuente: "2022-10"
+  -
+    tipo: "prodesal"
+    comuna: "Vilcún"
+    nombre: "Programa de Desarrollo Local PRODESAL"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "INDAP — Plan regional La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/sites/default/files/2025-04/11.La-Araucania-Plan-Regional-Sustentabilidad-y-Transicion-Agroeocologica.pdf"
+    fecha_fuente: "2022-10"
+  -
+    tipo: "prodesal"
+    comuna: "Villarrica"
+    nombre: "Programa de Desarrollo Local PRODESAL"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "INDAP — Plan regional La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/sites/default/files/2025-04/11.La-Araucania-Plan-Regional-Sustentabilidad-y-Transicion-Agroeocologica.pdf"
+    fecha_fuente: "2022-10"
+  -
+    tipo: "prodesal"
+    comuna: "Melipeuco"
+    nombre: "Programa de Desarrollo Local PRODESAL"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "INDAP — Plan regional La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/sites/default/files/2025-04/11.La-Araucania-Plan-Regional-Sustentabilidad-y-Transicion-Agroeocologica.pdf"
+    fecha_fuente: "2022-10"
+  -
+    tipo: "prodesal"
+    comuna: "Freire"
+    nombre: "Programa de Desarrollo Local PRODESAL"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "INDAP — Plan regional La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/sites/default/files/2025-04/11.La-Araucania-Plan-Regional-Sustentabilidad-y-Transicion-Agroeocologica.pdf"
+    fecha_fuente: "2022-10"
+  -
+    tipo: "prodesal"
+    comuna: "Gorbea"
+    nombre: "Programa de Desarrollo Local PRODESAL"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "INDAP — Plan regional La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/sites/default/files/2025-04/11.La-Araucania-Plan-Regional-Sustentabilidad-y-Transicion-Agroeocologica.pdf"
+    fecha_fuente: "2022-10"
+  -
+    tipo: "prodesal"
+    comuna: "Angol"
+    nombre: "Programa de Desarrollo Local PRODESAL"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "INDAP — Plan regional La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/sites/default/files/2025-04/11.La-Araucania-Plan-Regional-Sustentabilidad-y-Transicion-Agroeocologica.pdf"
+    fecha_fuente: "2022-10"
+  -
+    tipo: "prodesal"
+    comuna: "Renaico"
+    nombre: "Programa de Desarrollo Local PRODESAL"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "INDAP — Plan regional La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/sites/default/files/2025-04/11.La-Araucania-Plan-Regional-Sustentabilidad-y-Transicion-Agroeocologica.pdf"
+    fecha_fuente: "2022-10"
+  -
+    tipo: "prodesal"
+    comuna: "Los Sauces"
+    nombre: "Programa de Desarrollo Local PRODESAL"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "INDAP — Plan regional La Araucanía"
+    fuente_url: "https://www.indap.gob.cl/sites/default/files/2025-04/11.La-Araucania-Plan-Regional-Sustentabilidad-y-Transicion-Agroeocologica.pdf"
+    fecha_fuente: "2022-10"
+
+  # El recurso de datos.gob.cl identifica la comuna solo cuando aparece en
+  # la razón social; no se agregan direcciones ni teléfonos ausentes del CSV.
+  -
+    tipo: "cooperativa"
+    comuna: "Carahue"
+    nombre: "Cooperativa de Apicultores de Carahue"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "Datos.gob.cl — Listado de Cooperativas Agrícolas"
+    fuente_url: "https://datos.gob.cl/dataset/3859/resource/e032951e-519d-4f38-ad03-48f45cddac69"
+    fecha_fuente: "2013-01-25"
+  -
+    tipo: "cooperativa"
+    comuna: "Collipulli"
+    nombre: "Cooperativa Agrícola de Apicultores Collipulli-Ercilla Limitada"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "Datos.gob.cl — Listado de Cooperativas Agrícolas"
+    fuente_url: "https://datos.gob.cl/dataset/3859/resource/e032951e-519d-4f38-ad03-48f45cddac69"
+    fecha_fuente: "2013-01-25"
+  -
+    tipo: "cooperativa"
+    comuna: "Ercilla"
+    nombre: "Cooperativa Agrícola de Apicultores Collipulli-Ercilla Limitada"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "Datos.gob.cl — Listado de Cooperativas Agrícolas"
+    fuente_url: "https://datos.gob.cl/dataset/3859/resource/e032951e-519d-4f38-ad03-48f45cddac69"
+    fecha_fuente: "2013-01-25"
+  -
+    tipo: "cooperativa"
+    comuna: "Pucón"
+    nombre: "Cooperativa Apícola y Agroecológica de Pucón"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "Datos.gob.cl — Listado de Cooperativas Agrícolas"
+    fuente_url: "https://datos.gob.cl/dataset/3859/resource/e032951e-519d-4f38-ad03-48f45cddac69"
+    fecha_fuente: "2013-01-25"
+  -
+    tipo: "cooperativa"
+    comuna: "Lautaro"
+    nombre: "Cooperativa de Apicultores de Lautaro"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "Datos.gob.cl — Listado de Cooperativas Agrícolas"
+    fuente_url: "https://datos.gob.cl/dataset/3859/resource/e032951e-519d-4f38-ad03-48f45cddac69"
+    fecha_fuente: "2013-01-25"
+  -
+    tipo: "cooperativa"
+    comuna: "Loncoche"
+    nombre: "Cooperativa Agrícola y Lechera de Loncoche Ltda."
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "Datos.gob.cl — Listado de Cooperativas Agrícolas"
+    fuente_url: "https://datos.gob.cl/dataset/3859/resource/e032951e-519d-4f38-ad03-48f45cddac69"
+    fecha_fuente: "2013-01-25"
+  -
+    tipo: "cooperativa"
+    comuna: "Cholchol"
+    nombre: "Cooperativa Campesina Chol Chol Ltda."
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "Datos.gob.cl — Listado de Cooperativas Agrícolas"
+    fuente_url: "https://datos.gob.cl/dataset/3859/resource/e032951e-519d-4f38-ad03-48f45cddac69"
+    fecha_fuente: "2013-01-25"
+  -
+    tipo: "cooperativa"
+    comuna: "Curacautín"
+    nombre: "Cooperativa Agropecuaria Curacautín Limitada"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "Datos.gob.cl — Listado de Cooperativas Agrícolas"
+    fuente_url: "https://datos.gob.cl/dataset/3859/resource/e032951e-519d-4f38-ad03-48f45cddac69"
+    fecha_fuente: "2013-01-25"
+  -
+    tipo: "cooperativa"
+    comuna: "Collipulli"
+    nombre: "Cooperativa Especial Agrícola Collipulli Limitada"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "Datos.gob.cl — Listado de Cooperativas Agrícolas"
+    fuente_url: "https://datos.gob.cl/dataset/3859/resource/e032951e-519d-4f38-ad03-48f45cddac69"
+    fecha_fuente: "2013-01-25"
+  -
+    tipo: "cooperativa"
+    comuna: "Angol"
+    nombre: "Cooperativa Especial Agropecuaria y Forestal Angol Limitada"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "Datos.gob.cl — Listado de Cooperativas Agrícolas"
+    fuente_url: "https://datos.gob.cl/dataset/3859/resource/e032951e-519d-4f38-ad03-48f45cddac69"
+    fecha_fuente: "2013-01-25"
+  -
+    tipo: "cooperativa"
+    comuna: "Lautaro"
+    nombre: "Cooperativa Agrícola El Esfuerzo de los Emprendedores de la Comuna de Lautaro"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "Datos.gob.cl — Listado de Cooperativas Agrícolas"
+    fuente_url: "https://datos.gob.cl/dataset/3859/resource/e032951e-519d-4f38-ad03-48f45cddac69"
+    fecha_fuente: "2013-01-25"
+  -
+    tipo: "cooperativa"
+    comuna: "Villarrica"
+    nombre: "Cooperativa de la Red de Agroapicultores de Villarrica"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "Datos.gob.cl — Listado de Cooperativas Agrícolas"
+    fuente_url: "https://datos.gob.cl/dataset/3859/resource/e032951e-519d-4f38-ad03-48f45cddac69"
+    fecha_fuente: "2013-01-25"
+  -
+    tipo: "cooperativa"
+    comuna: "Carahue"
+    nombre: "Cooperativa Campesina y de Turismo Rural de Comunidades Indígenas y Comités de Pequeños Agricultores de Carahue"
+    direccion: null
+    telefono: null
+    horario: null
+    fuente: "Datos.gob.cl — Listado de Cooperativas Agrícolas"
+    fuente_url: "https://datos.gob.cl/dataset/3859/resource/e032951e-519d-4f38-ad03-48f45cddac69"
+    fecha_fuente: "2013-01-25"

@@ -974,6 +974,7 @@ class TestPrivacidad:
             "alert_consent",
             "expense_consent",
             "parcela_consent",
+            "location_consent",
             "identity_type",
             "group_label",
             "localidad",
