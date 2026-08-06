@@ -62,7 +62,9 @@ por la misma vía. El texto evita Whisper y TTS.
 9. Solo audio: Piper TTS convierte texto → audio `.wav`
 10. Solo audio: ffmpeg convierte `.wav` → `.ogg`
 11. FastAPI envía texto o audio por Open-WA y registra entrega efectiva
-12. Tras el envío, elimina el staging libre; el historial opcional exige opt-in
+12. El cron diario sincroniza ODEPA, compara los dos últimos datos por producto/mercado y detecta variaciones absolutas ≥15%; solo prepara avisos para `cultivos` suscritos con `alert_consent=true`
+13. El job entrega esos avisos por Open-WA mediante un rate limit global configurable; el mensaje conserva el precio crudo, la fecha y la fuente ODEPA
+14. Tras el envío, elimina el staging libre; el historial opcional exige opt-in
 ```
 
 ## Componentes del backend
@@ -79,7 +81,7 @@ por la misma vía. El texto evita Whisper y TTS.
 - `whisper_service.py` — transcripción de audio (descarga, ffmpeg, Whisper)
 - `llm_service.py` — interpretación NL + Tool Calling con whitelist (15 tools: precios, clima, corpus, gastos, parcelas, reglas, panel y `get_directorio_agricola`) + fallback OpenRouter
 - `tts_service.py` — síntesis de voz con Piper TTS
-- `odepa_service.py` — consultas a SQLite ODEPA + sync diario
+- `odepa_service.py` — consultas a SQLite ODEPA, sync diario y detector determinista de variaciones
 - `weather_service.py` — consultas a OpenMeteo API (forecast + histórico)
 - `location_service.py` — persistencia de coordenadas compartidas, seudonimizadas por `phone_hash`
 - `pipeline_service.py` — orquestador del pipeline end-to-end
@@ -110,7 +112,7 @@ por la misma vía. El texto evita Whisper y TTS.
 - `directorio_agricola.py` — snapshot SQLite de sedes y contactos públicos por comuna
 
 ### `app/jobs/` — Tareas programadas
-- `sync_odepa.py` — cron job 06:00 AM: descarga CSV ODEPA → upsert SQLite
+- `sync_odepa.py` — cron job 06:00 AM: descarga CSV ODEPA → upsert SQLite → evalúa alertas configuradas y variaciones críticas
 - `purge_consultation_history.py` — purga TTL auditable del historial consentido
 
 ## Componentes del frontend
@@ -402,3 +404,19 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     el punto exacto. Si el productor menciona una comuna o coordenadas
     explícitas, esa ubicación tiene prioridad sobre el GPS guardado; si no,
     se usa el pin consentido y luego Traiguén como default.
+
+29. **Variación brusca de precios ODEPA (#248).** El cron conserva el
+    procesamiento síncrono y una ventana SQL limita la lectura a los dos datos
+    más recientes del mismo producto, mercado y unidad; un cambio absoluto de
+    al menos 15% se considera crítico. Los destinatarios se resuelven desde
+    `user_prefs.cultivos` y `alert_consent`. Como el hash HMAC no permite
+    derivar el número, el siguiente mensaje entrante autenticado de un contacto
+    con opt-in aprende su `wa_chat_id`; un registro interno inactivo de
+    `Alert(tipo="variacion_precio")` conserva esa ruta y un digest opaco del
+    último conjunto entregado. Así un reintento del mismo boletín es idempotente
+    sin guardar contenido libre ni crear otra tabla/migración. La entrega agrupa
+    hasta tres variaciones por agricultor y usa el mismo TTS/Open-WA local, con
+    una cuota global configurable
+    (`ALERT_RATE_LIMIT_PER_MINUTE`) para evitar ráfagas y sin agregar Redis,
+    Celery ni APIs pagas. El mensaje solo informa precio, variación, fecha y
+    fuente ODEPA; no contiene recomendación agronómica.

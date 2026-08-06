@@ -102,6 +102,12 @@ def _apply_prefs_fields(
             "dataset_consent actualizado — consent=%s",
             prefs.dataset_consent,
         )
+    if body.alert_consent is not None:
+        prefs.alert_consent = body.alert_consent
+        logger.info(
+            "alert_consent actualizado — consent=%s",
+            prefs.alert_consent,
+        )
     if body.history_consent is not None:
         prefs.history_consent = body.history_consent
         logger.info(
@@ -345,6 +351,7 @@ def set_comuna(
         phone_hash=prefs.phone_hash,
         comuna=prefs.comuna,
         dataset_consent=prefs.dataset_consent,
+        alert_consent=prefs.alert_consent,
         history_consent=prefs.history_consent,
         expense_consent=prefs.expense_consent,
         parcela_consent=prefs.parcela_consent,
@@ -381,6 +388,7 @@ def get_user_prefs(
         phone_hash=prefs.phone_hash,
         comuna=prefs.comuna,
         dataset_consent=prefs.dataset_consent,
+        alert_consent=prefs.alert_consent,
         history_consent=prefs.history_consent,
         expense_consent=prefs.expense_consent,
         parcela_consent=prefs.parcela_consent,

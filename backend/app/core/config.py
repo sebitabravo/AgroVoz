@@ -154,6 +154,9 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 60
     weather_rate_limit_per_minute: int = 30
     demo_rate_limit_per_minute: int = 5
+    # Cuota global de avisos proactivos que el job entrega a Open-WA por
+    # minuto. Evita ráfagas que puedan provocar bloqueo del número de WhatsApp.
+    alert_rate_limit_per_minute: int = Field(default=30, ge=1, le=1000)
     audio_retention_hours: int = 24
     phone_hash_pepper: str = "agrovoz-dev-pepper"  # Cambiar en producción (PHONE_HASH_PEPPER en .env)
     extra_allowed_hosts: str = ""  # Hosts/IPs extra separadas por coma para TrustedHostMiddleware
