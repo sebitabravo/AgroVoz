@@ -222,13 +222,24 @@ async def cancelar_alertas(
 ) -> int:
     """Desactiva las alertas activas de un phone_hash.
 
+    Las alertas de variación de precio (#248) no usan filas ``Alert.activa``
+    como interruptor: `evaluar_variaciones_precio` decide a quién enviar
+    consultando `UserPrefs.alert_consent` directamente, y la fila `Alert`
+    de tipo `_VARIATION_ROUTE_TYPE` solo guarda el destino/idempotencia con
+    `activa=False` fijo. Sin este revoke, "cancela mis alertas" confirmaba
+    la cancelación mientras el productor seguía recibiendo avisos de
+    variación de precio en cada sync — cancelar sin `tipo` también corta esa
+    vía apagando `alert_consent`; con un `tipo` específico se deja intacto
+    porque esa suscripción no distingue precio de clima.
+
     Args:
         session: Sesion de SQLAlchemy.
         phone_hash: Hash del numero.
         tipo: Filtro opcional ('precio' o 'clima').
 
     Returns:
-        Cantidad de alertas desactivadas.
+        Cantidad de alertas desactivadas (incluye la revocación de
+        `alert_consent` cuando corresponde).
     """
     query = select(Alert).where(
         Alert.phone_hash == phone_hash,
@@ -240,12 +251,22 @@ async def cancelar_alertas(
     alertas = list(session.scalars(query).all())
     for alerta in alertas:
         alerta.activa = False
+
+    revoked_consent = False
+    if tipo is None:
+        prefs = session.scalar(select(UserPrefs).where(UserPrefs.phone_hash == phone_hash))
+        if prefs is not None and prefs.alert_consent:
+            prefs.alert_consent = False
+            revoked_consent = True
+
     session.commit()
+    total = len(alertas) + (1 if revoked_consent else 0)
     logger.info(
-        "Alertas actualizadas — estado=canceladas count=%d",
-        len(alertas),
+        "Alertas actualizadas — estado=canceladas count=%d consentimiento_revocado=%s",
+        total,
+        revoked_consent,
     )
-    return len(alertas)
+    return total
 
 
 async def evaluar_alertas_precio(
@@ -421,7 +442,13 @@ def _get_variation_route(session: Session, phone_hash: str) -> Alert | None:
 
 
 def _ensure_variation_route_from_existing_alert(session: Session, phone_hash: str) -> Alert | None:
-    """Migra perezosamente una ruta histórica sin duplicar el chat en memoria."""
+    """Migra perezosamente una ruta histórica sin duplicar el chat en memoria.
+
+    El `wa_chat_id` histórico puede venir de una alerta creada antes de que
+    `_is_valid_wa_chat_id` existiera; sin revalidar acá, un id de grupo
+    (`@g.us`) o malformado se promovía a ruta de envío proactivo, convirtiendo
+    un opt-in individual en un broadcast a un grupo que nunca consintió.
+    """
     route = _get_variation_route(session, phone_hash)
     if route is not None:
         return route
@@ -434,7 +461,7 @@ def _ensure_variation_route_from_existing_alert(session: Session, phone_hash: st
         .order_by(Alert.id.desc())
         .limit(1)
     )
-    if wa_chat_id is None:
+    if wa_chat_id is None or not _is_valid_wa_chat_id(wa_chat_id):
         return None
     route = Alert(
         phone_hash=phone_hash,
