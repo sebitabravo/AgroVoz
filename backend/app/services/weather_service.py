@@ -15,6 +15,7 @@ import unicodedata
 from dataclasses import dataclass, replace
 
 import httpx
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
 
@@ -387,6 +388,24 @@ async def _close_http_client() -> None:
     _http_client = None
 
 
+async def _get_user_coordinates(phone_hash: str | None) -> tuple[float, float] | None:
+    """Carga coordenadas compartidas sin bloquear el event loop de FastAPI."""
+    if not phone_hash:
+        return None
+
+    from app.services.location_service import get_user_location
+
+    try:
+        location = await asyncio.to_thread(get_user_location, phone_hash)
+    except (SQLAlchemyError, OSError, RuntimeError, ValueError):
+        # Una falla de preferencias no debe impedir el fallback por comuna.
+        logger.warning("No se pudo leer ubicación preferida; se usa la comuna")
+        return None
+    if location is None:
+        return None
+    return location.lat, location.lng
+
+
 def _location_name(lat: float, lon: float) -> str:
     """Determina el nombre de ubicación según las coordenadas.
 
@@ -599,9 +618,11 @@ async def _fetch_weather_data(lat: float, lon: float) -> dict[str, object]:
         ConnectionError: Error de red (DNS, timeout, conexión rechazada).
         RuntimeError: Error de API o respuesta malformada.
     """
+    # OpenMeteo solo necesita el grid aproximado; no enviar la coordenada
+    # precisa evita exponer el pin del productor a un tercero.
     params: dict[str, str | float] = {
-        "latitude": lat,
-        "longitude": lon,
+        "latitude": round(lat, 2),
+        "longitude": round(lon, 2),
         "current": "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,rain",
         "timezone": "auto",
         "forecast_days": 1,
@@ -707,8 +728,10 @@ def _format_weather(
 
 
 async def get_weather(
-    lat: float = DEFAULT_LAT,
-    lon: float = DEFAULT_LON,
+    lat: float | None = None,
+    lon: float | None = None,
+    phone_hash: str | None = None,
+    comuna: str | None = None,
 ) -> str:
     """Consulta el clima actual y devuelve texto natural en español chileno.
 
@@ -718,8 +741,13 @@ async def get_weather(
     OpenMeteo no requiere API key.
 
     Args:
-        lat: Latitud. Default: Traiguén (-38.23).
-        lon: Longitud. Default: Traiguén (-72.68).
+        lat: Latitud explícita solicitada por el usuario, o ``None`` si no
+            especificó una ubicación.
+        lon: Longitud explícita solicitada por el usuario, o ``None`` si no
+            especificó una ubicación.
+        phone_hash: Hash HMAC de la identidad; si tiene GPS guardado,
+            reemplaza las coordenadas default.
+        comuna: Comuna de fallback cuando no hay GPS guardado.
 
     Returns:
         Texto natural listo para TTS. Ejemplo:
@@ -729,6 +757,21 @@ async def get_weather(
         Si hay error, retorna un mensaje informativo en vez de lanzar
         excepción, para que el LLM pueda comunicarlo al agricultor.
     """
+    explicit_coords = lat is not None and lon is not None
+    if not explicit_coords:
+        user_coords = await _get_user_coordinates(phone_hash)
+        if user_coords is not None:
+            lat, lon = user_coords
+        elif comuna:
+            comuna_coords = _resolver_comuna(comuna)
+            if comuna_coords is not None:
+                lat, lon = comuna_coords
+        else:
+            lat, lon = DEFAULT_LAT, DEFAULT_LON
+
+    if lat is None or lon is None:
+        lat, lon = DEFAULT_LAT, DEFAULT_LON
+
     # Validación de rango: misma defensa que el endpoint REST (Query ge/le).
     if not (-90.0 <= lat <= 90.0):
         return "La latitud debe estar entre -90° y 90°. ¿Me das otra coordenada?"
@@ -794,8 +837,8 @@ async def get_weather_forecast_daily(
     days = min(max(days, 1), 7)
 
     params: dict[str, str | float | int] = {
-        "latitude": lat,
-        "longitude": lon,
+        "latitude": round(lat, 2),
+        "longitude": round(lon, 2),
         "daily": "temperature_2m_min,temperature_2m_max,precipitation_sum",
         "timezone": "auto",
         "forecast_days": days,
@@ -1149,8 +1192,8 @@ async def _fetch_historical_data(
         RuntimeError: Error de API o respuesta malformada.
     """
     params: dict[str, str | float | int] = {
-        "latitude": lat,
-        "longitude": lon,
+        "latitude": round(lat, 2),
+        "longitude": round(lon, 2),
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
         "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum",
@@ -1428,7 +1471,13 @@ def _format_pronostico_text(dias: list[ForecastDay], comuna: str) -> str:
     return f"{'. '.join(partes)}. Según OpenMeteo."
 
 
-async def get_pronostico(comuna: str, dias: int = 2) -> str:
+async def get_pronostico(
+    comuna: str | None = None,
+    dias: int = 2,
+    phone_hash: str | None = None,
+    lat: float | None = None,
+    lon: float | None = None,
+) -> str:
     """Tool function para el LLM: pronostico de los proximos dias.
 
     Responde preguntas como "va a llover manana?" o "como viene el tiempo?".
@@ -1440,16 +1489,37 @@ async def get_pronostico(comuna: str, dias: int = 2) -> str:
     temperaturas, no dice si regar o cosechar.
 
     Args:
-        comuna: Nombre de la comuna (ej: "Traiguen", "Temuco", "Santiago").
+        comuna: Nombre de la comuna explícita solicitada por el usuario, o
+            ``None`` si no especificó ubicación.
         dias: Cuantos dias de pronostico (1 a 3). Por defecto 2.
+        phone_hash: Hash HMAC de la identidad; si no se especificó comuna y
+            tiene GPS guardado, se consulta esa ubicación.
+        lat: Latitud explícita opcional, usada si no hay comuna ni GPS.
+        lon: Longitud explícita opcional, usada si no hay comuna ni GPS.
 
     Returns:
         Texto natural en espanol chileno para TTS.
     """
-    coords = _resolver_comuna(comuna)
+    coords: tuple[float, float] | None
+    if comuna is not None:
+        coords = _resolver_comuna(comuna)
+        nombre_ubicacion = comuna
+    else:
+        user_coords = await _get_user_coordinates(phone_hash)
+        if user_coords is not None:
+            coords = user_coords
+            nombre_ubicacion = "tu parcela"
+        elif lat is not None and lon is not None:
+            coords = (lat, lon)
+            nombre_ubicacion = _location_name(lat, lon)
+        else:
+            coords = (DEFAULT_LAT, DEFAULT_LON)
+            nombre_ubicacion = "Traiguén"
+
     if coords is None:
+        unknown_comuna = comuna or "esa ubicación"
         return (
-            f"Disculpa, no reconozco la comuna '{comuna}'. "
+            f"Disculpa, no reconozco la comuna '{unknown_comuna}'. "
             "Puedo consultar Traiguén, Temuco, Padre Las Casas, Lautaro, "
             "Villarrica y otras de la Araucanía, o Santiago. "
             "¿Cuál te interesa?"
@@ -1460,7 +1530,7 @@ async def get_pronostico(comuna: str, dias: int = 2) -> str:
 
     try:
         pronostico = await get_weather_forecast_daily(lat, lon, days=dias_pedidos)
-        return _format_pronostico_text(pronostico, comuna)
+        return _format_pronostico_text(pronostico, nombre_ubicacion)
     except (ConnectionError, RuntimeError, ValueError) as exc:
         logger.warning(
             "Error al consultar pronóstico — error=%s",

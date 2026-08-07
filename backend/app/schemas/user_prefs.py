@@ -39,6 +39,12 @@ class ComunaRequest(BaseModel):
         description="Opt-in explicito para retener audio en el dataset de voz rural (#96). "
         "None = no modificar el valor actual.",
     )
+    alert_consent: bool | None = Field(
+        default=None,
+        description=(
+            "Opt-in explícito para recibir alertas proactivas de precio y clima. None = no modificar el valor actual."
+        ),
+    )
     history_consent: bool | None = Field(
         default=None,
         description=(
@@ -57,6 +63,13 @@ class ComunaRequest(BaseModel):
         description=(
             "Opt-in específico para registrar parcelas (cultivo, superficie, comuna). Revocarlo con false "
             "borra las parcelas existentes. None = no modificar el valor actual."
+        ),
+    )
+    location_consent: bool | None = Field(
+        default=None,
+        description=(
+            "Opt-in específico para guardar ubicación GPS. Revocarlo limpia el pin existente. "
+            "None = no modificar el valor actual."
         ),
     )
     cultivos: list[str] | None = Field(
@@ -140,9 +153,11 @@ class ComunaRequest(BaseModel):
                 {
                     "comuna": "Traiguén",
                     "dataset_consent": True,
+                    "alert_consent": True,
                     "history_consent": True,
                     "expense_consent": False,
                     "parcela_consent": False,
+                    "location_consent": False,
                     "cultivos": ["papa", "trigo", "tomate"],
                     "identity_type": "prodesal_group",
                     "group_label": "prodesal-traiguen-norte",
@@ -163,6 +178,10 @@ class UserPrefsResponse(BaseModel):
     phone_hash: str = Field(description="Hash HMAC-SHA256 del teléfono (64 chars hex)")
     comuna: str | None = Field(default=None, description="Comuna registrada o None")
     dataset_consent: bool = Field(description="Consentimiento para retener audio en dataset (#96)")
+    alert_consent: bool = Field(
+        default=False,
+        description="Consentimiento específico para recibir alertas proactivas de precio y clima.",
+    )
     history_consent: bool = Field(
         default=False, description="Consentimiento específico para retener historial (#195, #201)"
     )
@@ -170,6 +189,7 @@ class UserPrefsResponse(BaseModel):
         default=False, description="Consentimiento específico para retener gastos declarados (#170)"
     )
     parcela_consent: bool = Field(default=False, description="Consentimiento específico para registrar parcelas (C5)")
+    location_consent: bool = Field(default=False, description="Consentimiento específico para guardar ubicación GPS")
     identity_type: IdentityType = Field(
         default="individual",
         description="Identidad individual o contacto compartido PRODESAL",
@@ -211,9 +231,11 @@ class UserPrefsResponse(BaseModel):
                     "phone_hash": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
                     "comuna": "Traiguén",
                     "dataset_consent": True,
+                    "alert_consent": True,
                     "history_consent": True,
                     "expense_consent": False,
                     "parcela_consent": False,
+                    "location_consent": False,
                     "identity_type": "prodesal_group",
                     "group_label": "prodesal-traiguen-norte",
                     "localidad": "Quilquén",

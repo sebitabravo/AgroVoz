@@ -13,6 +13,7 @@ Tools disponibles (whitelist):
    - get_clima_historico(comuna, metrica)       -> weather_service.get_clima_historico()
    - get_clima_historico_multianual(comuna, anos, temporada, anio, metrica)
                                                 -> weather_service.get_clima_historico_multianual()
+  - get_directorio_agricola(comuna, tipo)      -> directorio_agricola_service.get_directorio_agricola()
 
 Si el LLM intenta usar cualquier otra tool, se responde con texto
 de fallback. Si no entiende la query, pide reformular.
@@ -83,6 +84,7 @@ WHITELIST_TOOLS = frozenset(
         "get_parcelas",
         "get_regla_agronomica",
         "get_link_resumen",
+        "get_directorio_agricola",
     }
 )
 
@@ -104,7 +106,7 @@ _GENERATION_TIMEOUT = 25.0
 _LLM_CIRCUIT_COOLDOWN_SECONDS = 90.0
 _LLM_BUSY_TEXT = "Estoy procesando otra consulta ahora. ¿Podrías intentar de nuevo en un momento?"
 
-# Contexto máximo del modelo (tokens). Con las 10 tools actuales, el system
+# Contexto máximo del modelo (tokens). Con las tools actuales, el system
 # prompt completo + tools ya
 # ocupa ~2771 tokens medidos con el tokenizer real de Qwen2.5 — n_ctx=1024
 # y n_ctx=2048 NO alcanzan ni para el primer prompt (ValueError instantaneo
@@ -127,7 +129,7 @@ _N_CTX = 4096
 # scheduler en maquinas grandes sin beneficio real para un 3B en CPU.
 _N_THREADS: int = min(os.cpu_count() or 4, 8)
 
-# Tamano de lote para prompt eval. El prompt fijo (system + 10 tools) ronda los
+# Tamano de lote para prompt eval. El prompt fijo (system + tools) ronda los
 # 2700 tokens y se evalua en lotes: un batch mas grande procesa mas tokens por
 # pasada y reduce el overhead por lote, que es donde se va el tiempo cuando hay
 # poca CPU. Ver _preload_prompt_cache() para el otro lado del problema.
@@ -304,7 +306,7 @@ TOOLS: list[dict[str, object]] = [
                 "USAR para PREGUNTAS DE CLIMA. "
                 "Cuando el agricultor pregunte por el clima, la temperatura, si va a "
                 "llover, el pronostico del tiempo, etc. "
-                "Usa coordenadas de Traiguen (-38.23, -72.68) si no especifica ubicacion. "
+                "Si menciona ubicación, pasar lat/lon; si no, OMITIR ambos (usa GPS o Traiguen). "
                 "Ej: 'como esta el clima', 'va a llover hoy', 'temperatura en Traiguen'."
             ),
             "parameters": {
@@ -312,14 +314,14 @@ TOOLS: list[dict[str, object]] = [
                 "properties": {
                     "lat": {
                         "type": "number",
-                        "description": "Latitud en grados decimales (-90 a 90). Default: -38.23 para Traiguen.",
+                        "description": "Latitud (-90 a 90). OMITIR si no hay ubicación explícita.",
                     },
                     "lon": {
                         "type": "number",
-                        "description": "Longitud en grados decimales (-180 a 180). Default: -72.68 para Traiguen.",
+                        "description": "Longitud (-180 a 180). OMITIR si no hay ubicación explícita.",
                     },
                 },
-                "required": ["lat", "lon"],
+                "required": [],
             },
         },
     },
@@ -330,6 +332,7 @@ TOOLS: list[dict[str, object]] = [
             "description": (
                 "PRONOSTICO: clima de MANANA o proximos dias. "
                 "NO para clima de ahora (get_weather) ni pasado (get_clima_historico). "
+                "Si menciona comuna, pasarla (prioridad sobre GPS). Si no, OMITIR (usa GPS o Traiguen). "
                 "Ej: 'va a llover manana', 'va a helar', 'como viene el tiempo'."
             ),
             "parameters": {
@@ -337,10 +340,7 @@ TOOLS: list[dict[str, object]] = [
                 "properties": {
                     "comuna": {
                         "type": "string",
-                        "description": (
-                            "Nombre de la comuna chilena (ej: Traiguen, Temuco, Santiago). "
-                            "Usar Traiguen si no se especifica ubicacion."
-                        ),
+                        "description": "Comuna chilena (ej: Traiguen, Temuco, Santiago). OMITIR si no se especifica.",
                     },
                     "dias": {
                         "type": "integer",
@@ -350,7 +350,7 @@ TOOLS: list[dict[str, object]] = [
                         ),
                     },
                 },
-                "required": ["comuna"],
+                "required": [],
             },
         },
     },
@@ -379,7 +379,7 @@ TOOLS: list[dict[str, object]] = [
         "type": "function",
         "function": {
             "name": "get_clima_historico_multianual",
-            "description": "Compara clima histórico por año o temporada (OpenMeteo): temperatura, lluvia y heladas.",
+            "description": "Compara clima histórico por año/temporada: temperatura, lluvia, heladas.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -393,15 +393,15 @@ TOOLS: list[dict[str, object]] = [
                     },
                     "temporada": {
                         "type": "string",
-                        "description": "Temporada opcional.",
+                        "description": "Temporada opc.",
                     },
                     "anio": {
                         "type": "integer",
-                        "description": "Año final opcional.",
+                        "description": "Año final opc.",
                     },
                     "metrica": {
                         "type": "string",
-                        "description": "Métrica opcional.",
+                        "description": "Métrica opc.",
                     },
                 },
                 "required": ["comuna"],
@@ -415,8 +415,7 @@ TOOLS: list[dict[str, object]] = [
             "description": (
                 "USAR para CALCULAR CUANTO RECIBIRA el agricultor por una venta. "
                 "Cuando el agricultor mencione una cantidad de kilos a vender "
-                "(voy a vender 30 kilos de papa, a cuanto recibo por 50 kilos, "
-                "cuanto me pagan por 100 kilos de tomate). "
+                "(voy a vender 30 kilos, a cuanto recibo por 50 kilos). "
                 "EL CALCULO LO HACE LA HERRAMIENTA: nunca lo hagas tu. "
                 "Ej: 'voy a vender 30 kilos de papa', 'a cuanto recibo por 50 kilos de tomate'."
             ),
@@ -455,8 +454,7 @@ TOOLS: list[dict[str, object]] = [
                 "y monto total recibido. "
                 "NO usar para calcular cuanto recibira (usa calculate_sale_value). "
                 "Ej: 'vendi 3 sacos de papa a 150 lucas', "
-                "'me pagaron 250 mil por 4 mallas de tomate', "
-                "'recibi 100 lucas por 2 cajas de cebolla'."
+                "'me pagaron 250 mil por 4 mallas de tomate'."
             ),
             "parameters": {
                 "type": "object",
@@ -509,8 +507,7 @@ TOOLS: list[dict[str, object]] = [
                 "NO usar para precios actuales (usa get_price). "
                 "CITA la fuente y fecha que devuelve la herramienta. "
                 "Ej: 'que dice el boletin de la papa', "
-                "'cual es la tendencia del mercado', "
-                "'informacion sobre la papa en Chile'."
+                "'cual es la tendencia del mercado'."
             ),
             "parameters": {
                 "type": "object",
@@ -624,8 +621,7 @@ TOOLS: list[dict[str, object]] = [
                 "o pregunte CUANDO sembrar, cosechar o rotar. "
                 "NUNCA improvises la respuesta: esta tool resuelve contra reglas ya citadas "
                 "de INIA. Si no hay una regla que calce, dice que no tiene el dato. "
-                "Ej: 'mis papas tienen manchas en las hojas', 'cuando siembro la papa', "
-                "'que cultivo va antes de la papa'."
+                "Ej: 'mis papas tienen manchas en las hojas', 'cuando siembro la papa'."
             ),
             "parameters": {
                 "type": "object",
@@ -650,7 +646,7 @@ TOOLS: list[dict[str, object]] = [
             "description": (
                 "USAR cuando el agricultor pida VER, MANDAR o ENVIAR un resumen, panel o link "
                 "con sus datos (parcelas, alertas, comuna). "
-                "Ej: 'mandame mi resumen', 'quiero ver mis datos', 'dame el link del panel'."
+                "Ej: 'mandame mi resumen', 'dame el link del panel'."
             ),
             "parameters": {
                 "type": "object",
@@ -659,15 +655,40 @@ TOOLS: list[dict[str, object]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_directorio_agricola",
+            "description": (
+                "Sedes INDAP, PRODESAL o cooperativas por comuna. "
+                "Solo datos oficiales. Ej: 'INDAP en Traiguén'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "comuna": {
+                        "type": "string",
+                        "description": "Comuna chilena (ej: Traiguén).",
+                    },
+                    "tipo": {
+                        "type": "string",
+                        "enum": ["indap", "prodesal", "cooperativa"],
+                        "description": "Filtro opc.",
+                    },
+                },
+                "required": ["comuna"],
+            },
+        },
+    },
 ]
 
 # Subconjuntos de tools por tipo de consulta (TipoConsulta en schemas/variables).
-# Las 10 definiciones juntas pesan ~2000 tokens y se re-inyectan en cada consulta:
+# Las definiciones juntas se re-inyectan en cada consulta:
 # es el grueso del prompt y, con poca CPU, el grueso de la latencia. El pipeline
 # ya clasifica la consulta ANTES de llamar al LLM (_extract_variables), asi que
 # mandamos solo las tools del dominio consultado.
 #
-# "ambos" y "desconocido" reciben las 10: si no sabemos qué pregunta, recortar
+# "ambos" y "desconocido" reciben todas: si no sabemos qué pregunta, recortar
 # tools le sacaria capacidad al modelo. Solo recortamos cuando hay certeza.
 #
 # search_corpus va en ambos subconjuntos: responde dudas de contexto agricola
@@ -968,6 +989,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
     que el modulo llm_service.py sea importable sin DB ni servicios.
     """
     from app.services.agronomic_rules_service import get_agronomic_rule_for_llm
+    from app.services.directorio_agricola_service import get_directorio_agricola
     from app.services.expense_service import register_expense_for_llm
     from app.services.odepa_service import (
         calculate_margin_for_llm,
@@ -1002,6 +1024,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         "get_parcelas": get_parcelas_for_llm,
         "get_regla_agronomica": get_agronomic_rule_for_llm,
         "get_link_resumen": get_panel_link_for_llm,
+        "get_directorio_agricola": get_directorio_agricola,
     }
 
 
@@ -1056,6 +1079,8 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
             "register_parcela",
             "get_parcelas",
             "get_link_resumen",
+            "get_weather",
+            "get_pronostico",
         )
         and phone_hash
     ):
@@ -1080,7 +1105,8 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
         }
     )
     # search_corpus es tan rapido (<2ms) que no necesita cache.
-    if name in cacheable:
+    cache_enabled = name in cacheable and not (name in {"get_weather", "get_pronostico"} and phone_hash)
+    if cache_enabled:
         cached = _tool_cache.get(name, **valid_args)
         if cached is not None:
             return cached
@@ -1095,12 +1121,13 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
             "register_expense",
             "register_parcela",
             "get_parcelas",
+            "get_directorio_agricola",
         ):
             from app.core.database import SessionLocal
 
             # register_parcela/get_parcelas no tienen "producto": tienen su
             # propia validación de campos requeridos más abajo.
-            needs_producto = name not in ("register_parcela", "get_parcelas")
+            needs_producto = name not in ("register_parcela", "get_parcelas", "get_directorio_agricola")
             # Completar defaults para argumentos vacios que el LLM no especifico.
             # Si el producto esta vacio, no podemos consultar nada -> fallback.
             if needs_producto and (not valid_args.get("producto") or not str(valid_args.get("producto", "")).strip()):
@@ -1131,6 +1158,8 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
                     return "No entendí la superficie de la parcela. ¿Podrías repetir cuántas hectáreas son?"
                 if not str(valid_args.get("comuna", "")).strip():
                     return "No entendí en qué comuna está la parcela. ¿Podrías repetirla?"
+            if name == "get_directorio_agricola" and not str(valid_args.get("comuna", "")).strip():
+                return "Necesito el nombre de una comuna para buscar el directorio agrícola."
             # Mercado/dias son opcionales: cada handler aplica su default.
 
             session = SessionLocal()
@@ -1155,7 +1184,7 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
         else:
             logger.info("Tool ejecutada")
         # Cachear resultado para evitar futuras llamadas al LLM.
-        if name in cacheable:
+        if cache_enabled:
             _tool_cache.set(name, str(result), **valid_args)
         return str(result)
     except (RuntimeError, ValueError, OSError, SQLAlchemyError) as exc:
@@ -1344,7 +1373,7 @@ def _build_messages(
         system_tip: Instrucción adicional opcional para el system prompt.
         consulta_tipo: Tipo detectado por el pipeline ("precio", "clima",
                        "ambos", "desconocido"). Recorta el bloque de tools al
-                       dominio consultado. None o desconocido = las 10 tools.
+                       dominio consultado. None o desconocido = todas las tools.
     """
     # El bloque de tools va inmediatamente despues del system prompt para que el
     # prefijo quede estable y reusable por el cache KV. Todo lo variable

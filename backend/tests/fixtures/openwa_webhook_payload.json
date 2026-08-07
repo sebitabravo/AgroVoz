@@ -104,5 +104,31 @@
         "data": "/9j/4AAQSkZJRg=="
       }
     }
+  },
+  "location_message": {
+    "event": "message.received",
+    "timestamp": "2026-06-21T20:07:14.448Z",
+    "sessionId": "56aa0085-8eb7-4b3c-a353-7e7b57b094a1",
+    "idempotencyKey": "msg_test_location_001",
+    "deliveryId": "dlv_test_location_001",
+    "data": {
+      "id": "false_test_location_001",
+      "from": "248069442560050@lid",
+      "to": "56900000000@c.us",
+      "chatId": "248069442560050@lid",
+      "body": "",
+      "type": "location",
+      "timestamp": 1782072434,
+      "fromMe": false,
+      "isGroup": false,
+      "isStatusBroadcast": false,
+      "isLidSender": true,
+      "contact": {
+        "name": "Test User",
+        "pushName": "Test User"
+      },
+      "lat": -38.2412,
+      "lng": -72.6911
+    }
   }
 }

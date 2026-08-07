@@ -14,12 +14,13 @@ import threading
 import time
 import weakref
 from collections.abc import Awaitable, Callable
+from urllib.parse import parse_qs
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
-from starlette.types import ASGIApp
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.config import settings
 
@@ -27,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 # Tamaño máximo de body para webhooks (10 MB). Previene DoS por RAM bombing.
 MAX_WEBHOOK_BODY_SIZE = 10 * 1024 * 1024
+_VISION_MULTIPART_OVERHEAD_BYTES = 64 * 1024
+_VISION_UPLOAD_PATH = "/api/v1/vision/identify"
 
 # Hosts permitidos para TrustedHostMiddleware.
 # El middleware se registra en main.py con esta lista.
@@ -41,6 +44,104 @@ _base_hosts: list[str] = [
 ]
 _base_hosts.extend(h.strip() for h in settings.extra_allowed_hosts.split(",") if h.strip())
 ALLOWED_HOSTS: tuple[str, ...] = tuple(_base_hosts)
+
+
+class _VisionPayloadTooLargeError(Exception):
+    """Señal interna para cortar el receive antes del parser multipart."""
+
+
+class VisionUploadGuardMiddleware:
+    """Autentica y limita el upload visual antes de que FastAPI lo materialice."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    @staticmethod
+    async def _reject(scope: Scope, receive: Receive, send: Send, status: int, detail: str) -> None:
+        response = JSONResponse(status_code=status, content={"detail": detail})
+        await response(scope, receive, send)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope.get("method") != "POST" or scope.get("path") != _VISION_UPLOAD_PATH:
+            await self.app(scope, receive, send)
+            return
+
+        if not settings.vision_enabled:
+            await self._reject(
+                scope,
+                receive,
+                send,
+                503,
+                "La identificación visual todavía no está habilitada.",
+            )
+            return
+
+        query = parse_qs(scope.get("query_string", b"").decode("ascii", errors="ignore"))
+        token = query.get("token", [""])[0]
+        from app.services.panel_service import verify_panel_token
+
+        if not token or len(token) > 160 or verify_panel_token(token) is None:
+            await self._reject(
+                scope,
+                receive,
+                send,
+                401,
+                "Link inválido o vencido. Pide uno nuevo por WhatsApp.",
+            )
+            return
+
+        max_request_bytes = settings.vision_image_max_bytes + _VISION_MULTIPART_OVERHEAD_BYTES
+        headers = dict(scope.get("headers", []))
+        declared_size = headers.get(b"content-length")
+        if declared_size is not None:
+            try:
+                parsed_size = int(declared_size)
+            except ValueError:
+                await self._reject(scope, receive, send, 400, "El tamaño de la solicitud no es válido.")
+                return
+            if parsed_size < 0:
+                await self._reject(scope, receive, send, 400, "El tamaño de la solicitud no es válido.")
+                return
+            if parsed_size > max_request_bytes:
+                await self._reject(scope, receive, send, 413, "La imagen excede el tamaño máximo permitido.")
+                return
+
+        consumed = 0
+
+        async def capped_receive() -> Message:
+            nonlocal consumed
+            message = await receive()
+            if message["type"] == "http.request":
+                consumed += len(message.get("body", b""))
+                if consumed > max_request_bytes:
+                    scope.setdefault("state", {})["vision_oversize"] = True
+                    raise _VisionPayloadTooLargeError
+            return message
+
+        oversize_response_rewritten = False
+
+        async def guarded_send(message: Message) -> None:
+            nonlocal oversize_response_rewritten
+            if message["type"] == "http.response.start":
+                state = scope.get("state", {})
+                if state.get("vision_oversize") and message["status"] != 413:
+                    # FastAPI convierte el error del parser multipart en 400;
+                    # el corte preventivo ya demostró que corresponde 413.
+                    oversize_response_rewritten = True
+                    response = JSONResponse(
+                        status_code=413,
+                        content={"detail": "La imagen excede el tamaño máximo permitido."},
+                    )
+                    await response(scope, receive, send)
+                    return
+            if oversize_response_rewritten and message["type"] == "http.response.body":
+                return
+            await send(message)
+
+        try:
+            await self.app(scope, capped_receive, guarded_send)
+        except _VisionPayloadTooLargeError:
+            await self._reject(scope, receive, send, 413, "La imagen excede el tamaño máximo permitido.")
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -72,7 +173,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
         )
-        response.headers["Permissions-Policy"] = "microphone=(), camera=(), geolocation=()"
+        # La cámara solo se habilita dentro del panel del agricultor, donde
+        # el productor inició explícitamente la captura; el resto del backend
+        # mantiene la política cerrada por defecto.
+        camera_policy = "(self)" if request.url.path.startswith("/panel/") else "()"
+        response.headers["Permissions-Policy"] = (
+            f"microphone=(), camera={camera_policy}, geolocation=()"
+        )
         return response
 
 
@@ -213,6 +320,33 @@ def validate_openwa_hmac(body: bytes, signature: str, secret: str) -> bool:
     return hmac_mod.compare_digest(expected, signature)
 
 
+async def _read_limited_webhook_body(request: Request) -> bytes:
+    """Consume el stream ASGI sin bufferizar más que el máximo permitido."""
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_size = int(content_length)
+        except ValueError as err:
+            raise HTTPException(status_code=400, detail="Content-Length inválido") from err
+        if declared_size < 0:
+            raise HTTPException(status_code=400, detail="Content-Length inválido")
+        if declared_size > MAX_WEBHOOK_BODY_SIZE:
+            raise HTTPException(status_code=413, detail="Payload demasiado grande")
+
+    body = bytearray()
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > MAX_WEBHOOK_BODY_SIZE:
+            logger.warning(
+                "Webhook rechazado: stream excede tamaño máximo — size_bytes>%d",
+                MAX_WEBHOOK_BODY_SIZE,
+            )
+            raise HTTPException(status_code=413, detail="Payload demasiado grande")
+        body.extend(chunk)
+    return bytes(body)
+
+
 async def verify_openwa_webhook(request: Request) -> dict[str, object]:
     """Dependencia de FastAPI: valida HMAC del webhook y retorna el payload parseado.
 
@@ -229,12 +363,7 @@ async def verify_openwa_webhook(request: Request) -> dict[str, object]:
         HTTPException 401: Si la firma HMAC está ausente o es inválida.
         HTTPException 400: Si el body no es JSON válido.
     """
-    body = await request.body()
-
-    # Validar tamaño máximo de payload para prevenir DoS por RAM bombing.
-    if len(body) > MAX_WEBHOOK_BODY_SIZE:
-        logger.warning("Webhook rechazado: body excede tamaño máximo — size_bytes=%d", len(body))
-        raise HTTPException(status_code=413, detail="Payload demasiado grande")
+    body = await _read_limited_webhook_body(request)
 
     # Dev mode: sin secret configurado, aceptar sin validación HMAC.
     if not settings.openwa_webhook_secret:
