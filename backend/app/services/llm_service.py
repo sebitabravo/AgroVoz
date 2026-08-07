@@ -11,6 +11,8 @@ Tools disponibles (whitelist):
    - get_weather(lat, lon)                      -> weather_service.get_weather()
    - get_pronostico(comuna, dias)               -> weather_service.get_pronostico()
    - get_clima_historico(comuna, metrica)       -> weather_service.get_clima_historico()
+   - get_clima_historico_multianual(comuna, anos, temporada, anio, metrica)
+                                                -> weather_service.get_clima_historico_multianual()
   - get_directorio_agricola(comuna, tipo)      -> directorio_agricola_service.get_directorio_agricola()
 
 Si el LLM intenta usar cualquier otra tool, se responde con texto
@@ -75,6 +77,7 @@ WHITELIST_TOOLS = frozenset(
         "get_weather",
         "get_pronostico",
         "get_clima_historico",
+        "get_clima_historico_multianual",
         "search_corpus",
         "register_expense",
         "register_parcela",
@@ -355,34 +358,50 @@ TOOLS: list[dict[str, object]] = [
         "type": "function",
         "function": {
             "name": "get_clima_historico",
-            "description": (
-                "USAR para CLIMA HISTORICO. "
-                "Cuando el agricultor pregunte como fue el clima en un periodo "
-                "pasado, la temperatura promedio del año, cuanta lluvia cayo o "
-                "cuantos dias de helada hubo. "
-                "NO usar para clima actual (usa get_weather). "
-                "SOLO INFORMA DATOS, no recomienda cuando sembrar. "
-                "Ej: 'como fue el clima el año pasado en Traiguen', "
-                "'cuanta lluvia cayo el año pasado', "
-                "'cuantos dias de helada hubo en Temuco'."
-            ),
+            "description": "Clima histórico de un año: temperatura, lluvia y heladas. No recomienda.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "comuna": {
                         "type": "string",
-                        "description": (
-                            "Nombre de la comuna chilena (ej: Traiguen, Temuco, Santiago). "
-                            "Usar Traiguen si no se especifica ubicacion."
-                        ),
+                        "description": "Comuna chilena. Default: Traiguén.",
                     },
                     "metrica": {
                         "type": "string",
-                        "description": (
-                            "Metrica opcional a enfatizar: "
-                            "'temperatura', 'lluvia', 'heladas'. "
-                            "Si no se especifica, se entrega resumen completo."
-                        ),
+                        "description": "Métrica opcional: temperatura, lluvia o heladas.",
+                    },
+                },
+                "required": ["comuna"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_clima_historico_multianual",
+            "description": "Compara clima histórico por año/temporada: temperatura, lluvia, heladas.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "comuna": {
+                        "type": "string",
+                        "description": "Comuna.",
+                    },
+                    "anos": {
+                        "type": "integer",
+                        "description": "Años (1-5).",
+                    },
+                    "temporada": {
+                        "type": "string",
+                        "description": "Temporada opc.",
+                    },
+                    "anio": {
+                        "type": "integer",
+                        "description": "Año final opc.",
+                    },
+                    "metrica": {
+                        "type": "string",
+                        "description": "Métrica opc.",
                     },
                 },
                 "required": ["comuna"],
@@ -396,8 +415,7 @@ TOOLS: list[dict[str, object]] = [
             "description": (
                 "USAR para CALCULAR CUANTO RECIBIRA el agricultor por una venta. "
                 "Cuando el agricultor mencione una cantidad de kilos a vender "
-                "(voy a vender 30 kilos de papa, a cuanto recibo por 50 kilos, "
-                "cuanto me pagan por 100 kilos de tomate). "
+                "(voy a vender 30 kilos, a cuanto recibo por 50 kilos). "
                 "EL CALCULO LO HACE LA HERRAMIENTA: nunca lo hagas tu. "
                 "Ej: 'voy a vender 30 kilos de papa', 'a cuanto recibo por 50 kilos de tomate'."
             ),
@@ -436,8 +454,7 @@ TOOLS: list[dict[str, object]] = [
                 "y monto total recibido. "
                 "NO usar para calcular cuanto recibira (usa calculate_sale_value). "
                 "Ej: 'vendi 3 sacos de papa a 150 lucas', "
-                "'me pagaron 250 mil por 4 mallas de tomate', "
-                "'recibi 100 lucas por 2 cajas de cebolla'."
+                "'me pagaron 250 mil por 4 mallas de tomate'."
             ),
             "parameters": {
                 "type": "object",
@@ -490,8 +507,7 @@ TOOLS: list[dict[str, object]] = [
                 "NO usar para precios actuales (usa get_price). "
                 "CITA la fuente y fecha que devuelve la herramienta. "
                 "Ej: 'que dice el boletin de la papa', "
-                "'cual es la tendencia del mercado', "
-                "'informacion sobre la papa en Chile'."
+                "'cual es la tendencia del mercado'."
             ),
             "parameters": {
                 "type": "object",
@@ -605,8 +621,7 @@ TOOLS: list[dict[str, object]] = [
                 "o pregunte CUANDO sembrar, cosechar o rotar. "
                 "NUNCA improvises la respuesta: esta tool resuelve contra reglas ya citadas "
                 "de INIA. Si no hay una regla que calce, dice que no tiene el dato. "
-                "Ej: 'mis papas tienen manchas en las hojas', 'cuando siembro la papa', "
-                "'que cultivo va antes de la papa'."
+                "Ej: 'mis papas tienen manchas en las hojas', 'cuando siembro la papa'."
             ),
             "parameters": {
                 "type": "object",
@@ -631,7 +646,7 @@ TOOLS: list[dict[str, object]] = [
             "description": (
                 "USAR cuando el agricultor pida VER, MANDAR o ENVIAR un resumen, panel o link "
                 "con sus datos (parcelas, alertas, comuna). "
-                "Ej: 'mandame mi resumen', 'quiero ver mis datos', 'dame el link del panel'."
+                "Ej: 'mandame mi resumen', 'dame el link del panel'."
             ),
             "parameters": {
                 "type": "object",
@@ -645,7 +660,7 @@ TOOLS: list[dict[str, object]] = [
         "function": {
             "name": "get_directorio_agricola",
             "description": (
-                "Buscar sedes INDAP, PRODESAL o cooperativas por comuna. "
+                "Sedes INDAP, PRODESAL o cooperativas por comuna. "
                 "Solo datos oficiales. Ej: 'INDAP en Traiguén'."
             ),
             "parameters": {
@@ -658,7 +673,7 @@ TOOLS: list[dict[str, object]] = [
                     "tipo": {
                         "type": "string",
                         "enum": ["indap", "prodesal", "cooperativa"],
-                        "description": "Filtro opcional.",
+                        "description": "Filtro opc.",
                     },
                 },
                 "required": ["comuna"],
@@ -689,7 +704,15 @@ _TOOLS_PRECIO = frozenset(
         "search_corpus",
     }
 )
-_TOOLS_CLIMA = frozenset({"get_weather", "get_pronostico", "get_clima_historico", "search_corpus"})
+_TOOLS_CLIMA = frozenset(
+    {
+        "get_weather",
+        "get_pronostico",
+        "get_clima_historico",
+        "get_clima_historico_multianual",
+        "search_corpus",
+    }
+)
 
 
 # Tools apagadas por feature gate: no se anuncian. Ofrecer una tool que el
@@ -978,7 +1001,12 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
     from app.services.panel_service import get_panel_link_for_llm
     from app.services.parcela_service import get_parcelas_for_llm, register_parcela_for_llm
     from app.services.rag_service import search_corpus_for_llm
-    from app.services.weather_service import get_clima_historico, get_pronostico, get_weather
+    from app.services.weather_service import (
+        get_clima_historico,
+        get_clima_historico_multianual,
+        get_pronostico,
+        get_weather,
+    )
 
     return {
         "get_price": get_price_for_llm,
@@ -989,6 +1017,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         "get_weather": get_weather,
         "get_pronostico": get_pronostico,
         "get_clima_historico": get_clima_historico,
+        "get_clima_historico_multianual": get_clima_historico_multianual,
         "search_corpus": search_corpus_for_llm,
         "register_expense": register_expense_for_llm,
         "register_parcela": register_parcela_for_llm,
@@ -1058,6 +1087,12 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
         arguments = {**arguments, "phone_hash": phone_hash}
     valid_args = _filter_handler_args(handler, arguments)
 
+    if (
+        name in ("get_clima_historico", "get_clima_historico_multianual")
+        and not str(valid_args.get("comuna", "")).strip()
+    ):
+        return "No entendí la comuna. ¿Podrías repetir dónde quieres consultar?"
+
     # Cache de resultados: evita llamadas redundantes al LLM + DB para
     # la misma consulta repetida (precios ODEPA solo cambian 1 vez al dia).
     cacheable = frozenset(
@@ -1066,6 +1101,7 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
             "get_price_history",
             "get_weather",
             "get_clima_historico",
+            "get_clima_historico_multianual",
         }
     )
     # search_corpus es tan rapido (<2ms) que no necesita cache.
@@ -1671,6 +1707,24 @@ def _mock_answer(query_text: str) -> str:
     Solo para desarrollo; en producción el modelo real debe estar cargado.
     """
     q = query_text.strip().lower()
+
+    historico_keywords = [
+        "histórico",
+        "historico",
+        "invierno",
+        "otoño",
+        "otono",
+        "primavera",
+        "verano",
+        "helada",
+        "llovió",
+        "llovio",
+    ]
+    if any(kw in q for kw in historico_keywords):
+        return (
+            "Modo de prueba: resumen histórico simulado de Traiguén, con "
+            "420 milímetros de lluvia y 14 días de helada, según OpenMeteo."
+        )
 
     # Detección de keywords de clima
     clima_keywords = [
