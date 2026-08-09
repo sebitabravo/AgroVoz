@@ -471,6 +471,40 @@ async def test_send_audio_con_lid_resuelto(
     assert post_calls[0][1]["json"]["chatId"] == "56912345678@c.us"
 
 
+@pytest.mark.asyncio
+async def test_send_file_envia_pdf_base64_y_nombre(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """send_file usa el endpoint de documentos y no expone el path local."""
+    monkeypatch.setattr(settings, "openwa_api_url", "http://openwa:2785")
+    monkeypatch.setattr(settings, "openwa_api_key", "k")
+    pdf_path = tmp_path / "reporte_temporal.pdf"
+    pdf_path.write_bytes(b"%PDF-test")
+
+    client = AsyncMock()
+    client.post.return_value = _mock_response({"status": "sent"})
+    _patch_async_client(monkeypatch, client)
+    OpenWAService._cached_session_id = "sess-1"
+
+    result = await OpenWAService().send_file(
+        "56912345678@c.us",
+        str(pdf_path),
+        "agrovoz-reporte-semanal.pdf",
+        "Reporte semanal",
+    )
+
+    assert result == {"status": "sent"}
+    client.post.assert_called_once()
+    url, kwargs = client.post.call_args.args[0], client.post.call_args.kwargs
+    assert url == "http://openwa:2785/api/sessions/sess-1/messages/send-file"
+    assert kwargs["json"]["chatId"] == "56912345678@c.us"
+    assert kwargs["json"]["filename"] == "agrovoz-reporte-semanal.pdf"
+    assert kwargs["json"]["mimetype"] == "application/pdf"
+    assert kwargs["json"]["base64"]
+    assert str(pdf_path) not in str(kwargs["json"])
+
+
 # ── Robustness: send_text con numero invalido ──────────────
 
 

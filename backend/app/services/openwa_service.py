@@ -25,6 +25,9 @@ _AUDIO_MIMETYPE_BY_SUFFIX: dict[str, str] = {
     ".amr": "audio/amr",
     ".wav": "audio/wav",
 }
+_FILE_MIMETYPE_BY_SUFFIX: dict[str, str] = {
+    ".pdf": "application/pdf",
+}
 
 
 def phone_to_chat_id(target: str) -> str:
@@ -73,6 +76,16 @@ def _audio_file_to_base64_payload(audio_path: str) -> dict[str, str]:
     audio_data = b64encode(path.read_bytes()).decode("ascii")
     return {
         "base64": audio_data,
+        "mimetype": mimetype,
+    }
+
+
+def _file_to_base64_payload(file_path: str) -> dict[str, str]:
+    """Codifica un documento local para el endpoint ``send-file`` de Open-WA."""
+    path = Path(file_path)
+    mimetype = _FILE_MIMETYPE_BY_SUFFIX.get(path.suffix.lower(), "application/octet-stream")
+    return {
+        "base64": b64encode(path.read_bytes()).decode("ascii"),
         "mimetype": mimetype,
     }
 
@@ -390,6 +403,55 @@ class OpenWAService:
         except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
             logger.error(
                 "Error enviando audio — error=%s",
+                type(exc).__name__,
+            )
+            raise
+
+    async def send_file(
+        self,
+        target: str,
+        file_path: str,
+        file_name: str | None = None,
+        caption: str | None = None,
+    ) -> dict[str, object]:
+        """Envía un documento local a WhatsApp usando ``sendFile`` de Open-WA.
+
+        Open-WA y el backend corren en contenedores distintos, por eso se
+        envían bytes base64 en vez de un path local que el gateway no podría
+        leer. El caller conserva la responsabilidad de borrar el temporal.
+        """
+        try:
+            final_target = target
+            if target.endswith("@lid"):
+                resolved_phone = await self.resolve_contact_phone(target)
+                if resolved_phone:
+                    final_target = f"{resolved_phone}@c.us"
+                else:
+                    logger.warning("No se pudo resolver LID — estado=fallback_original")
+
+            session_id = await self._resolve_session_id()
+            path = Path(file_path)
+            safe_file_name = Path(file_name or path.name).name
+            if not safe_file_name:
+                raise ValueError("El nombre del archivo no puede estar vacío")
+
+            url = f"{self._base_url}/api/sessions/{session_id}/messages/send-file"
+            payload: dict[str, object] = {
+                "chatId": phone_to_chat_id(final_target),
+                "filename": safe_file_name,
+                **_file_to_base64_payload(file_path),
+            }
+            if caption:
+                payload["caption"] = caption
+
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.post(url, headers=self._headers(), json=payload)
+                response.raise_for_status()
+                logger.info("Archivo enviado — file=%s", safe_file_name)
+                return dict(response.json())
+        except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
+            logger.error(
+                "Error enviando archivo — error=%s",
                 type(exc).__name__,
             )
             raise

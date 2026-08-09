@@ -55,6 +55,7 @@ _CONSULTATION_HISTORY_PURGE_INTERVAL_SECONDS = 24 * 60 * 60
 _CONSULTATION_STAGING_CLEANUP_INTERVAL_SECONDS = 60 * 60
 _EXPENSE_PURGE_INTERVAL_SECONDS = 24 * 60 * 60
 _PARCELA_PURGE_INTERVAL_SECONDS = 24 * 60 * 60
+_REPORT_TEMP_PURGE_INTERVAL_SECONDS = 60 * 60
 _LOCATION_PURGE_INTERVAL_SECONDS = 24 * 60 * 60
 
 # ContextVar para propagar el request_id a los logs.
@@ -245,6 +246,26 @@ async def _parcela_purge_scheduler() -> None:
         await asyncio.sleep(_PARCELA_PURGE_INTERVAL_SECONDS)
 
 
+async def _report_temp_purge_scheduler() -> None:
+    """Elimina cada hora PDFs vencidos aun con el feature gate apagado."""
+    from app.services.report_service import purge_stale_reports
+
+    while True:
+        try:
+            records_deleted = await asyncio.to_thread(purge_stale_reports)
+            logger.info(
+                "Reportes scheduler: purga temporal OK — %d archivos",
+                records_deleted,
+            )
+        except Exception as exc:
+            logger.error(
+                "Reportes scheduler: error inesperado — error=%s",
+                type(exc).__name__,
+            )
+
+        await asyncio.sleep(_REPORT_TEMP_PURGE_INTERVAL_SECONDS)
+
+
 async def _location_purge_scheduler() -> None:
     """Purga diariamente los pins GPS vencidos según su timestamp de actualización."""
     from app.services.location_service import LocationOperationError, purge_expired_locations
@@ -307,6 +328,14 @@ def _start_parcela_purge_scheduler() -> asyncio.Task[None]:
     return asyncio.create_task(
         _parcela_purge_scheduler(),
         name="parcela-ttl",
+    )
+
+
+def _start_report_temp_purge_scheduler() -> asyncio.Task[None]:
+    """Crea siempre la purga de PDFs para cubrir reinicios abruptos."""
+    return asyncio.create_task(
+        _report_temp_purge_scheduler(),
+        name="report-temp-ttl",
     )
 
 
@@ -396,11 +425,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     staging_cleanup_task = _start_consultation_staging_cleanup_scheduler()
     expense_purge_task = _start_expense_purge_scheduler()
     parcela_purge_task = _start_parcela_purge_scheduler()
+    report_temp_purge_task = _start_report_temp_purge_scheduler()
     location_purge_task = _start_location_purge_scheduler()
 
     yield
 
     logger.info("AgroVoz deteniendo — liberando conexiones")
+    await _cancel_background_task(report_temp_purge_task)
     await _cancel_background_task(parcela_purge_task)
     await _cancel_background_task(location_purge_task)
     await _cancel_background_task(expense_purge_task)

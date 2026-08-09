@@ -308,6 +308,7 @@ class AudioService:
 
         ogg_path: Path | None = None
         wav_path: Path | None = None
+        report_pdf_path: Path | None = None
 
         try:
             # Validar bytes de audio antes de cualquier procesamiento
@@ -379,6 +380,7 @@ class AudioService:
             )
 
             consultation_id = pipeline_result.consultation_id
+            report_pdf_path = Path(pipeline_result.report_pdf_path) if pipeline_result.report_pdf_path else None
             response_ogg_path: str | None = pipeline_result.audio_path if pipeline_result.audio_path else None
             has_primary_response = response_ogg_path is not None
 
@@ -427,8 +429,24 @@ class AudioService:
             if pipeline_result.es_primer_contacto:
                 await self._enviar_aviso_responsabilidad(openwa, chat_id, request_id)
 
-            # Enviar respuesta de audio
-            if response_ogg_path:
+            # Un reporte se adjunta antes de verbalizar que quedó listo. Así un
+            # fallo de Open-WA no deja una confirmación falsa en el chat.
+            report_sent = True
+            if report_pdf_path is not None:
+                report_sent = await self._enviar_reporte_pdf(openwa, chat_id, report_pdf_path, request_id)
+                report_pdf_path = None
+                if not report_sent:
+                    await _mark_delivery_failed(consultation_id, "openwa_send_failed")
+                    try:
+                        await openwa.send_text(
+                            chat_id,
+                            "No pude adjuntar el reporte ahora. ¿Probamos de nuevo más tarde?",
+                        )
+                    except (httpx.HTTPError, OSError, RuntimeError, TypeError, ValueError):
+                        logger.warning("Aviso de fallo del reporte no enviado — request_id=%s", request_id)
+
+            # Enviar respuesta de audio solo si el adjunto requerido llegó.
+            if response_ogg_path and report_sent:
                 try:
                     await openwa.send_audio(chat_id, response_ogg_path)
                     if has_primary_response:
@@ -459,6 +477,8 @@ class AudioService:
                     # (P2: cleanup garantizado, no solo en path exitoso)
                     if response_ogg_path != str(_HELLO_OGG_PATH):
                         Path(response_ogg_path).unlink(missing_ok=True)
+            elif response_ogg_path and response_ogg_path != str(_HELLO_OGG_PATH):
+                Path(response_ogg_path).unlink(missing_ok=True)
 
             # Limpiar indicador "grabando..." SIEMPRE (fix #105: evita que
             # quede activo cuando response_ogg_path es None — ej: hello.ogg
@@ -506,6 +526,8 @@ class AudioService:
                 ogg_path.unlink(missing_ok=True)
             if wav_path is not None:
                 wav_path.unlink(missing_ok=True)
+            if report_pdf_path is not None:
+                report_pdf_path.unlink(missing_ok=True)
 
     @staticmethod
     async def _enviar_fuentes_indap(
@@ -530,6 +552,26 @@ class AudioService:
             logger.info("Fuentes INDAP enviadas — code=indap_sources_sent")
         except (httpx.HTTPError, OSError, RuntimeError, TypeError, ValueError):
             logger.warning("Fuentes INDAP no enviadas — code=indap_sources_send_failed")
+
+    @staticmethod
+    async def _enviar_reporte_pdf(
+        openwa: OpenWAService,
+        chat_id: str,
+        report_path: Path,
+        request_id: str,
+    ) -> bool:
+        """Envía el PDF, informa el resultado y siempre elimina el temporal."""
+        from app.services.report_service import REPORT_CAPTION, REPORT_FILENAME
+
+        try:
+            await openwa.send_file(chat_id, str(report_path), REPORT_FILENAME, REPORT_CAPTION)
+            logger.info("Reporte PDF enviado — request_id=%s", request_id)
+            return True
+        except (httpx.HTTPError, OSError, RuntimeError, TypeError, ValueError):
+            logger.warning("Reporte PDF no enviado — request_id=%s", request_id)
+            return False
+        finally:
+            report_path.unlink(missing_ok=True)
 
     @staticmethod
     async def _enviar_aviso_responsabilidad(
@@ -599,6 +641,7 @@ class AudioService:
         )
 
         openwa = OpenWAService()
+        report_pdf_path: Path | None = None
         try:
             # "typing" y no "recording": la respuesta va escrita, no es audio.
             await openwa.send_typing_indicator(chat_id, "typing")
@@ -616,12 +659,27 @@ class AudioService:
                 generar_audio=False,
             )
             consultation_id = resultado.consultation_id
+            report_pdf_path = Path(resultado.report_pdf_path) if resultado.report_pdf_path else None
 
             # Aviso de responsabilidad ANTES de la primera respuesta, igual que
             # en el camino de audio. Quien escribe no recibe bienvenida hablada,
             # pero el aviso legal aplica igual.
             if resultado.es_primer_contacto:
                 await self._enviar_aviso_responsabilidad(openwa, chat_id, request_id)
+
+            if report_pdf_path is not None:
+                report_sent = await self._enviar_reporte_pdf(openwa, chat_id, report_pdf_path, request_id)
+                report_pdf_path = None
+                if not report_sent:
+                    await _mark_delivery_failed(consultation_id, "openwa_send_failed")
+                    try:
+                        await openwa.send_text(
+                            chat_id,
+                            "No pude adjuntar el reporte ahora. ¿Probamos de nuevo más tarde?",
+                        )
+                    except (httpx.HTTPError, OSError, RuntimeError, TypeError, ValueError):
+                        logger.warning("Aviso de fallo del reporte no enviado — request_id=%s", request_id)
+                    return
 
             if resultado.text_response:
                 try:
@@ -666,6 +724,8 @@ class AudioService:
             )
             raise
         finally:
+            if report_pdf_path is not None:
+                report_pdf_path.unlink(missing_ok=True)
             try:
                 await openwa.send_typing_indicator(chat_id, "paused")
             except (httpx.HTTPError, OSError, RuntimeError):

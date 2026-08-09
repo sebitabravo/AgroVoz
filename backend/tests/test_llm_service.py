@@ -13,7 +13,7 @@ import asyncio
 import logging
 import os
 import threading
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -92,11 +92,11 @@ class TestConstantes:
         assert len(NO_RESPONSE_TEXT) > 10
         assert "reformular" in NO_RESPONSE_TEXT.lower()
 
-    def test_whitelist_dieciseis_tools(self) -> None:
+    def test_whitelist_diecisiete_tools(self) -> None:
         """Whitelist: precio, spread, historico, venta, margen, clima actual,
         pronostico, clima historico, corpus, gastos, parcelas, reglas
-        agronomicas, histórico multianual, link del panel y directorio
-        agrícola (16 tools)."""
+        agronomicas, histórico multianual, link del panel, directorio
+        agrícola y reporte PDF (17 tools)."""
         assert (
             frozenset(
                 {
@@ -115,6 +115,7 @@ class TestConstantes:
                     "get_parcelas",
                     "get_regla_agronomica",
                     "get_link_resumen",
+                    "get_reporte_pdf",
                     "get_directorio_agricola",
                 }
             )
@@ -127,8 +128,8 @@ class TestConstantes:
         # + register_expense (#170) + get_price_spread (#171) + get_pronostico
         # + register_parcela/get_parcelas (C5) + get_regla_agronomica (C1+C2)
         # + get_link_resumen (C3) + histórico multianual (#247)
-        # + get_directorio_agricola (#246)
-        assert len(TOOLS) == 16
+        # + get_directorio_agricola (#246) + get_reporte_pdf (#240)
+        assert len(TOOLS) == 17
         for tool in TOOLS:
             assert tool["type"] == "function"
             fn = tool["function"]
@@ -176,6 +177,15 @@ class TestConstantes:
             assert "get_link_resumen" not in _tool_names(_offered_tools())
         with patch.object(settings, "farmer_panel_enabled", True):
             assert "get_link_resumen" in _tool_names(_offered_tools())
+
+    def test_tool_de_reporte_pdf_apagada_por_gate_no_se_ofrece(self) -> None:
+        """El reporte no aumenta el prompt mientras el gate está apagado."""
+        from app.services.llm_service import _offered_tools, _tool_names
+
+        with patch.object(settings, "pdf_reports_enabled", False):
+            assert "get_reporte_pdf" not in _tool_names(_offered_tools())
+        with patch.object(settings, "pdf_reports_enabled", True):
+            assert "get_reporte_pdf" in _tool_names(_offered_tools())
 
     def test_seccion_de_tools_omite_la_tool_apagada(self) -> None:
         """El prefijo del prompt no gasta chars en una tool deshabilitada."""
@@ -931,6 +941,39 @@ class TestAnswerGuardasLlm:
         assert arguments_secret not in caplog.text
         assert "get_price" in caplog.text
         assert "JSONDecodeError" in caplog.text
+
+    async def test_tool_reporte_devuelve_senal_sin_promesa_del_llm(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El pipeline, no otra vuelta del modelo, recibe el intent de adjunto."""
+        from app.services.report_service import REPORT_TOOL_SIGNAL
+
+        completion = AsyncMock(
+            return_value={
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '<tool_call>{"name":"get_reporte_pdf",'
+                                '"arguments":{}}</tool_call>'
+                            )
+                        }
+                    }
+                ]
+            }
+        )
+        monkeypatch.setattr("app.services.llm_service._get_model", lambda: object())
+        monkeypatch.setattr("app.services.llm_service._run_llm_completion", completion)
+        monkeypatch.setattr(
+            "app.services.llm_service._execute_tool",
+            AsyncMock(return_value=REPORT_TOOL_SIGNAL),
+        )
+
+        result = await answer("necesito el documento que ofreciste", phone_hash="a" * 64)
+
+        assert result == REPORT_TOOL_SIGNAL
+        completion.assert_awaited_once()
 
     async def test_loop_agotado_no_loguea_query_ni_tool_call(
         self,

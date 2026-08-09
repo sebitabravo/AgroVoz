@@ -236,6 +236,10 @@ class Settings(BaseSettings):
     # responsabilidad si un diagnóstico resulta incorrecto: queda apagada
     # hasta que el equipo valide el corpus y el matching con productores.
     agronomic_rules_enabled: bool = False
+    # Reporte semanal PDF de precios y clima (#240). El archivo es temporal y
+    # se elimina después de que Open-WA confirma el envío; queda apagado hasta
+    # validar el formato y el flujo completo con productores.
+    pdf_reports_enabled: bool = False
 
     # ── Logging ──────────────────────────
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"

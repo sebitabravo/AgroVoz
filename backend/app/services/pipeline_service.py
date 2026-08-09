@@ -508,6 +508,40 @@ class AgroVozPipeline:
         return any(kw in q for kw in resumen_keywords)
 
     @staticmethod
+    def _is_reporte_pdf_query(query_text: str) -> bool:
+        """Detecta pedidos explícitos de un documento semanal.
+
+        La detección ocurre antes del resumen hablado para que frases como
+        ``mándame un resumen de la semana`` generen un archivo, mientras que
+        el comando corto ``resumen`` conserva su comportamiento histórico.
+        """
+        decomposed = unicodedata.normalize("NFD", query_text.casefold())
+        normalized = "".join(char for char in decomposed if unicodedata.category(char) != "Mn")
+        normalized = " ".join("".join(char if char.isalnum() else " " for char in normalized).split())
+
+        if any(phrase in normalized for phrase in ("no quiero", "no necesito", "no me mandes", "sin reporte")):
+            return False
+        if any(keyword in normalized for keyword in ("pdf", "reporte", "informe")):
+            return True
+        if "resumen" not in normalized:
+            return False
+        return any(keyword in normalized for keyword in ("semana", "precios y clima", "precio y clima"))
+
+    @staticmethod
+    async def _generate_report_response(phone_hash: str) -> tuple[str, str | None]:
+        """Genera el archivo PDF y devuelve el texto corto para WhatsApp."""
+        from app.services.report_service import ReportGenerationError, generate_weekly_report
+
+        try:
+            report_path = await generate_weekly_report(phone_hash)
+        except ReportGenerationError:
+            logger.warning("Reporte PDF no disponible — identidad seudonimizada")
+            if settings.pdf_reports_enabled:
+                return "No pude generar el reporte ahora. ¿Probamos de nuevo más tarde?", None
+            return "Los reportes PDF todavía no están habilitados.", None
+        return "Listo, te envío el reporte semanal en PDF.", str(report_path)
+
+    @staticmethod
     def _is_explicit_history_query(query_text: str) -> bool:
         """Detecta únicamente pedidos inequívocos de la consulta anterior."""
         decomposed = unicodedata.normalize("NFD", query_text.casefold())
@@ -1275,6 +1309,7 @@ class AgroVozPipeline:
         llm_ms_ref = [0]
         tts_ms_ref = [0]
         welcome_ogg_ref: list[str | None] = [None]
+        report_pdf_ref: list[str | None] = [None]
         primer_contacto_ref: list[bool] = [False]
         conversation_lease, conversation_busy = _claim_conversation(chat_id_hash)
 
@@ -1310,6 +1345,7 @@ class AgroVozPipeline:
                         llm_ms_ref=llm_ms_ref,
                         tts_ms_ref=tts_ms_ref,
                         welcome_ogg_ref=welcome_ogg_ref,
+                        report_pdf_ref=report_pdf_ref,
                         primer_contacto_ref=primer_contacto_ref,
                         texto_directo=texto_directo,
                         generar_audio=generar_audio,
@@ -1342,8 +1378,15 @@ class AgroVozPipeline:
 
             if conversation_lease is not None and conversation_lease.transition(ConversationState.ESPERANDO_CONSULTA):
                 conversation_lease.finish()
+            # Solo al devolver AudioResponse se transfiere el ownership del PDF
+            # al caller, que lo elimina después de intentar el envío.
+            report_pdf_ref[0] = None
             return response
         finally:
+            # Si el pipeline fue cancelado, expiró o falló después de crear el
+            # reporte, el path nunca llegó a AudioService: todavía es nuestro.
+            if report_pdf_ref[0]:
+                Path(report_pdf_ref[0]).unlink(missing_ok=True)
             # En timeout, cancelación o excepción se retira solo la sesión que
             # aún pertenece a esta lease. Una sesión reemplazante queda intacta.
             if conversation_lease is not None:
@@ -1362,6 +1405,7 @@ class AgroVozPipeline:
         llm_ms_ref: list[int],
         tts_ms_ref: list[int],
         welcome_ogg_ref: list[str | None],
+        report_pdf_ref: list[str | None],
         primer_contacto_ref: list[bool],
         texto_directo: str | None = None,
         generar_audio: bool = True,
@@ -1507,6 +1551,7 @@ class AgroVozPipeline:
         response_text = ""
         intent: Intent = "desconocido"
         producto: str | None = None
+        report_pdf_path: str | None = None
         t_llm_start = time.monotonic()
 
         if transcribed_text and transcribed_text.strip():
@@ -1560,13 +1605,27 @@ class AgroVozPipeline:
                     # Extraer producto antes de generar respuesta (para guardar en consulta).
                     producto = self._extract_producto(transcribed_text)
 
-                    # _generate_response detecta internally si es resumen o LLM,
-                    # maneja su propia lógica y error handling.
-                    # Se captura COMO se genero la respuesta para que el log no
-                    # mienta: antes decia "Respuesta LLM generada" incluso cuando
-                    # respondio el fast-path sin tocar el LLM.
                     origen_ref: list[str] = ["desconocido"]
-                    response_text, intent = await self._generate_response(transcribed_text, chat_id_hash, origen_ref)
+                    if settings.pdf_reports_enabled and self._is_reporte_pdf_query(transcribed_text):
+                        response_text, report_pdf_path = await self._generate_report_response(chat_id_hash)
+                        report_pdf_ref[0] = report_pdf_path
+                        intent = "resumen"
+                        origen_ref[0] = "reporte_pdf"
+                    else:
+                        # _generate_response detecta internamente si es resumen o LLM,
+                        # maneja su propia lógica y error handling.
+                        response_text, intent = await self._generate_response(
+                            transcribed_text,
+                            chat_id_hash,
+                            origen_ref,
+                        )
+                        from app.services.report_service import REPORT_TOOL_SIGNAL
+
+                        if response_text == REPORT_TOOL_SIGNAL:
+                            response_text, report_pdf_path = await self._generate_report_response(chat_id_hash)
+                            report_pdf_ref[0] = report_pdf_path
+                            intent = "resumen"
+                            origen_ref[0] = "reporte_pdf_tool"
                     llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
 
                     if intent == "resumen":
@@ -1692,4 +1751,5 @@ class AgroVozPipeline:
             tts_ms=tts_ms_ref[0],
             welcome_audio_path=welcome_ogg_ref[0],
             es_primer_contacto=primer_contacto_ref[0],
+            report_pdf_path=report_pdf_path,
         )

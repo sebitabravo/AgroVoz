@@ -14,6 +14,7 @@ Tools disponibles (whitelist):
    - get_clima_historico_multianual(comuna, anos, temporada, anio, metrica)
                                                 -> weather_service.get_clima_historico_multianual()
   - get_directorio_agricola(comuna, tipo)      -> directorio_agricola_service.get_directorio_agricola()
+   - get_reporte_pdf()                          -> report_service.get_reporte_pdf_for_llm()
 
 Si el LLM intenta usar cualquier otra tool, se responde con texto
 de fallback. Si no entiende la query, pide reformular.
@@ -84,6 +85,7 @@ WHITELIST_TOOLS = frozenset(
         "get_parcelas",
         "get_regla_agronomica",
         "get_link_resumen",
+        "get_reporte_pdf",
         "get_directorio_agricola",
     }
 )
@@ -658,6 +660,23 @@ TOOLS: list[dict[str, object]] = [
     {
         "type": "function",
         "function": {
+            "name": "get_reporte_pdf",
+            "description": (
+                "USAR cuando el agricultor pida que le MANDES un REPORTE, INFORME "
+                "o PDF semanal con precios y clima. No inventes datos: la herramienta "
+                "arma el documento con ODEPA y OpenMeteo y lo envía por WhatsApp. "
+                "Ej: 'mándame el reporte de la semana', 'envíame un PDF de precios y clima'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_directorio_agricola",
             "description": (
                 "Sedes INDAP, PRODESAL o cooperativas por comuna. "
@@ -701,6 +720,7 @@ _TOOLS_PRECIO = frozenset(
         "calculate_sale_value",
         "calculate_margin",
         "register_expense",
+        "get_reporte_pdf",
         "search_corpus",
     }
 )
@@ -710,6 +730,7 @@ _TOOLS_CLIMA = frozenset(
         "get_pronostico",
         "get_clima_historico",
         "get_clima_historico_multianual",
+        "get_reporte_pdf",
         "search_corpus",
     }
 )
@@ -724,6 +745,7 @@ _GATED_TOOLS: dict[str, Callable[[], bool]] = {
     "get_parcelas": lambda: settings.parcela_tracking_enabled,
     "get_regla_agronomica": lambda: settings.agronomic_rules_enabled,
     "get_link_resumen": lambda: settings.farmer_panel_enabled,
+    "get_reporte_pdf": lambda: settings.pdf_reports_enabled,
 }
 
 
@@ -1001,6 +1023,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
     from app.services.panel_service import get_panel_link_for_llm
     from app.services.parcela_service import get_parcelas_for_llm, register_parcela_for_llm
     from app.services.rag_service import search_corpus_for_llm
+    from app.services.report_service import get_reporte_pdf_for_llm
     from app.services.weather_service import (
         get_clima_historico,
         get_clima_historico_multianual,
@@ -1024,6 +1047,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         "get_parcelas": get_parcelas_for_llm,
         "get_regla_agronomica": get_agronomic_rule_for_llm,
         "get_link_resumen": get_panel_link_for_llm,
+        "get_reporte_pdf": get_reporte_pdf_for_llm,
         "get_directorio_agricola": get_directorio_agricola,
     }
 
@@ -1079,6 +1103,7 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
             "register_parcela",
             "get_parcelas",
             "get_link_resumen",
+            "get_reporte_pdf",
             "get_weather",
             "get_pronostico",
         )
@@ -1539,6 +1564,11 @@ async def answer(
 
                 # Ejecutar tool.
                 tool_result = await _execute_tool(fn_name, fn_args, phone_hash=phone_hash)
+                if fn_name == "get_reporte_pdf":
+                    from app.services.report_service import REPORT_TOOL_SIGNAL
+
+                    if tool_result == REPORT_TOOL_SIGNAL:
+                        return REPORT_TOOL_SIGNAL
 
                 # Envolver resultado en <tool_response> (formato nativo Qwen2.5).
                 messages.append(
@@ -1685,6 +1715,11 @@ async def answer_via_openrouter(
                     if name in WHITELIST_TOOLS
                     else FALLBACK_TEXT
                 )
+                if name == "get_reporte_pdf":
+                    from app.services.report_service import REPORT_TOOL_SIGNAL
+
+                    if result == REPORT_TOOL_SIGNAL:
+                        return REPORT_TOOL_SIGNAL
                 messages.append(
                     {
                         "role": "tool",
