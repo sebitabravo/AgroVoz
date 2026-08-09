@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from app.services.indap_credit_service import (
+    _LIMITS_TEXT,
     format_indap_response_for_voice,
     get_programas_indap,
     is_programas_indap_query,
@@ -92,3 +93,44 @@ def test_resumen_general_pide_aclaracion_y_audio_no_lee_urls() -> None:
     assert "Dime cuál" in response
     assert len(voice) <= 600
     assert "https://" not in voice
+
+
+def test_audio_truncado_conserva_el_descargo_completo() -> None:
+    """El recorte a 600 caracteres nunca se come el descargo obligatorio.
+
+    Regresión: una respuesta larga (motocultivador, ~1000 chars) truncaba el
+    audio en medio del catálogo, antes de llegar al descargo que va al final
+    del texto — el agricultor escuchaba detalle de créditos sin la aclaración
+    de que AgroVoz no evalúa elegibilidad ni recomienda montos.
+    """
+    response = get_programas_indap(
+        "¿Qué subsidio o crédito hay para comprar un motocultivador?",
+        today=_CATALOG_DATE,
+    )
+    assert len(response) > 600  # confirma que el caso realmente ejercita el truncado
+
+    voice = format_indap_response_for_voice(response)
+
+    assert len(voice) <= 600
+    assert _LIMITS_TEXT in voice
+
+
+@pytest.mark.parametrize(
+    "consulta",
+    [
+        "soy elegible para el SAT?",
+        "que monto me dan en el PRODESAL",
+    ],
+)
+def test_pregunta_de_elegibilidad_no_devuelve_ficha_de_programa(consulta: str) -> None:
+    """get_programas_indap rechaza preguntas de elegibilidad/monto, no las responde.
+
+    Regresión: el fast-path de programas corre antes que get_indap_credit_referral
+    en el pipeline y no revisaba _ADVICE_MARKERS, así que "soy elegible para el
+    SAT" devolvía la ficha del programa en vez de la negativa explícita — rozando
+    evaluar elegibilidad o recomendar un instrumento (decisión #21).
+    """
+    response = get_programas_indap(consulta, today=_CATALOG_DATE)
+
+    assert "no puede decir si calificas" in response
+    assert "Fuente oficial INDAP:" not in response

@@ -103,6 +103,10 @@ _OUT_OF_SCOPE_RESPONSE = (
     "de consumo. Solo deriva a información pública de financiamiento agrícola "
     f"de INDAP. {_LIMITS_TEXT}"
 )
+_PROGRAM_ADVICE_REFUSAL = (
+    f"{_LIMITS_TEXT} La acreditación tampoco garantiza acceso a un instrumento. "
+    f"{_LOCAL_OFFICE_TEXT}"
+)
 _PROGRAM_REQUIRED_IDS = frozenset(
     {
         "programa_desarrollo_inversiones",
@@ -390,15 +394,36 @@ def is_programas_indap_query(query_text: str) -> bool:
 
 
 def format_indap_response_for_voice(text: str, max_chars: int = 600) -> str:
-    """Quita URLs del audio y acota la locución; las fuentes van por texto."""
+    """Quita URLs del audio y acota la locución; las fuentes van por texto.
+
+    El descargo obligatorio (``_LIMITS_TEXT``) nunca se trunca: si el texto
+    excede el límite, se acorta el contenido ANTERIOR al descargo y este se
+    conserva completo al final. Sin esto, un catálogo largo podía cortar la
+    aclaración de que AgroVoz no evalúa elegibilidad ni recomienda montos.
+    """
     without_urls = _URL_RE.sub("", text)
     normalized = " ".join(without_urls.split())
     if len(normalized) <= max_chars:
         return normalized
-    cutoff = normalized.rfind(". ", 0, max_chars)
-    if cutoff < max_chars // 2:
-        cutoff = max_chars - 1
-    return normalized[: cutoff + 1].rstrip() + ("" if normalized[cutoff] == "." else ".")
+
+    disclaimer_start = normalized.find(_LIMITS_TEXT)
+    if disclaimer_start == -1:
+        cutoff = normalized.rfind(". ", 0, max_chars)
+        if cutoff < max_chars // 2:
+            cutoff = max_chars - 1
+        return normalized[: cutoff + 1].rstrip() + ("" if normalized[cutoff] == "." else ".")
+
+    disclaimer = normalized[disclaimer_start:]
+    prefix = normalized[:disclaimer_start].rstrip()
+    prefix_budget = max(max_chars - len(disclaimer) - 1, 0)
+    if len(prefix) > prefix_budget:
+        cutoff = prefix.rfind(". ", 0, prefix_budget)
+        if cutoff < prefix_budget // 2:
+            cutoff = max(prefix_budget - 1, 0)
+        prefix = prefix[: cutoff + 1].rstrip()
+        if prefix and not prefix.endswith("."):
+            prefix += "."
+    return f"{prefix} {disclaimer}".strip()
 
 
 def _format_programs(catalog: _CreditCatalog, query: str) -> str:
@@ -450,6 +475,8 @@ def get_programas_indap(
     normalized_query = _normalizar(consulta)
     if any(marker in normalized_query for marker in _OUT_OF_SCOPE_MARKERS):
         return _OUT_OF_SCOPE_RESPONSE
+    if any(marker in normalized_query for marker in _ADVICE_MARKERS):
+        return _PROGRAM_ADVICE_REFUSAL
 
     effective_today = today or date.today()
     effective_path = corpus_path or _PROGRAMS_CORPUS_PATH
