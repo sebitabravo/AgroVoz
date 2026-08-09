@@ -399,7 +399,7 @@ class LlmWorkerManager:
                     "worker_timeout" if process.is_alive() else "worker_crashed"
                 )
                 self._last_error_code = error_code
-                self._dispose_locked(terminate=True)
+                self._dispose_locked(terminate=True, force=True)
                 if error_code == "worker_timeout":
                     raise LlmWorkerTimeoutError(error_code)
                 raise LlmWorkerCrashedError(error_code)
@@ -445,8 +445,14 @@ class LlmWorkerManager:
             and self._connection is not None
         )
 
-    def _dispose_locked(self, *, terminate: bool) -> None:
-        """Libera handles con el lock de estado ya adquirido."""
+    def _dispose_locked(self, *, terminate: bool, force: bool = False) -> None:
+        """Libera handles con el lock de estado ya adquirido.
+
+        ``llama.cpp`` puede quedarse ejecutando código nativo aunque Python ya
+        haya vencido el timeout. En ese caso ``SIGTERM`` no basta para liberar
+        el lock de inferencia: se usa ``SIGKILL`` inmediatamente y el siguiente
+        request puede levantar un worker limpio sin contaminar la cola.
+        """
         process = self._process
         connection = self._connection
         self._ready = False
@@ -458,6 +464,10 @@ class LlmWorkerManager:
         if process is None:
             return
         if terminate and process.is_alive():
+            if force:
+                process.kill()
+                process.join(timeout=1.0)
+                return
             process.terminate()
             process.join(timeout=1.0)
             if process.is_alive():

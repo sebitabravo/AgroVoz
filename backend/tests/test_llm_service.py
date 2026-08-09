@@ -31,6 +31,7 @@ from app.services.llm_service import (
     TOOLS,
     WHITELIST_TOOLS,
     LlmBusyError,
+    LlmCircuitOpenError,
     _build_messages,
     _execute_tool,
     _filter_handler_args,
@@ -43,6 +44,7 @@ from app.services.llm_service import (
     answer_via_openrouter,
     get_model_error,
     is_model_available,
+    preload_model,
     reset_model,
 )
 from app.services.llm_worker import LlmWorkerCrashedError
@@ -757,6 +759,29 @@ class TestAnswerGuardasLlm:
         assert heartbeat_completed is True
         assert result == FALLBACK_TEXT
 
+    async def test_fallback_keyword_precede_carga_y_timeout_del_llm(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Una consulta de precio conocida no espera el timeout del LLM."""
+        llamadas: list[str] = []
+
+        async def _forced(*args: object, **kwargs: object) -> str:
+            llamadas.append("keyword")
+            return "Papa está a 900 pesos el kilo según ODEPA."
+
+        def _get_model_no_deberia_correr() -> object:
+            llamadas.append("modelo")
+            raise AssertionError("el preflight debía responder antes de cargar el modelo")
+
+        monkeypatch.setattr("app.services.llm_service._force_keyword_tool", _forced)
+        monkeypatch.setattr("app.services.llm_service._get_model", _get_model_no_deberia_correr)
+
+        result = await answer("a cuanto esta la papa", consulta_tipo="precio")
+
+        assert result == "Papa está a 900 pesos el kilo según ODEPA."
+        assert llamadas == ["keyword"]
+
     async def test_answer_delega_inferencia_al_worker(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -827,6 +852,27 @@ class TestAnswerGuardasLlm:
 
         result = await answer("consulta sin producto ni clima")
         assert "procesando otra consulta" in result.lower()
+
+    async def test_circuito_abierto_no_contamina_con_mensaje_de_cola(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Tras un timeout, una consulta siguiente falla cerrada y no dice "ocupado"."""
+
+        async def _raise_circuit(*args: object, **kwargs: object) -> object:
+            raise LlmCircuitOpenError("llm_circuit_open")
+
+        async def _forced_none(*args: object, **kwargs: object) -> str | None:
+            return None
+
+        monkeypatch.setattr("app.services.llm_service._get_model", lambda: object())
+        monkeypatch.setattr("app.services.llm_service._run_llm_completion", _raise_circuit)
+        monkeypatch.setattr("app.services.llm_service._force_keyword_tool", _forced_none)
+
+        result = await answer("consulta sin producto ni clima")
+
+        assert result == FALLBACK_TEXT
+        assert "procesando otra consulta" not in result.lower()
 
     async def test_error_runtime_llm_prioriza_fallback_determinista(
         self,
@@ -1035,6 +1081,22 @@ class TestAnswerGuardasLlm:
 
 class TestUtilidades:
     """is_model_available, get_model_error, reset_model."""
+
+    def test_preload_wait_confirma_carga_antes_de_retornar(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El lifespan puede esperar el handshake sin crear un thread suelto."""
+        llamadas: list[str] = []
+
+        def _fake_get_model() -> None:
+            llamadas.append("cargado")
+
+        monkeypatch.setattr("app.services.llm_service._get_model", _fake_get_model)
+
+        preload_model(wait=True)
+
+        assert llamadas == ["cargado"]
 
     def test_is_model_available_sin_modelo(self) -> None:
         """Sin modelo cargado, is_model_available retorna False."""

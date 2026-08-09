@@ -33,7 +33,7 @@ from app.services.conversation_state import (
     TransitionStatus,
 )
 from app.services.dataset_service import retain_audio
-from app.services.llm_keywords import _COMMON_PRODUCTS
+from app.services.llm_keywords import _COMMON_PRODUCTS, _contains_product_keyword
 from app.services.llm_service import FALLBACK_TEXT, NO_RESPONSE_TEXT
 from app.services.tts_service import PiperModelNotFoundError, TTSService
 from app.services.whisper_service import WhisperService
@@ -597,7 +597,7 @@ class AgroVozPipeline:
         # Ordenar por largo descendente para que "pimentón" matchee antes
         # que "pimenton" y "sandía" antes que "sandia".
         for product in sorted(_COMMON_PRODUCTS, key=len, reverse=True):
-            if product in q:
+            if _contains_product_keyword(q, product):
                 return product
         return None
 

@@ -7,7 +7,7 @@
 
 ### Arquitectura técnica
 
-AgroVoz es un asistente conversacional de inteligencia artificial que responde por voz a través de WhatsApp. El agricultor envía un audio con una pregunta en lenguaje natural y recibe una respuesta hablada basada en datos oficiales en tiempo real.
+AgroVoz es un asistente conversacional de inteligencia artificial que responde por voz a través de WhatsApp. El agricultor envía un audio con una pregunta en lenguaje natural y recibe una respuesta hablada basada en precios ODEPA sincronizados diariamente a las 06:00 y pronósticos de Open-Meteo actualizados.
 
 **Flujo técnico**:
 ```
@@ -71,7 +71,7 @@ Whisper, LLM y TTS corren localmente en VPS bajo control del equipo, sin depende
 
 **4. Tool Calling con fuentes oficiales: respuestas verificables, no opiniones del modelo**
 
-Como detalle de implementación (no como eje de innovación, sino como garantía de calidad), AgroVoz utiliza Tool Calling con una whitelist estricta de herramientas permitidas: únicamente consultas de lectura a ODEPA y Open-Meteo, sin capacidad de modificar datos ni ejecutar acciones no autorizadas. El LLM no "sabe" precios ni clima: los consulta desde fuentes oficiales al momento de cada consulta, y cada respuesta está respaldada por datos verificables. Si el modelo intenta usar una herramienta no autorizada o generar una respuesta sin respaldo de datos, el sistema aplica un fallback determinístico: responde con los datos disponibles o solicita reformular la pregunta. Esta arquitectura se explica en detalle en las secciones 5.1 y 5.2.
+Como detalle de implementación (no como eje de innovación, sino como garantía de calidad), AgroVoz utiliza Tool Calling con una whitelist estricta de herramientas permitidas: únicamente consultas de lectura a ODEPA y Open-Meteo, sin capacidad de modificar datos ni ejecutar acciones no autorizadas. El LLM no "sabe" precios ni clima: consulta el precio diario disponible en SQLite y el pronóstico de Open-Meteo al responder, y cada respuesta está respaldada por datos verificables. Si el modelo intenta usar una herramienta no autorizada o generar una respuesta sin respaldo de datos, el sistema aplica un fallback determinístico: responde con los datos disponibles o solicita reformular la pregunta. Esta arquitectura se explica en detalle en las secciones 5.1 y 5.2.
 
 **5. Recomendaciones solo por regla citada: el LLM nunca improvisa un consejo**
 
@@ -81,7 +81,7 @@ El equipo está compuesto exclusivamente por estudiantes de Ingeniería en Infor
 
 - **No proponemos una app móvil nativa.** Requeriría que el agricultor instale, actualice y aprenda una aplicación nueva. Solo el 41,6% de los trabajadores agrícolas usa internet de forma regular (País Digital, 2025); la app ya está en su teléfono y es lo único que usan.
 - **No proponemos IoT ni sensores en terreno.** Requieren hardware, mantenimiento, conectividad permanente y un presupuesto que la AFC no tiene. AgroVoz funciona con el micrófono que el agricultor ya posee.
-- **No proponemos inteligencia artificial generativa sin control.** El LLM no "sabe" precios ni clima: los consulta desde fuentes oficiales al momento de cada consulta. No usa conocimiento pre-entrenado, no inventa respuestas, y nunca improvisa recomendaciones agronómicas (solo verbaliza reglas determinísticas con fuente INIA/INDAP citada; sin regla vigente, informa la falta de dato).
+- **No proponemos inteligencia artificial generativa sin control.** El LLM no "sabe" precios ni clima: usa el precio ODEPA diario disponible y consulta el pronóstico de Open-Meteo para cada respuesta. No usa conocimiento pre-entrenado, no inventa respuestas, y nunca improvisa recomendaciones agronómicas (solo verbaliza reglas determinísticas con fuente INIA/INDAP citada; sin regla vigente, informa la falta de dato).
 - **No proponemos reemplazar al extensionista PRODESAL.** AgroVoz responde consultas de precios y clima que hoy quedan sin respuesta entre visitas. El extensionista sigue siendo el canal principal para asistencia técnica agronómica, crediticia y de gestión predial.
 
 ### Plan de construcción del dataset de voz rural chilena

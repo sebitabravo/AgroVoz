@@ -15,7 +15,7 @@ AgroVoz aborda la raíz económica de la pobreza rural: la asimetría de informa
 | Pérdidas post-cosecha | 14,5% | <11% | Menor desperdicio de alimento por mejores decisiones de timing de cosecha y venta |
 | Decisiones climáticas basadas en datos | 7% (planificadas) | >50% de usuarios consultan clima antes de decisiones clave | Reducción de pérdidas por eventos climáticos no anticipados |
 | Tiempo del extensionista en consultas básicas | 20-35% | <10% | Cada extensionista PRODESAL libera 4-8 horas/semana para capacitación técnica especializada |
-| Costo operativo por agricultor/mes | No existe solución equivalente | CLP 150-210 | El modelo es viable a CLP 500-1.000 de suscripción institucional (margen 58-85%) |
+| Costo operativo por agricultor/mes | No existe solución equivalente | CLP 14.364 fijos/mes y CLP 0 variable (CLP 29 por agricultor a 500 usuarios) | El modelo es viable a CLP 500-1.000 de suscripción institucional (margen bruto >97% a escala) |
 
 ### Impacto social y territorial
 
@@ -37,4 +37,3 @@ El piloto en Traiguén apunta a un impacto territorial concreto: 3-5 productores
 El detalle completo de la propuesta de valor y las fuentes de las proyecciones se encuentra en la sección 4. El análisis de sostenibilidad y la contribucion a la seguridad alimentaria se desarrolla en la sección 8.5.
 
 ---
-

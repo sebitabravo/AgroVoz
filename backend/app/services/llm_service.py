@@ -837,16 +837,22 @@ class LlmCircuitOpenError(LlmGuardError):
     """Circuit breaker activo: se evita usar LLM temporalmente."""
 
 
-def preload_model() -> None:
-    """Inicia en background el proceso que carga el modelo LLM.
+def preload_model(*, wait: bool = False) -> None:
+    """Precalienta el proceso que carga el modelo LLM.
 
     Llamar desde el ciclo de vida de FastAPI (startup) para que el modelo
     esté listo antes de que llegue la primera consulta. En VPS CX43 tarda
     ~6s cargar el GGUF de 3GB en RAM.
 
     FastAPI nunca importa ni ejecuta llama.cpp: el thread solo espera el
-    handshake del proceso ``spawn``. Si falla, ``answer`` conserva su fallback.
+    handshake del proceso ``spawn``. En el lifespan ``wait=True`` confirma el
+    handshake antes de aceptar tráfico; el dashboard conserva ``wait=False``
+    para relanzar la carga sin bloquear su request. Si falla, ``answer``
+    conserva su fallback.
     """
+    if wait:
+        _get_model()
+        return
     threading.Thread(target=_get_model, daemon=True, name="llm-preload").start()
 
 
@@ -995,6 +1001,98 @@ async def _run_llm_completion(
     _close_llm_circuit()
     return response
 
+
+async def _preflight_keyword_tool(
+    query_text: str,
+    phone_hash: str | None,
+    consulta_tipo: str | None,
+    system_tip: str | None,
+) -> str | None:
+    """Resuelve una consulta determinista antes de cargar o invocar el LLM.
+
+    El pipeline ya usa fast-path para preguntas simples. Este segundo control
+    cubre las consultas que por longitud o contexto no pasan ese gate, pero
+    cuyo resultado sigue siendo un dato crudo de ODEPA/OpenMeteo. Así no se
+    espera el timeout de 25 segundos para ejecutar una tool conocida.
+    """
+    if system_tip is not None or consulta_tipo not in {"precio", "clima"}:
+        return None
+
+    q = query_text.strip().lower()
+    if not q:
+        return None
+
+    # No adelantar una consulta compuesta o explicativa: esos casos sí pueden
+    # necesitar el razonamiento del LLM (el pipeline maneja precio + clima
+    # antes de llegar acá).
+    bloqueantes = (
+        " y ademas",
+        " y además",
+        " tambien",
+        " también",
+        " o sea",
+        " por que",
+        " por qué",
+        " porque",
+        " conviene",
+        " me sirve",
+        " comparado",
+        " diferencia",
+        " deberia",
+        " debería",
+        " recomend",
+    )
+    normalizado = f" {q.replace('¿', ' ').replace('¡', ' ')} "
+    if any(marca in normalizado for marca in bloqueantes):
+        return None
+
+    if consulta_tipo == "precio":
+        indicadores: tuple[str, ...] = (
+            "precio",
+            "cuanto",
+            "cuánto",
+            "cuesta",
+            "vale",
+            "kilo",
+            "saco",
+            "luca",
+            "peso",
+            "vender",
+            "vendi",
+            "vendí",
+            "comprar",
+            "estaba",
+            "ayer",
+            "semana pasada",
+            "hace ",
+        )
+    else:
+        indicadores = (
+            "clima",
+            "tiempo",
+            "lluvia",
+            "llover",
+            "temperatura",
+            "frio",
+            "frío",
+            "calor",
+            "helada",
+            "viento",
+            "pronostico",
+            "pronóstico",
+            "grados",
+        )
+    if not any(indicador in q for indicador in indicadores):
+        return None
+
+    try:
+        return await _force_keyword_tool(q, phone_hash=phone_hash)
+    except (SQLAlchemyError, OSError, RuntimeError, ValueError, TimeoutError) as exc:
+        logger.warning(
+            "Preflight keyword no disponible — error=%s",
+            type(exc).__name__,
+        )
+        return None
 
 # ── Tool dispatcher ─────────────────────────────────────────────────
 
@@ -1463,6 +1561,16 @@ async def answer(
     if not query_text or not query_text.strip():
         return NO_RESPONSE_TEXT
 
+    forced_preflight = await _preflight_keyword_tool(
+        query_text,
+        phone_hash,
+        consulta_tipo,
+        system_tip,
+    )
+    if forced_preflight:
+        logger.info("Fallback keyword ejecutado antes del LLM — tipo=%s", consulta_tipo)
+        return forced_preflight
+
     # La carga/reinicialización del hijo puede esperar hasta el timeout de
     # startup. Nunca bloquear el event loop del webhook mientras ocurre.
     model = await asyncio.to_thread(_get_model)
@@ -1614,6 +1722,13 @@ async def answer(
         if forced:
             return forced
         return "Estoy teniendo problemas para responder. ¿Podrías preguntar de nuevo más breve?"
+    except LlmCircuitOpenError:
+        # El timeout ya aisló y mató el proceso hijo. No devolver "ocupado"
+        # durante el cooldown: eso contaminaba las consultas siguientes con un
+        # mensaje de cola aunque el lock nativo ya estuviera liberado.
+        logger.warning("Circuit breaker LLM activo — usando respuesta degradada")
+        forced = await _force_keyword_tool(query_text, phone_hash=phone_hash)
+        return forced or FALLBACK_TEXT
     except LlmGuardError as exc:
         logger.warning(
             "LLM no disponible temporalmente — error=%s",

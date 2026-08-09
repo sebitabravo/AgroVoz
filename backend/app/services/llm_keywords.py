@@ -58,6 +58,8 @@ _COMMON_PRODUCTS = [
     "naranja",
     "limón",
     "limon",
+    "plátano",
+    "platano",
     "manzana",
     "pera",
     "kiwi",
@@ -86,7 +88,9 @@ _COMMON_PRODUCTS = [
     "apio",
     "puerro",
     "choclo",
+    "poroto verde",
     "poroto",
+    "arveja verde",
     "arveja",
     "haba",
     "pepino",
@@ -94,11 +98,19 @@ _COMMON_PRODUCTS = [
     "pimenton",
     "ají",
     "aji",
+    "maíz choclero",
+    "maiz choclero",
     "maíz",
     "maiz",
+    "lenteja",
     "trigo",
     "arroz",
 ]
+
+
+def _contains_product_keyword(query: str, product: str) -> bool:
+    """Comprueba el producto como palabra, no dentro de otra palabra."""
+    return re.search(rf"(?<!\w){re.escape(product)}(?!\w)", query) is not None
 
 # Regex determinista para detección de venta (Issue #104): captura "N kilos"
 # con producto cercano. El "de" es opcional: "50 kilos de papa" y
@@ -457,7 +469,24 @@ _PALABRAS_NO_PRODUCTO = frozenset(
 # y "vega central" no se confunda con un "vega" suelto.
 # El substring se pasa a get_price_for_llm / _find_market_record.
 _MERCADO_ALIASES: tuple[tuple[str, str], ...] = (
+    ("estación central", "vega central"),
+    ("estacion central", "vega central"),
+    ("la araucanía", "Vega Modelo de Temuco"),
+    ("la araucania", "Vega Modelo de Temuco"),
+    ("novena región", "Vega Modelo de Temuco"),
+    ("novena region", "Vega Modelo de Temuco"),
+    ("la novena", "Vega Modelo de Temuco"),
+    ("décima región", "Vega de Puerto Montt"),
+    ("decima region", "Vega de Puerto Montt"),
+    ("la décima", "Vega de Puerto Montt"),
+    ("la decima", "Vega de Puerto Montt"),
+    ("octava región", "Vega Monumental de Concepción"),
+    ("octava region", "Vega Monumental de Concepción"),
+    ("la octava", "Vega Monumental de Concepción"),
     ("vega central", "vega central"),
+    ("concepción", "vega monumental"),
+    ("concepcion", "vega monumental"),
+    ("conce", "vega monumental"),
     ("lo valledor", "valledor"),
     ("vega modelo", "vega modelo"),
     ("puerto montt", "puerto montt"),
@@ -496,6 +525,15 @@ def _extract_mercado_from_query(query: str) -> str | None:
     for alias, substring in _MERCADO_ALIASES:
         if alias in q:
             return substring
+
+    # Las comunas no son mercados en sí mismas, pero el catálogo de ODEPA sí
+    # tiene un mercado de referencia cercano para las comunas conocidas.
+    # Importar aquí evita cargar SQLAlchemy al importar el módulo de keywords.
+    from app.services.odepa_service import COMUNA_TO_MERCADO
+
+    for comuna, mercado in sorted(COMUNA_TO_MERCADO.items(), key=lambda item: len(item[0]), reverse=True):
+        if comuna in q:
+            return mercado
     return None
 
 
@@ -566,7 +604,7 @@ def _extract_product_from_query(query: str) -> str | None:
     # 1. Substring exacto: ordenar por largo descendente para que "pimentón"
     # matchee antes que "pimenton" y "sandía" antes que "sandia".
     for product in sorted(_COMMON_PRODUCTS, key=len, reverse=True):
-        if product in query_lower:
+        if _contains_product_keyword(query_lower, product):
             return product
 
     # 2. Fuzzy match como fallback: detectar typos sin strict substring match.
@@ -590,6 +628,30 @@ def _extract_product_from_query(query: str) -> str | None:
             return matches[0]
 
     return None
+
+
+def _extract_product_mentions(query: str) -> list[str]:
+    """Extrae productos en orden, conservando repeticiones por zona.
+
+    La extracción simple retorna un solo producto porque es suficiente para la
+    consulta habitual. Este helper se usa únicamente cuando aparecen varias
+    cláusulas unidas por "y", por ejemplo "papa en Temuco y tomate en Chillán".
+    """
+    query_lower = query.lower()
+    candidates = sorted(_COMMON_PRODUCTS, key=len, reverse=True)
+    matches: list[tuple[int, int, str]] = []
+    for product in candidates:
+        start = query_lower.find(product)
+        if start < 0:
+            continue
+        end = start + len(product)
+        if not _contains_product_keyword(query_lower, product):
+            continue
+        if any(start < previous_end and end > previous_start for previous_start, previous_end, _ in matches):
+            continue
+        matches.append((start, end, product))
+    matches.sort(key=lambda match: match[0])
+    return [product for _, _, product in matches]
 
 
 async def _force_sale_value_tool(query_text: str) -> str | None:
@@ -964,6 +1026,68 @@ async def _force_compound_keyword_tools(
     return "\n\n".join(blocks)
 
 
+async def _force_multi_price_tool(
+    query_text: str,
+    phone_hash: str | None = None,
+) -> str | None:
+    """Resuelve precios de varias cláusulas sin depender del LLM.
+
+    El fast-path anterior solo podía tomar el primer producto y el último
+    mercado de una pregunta compuesta. Separar cláusulas cortas mantiene el
+    flujo determinista para "papa en Temuco y tomate en Chillán" y para
+    "papa en Temuco y en Puerto Montt".
+    """
+    q = query_text.strip().lower()
+    clauses = re.split(r"\s+y\s+", q)
+    if len(clauses) < 2:
+        return None
+
+    from app.core.database import SessionLocal
+    from app.services.odepa_service import get_price_for_llm
+
+    requests: list[tuple[str, str]] = []
+    previous_product: str | None = None
+    for clause in clauses:
+        exact_products = _extract_product_mentions(clause)
+        clause_product = exact_products[0] if exact_products else None
+        market = _extract_mercado_from_query(clause) or ""
+        if clause_product is None and not market:
+            # No inventar una segunda consulta para una cláusula conversacional
+            # como "papa y clima"; requiere producto o zona explícitos.
+            continue
+        product = clause_product or previous_product
+        if product is None:
+            continue
+        previous_product = product
+        requests.append((product, market))
+
+    if len(requests) < 2:
+        return None
+
+    session = SessionLocal()
+    try:
+        responses: list[str] = []
+        for product, market in requests:
+            response = await asyncio.to_thread(
+                get_price_for_llm,
+                session,
+                producto=product,
+                mercado=market,
+                phone_hash=phone_hash,
+            )
+            responses.append(response)
+        logger.info("Fallback multi-zona forzado — consultas=%d", len(responses))
+        return "\n\n".join(responses)
+    except (SQLAlchemyError, OSError, RuntimeError, ValueError) as exc:
+        logger.warning(
+            "Error DB en fallback multi-zona — error=%s",
+            type(exc).__name__,
+        )
+        return None
+    finally:
+        session.close()
+
+
 async def _force_directorio_tool(query_text: str) -> str | None:
     """Resuelve el directorio por keywords cuando el LLM no llama la tool."""
     q = query_text.strip().lower()
@@ -1035,6 +1159,10 @@ async def _force_keyword_tool(query_text: str, phone_hash: str | None = None) ->
     # comparacion de margen, no de precio actual. Extraccion heuristicamente
     # simple; el LLM es el camino principal para margin.
     forced = await _force_margin_tool(query_text)
+    if forced:
+        return forced
+
+    forced = await _force_multi_price_tool(query_text, phone_hash=phone_hash)
     if forced:
         return forced
 

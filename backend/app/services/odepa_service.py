@@ -14,6 +14,7 @@ import datetime
 import io
 import logging
 import re
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -47,6 +48,19 @@ COMUNA_TO_MERCADO: dict[str, str] = {
     "padre las casas": "Vega Modelo de Temuco",
     "nueva imperial": "Vega Modelo de Temuco",
     "lautaro": "Vega Modelo de Temuco",
+    "victoria": "Vega Modelo de Temuco",
+    "carahue": "Vega Modelo de Temuco",
+    "saavedra": "Vega Modelo de Temuco",
+    "curacautín": "Vega Modelo de Temuco",
+    "curacautin": "Vega Modelo de Temuco",
+    "freire": "Vega Modelo de Temuco",
+    "gorbea": "Vega Modelo de Temuco",
+    "perquenco": "Vega Modelo de Temuco",
+    "vilcún": "Vega Modelo de Temuco",
+    "vilcun": "Vega Modelo de Temuco",
+    "teodoro schmidt": "Vega Modelo de Temuco",
+    "toltén": "Vega Modelo de Temuco",
+    "tolten": "Vega Modelo de Temuco",
     "villarrica": "Vega Modelo de Temuco",
     "pucón": "Vega Modelo de Temuco",
     "pucon": "Vega Modelo de Temuco",
@@ -75,6 +89,8 @@ COMUNA_TO_MERCADO: dict[str, str] = {
     "san antonio": "Vega de Valparaíso",
     # Región Metropolitana
     "santiago": "Mercado Mayorista Lo Valledor de Santiago",
+    "estación central": "Vega Central",
+    "estacion central": "Vega Central",
     "maipú": "Mercado Mayorista Lo Valledor de Santiago",
     "maipu": "Mercado Mayorista Lo Valledor de Santiago",
     "puente alto": "Mercado Mayorista Lo Valledor de Santiago",
@@ -699,6 +715,37 @@ def detectar_variaciones_precio(
 # ── Funciones de consulta para Tool Calling (Issue #16) ──────────
 
 
+def _normalizar_producto_busqueda(producto: str) -> str:
+    """Quita tildes para que el habla no dependa del catálogo acentuado."""
+    descompuesto = unicodedata.normalize("NFD", producto.strip().lower())
+    return "".join(
+        caracter for caracter in descompuesto if unicodedata.category(caracter) != "Mn"
+    )
+
+
+def _variantes_producto_sin_tilde(
+    session: Session,
+    producto: str,
+    mercado_norm: str | None = None,
+) -> list[str]:
+    """Encuentra variantes acentuadas consultando solo el catálogo distinto.
+
+    SQLite no tiene una función ``unaccent`` portable. El catálogo ODEPA es
+    pequeño (79 productos), por lo que comparar sus nombres únicos en Python
+    evita recorrer todo el histórico cuando el agricultor omite una tilde.
+    """
+    q_catalogo = select(OdepaPrice.producto).distinct()
+    if mercado_norm is not None:
+        q_catalogo = q_catalogo.where(func.lower(OdepaPrice.mercado) == mercado_norm)
+
+    buscado = _normalizar_producto_busqueda(producto)
+    return [
+        nombre
+        for nombre in session.scalars(q_catalogo).all()
+        if _normalizar_producto_busqueda(nombre) == buscado
+    ]
+
+
 def query_latest_price(session: Session, producto: str, mercado: str) -> OdepaPrice | None:
     """Busca el precio más reciente para un producto en un mercado.
 
@@ -725,7 +772,24 @@ def query_latest_price(session: Session, producto: str, mercado: str) -> OdepaPr
         .order_by(OdepaPrice.fecha.desc())
         .limit(1)
     )
-    return session.scalars(q).first()
+    resultado = session.scalars(q).first()
+    if resultado is not None:
+        return resultado
+
+    # El CSV puede guardar "maíz" aunque el usuario diga "maiz".
+    variantes = _variantes_producto_sin_tilde(session, producto, mercado_norm)
+    if not variantes:
+        return None
+    q_variante = (
+        select(OdepaPrice)
+        .where(
+            OdepaPrice.producto.in_(variantes),
+            func.lower(OdepaPrice.mercado) == mercado_norm,
+        )
+        .order_by(OdepaPrice.fecha.desc())
+        .limit(1)
+    )
+    return session.scalars(q_variante).first()
 
 
 def query_latest_by_product(session: Session, producto: str) -> dict[str, OdepaPrice]:
@@ -744,6 +808,17 @@ def query_latest_by_product(session: Session, producto: str) -> dict[str, OdepaP
         .order_by(OdepaPrice.mercado, OdepaPrice.fecha.desc())
     )
     rows = session.scalars(q).all()
+    if not rows:
+        # Fallback acento-insensible acotado a los nombres distintos del CSV.
+        variantes = _variantes_producto_sin_tilde(session, producto)
+        if variantes:
+            q_variante = (
+                select(OdepaPrice)
+                .where(OdepaPrice.producto.in_(variantes))
+                .order_by(OdepaPrice.mercado, OdepaPrice.fecha.desc())
+            )
+            rows = session.scalars(q_variante).all()
+
     # Primera fila por mercado = la más reciente (orden desc por fecha)
     seen: set[str] = set()
     result: dict[str, OdepaPrice] = {}
@@ -975,8 +1050,18 @@ def get_price_for_llm(
                     )
                 return format_price_text(registro_local)
 
-        # Fallback: Lo Valledor (comportamiento original, Issue #83).
-        return format_price_text(_select_registro_referencia(precios_por_mercado))
+        # Fallback nacional: declarar la referencia evita que el productor
+        # confunda Lo Valledor con un precio local cuando no hay ubicación.
+        registro_referencia = _select_registro_referencia(precios_por_mercado)
+        referencia = (
+            "Lo Valledor de Santiago"
+            if "valledor" in registro_referencia.mercado.lower()
+            else registro_referencia.mercado
+        )
+        return (
+            f"Referencia nacional (sin mercado local): {referencia}. "
+            f"{format_price_text(registro_referencia)}"
+        )
 
     # Mercado hablado ("vega central", "valledor"): exacto o substring.
     try:

@@ -368,6 +368,9 @@ class TestExtractProducto:
     def test_sin_producto(self) -> None:
         assert AgroVozPipeline._extract_producto("clima en traiguen") is None
 
+    def test_temperatura_no_es_producto(self) -> None:
+        assert AgroVozPipeline._extract_producto("qué temperatura hace en temuco") is None
+
     def test_vacio(self) -> None:
         assert AgroVozPipeline._extract_producto("") is None
 
