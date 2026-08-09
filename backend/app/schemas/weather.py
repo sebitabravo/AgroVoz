@@ -1,4 +1,4 @@
-"""Schemas Pydantic para el endpoint de clima OpenWeatherMap.
+"""Schemas Pydantic para los endpoints de clima OpenMeteo.
 
 Issue #17: GET /api/v1/weather?lat=X&lon=Y
 """
@@ -15,23 +15,13 @@ class WeatherResponse(BaseModel):
 
     lat: float = Field(description="Latitud consultada")
     lon: float = Field(description="Longitud consultada")
-    location: str = Field(description="Nombre de la ubicación según OpenWeatherMap")
-    temperature_c: float | None = Field(
-        default=None, description="Temperatura actual en grados Celsius"
-    )
-    feels_like_c: float | None = Field(
-        default=None, description="Sensación térmica en grados Celsius"
-    )
-    humidity: int | None = Field(
-        default=None, description="Humedad relativa en porcentaje (0-100)"
-    )
+    location: str = Field(description="Nombre de la ubicación según OpenMeteo")
+    temperature_c: float | None = Field(default=None, description="Temperatura actual en grados Celsius")
+    feels_like_c: float | None = Field(default=None, description="Sensación térmica en grados Celsius")
+    humidity: int | None = Field(default=None, description="Humedad relativa en porcentaje (0-100)")
     description: str = Field(description="Descripción del clima en español")
-    wind_speed_ms: float | None = Field(
-        default=None, description="Velocidad del viento en m/s"
-    )
-    rain_1h_mm: float | None = Field(
-        default=None, description="Lluvia última hora en mm"
-    )
+    wind_speed_ms: float | None = Field(default=None, description="Velocidad del viento en m/s")
+    rain_1h_mm: float | None = Field(default=None, description="Lluvia última hora en mm")
     texto: str = Field(description="Texto natural en español chileno para TTS")
 
     model_config = {
@@ -59,21 +49,12 @@ class HistoricalYearSchema(BaseModel):
     """Resumen climático de un año específico."""
 
     year: int = Field(description="Año del resumen climático")
-    temp_promedio: float | None = Field(
-        default=None, description="Temperatura promedio anual en °C"
-    )
-    temp_max_promedio: float | None = Field(
-        default=None, description="Promedio anual de temperatura máxima en °C"
-    )
-    temp_min_promedio: float | None = Field(
-        default=None, description="Promedio anual de temperatura mínima en °C"
-    )
-    precipitacion_total_mm: float | None = Field(
-        default=None, description="Precipitación total anual en mm"
-    )
-    dias_helada: int | None = Field(
-        default=None, description="Días con temperatura mínima bajo 0°C"
-    )
+    temporada: str | None = Field(default=None, description="Temporada resumida, si la consulta la especificó")
+    temp_promedio: float | None = Field(default=None, description="Temperatura promedio anual en °C")
+    temp_max_promedio: float | None = Field(default=None, description="Promedio anual de temperatura máxima en °C")
+    temp_min_promedio: float | None = Field(default=None, description="Promedio anual de temperatura mínima en °C")
+    precipitacion_total_mm: float | None = Field(default=None, description="Precipitación total anual en mm")
+    dias_helada: int | None = Field(default=None, description="Días con temperatura mínima bajo 0°C")
 
 
 class HistoricalWeatherResponse(BaseModel):
@@ -84,15 +65,11 @@ class HistoricalWeatherResponse(BaseModel):
 
     lat: float = Field(description="Latitud consultada")
     lon: float = Field(description="Longitud consultada")
-    years_solicitados: int = Field(
-        default=1, description="Cantidad de años solicitados"
-    )
-    resumenes: list[HistoricalYearSchema] = Field(
-        description="Lista de resúmenes climáticos anuales"
-    )
-    texto: str = Field(
-        description="Texto natural en español chileno para TTS"
-    )
+    years_solicitados: int = Field(default=1, description="Cantidad de años solicitados")
+    temporada: str | None = Field(default=None, description="Temporada resumida, si corresponde")
+    anio_consultado: int | None = Field(default=None, description="Año final usado para un rango reproducible")
+    resumenes: list[HistoricalYearSchema] = Field(description="Lista de resúmenes climáticos anuales")
+    texto: str = Field(description="Texto natural en español chileno para TTS")
 
     model_config = {
         "json_schema_extra": {

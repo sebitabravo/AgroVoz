@@ -15,7 +15,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core.rate_limiter import _weather_limiter, check_weather_rate_limit
 from app.main import app
-from app.services.weather_service import WeatherData
+from app.services.weather_service import HistoricalYearSummary, WeatherData
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -31,11 +31,10 @@ def _deshabilitar_rate_limit() -> Iterator[None]:
     yield
     app.dependency_overrides.pop(check_weather_rate_limit, None)
 
+
 # ── Fixture de datos estructurados que devuelve get_weather_full ─
 
-_TEXTO_ESPERADO = (
-    "En Traiguén ahora: 18°C, nublado, humedad 65%, viento 3.6 m/s, lluvia 0.5 mm."
-)
+_TEXTO_ESPERADO = "En Traiguén ahora: 18°C, nublado, humedad 65%, viento 3.6 m/s, lluvia 0.5 mm."
 
 
 def _weather_data_para(
@@ -86,9 +85,7 @@ async def weather_client() -> AsyncIterator[AsyncClient]:
 class TestWeatherEndpoint:
     """Happy path y errores mapeados a HTTP."""
 
-    async def test_get_weather_default_coords(
-        self, weather_client: AsyncClient
-    ) -> None:
+    async def test_get_weather_default_coords(self, weather_client: AsyncClient) -> None:
         """GET sin parámetros usa Traiguén y devuelve WeatherResponse."""
         wd = _weather_data_para()
 
@@ -111,9 +108,7 @@ class TestWeatherEndpoint:
         assert body["rain_1h_mm"] == 0.5
         assert body["texto"] == _TEXTO_ESPERADO
 
-    async def test_get_weather_custom_coords(
-        self, weather_client: AsyncClient
-    ) -> None:
+    async def test_get_weather_custom_coords(self, weather_client: AsyncClient) -> None:
         """GET con coordenadas de Santiago consulta esa ubicación."""
         texto_stgo = "En Santiago ahora: 25°C, soleado, humedad 30%."
 
@@ -134,9 +129,7 @@ class TestWeatherEndpoint:
             "app.api.weather.get_weather_full",
             AsyncMock(return_value=wd),
         ):
-            response = await weather_client.get(
-                "/api/v1/weather?lat=-33.45&lon=-70.65"
-            )
+            response = await weather_client.get("/api/v1/weather?lat=-33.45&lon=-70.65")
 
         assert response.status_code == 200
         body = response.json()
@@ -145,9 +138,7 @@ class TestWeatherEndpoint:
         assert body["location"] == "Santiago"
         assert body["texto"] == texto_stgo
 
-    async def test_missing_api_key_returns_503(
-        self, weather_client: AsyncClient
-    ) -> None:
+    async def test_missing_api_key_returns_503(self, weather_client: AsyncClient) -> None:
         """ValueError → HTTP 503 (servicio no configurado)."""
         with patch(
             "app.api.weather.get_weather_full",
@@ -167,15 +158,9 @@ class TestWeatherEndpoint:
         caplog.set_level(logging.WARNING, logger="app.api.weather")
         with patch(
             "app.api.weather.get_weather_full",
-            AsyncMock(
-                side_effect=ConnectionError(
-                    "secreto-weather lat=-33.4567 lon=-70.6543"
-                )
-            ),
+            AsyncMock(side_effect=ConnectionError("secreto-weather lat=-33.4567 lon=-70.6543")),
         ):
-            response = await weather_client.get(
-                "/api/v1/weather?lat=-33.4567&lon=-70.6543"
-            )
+            response = await weather_client.get("/api/v1/weather?lat=-33.4567&lon=-70.6543")
 
         assert response.status_code == 502
         assert "no disponible" in response.json()["detail"]
@@ -183,9 +168,7 @@ class TestWeatherEndpoint:
         assert "-33.4567" not in caplog.text
         assert "-70.6543" not in caplog.text
 
-    async def test_runtime_error_returns_502(
-        self, weather_client: AsyncClient
-    ) -> None:
+    async def test_runtime_error_returns_502(self, weather_client: AsyncClient) -> None:
         """RuntimeError (ej: API key inválida) → HTTP 502."""
         with patch(
             "app.api.weather.get_weather_full",
@@ -196,9 +179,7 @@ class TestWeatherEndpoint:
         assert response.status_code == 502
         assert "no disponible" in response.json()["detail"]
 
-    async def test_wind_and_rain_null_when_missing(
-        self, weather_client: AsyncClient
-    ) -> None:
+    async def test_wind_and_rain_null_when_missing(self, weather_client: AsyncClient) -> None:
         """Sin campos wind ni rain → wind_speed_ms y rain_1h_mm son None."""
         wd = _weather_data_para(
             temperature_c=22.0,
@@ -220,3 +201,36 @@ class TestWeatherEndpoint:
         assert body["wind_speed_ms"] is None
         assert body["rain_1h_mm"] is None
         assert body["description"] == "cielo claro"
+
+    async def test_get_weather_history_accepts_temporada_y_anio(self, weather_client: AsyncClient) -> None:
+        """El endpoint expone un rango histórico reproducible por temporada."""
+        summaries = [
+            HistoricalYearSummary(
+                year=2024,
+                temp_promedio=10.0,
+                temp_max_promedio=15.0,
+                temp_min_promedio=5.0,
+                precipitacion_total_mm=120.0,
+                dias_helada=4,
+                temporada="invierno",
+            )
+        ]
+
+        with patch(
+            "app.api.weather.fetch_historico",
+            AsyncMock(return_value=summaries),
+        ) as fetch_mock:
+            response = await weather_client.get("/api/v1/weather/history?years=1&temporada=invierno&anio=2024")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["resumenes"][0]["dias_helada"] == 4
+        assert body["resumenes"][0]["temporada"] == "invierno"
+        assert body["anio_consultado"] == 2024
+        fetch_mock.assert_awaited_once_with(
+            -38.23,
+            -72.68,
+            1,
+            temporada="invierno",
+            anio=2024,
+        )

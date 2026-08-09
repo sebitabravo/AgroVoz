@@ -1,11 +1,12 @@
 """Tests de main.py — exception handler, lifespan, RequestIDMiddleware, GZipMiddleware."""
 
+import asyncio
 import datetime
 import json
 from collections.abc import Generator, Iterator
 from importlib import reload
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -306,6 +307,22 @@ async def test_lifespan_shutdown_cierra_http_client(
 
     # Después del shutdown, el cliente debe estar cerrado.
     assert ws._http_client is None or ws._http_client.is_closed
+
+
+async def test_report_temp_scheduler_purga_antes_de_dormir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """La tarea ejecuta cleanup al iniciar y conserva cancelación cooperativa."""
+    purge = Mock(return_value=2)
+    sleep = AsyncMock(side_effect=asyncio.CancelledError)
+    monkeypatch.setattr("app.services.report_service.purge_stale_reports", purge)
+    monkeypatch.setattr(app_main.asyncio, "sleep", sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await app_main._report_temp_purge_scheduler()
+
+    purge.assert_called_once_with()
+    sleep.assert_awaited_once_with(app_main._REPORT_TEMP_PURGE_INTERVAL_SECONDS)
 
 
 # ── GZipMiddleware ──────────────────────────────────────────────────

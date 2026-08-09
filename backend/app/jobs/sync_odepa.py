@@ -12,6 +12,8 @@ Ejecución manual::
 Orquestación:
 1. Descarga y carga precios ODEPA (app.services.odepa_service.sync_odepa)
 2. Evalúa alertas de precio configuradas por voz (app.services.alert_service.evaluar_alertas_precio)
+3. Detecta variaciones críticas y entrega alertas a suscriptores por cultivo
+   (app.services.alert_service.evaluar_variaciones_precio)
 
 Exit code: 0 OK, 1 error (para que cron reporte falla vía MAILTO o monitoreo).
 """
@@ -26,7 +28,7 @@ import sqlalchemy.exc
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.services.alert_service import evaluar_alertas_precio
+from app.services.alert_service import evaluar_alertas_precio, evaluar_variaciones_precio
 from app.services.odepa_service import OdepaSyncError, sync_odepa
 
 logger = logging.getLogger(__name__)
@@ -62,6 +64,19 @@ async def _ejecutar() -> int:
         except Exception as exc:
             logger.error(
                 "Error evaluando alertas de precio — error=%s",
+                type(exc).__name__,
+            )
+
+        try:
+            enviados_variacion = await evaluar_variaciones_precio(session, settings)
+            if enviados_variacion:
+                logger.info(
+                    "Alertas por variación ODEPA disparadas: %d productores notificados",
+                    len(enviados_variacion),
+                )
+        except Exception as exc:
+            logger.error(
+                "Error evaluando variaciones de precio — error=%s",
                 type(exc).__name__,
             )
         finally:

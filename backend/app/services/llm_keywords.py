@@ -11,9 +11,11 @@ fuzzy matching para tolerancia a typos en nombres de productos.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import difflib
 import logging
 import re
+import unicodedata
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
@@ -26,24 +28,76 @@ logger = logging.getLogger(__name__)
 
 # Patrones que indican que el LLM respondió sin usar herramientas.
 _GENERIC_RESPONSE_PATTERNS = [
-    "no tengo", "no entiendo", "no conozco", "no sé", "no se",
-    "reformul", "podrías repetir", "no dispongo", "sin información",
-    "sin datos", "no cuento con", "no puedo responder",
-    "lo siento", "disculpa", "no estoy seguro",
+    "no tengo",
+    "no entiendo",
+    "no conozco",
+    "no sé",
+    "no se",
+    "reformul",
+    "podrías repetir",
+    "no dispongo",
+    "sin información",
+    "sin datos",
+    "no cuento con",
+    "no puedo responder",
+    "lo siento",
+    "disculpa",
+    "no estoy seguro",
 ]
 
 # Productos agrícolas chilenos más comunes (ODEPA). Para fallback de
 # keyword detection cuando el LLM no llama get_price.
 _COMMON_PRODUCTS = [
-    "papa", "tomate", "cebolla", "lechuga", "zanahoria", "ajo",
-    "palta", "naranja", "limón", "limon", "manzana", "pera",
-    "kiwi", "uva", "durazno", "ciruela", "frutilla", "sandía",
-    "sandia", "melón", "melon", "repollo", "acelga", "espinaca",
-    "brocoli", "brócoli", "coliflor", "zapallo", "camote",
-    "betarraga", "rabanito", "rúcula", "rucula", "cilantro",
-    "perejil", "apio", "puerro", "choclo", "poroto", "arveja",
-    "haba", "pepino", "pimentón", "pimenton", "ají", "aji",
-    "maíz", "maiz", "trigo", "arroz",
+    "papa",
+    "tomate",
+    "cebolla",
+    "lechuga",
+    "zanahoria",
+    "ajo",
+    "palta",
+    "naranja",
+    "limón",
+    "limon",
+    "manzana",
+    "pera",
+    "kiwi",
+    "uva",
+    "durazno",
+    "ciruela",
+    "frutilla",
+    "sandía",
+    "sandia",
+    "melón",
+    "melon",
+    "repollo",
+    "acelga",
+    "espinaca",
+    "brocoli",
+    "brócoli",
+    "coliflor",
+    "zapallo",
+    "camote",
+    "betarraga",
+    "rabanito",
+    "rúcula",
+    "rucula",
+    "cilantro",
+    "perejil",
+    "apio",
+    "puerro",
+    "choclo",
+    "poroto",
+    "arveja",
+    "haba",
+    "pepino",
+    "pimentón",
+    "pimenton",
+    "ají",
+    "aji",
+    "maíz",
+    "maiz",
+    "trigo",
+    "arroz",
 ]
 
 # Regex determinista para detección de venta (Issue #104): captura "N kilos"
@@ -113,19 +167,136 @@ _CLIMA_FUTURO_KW = (
     "semana que viene",
 )
 
+_CLIMA_HISTORICO_KW = (
+    "histórico",
+    "historico",
+    "año pasado",
+    "ano pasado",
+    "año anterior",
+    "ano anterior",
+    "anos anteriores",
+    "años anteriores",
+    "invierno",
+    "otoño",
+    "otono",
+    "primavera",
+    "verano",
+    "heladas",
+    "llovió",
+    "llovio",
+)
+
+_HISTORICAL_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+
 # Keywords que indican consulta sobre documentos oficiales ODEPA.
 # Activan el fallback search_corpus cuando el LLM no genera tool call.
 _CORPUS_KEYWORDS = [
-    "boletin", "boletín", "documento", "informe",
-    "publicacion", "publicación",
-    "tendencia", "contexto",
-    "mercado agricola", "rubro",
-    "agricultura familiar", "pequeña agricultura", "pequena agricultura",
-    "como funciona", "como es el mercado",
-    "que dice el boletin", "que dice la odepa",
-    "información general", "informacion general",
-    "censo agropecuario", "caracterizacion",
+    "boletin",
+    "boletín",
+    "documento",
+    "informe",
+    "publicacion",
+    "publicación",
+    "tendencia",
+    "contexto",
+    "mercado agricola",
+    "rubro",
+    "agricultura familiar",
+    "pequeña agricultura",
+    "pequena agricultura",
+    "como funciona",
+    "como es el mercado",
+    "que dice el boletin",
+    "que dice la odepa",
+    "información general",
+    "informacion general",
+    "censo agropecuario",
+    "caracterizacion",
 ]
+
+# Keywords del directorio. Se resuelven antes que precio/clima cuando el LLM
+# no genera una llamada, para que una consulta de oficina siga siendo útil en
+# el piso de hardware sin pagar otra inferencia.
+_DIRECTORIO_KEYWORDS = (
+    "indap",
+    "prodesal",
+    "cooperativa",
+    "cooperativas",
+    "oficina de area",
+    "oficina de área",
+    "agencia de area",
+    "agencia de área",
+    "directorio agricola",
+    "directorio agrícola",
+)
+
+_DIRECTORIO_COMUNAS = (
+    "padre las casas",
+    "teodoro schmidt",
+    "nueva imperial",
+    "puerto saavedra",
+    "curacautin",
+    "curacautín",
+    "curarrehue",
+    "pitrufquen",
+    "pitrufquén",
+    "collipulli",
+    "villarrica",
+    "lonquimay",
+    "traiguen",
+    "traiguén",
+    "galvarino",
+    "lautaro",
+    "loncoche",
+    "puren",
+    "purén",
+    "temuco",
+    "tolten",
+    "toltén",
+    "vilcun",
+    "vilcún",
+    "angol",
+    "carahue",
+    "cunco",
+    "pucon",
+    "pucón",
+    "hualpin",
+    "hualpín",
+    "lumaco",
+    "cholchol",
+    "ercilla",
+    "melipeuco",
+    "freire",
+    "gorbea",
+    "renaico",
+    "los sauces",
+    "victoria",
+)
+
+
+def _normalizar_sin_tildes(texto: str) -> str:
+    """Normaliza texto para detectar comunas en transcripciones."""
+    decomposed = unicodedata.normalize("NFKD", texto.casefold())
+    return "".join(char for char in decomposed if not unicodedata.combining(char))
+
+
+def _extract_directorio_comuna(query: str) -> str | None:
+    """Extrae una comuna conocida para el fallback del directorio."""
+    normalized = _normalizar_sin_tildes(query)
+    for comuna in sorted(_DIRECTORIO_COMUNAS, key=len, reverse=True):
+        if _normalizar_sin_tildes(comuna) in normalized:
+            return comuna
+    return None
+
+
+def _extract_directorio_tipo(query: str) -> str | None:
+    """Determina el tipo de sede mencionado por el agricultor."""
+    normalized = _normalizar_sin_tildes(query)
+    if "cooperativ" in normalized:
+        return "cooperativa"
+    if "prodesal" in normalized:
+        return "prodesal"
+    return "indap"
 
 
 def _detect_greeting(query: str) -> bool:
@@ -148,26 +319,58 @@ def _detect_greeting(query: str) -> bool:
     """
     # Saludos multi-palabra (frases completas).
     saludos_frases = [
-        "buenos días", "buenos dias",
+        "buenos días",
+        "buenos dias",
         "buenas tardes",
         "buenas noches",
-        "buen día", "buen dia",
-        "qué tal", "que tal",
+        "buen día",
+        "buen dia",
+        "qué tal",
+        "que tal",
     ]
 
     # Saludos de una palabra.
     saludos_palabras = {
-        "hola", "hi", "ola", "aló", "alo", "hey", "holaa",
+        "hola",
+        "hi",
+        "ola",
+        "aló",
+        "alo",
+        "hey",
+        "holaa",
     }
 
     # Palabras que indican una pregunta real (no es solo saludo).
     pregunta_keywords = [
-        "precio", "cuánto", "cuanto", "cuesta", "vale",
-        "a cómo", "a como", "kilo", "saco", "malla", "caja",
-        "clima", "tiempo", "temperatura", "lluvia", "pronóstico", "pronostico",
-        "frio", "calor", "viento", "humedad",
-        "vendo", "vender", "venta", "kilos", "kg",
-        "semana pasada", "ayer", "hace",
+        "precio",
+        "cuánto",
+        "cuanto",
+        "cuesta",
+        "vale",
+        "a cómo",
+        "a como",
+        "kilo",
+        "saco",
+        "malla",
+        "caja",
+        "clima",
+        "tiempo",
+        "temperatura",
+        "lluvia",
+        "pronóstico",
+        "pronostico",
+        "frio",
+        "calor",
+        "viento",
+        "humedad",
+        "vendo",
+        "vender",
+        "venta",
+        "kilos",
+        "kg",
+        "semana pasada",
+        "ayer",
+        "hace",
     ]
 
     q = query.strip().lower()
@@ -189,7 +392,7 @@ def _detect_greeting(query: str) -> bool:
 
     # Paso 3: Tokenizar y buscar palabras de saludo simples.
     # Dividir por espacios, comas, puntos, etc.
-    tokens = re.split(r'[\s,;.!?]+', q)
+    tokens = re.split(r"[\s,;.!?]+", q)
     tokens = [t for t in tokens if t]  # Filtrar vacíos.
 
     # Si hay solo 1-2 tokens y alguno es un saludo, es saludo puro.
@@ -313,6 +516,35 @@ def _extract_comuna_from_query(query: str) -> str | None:
     return extraer_comuna_de_consulta(query)
 
 
+def _extract_historico_request(query: str) -> tuple[int, str | None, int | None, str | None]:
+    """Extrae rango, temporada, año y métrica para el fallback climático."""
+    q = query.strip().lower()
+    temporada: str | None = None
+    for candidate in ("invierno", "otoño", "otono", "primavera", "verano"):
+        if candidate in q:
+            temporada = candidate
+            break
+
+    year_match = _HISTORICAL_YEAR_RE.search(q)
+    anio = int(year_match.group()) if year_match is not None else None
+    current_markers = ("este año", "este ano", "año actual", "ano actual")
+    previous_markers = ("año pasado", "ano pasado", "año anterior", "ano anterior", "el anterior")
+    if any(marker in q for marker in current_markers):
+        anio = datetime.date.today().year
+        anos = 2 if any(marker in q for marker in previous_markers) else 1
+    else:
+        anos = 1 if anio is not None or any(marker in q for marker in previous_markers) else 3
+
+    metrica: str | None = None
+    if "helad" in q:
+        metrica = "heladas"
+    elif "lluv" in q or "llov" in q or "precipit" in q:
+        metrica = "lluvia"
+    elif "temperatura" in q:
+        metrica = "temperatura"
+    return anos, temporada, anio, metrica
+
+
 def _extract_product_from_query(query: str) -> str | None:
     """Extrae el nombre de un producto agrícola de la consulta por keyword.
 
@@ -423,10 +655,24 @@ async def _force_sale_value_tool(query_text: str) -> str | None:
 
 # Keywords que indican una venta ya realizada (para margin).
 _VENTA_REALIZADA_KW = [
-    "vendí", "vendi", "vendiste", "vendio", "vendió", "vendieron",
-    "ya vendí", "ya vendi", "acabo de vender", "recién vendí",
-    "recien vendi", "recibí", "recibi", "me pagaron", "me pagó",
-    "me pago", "recibimos", "vendimos",
+    "vendí",
+    "vendi",
+    "vendiste",
+    "vendio",
+    "vendió",
+    "vendieron",
+    "ya vendí",
+    "ya vendi",
+    "acabo de vender",
+    "recién vendí",
+    "recien vendi",
+    "recibí",
+    "recibi",
+    "me pagaron",
+    "me pagó",
+    "me pago",
+    "recibimos",
+    "vendimos",
 ]
 
 
@@ -496,8 +742,12 @@ async def _force_margin_tool(query_text: str) -> str | None:
 
     # Normalizar plurales a singular para el handler.
     mapa_plural = {
-        "sacos": "saco", "kilos": "kilo", "kg": "kilo",
-        "mallas": "malla", "cajas": "caja", "toneladas": "tonelada",
+        "sacos": "saco",
+        "kilos": "kilo",
+        "kg": "kilo",
+        "mallas": "malla",
+        "cajas": "caja",
+        "toneladas": "tonelada",
     }
     unidad = mapa_plural.get(unidad, unidad)
 
@@ -626,21 +876,54 @@ async def _compound_price_block(
             session.close()
 
 
-async def _compound_weather_block(query_text: str) -> tuple[str | None, str]:
+async def _compound_weather_block(
+    query_text: str,
+    phone_hash: str | None,
+) -> tuple[str | None, str]:
     """Obtiene el bloque OpenMeteo de una consulta compuesta."""
     from app.services.weather_service import (
+        get_clima_historico_multianual,
         get_pronostico,
         get_weather,
         resolver_comuna,
     )
 
-    comuna = _extract_comuna_from_query(query_text) or "Traiguén"
+    comuna = _extract_comuna_from_query(query_text)
     try:
-        if any(kw in query_text for kw in _CLIMA_FUTURO_KW):
-            result = await get_pronostico(comuna, dias=2)
+        if any(kw in query_text for kw in _CLIMA_HISTORICO_KW):
+            anos, temporada, anio, metrica = _extract_historico_request(query_text)
+            result = await get_clima_historico_multianual(
+                comuna or "Traiguén",
+                anos=anos,
+                temporada=temporada,
+                anio=anio,
+                metrica=metrica,
+            )
+        elif any(kw in query_text for kw in _CLIMA_FUTURO_KW):
+            if phone_hash:
+                try:
+                    result = await get_pronostico(comuna, dias=2, phone_hash=phone_hash)
+                except TypeError as exc:
+                    # Mantiene compatibilidad con handlers sustituidos en
+                    # integraciones/tests antiguas que aún no aceptan phone_hash.
+                    if "phone_hash" not in str(exc):
+                        raise
+                    result = await get_pronostico(comuna, dias=2)
+            else:
+                result = await get_pronostico(comuna, dias=2)
         else:
-            coords = resolver_comuna(comuna) or (-38.23, -72.68)
-            result = await get_weather(lat=coords[0], lon=coords[1])
+            if comuna is not None:
+                coords = resolver_comuna(comuna) or (-38.23, -72.68)
+                if phone_hash:
+                    result = await get_weather(
+                        lat=coords[0],
+                        lon=coords[1],
+                        phone_hash=phone_hash,
+                    )
+                else:
+                    result = await get_weather(lat=coords[0], lon=coords[1])
+            else:
+                result = await get_weather(phone_hash=phone_hash) if phone_hash else await get_weather()
         if result:
             return str(result), ""
         return None, "OpenMeteo no entregó datos para esa consulta."
@@ -665,7 +948,7 @@ async def _force_compound_keyword_tools(
     q = query_text.strip().lower()
     price_result, weather_result = await asyncio.gather(
         _compound_price_block(q, phone_hash),
-        _compound_weather_block(q),
+        _compound_weather_block(q, phone_hash),
     )
     price_data, price_notice = price_result
     weather_data, weather_notice = weather_result
@@ -677,23 +960,50 @@ async def _force_compound_keyword_tools(
         f"OpenMeteo — Clima:\n{weather_text}",
     )
     if price_data is None and weather_data is None:
-        return (
-            "No pude completar ninguno de los dos datos solicitados.\n\n"
-            + "\n\n".join(blocks)
-        )
+        return "No pude completar ninguno de los dos datos solicitados.\n\n" + "\n\n".join(blocks)
     return "\n\n".join(blocks)
 
 
+async def _force_directorio_tool(query_text: str) -> str | None:
+    """Resuelve el directorio por keywords cuando el LLM no llama la tool."""
+    q = query_text.strip().lower()
+    if not any(keyword in q for keyword in _DIRECTORIO_KEYWORDS):
+        return None
+
+    comuna = _extract_directorio_comuna(q)
+    if comuna is None:
+        return None
+
+    from app.core.database import SessionLocal
+    from app.services.directorio_agricola_service import get_directorio_agricola
+
+    tipo = _extract_directorio_tipo(q)
+    session = SessionLocal()
+    try:
+        result = await asyncio.to_thread(get_directorio_agricola, session, comuna, tipo)
+        logger.info("Fallback tool forzado — tool=get_directorio_agricola")
+        return result
+    except (SQLAlchemyError, RuntimeError, ValueError, OSError) as exc:
+        logger.warning(
+            "Error en fallback directorio — error=%s",
+            type(exc).__name__,
+        )
+        return None
+    finally:
+        session.close()
+
+
 async def _force_keyword_tool(query_text: str, phone_hash: str | None = None) -> str | None:
-    """Orquestador de fallback por keywords: venta → precio → clima.
+    """Orquestador de fallback por keywords: directorio → venta → precio → clima.
 
     Cuando el LLM no genera <tool_call>, detectamos keywords en la consulta
     para forzar la tool correspondiente directamente sin pasar por el LLM.
 
     Orden de precedencia:
-    1. Venta (N kilos de producto) -> calculate_sale_value
-    2. Precio (producto agrícola, presente/pasado) -> get_price/get_price_history
-    3. Clima (keywords climáticos) -> get_weather
+    1. Directorio (sede y comuna) -> get_directorio_agricola
+    2. Venta (N kilos de producto) -> calculate_sale_value
+    3. Precio (producto agrícola, presente/pasado) -> get_price/get_price_history
+    4. Clima (keywords climáticos) -> get_weather
 
     Args:
         query_text: Texto de la consulta del agricultor.
@@ -708,7 +1018,12 @@ async def _force_keyword_tool(query_text: str, phone_hash: str | None = None) ->
         get_price_history_for_llm,
     )
 
-    # 0. Detectar "N kilos de producto" -> calculate_sale_value (Issue #104).
+    # 0. Directorio agrícola: dirección y teléfono solo desde el snapshot local.
+    forced = await _force_directorio_tool(query_text)
+    if forced:
+        return forced
+
+    # 0.5. Detectar "N kilos de producto" -> calculate_sale_value (Issue #104).
     # Va antes que el bloque de precio: la cantidad de kilos es señal
     # fuerte de cálculo de venta y el LLM no debe hacer la multiplicación.
     forced = await _force_sale_value_tool(query_text)
@@ -796,9 +1111,24 @@ async def _force_keyword_tool(query_text: str, phone_hash: str | None = None) ->
         "helar",
         "granizo",
         "nieve",
+        "histórico",
+        "historico",
+        "invierno",
+        "otoño",
+        "otono",
+        "primavera",
+        "verano",
+        "llovió",
+        "llovio",
+        "año pasado",
+        "ano pasado",
     ]
     if any(kw in q for kw in clima_kw):
-        from app.services.weather_service import get_pronostico, get_weather
+        from app.services.weather_service import (
+            get_clima_historico_multianual,
+            get_pronostico,
+            get_weather,
+        )
 
         # "¿va a llover MANANA?" pide pronostico, no el clima de ahora.
         # Antes solo existia get_weather (clima actual) y la respuesta no
@@ -806,20 +1136,44 @@ async def _force_keyword_tool(query_text: str, phone_hash: str | None = None) ->
         es_futuro = any(kw in q for kw in _CLIMA_FUTURO_KW)
 
         try:
-            comuna = _extract_comuna_from_query(q) or "Traiguén"
-            if es_futuro:
-                result = await get_pronostico(comuna, dias=2)
+            comuna = _extract_comuna_from_query(q)
+            if any(kw in q for kw in _CLIMA_HISTORICO_KW):
+                anos, temporada, anio, metrica = _extract_historico_request(q)
+                result = await get_clima_historico_multianual(
+                    comuna or "Traiguén",
+                    anos=anos,
+                    temporada=temporada,
+                    anio=anio,
+                    metrica=metrica,
+                )
+                herramienta = "get_clima_historico_multianual"
+            elif es_futuro:
+                if phone_hash:
+                    try:
+                        result = await get_pronostico(comuna, dias=2, phone_hash=phone_hash)
+                    except TypeError as exc:
+                        if "phone_hash" not in str(exc):
+                            raise
+                        result = await get_pronostico(comuna, dias=2)
+                else:
+                    result = await get_pronostico(comuna, dias=2)
                 herramienta = "get_pronostico"
             else:
-                from app.services.weather_service import resolver_comuna
+                if comuna is not None:
+                    from app.services.weather_service import resolver_comuna
 
-                coords = resolver_comuna(comuna)
-                if coords is None:
-                    # Traiguén: default del piloto si la comuna no está mapeada.
-                    lat, lon = -38.23, -72.68
+                    coords = resolver_comuna(comuna)
+                    if coords is None:
+                        # Traiguén: default del piloto si la comuna no está mapeada.
+                        lat, lon = -38.23, -72.68
+                    else:
+                        lat, lon = coords
+                    if phone_hash:
+                        result = await get_weather(lat=lat, lon=lon, phone_hash=phone_hash)
+                    else:
+                        result = await get_weather(lat=lat, lon=lon)
                 else:
-                    lat, lon = coords
-                result = await get_weather(lat=lat, lon=lon)
+                    result = await get_weather(phone_hash=phone_hash) if phone_hash else await get_weather()
                 herramienta = "get_weather"
             if result:
                 logger.info(

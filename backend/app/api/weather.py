@@ -1,9 +1,9 @@
-"""Endpoint REST de consulta de clima OpenWeatherMap.
+"""Endpoint REST de consulta de clima OpenMeteo.
 
 Issue #17: GET /api/v1/weather?lat=X&lon=Y
 Issue #124: GET /api/v1/weather/history?lat=X&lon=Y&years=1
 
-Defensa en profundidad contra agotamiento de cuota OWM:
+Defensa en profundidad contra agotamiento de cuota OpenMeteo:
   - Cache con TTL 30 min + clave truncada a .2f (~1.1 km)
   - Rate limiter 30 req/min por IP (check_weather_rate_limit)
 """
@@ -44,8 +44,8 @@ async def get_weather_endpoint(
     en el servicio (get_weather_full).
 
     Rate limited a 30 req/min por IP para proteger la cuota gratuita de
-    OpenWeatherMap (60 req/min). El cache con TTL 30 min y clave truncada
-    a 2 decimales (~1.1 km) reduce llamadas reales a OWM aún más.
+    OpenMeteo. El cache con TTL 30 min y clave truncada a 2 decimales
+    (~1.1 km) reduce llamadas reales aún más.
     """
     try:
         wd = await get_weather_full(lat, lon)
@@ -78,6 +78,16 @@ async def get_weather_history_endpoint(
     lat: float = Query(DEFAULT_LAT, ge=-90.0, le=90.0, description="Latitud"),
     lon: float = Query(DEFAULT_LON, ge=-180.0, le=180.0, description="Longitud"),
     years: int = Query(1, ge=1, le=5, description="Años completos hacia atrás (1-5)"),
+    temporada: str | None = Query(
+        None,
+        description="Temporada: verano, otoño, invierno o primavera",
+    ),
+    anio: int | None = Query(
+        None,
+        ge=1940,
+        le=2100,
+        description="Año final explícito del rango",
+    ),
     _rate_limit: None = Depends(check_weather_rate_limit),
 ) -> HistoricalWeatherResponse:
     """Consulta el histórico climático para coordenadas específicas.
@@ -92,9 +102,17 @@ async def get_weather_history_endpoint(
         lat: Latitud. Default: Traiguén (-38.23).
         lon: Longitud. Default: Traiguén (-72.68).
         years: Años completos hacia atrás (1-5). Default: 1.
+        temporada: Temporada opcional a resumir.
+        anio: Año final opcional para fijar un periodo histórico concreto.
     """
     try:
-        summaries = await fetch_historico(lat, lon, years)
+        summaries = await fetch_historico(
+            lat,
+            lon,
+            years,
+            temporada=temporada,
+            anio=anio,
+        )
     except ValueError as exc:
         logger.warning(
             "Parámetros inválidos para histórico — error=%s",
@@ -121,6 +139,7 @@ async def get_weather_history_endpoint(
     resumenes = [
         HistoricalYearSchema(
             year=s.year,
+            temporada=s.temporada,
             temp_promedio=s.temp_promedio,
             temp_max_promedio=s.temp_max_promedio,
             temp_min_promedio=s.temp_min_promedio,
@@ -131,11 +150,14 @@ async def get_weather_history_endpoint(
     ]
 
     texto = _format_historico_text(summaries, location)
+    temporada_respuesta = summaries[0].temporada if summaries else temporada
 
     return HistoricalWeatherResponse(
         lat=lat,
         lon=lon,
         years_solicitados=years,
+        temporada=temporada_respuesta,
+        anio_consultado=anio,
         resumenes=resumenes,
         texto=texto,
     )
