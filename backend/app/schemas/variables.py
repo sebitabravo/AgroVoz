@@ -15,7 +15,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 # Literal de tipos de consulta que AgroVoz puede responder.
-TipoConsulta = Literal["precio", "clima", "ambos", "desconocido"]
+TipoConsulta = Literal["precio", "clima", "agronomica", "ambos", "desconocido"]
 
 
 class ExtractedVariables(BaseModel):
@@ -41,7 +41,7 @@ class ExtractedVariables(BaseModel):
     )
     consulta_tipo: TipoConsulta = Field(
         default="desconocido",
-        description="Tipo de consulta: precio, clima, ambos, o desconocido.",
+        description="Tipo de consulta: precio, clima, agronómica, ambos, o desconocido.",
     )
     urgencia: str | None = Field(
         default=None,

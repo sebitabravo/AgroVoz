@@ -77,6 +77,8 @@ _COMMON_PRODUCTS = [
     "brocoli",
     "brócoli",
     "coliflor",
+    "zapallo italiano",
+    "zapallo de guarda",
     "zapallo",
     "camote",
     "betarraga",
@@ -88,6 +90,7 @@ _COMMON_PRODUCTS = [
     "apio",
     "puerro",
     "choclo",
+    "poroto granado",
     "poroto verde",
     "poroto",
     "arveja verde",
@@ -601,8 +604,8 @@ def _extract_product_from_query(query: str) -> str | None:
     """
     query_lower = query.lower()
 
-    # 1. Substring exacto: ordenar por largo descendente para que "pimentón"
-    # matchee antes que "pimenton" y "sandía" antes que "sandia".
+    # 1. Coincidencia exacta por límites de palabra. Un substring simple
+    # confundía "papaya" con "papa" y cultivos compuestos con el genérico.
     for product in sorted(_COMMON_PRODUCTS, key=len, reverse=True):
         if _contains_product_keyword(query_lower, product):
             return product
@@ -616,10 +619,15 @@ def _extract_product_from_query(query: str) -> str | None:
     tokens = [t for t in tokens if t and len(t) > 2 and t not in _PALABRAS_NO_PRODUCTO]
 
     for token in tokens:
-        # Buscar el producto más similar usando difflib.
+        # Restringir a una edición de longitud: "papaya" no es un typo de
+        # "papa", pero "pap" y "celga" siguen tolerados.
+        candidates = [
+            product for product in _COMMON_PRODUCTS
+            if " " not in product and abs(len(product) - len(token)) <= 1
+        ]
         matches = difflib.get_close_matches(
             token,
-            _COMMON_PRODUCTS,
+            candidates,
             n=1,  # Solo el mejor match.
             cutoff=0.75,  # Umbral para evitar falsos positivos.
         )

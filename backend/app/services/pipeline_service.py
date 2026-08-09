@@ -53,6 +53,8 @@ _PRECIO_KEYWORDS = frozenset(
         "precio",
         "cuanto",
         "cuánto",
+        "como",
+        "cómo",
         "cuesta",
         "vale",
         "kilo",
@@ -80,6 +82,42 @@ _CLIMA_KEYWORDS = frozenset(
         "pronostico",
         "pronóstico",
         "grados",
+    }
+)
+_CALENDARIO_KEYWORDS = frozenset(
+    {
+        "calendario",
+        "siembra",
+        "siembro",
+        "sembrar",
+        "sembré",
+        "sembre",
+        "plantar",
+        "planto",
+        "plantación",
+        "plantacion",
+        "cosecha",
+        "cosechar",
+        "cosecho",
+        "coseché",
+        "coseche",
+        "cuando saco",
+    }
+)
+_AGRONOMICA_KEYWORDS = _CALENDARIO_KEYWORDS | frozenset(
+    {
+        "rotación",
+        "rotacion",
+        "rotar",
+        "va antes",
+        "síntoma",
+        "sintoma",
+        "problema de mi cultivo",
+        "manchas",
+        "plaga",
+        "tizón",
+        "tizon",
+        "enfermedad",
     }
 )
 
@@ -402,6 +440,25 @@ class AgroVozPipeline:
         # contiene datos concretos (precios, grados, etc).
         text = (llm_response + " " + query_text).lower()
 
+        # Calendario y reglas agronómicas tienen prioridad sobre palabras como
+        # "precio" que pueden aparecer al citar una consulta compuesta. La
+        # respuesta determinista ya validó la fuente antes de llegar aquí.
+        calendario_patterns = [
+            "siembra",
+            "siembro",
+            "sembrar",
+            "plantar",
+            "plantación",
+            "plantacion",
+            "cosecha",
+            "cosechar",
+            "rotación",
+            "rotacion",
+            "fuente publicada el",
+        ]
+        if any(pattern in text for pattern in calendario_patterns):
+            return "agronomica"
+
         # Indicadores fuertes de precio (datos reales, no keywords ambiguos).
         precio_patterns = [
             "pesos el kilo",
@@ -594,19 +651,42 @@ class AgroVozPipeline:
             Nombre del producto en minúscula, o None.
         """
         q = query_text.strip().lower()
-        # Ordenar por largo descendente para que "pimentón" matchee antes
-        # que "pimenton" y "sandía" antes que "sandia".
+        # Priorizar nombres compuestos y exigir límites de palabra. El
+        # substring simple confundía, por ejemplo, "papaya" con "papa".
         for product in sorted(_COMMON_PRODUCTS, key=len, reverse=True):
             if _contains_product_keyword(q, product):
                 return product
         return None
 
     @staticmethod
+    def _extract_comuna(query_text: str) -> str:
+        """Extrae una comuna explícita sin inventar una ubicación.
+
+        El piloto solo tiene una equivalencia verificada para Traiguén. Si la
+        consulta nombra otra comuna, se conserva el texto para que el motor de
+        calendario falle cerrado en vez de responder con la comuna por defecto.
+        """
+        decomposed = unicodedata.normalize("NFKD", query_text.casefold())
+        normalized = "".join(char for char in decomposed if not unicodedata.combining(char))
+        if "traiguen" in normalized:
+            return "Traiguén"
+
+        marker = " en "
+        if marker not in normalized:
+            return "Traiguén"
+        candidate = normalized.split(marker, 1)[1]
+        for stop in (" para ", " y ", " cuando ", " que ", " con "):
+            candidate = candidate.split(stop, 1)[0]
+        candidate = candidate.strip(" ?!.,;:")
+        return candidate or "Traiguén"
+
+    @staticmethod
     def _extract_variables(query_text: str) -> ExtractedVariables:
         """Extrae variables tipadas de la consulta por keyword matching (issue #191).
 
         Gate de validación temprana ANTES del tool calling: detecta producto y
-        tipo de consulta (precio / clima / ambos / desconocido) con keywords.
+        tipo de consulta (precio / clima / agronómica / ambos / desconocido) con
+        keywords.
 
         Decisión de diseño: la extracción es keyword-based, NO vía LLM. Agregar
         una llamada LLM de extracción empeoraría la latencia crítica del
@@ -625,11 +705,21 @@ class AgroVozPipeline:
 
         producto = AgroVozPipeline._extract_producto(query_text)
         q = query_text.lower()
-        tiene_precio = producto is not None or any(kw in q for kw in _PRECIO_KEYWORDS)
+        tiene_agronomica = any(kw in q for kw in _AGRONOMICA_KEYWORDS)
+        tiene_precio = any(kw in q for kw in _PRECIO_KEYWORDS if kw not in {"como", "cómo"})
         tiene_clima = any(kw in q for kw in _CLIMA_KEYWORDS)
+        # "¿a cómo está la papa?" es una forma válida de preguntar precio,
+        # pero "¿cómo está el clima?" no debe convertirse en consulta mixta.
+        if not tiene_precio and producto is not None and not tiene_clima:
+            tiene_precio = "como" in q or "cómo" in q
 
         consulta_tipo: TipoConsulta
-        if tiene_precio and tiene_clima:
+        # La regla agronómica tiene precedencia: un cultivo mencionado en
+        # "cuando siembro trigo" no debe convertirse accidentalmente en una
+        # consulta de precio solo por contener el nombre del producto.
+        if tiene_agronomica:
+            consulta_tipo = "agronomica"
+        elif tiene_precio and tiene_clima:
             consulta_tipo = "ambos"
         elif tiene_precio:
             consulta_tipo = "precio"
@@ -945,6 +1035,29 @@ class AgroVozPipeline:
                     "Tuve un problema al generar tu resumen. ¿Podrias intentar de nuevo?",
                     "resumen",
                 )
+
+        # Consultas agronómicas se resuelven de forma determinista para que el
+        # LLM no pueda completar una ventana o recomendación que no exista en
+        # una fuente verificada. El camino de calendario cita INIA y falla
+        # cerrado para cultivos o comunas fuera del snapshot.
+        if extracted.consulta_tipo == "agronomica":
+            if any(keyword in transcribed_text.lower() for keyword in _CALENDARIO_KEYWORDS):
+                from app.services.agricultural_calendar_service import get_calendario_agricola
+
+                response_text = get_calendario_agricola(
+                    extracted.producto or "",
+                    AgroVozPipeline._extract_comuna(transcribed_text),
+                )
+                _marcar("calendario")
+            else:
+                from app.services.agronomic_rules_service import get_agronomic_rule_for_llm
+
+                response_text = get_agronomic_rule_for_llm(
+                    transcribed_text,
+                    extracted.producto or "",
+                )
+                _marcar("regla_agronomica")
+            return response_text, "agronomica"
 
         # 2. Pipeline normal: LLM con tool calling.
         # Import local para permitir mocking en tests

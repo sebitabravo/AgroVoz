@@ -118,6 +118,16 @@ class TestExtractProductFromQuery:
         assert _extract_product_from_query("tomate") == "tomate"
         assert _extract_product_from_query("a cuánto el tomate") == "tomate"
 
+    def test_extract_no_confunde_papaya_con_papa(self) -> None:
+        """Un producto desconocido no matchea un substring de otro nombre."""
+        assert _extract_product_from_query("calendario de la papaya") is None
+
+    def test_extract_prioriza_cultivos_compuestos(self) -> None:
+        """Los nombres específicos ganan sobre sus variantes genéricas."""
+        assert _extract_product_from_query("siembra de zapallo italiano") == "zapallo italiano"
+        assert _extract_product_from_query("cosecha de poroto verde") == "poroto verde"
+        assert _extract_product_from_query("siembra de poroto granado") == "poroto granado"
+
     def test_extract_accented_product(self) -> None:
         """Extrae producto con acento: 'sandía'."""
         result = _extract_product_from_query("cuánto cuesta la sandía")

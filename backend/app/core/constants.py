@@ -24,6 +24,7 @@ from typing import Literal
 type Intent = Literal[
     "precio",
     "clima",
+    "agronomica",
     "credito",
     "corpus",
     "desconocido",

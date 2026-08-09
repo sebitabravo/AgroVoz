@@ -9,10 +9,13 @@ un cambio futuro no lo abra de mas y degrade la calidad de las respuestas.
 
 import builtins
 import logging
+from datetime import date
 
 import pytest
 
+from app.core.config import settings
 from app.schemas.variables import ExtractedVariables
+from app.services.agricultural_calendar_service import get_calendario_agricola
 from app.services.llm_keywords import (
     _force_compound_keyword_tools,
     _force_corpus_search,
@@ -152,6 +155,40 @@ class TestFastPathCreditoIndap:
         assert "500 pesos" in response
         assert intent == "precio"
         assert origin == ["fast_path"]
+
+
+class TestFastPathCalendario:
+    """El calendario se resuelve igual para texto y audio tras Whisper."""
+
+    @pytest.mark.asyncio
+    async def test_texto_calendario_citado_no_invoca_llm(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """La ventana proviene del servicio local y conserva el origen trazable."""
+        monkeypatch.setattr(settings, "agronomic_rules_enabled", True)
+
+        def fixed_calendar(producto: str, comuna: str) -> str:
+            """Mantiene fija la fecha del snapshot en esta prueba de integración."""
+            return get_calendario_agricola(producto, comuna, today=date(2026, 8, 3))
+
+        monkeypatch.setattr(
+            "app.services.agricultural_calendar_service.get_calendario_agricola",
+            fixed_calendar,
+        )
+        monkeypatch.setattr(
+            "app.services.llm_service.answer",
+            lambda *_args, **_kwargs: pytest.fail("el calendario no debe invocar al LLM"),
+        )
+
+        origin = ["desconocido"]
+        response, intent = await AgroVozPipeline._generate_response(
+            "cuando siembro trigo en Traiguén",
+            "phone-hash",
+            origin,
+        )
+
+        assert intent == "agronomica"
+        assert "15/04 a 30/05" in response
+        assert "INIA" in response
+        assert origin == ["calendario"]
 
 
 class TestGateFastPath:
@@ -415,7 +452,19 @@ class TestSubsetDeTools:
         assert '"name": "register_parcela"' not in seccion
         assert '"name": "get_parcelas"' not in seccion
         assert '"name": "get_regla_agronomica"' not in seccion
+        assert '"name": "get_calendario_agricola"' not in seccion
         assert '"name": "get_link_resumen"' not in seccion
+
+    def test_agronomica_ofrece_solo_tools_citadas(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Con el gate activo, la sección agronómica no ofrece tools de precio."""
+        from app.services.llm_service import _TOOLS_AGRONOMICA, _render_tools_section
+
+        monkeypatch.setattr(settings, "agronomic_rules_enabled", True)
+        seccion = _render_tools_section(_TOOLS_AGRONOMICA)
+
+        assert '"name": "get_calendario_agricola"' in seccion
+        assert '"name": "get_regla_agronomica"' in seccion
+        assert '"name": "get_price"' not in seccion
 
     def test_recorte_reduce_el_prompt(self) -> None:
         completo = len(_TOOLS_SECTION_POR_TIPO["desconocido"])

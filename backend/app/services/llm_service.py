@@ -15,6 +15,7 @@ Tools disponibles (whitelist):
                                                 -> weather_service.get_clima_historico_multianual()
   - get_directorio_agricola(comuna, tipo)      -> directorio_agricola_service.get_directorio_agricola()
    - get_reporte_pdf()                          -> report_service.get_reporte_pdf_for_llm()
+  - get_calendario_agricola(producto, comuna) -> agricultural_calendar_service.get_calendario_agricola()
 
 Si el LLM intenta usar cualquier otra tool, se responde con texto
 de fallback. Si no entiende la query, pide reformular.
@@ -85,6 +86,7 @@ WHITELIST_TOOLS = frozenset(
         "register_parcela",
         "get_parcelas",
         "get_regla_agronomica",
+        "get_calendario_agricola",
         "get_link_resumen",
         "get_reporte_pdf",
         "get_directorio_agricola",
@@ -643,6 +645,32 @@ TOOLS: list[dict[str, object]] = [
     {
         "type": "function",
         "function": {
+            "name": "get_calendario_agricola",
+            "description": (
+                "USAR para consultar ventanas de SIEMBRA, PLANTACIÓN o COSECHA "
+                "por cultivo y comuna. Solo entrega calendarios publicados por INIA "
+                "con fuente y fecha; si no hay una regla, informa que no tiene el dato. "
+                "NUNCA inventes fechas ni generalices entre comunas."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "producto": {
+                        "type": "string",
+                        "description": "Cultivo consultado (ej: papa, trigo, maíz)",
+                    },
+                    "comuna": {
+                        "type": "string",
+                        "description": "Comuna del agricultor (ej: Traiguén)",
+                    },
+                },
+                "required": ["producto", "comuna"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_link_resumen",
             "description": (
                 "USAR cuando el agricultor pida VER, MANDAR o ENVIAR un resumen, panel o link "
@@ -733,6 +761,7 @@ _TOOLS_CLIMA = frozenset(
         "search_corpus",
     }
 )
+_TOOLS_AGRONOMICA = frozenset({"get_calendario_agricola", "get_regla_agronomica"})
 
 
 # Tools apagadas por feature gate: no se anuncian. Ofrecer una tool que el
@@ -743,6 +772,7 @@ _GATED_TOOLS: dict[str, Callable[[], bool]] = {
     "register_parcela": lambda: settings.parcela_tracking_enabled,
     "get_parcelas": lambda: settings.parcela_tracking_enabled,
     "get_regla_agronomica": lambda: settings.agronomic_rules_enabled,
+    "get_calendario_agricola": lambda: settings.agronomic_rules_enabled,
     "get_link_resumen": lambda: settings.farmer_panel_enabled,
     "get_reporte_pdf": lambda: settings.pdf_reports_enabled,
 }
@@ -808,6 +838,7 @@ _TOOLS_SECTION = _render_tools_section()
 _TOOLS_SECTION_POR_TIPO: dict[str, str] = {
     "precio": _render_tools_section(_TOOLS_PRECIO),
     "clima": _render_tools_section(_TOOLS_CLIMA),
+    "agronomica": _render_tools_section(_TOOLS_AGRONOMICA),
     "ambos": _TOOLS_SECTION,
     "desconocido": _TOOLS_SECTION,
 }
@@ -1107,6 +1138,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
     Los imports son lazy para evitar dependencias circulares y permitir
     que el modulo llm_service.py sea importable sin DB ni servicios.
     """
+    from app.services.agricultural_calendar_service import get_calendario_agricola
     from app.services.agronomic_rules_service import get_agronomic_rule_for_llm
     from app.services.directorio_agricola_service import get_directorio_agricola
     from app.services.expense_service import register_expense_for_llm
@@ -1145,6 +1177,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         "register_parcela": register_parcela_for_llm,
         "get_parcelas": get_parcelas_for_llm,
         "get_regla_agronomica": get_agronomic_rule_for_llm,
+        "get_calendario_agricola": get_calendario_agricola,
         "get_link_resumen": get_panel_link_for_llm,
         "get_reporte_pdf": get_reporte_pdf_for_llm,
         "get_directorio_agricola": get_directorio_agricola,
