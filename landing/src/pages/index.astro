@@ -64,15 +64,15 @@ const pasos = [
   {
     step: "02",
     title: "AgroVoz consulta",
-    desc: "Transcribe la voz, interpreta la pregunta y consulta fuentes oficiales —ODEPA y OpenMeteo— en tiempo real.",
+    desc: "Transcribe la voz o procesa el texto, interpreta la pregunta y consulta fuentes oficiales. ODEPA se actualiza diariamente a las 06:00; el clima se actualiza con OpenMeteo.",
     i18nTitle: "como.2.title",
     i18nDesc: "como.2.desc",
     delay: 120,
   },
   {
     step: "03",
-    title: "Responde con voz",
-    desc: "Devuelve un mensaje de audio en español natural con datos verificables, en menos de 15 segundos.",
+    title: "Responde por el mismo canal",
+    desc: "Devuelve audio o texto en español natural con datos verificables, en menos de 15 segundos.",
     i18nTitle: "como.3.title",
     i18nDesc: "como.3.desc",
     delay: 240,
@@ -164,25 +164,6 @@ const planes = [
     ],
   },
   {
-    plan: "premium",
-    name: "Premium directo",
-    sub: "Para el agricultor o la cooperativa",
-    price: "CLP 2.000",
-    unit: "por mes · 10 consultas gratis al mes",
-    features: [
-      "Consultas ilimitadas",
-      "Alertas de precio",
-      "Historial de consultas",
-      "Pronóstico extendido",
-    ],
-    cta: "Probar gratis",
-    i18nName: "plan2.name",
-    i18nSub: "plan2.sub",
-    i18nUnit: "plan2.unit",
-    i18nCta: "plan2.cta",
-    i18nFeatures: ["plan2.f1", "plan2.f2", "plan2.f3", "plan2.f4"],
-  },
-  {
     plan: "convenios",
     name: "Convenios privados",
     sub: "Para empresas y gremios",
@@ -263,12 +244,12 @@ const equipo = [
     <Hero
       eyebrow="Inteligencia de precios y clima · por voz en WhatsApp"
       title="Tu voz tiene el precio justo."
-      subtitle="AgroVoz convierte un mensaje de voz en WhatsApp en datos oficiales de mercado y clima, devueltos también por voz. Sin apps, sin leer ni escribir."
+      subtitle="AgroVoz convierte un mensaje de voz o texto en WhatsApp en datos oficiales de mercado y clima, devueltos por el mismo canal. Sin apps ni instalaciones."
       ctaText="Solicitar una demo"
       ctaLink="#contacto"
       ctaSecondaryText="Ver cómo funciona"
       ctaSecondaryLink="#demo"
-      meta="Voz vía WhatsApp · Precios ODEPA + clima en tiempo real · <15 s por respuesta"
+      meta="WhatsApp · Precios ODEPA del día + clima actualizado · <15 s por respuesta"
       i18nEyebrow="hero.eyebrow"
       i18nTitle="hero.title"
       i18nSubtitle="hero.sub"
@@ -349,15 +330,15 @@ const equipo = [
               >Una conversación real</span
             >
             <h2 class="h2" data-i18n="demo.title">
-              Tan simple como un mensaje de voz.
+              Tan simple como un mensaje de WhatsApp.
             </h2>
             <p
               class="lede"
               style="margin-top:20px;max-width:46ch"
               data-i18n="demo.caption"
             >
-              100% por voz. Sin apps, sin leer ni escribir — como mandarle un
-              mensaje de voz a un vecino.
+              Por voz o texto. Sin apps ni instalaciones — como mandarle un
+              mensaje de WhatsApp a un vecino.
             </p>
             <div style="margin-top:32px">
               <Waveform variant="mini" />
@@ -406,8 +387,8 @@ const equipo = [
         <div class="cost-note" data-reveal>
           <span class="dot" aria-hidden="true"></span>
           <span data-i18n="stack.cost"
-            >Costo de operación ≈ CLP 150–210 por agricultor/mes · margen bruto
-            del 58–85%</span
+            >Costo fijo de operación: CLP 14.364/mes · costo variable CLP 0 ·
+            margen bruto &gt;97% a escala</span
           >
         </div>
       </div>
@@ -422,8 +403,8 @@ const equipo = [
             Un plan para cada forma de llegar al agricultor.
           </h2>
           <p class="lede" style="margin:20px auto 0" data-i18n="planes.body">
-            Desde el despliegue institucional hasta el servicio directo: elige
-            cómo AgroVoz se ajusta a tu organización.
+            Desde el despliegue institucional hasta convenios privados: elige
+            cómo AgroVoz se integra a tu organización.
           </p>
         </div>
         <div class="grid-plans">
@@ -454,8 +435,8 @@ const equipo = [
           style="margin-top:32px;text-align:center;font-size:13.5px;color:var(--color-muted);max-width:60ch;margin-inline:auto"
           data-reveal data-i18n="planes.note"
         >
-          El agricultor nunca paga en el plan institucional. Costo de operación
-          ≈ CLP 150–210 por agricultor/mes.
+          El agricultor nunca paga. El costo de operación es fijo: CLP 14.364 al
+          mes y CLP 0 variable.
         </p>
       </div>
     </section>
@@ -570,6 +551,7 @@ const equipo = [
   // ===== Drawer de navegacion mobile (boton hamburguesa) =====
   const header = document.getElementById("site-header");
   const navToggle = document.getElementById("nav-toggle");
+  const nav = document.getElementById("nav");
   const navBackdrop = document.getElementById("nav-backdrop");
 
   function setNav(open: boolean) {
@@ -580,8 +562,15 @@ const equipo = [
       "aria-label",
       open ? "Cerrar menú de navegación" : "Abrir menú de navegación",
     );
+    nav?.setAttribute(
+      "aria-hidden",
+      !open && window.innerWidth <= 920 ? "true" : "false",
+    );
     document.body.style.overflow = open && window.innerWidth <= 920 ? "hidden" : "";
   }
+
+  // El estado inicial también debe reflejar si el drawer está oculto en mobile.
+  setNav(false);
 
   navToggle?.addEventListener("click", () =>
     setNav(!header?.classList.contains("nav-open")),
@@ -610,11 +599,11 @@ const equipo = [
     "hero.eyebrow": "Price and weather intelligence · by voice on WhatsApp",
     "hero.title": "Your voice gets the right price.",
     "hero.sub":
-      "AgroVoz turns a WhatsApp voice message into official market and weather data, returned by voice. No apps, no reading or writing.",
+      "AgroVoz turns a WhatsApp voice message or text into official market and weather data, returned through the same channel. No app installation.",
     "hero.cta1": "Request a demo",
     "hero.cta2": "See how it works",
     "hero.meta":
-      "Voice via WhatsApp · ODEPA prices + real-time weather · <15s per reply",
+      "WhatsApp · ODEPA daily prices + updated weather · <15s per reply",
     "problema.eyebrow": "The problem",
     "problema.title": "The prices exist. Access doesn't.",
     "problema.body":
@@ -635,14 +624,14 @@ const equipo = [
       "Sends a voice note on WhatsApp in plain language: \"How much is potato in Santiago?\"",
     "como.2.title": "AgroVoz looks it up",
     "como.2.desc":
-      "Transcribes the voice, understands the question and queries official sources — ODEPA and OpenMeteo — in real time.",
-    "como.3.title": "Replies by voice",
+      "Transcribes voice or processes text, understands the question and queries official sources. ODEPA updates daily at 06:00; weather updates through OpenMeteo.",
+    "como.3.title": "Replies in your channel",
     "como.3.desc":
-      "Returns an audio message in natural Spanish with verifiable data, in under 15 seconds.",
+      "Returns audio or text in natural Spanish with verifiable data, in under 15 seconds.",
     "demo.eyebrow": "A real conversation",
-    "demo.title": "As simple as a voice message.",
+    "demo.title": "As simple as a WhatsApp message.",
     "demo.caption":
-      "100% by voice. No apps, no reading or writing — like sending a voice note to a neighbor.",
+      "By voice or text. No app installation — like sending a WhatsApp message to a neighbor.",
     "demo.cta": "Try the interactive demo",
     "demo.status": "online",
     "demo.m1": "How much is potato?",
@@ -656,7 +645,7 @@ const equipo = [
     "stack.body":
       "Whisper, the LLM and voice synthesis run on open-source technology on our own infrastructure. Not to give the service away, but so it's profitable: operating cost doesn't grow with every new farmer.",
     "stack.cost":
-      "Operating cost ≈ CLP 150–210 per farmer/month · 58–85% gross margin",
+      "Fixed operating cost: CLP 14,364/month · CLP 0 variable cost · >97% gross margin at scale",
     "stack.1.sub": "Messaging channel",
     "stack.2.sub": "Voice transcription",
     "stack.3.sub": "Understanding + Tool Calling",
@@ -666,10 +655,10 @@ const equipo = [
     "planes.eyebrow": "Plans",
     "planes.title": "A plan for every way to reach the farmer.",
     "planes.body":
-      "From institutional deployment to direct service: choose how AgroVoz fits your organization.",
+      "From institutional deployment to private partnerships: choose how AgroVoz fits your organization.",
     "planes.badge": "Recommended",
     "planes.note":
-      "The farmer never pays in the institutional plan. Operating cost ≈ CLP 150–210 per farmer/month.",
+      "The farmer never pays. Operating cost is fixed at CLP 14,364/month with CLP 0 variable cost.",
     "plan1.name": "Institutional · B2G",
     "plan1.sub": "For INDAP, PRODESAL and municipalities",
     "plan1.unit": "per farmer · month",
@@ -679,14 +668,6 @@ const equipo = [
     "plan1.f2": "Unlimited price and weather queries",
     "plan1.f3": "Coverage and usage dashboard",
     "plan1.f4": "Field onboarding",
-    "plan2.name": "Direct Premium",
-    "plan2.sub": "For the farmer or the cooperative",
-    "plan2.unit": "per month · 10 free queries a month",
-    "plan2.cta": "Try free",
-    "plan2.f1": "Unlimited queries",
-    "plan2.f2": "Price alerts",
-    "plan2.f3": "Query history",
-    "plan2.f4": "Extended forecast",
     "plan3.name": "Private partnerships",
     "plan3.sub": "For companies and trade associations",
     "plan3.unit": "by arrangement",
@@ -727,10 +708,11 @@ const equipo = [
     "form.nameph": "Your name",
     "form.msgph": "How can we collaborate?",
     "form.chip.inst": "Institutional",
-    "form.chip.premium": "Premium",
     "form.chip.convenios": "Partnerships",
     "form.chip.general": "General inquiry",
     "footer.credit": "Born at INACAP Temuco · Desafío Crea INACAP 2026",
+    "footer.privacy": "Privacy (Law 21.719)",
+    "footer.notice": "Legal notice",
   };
 
   const ENPH: Record<string, string> = {

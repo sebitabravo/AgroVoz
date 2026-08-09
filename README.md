@@ -2,7 +2,7 @@
 
 Asistente de IA que responde por WhatsApp, diseñado para que pequeños agricultores chilenos accedan a precios agrícolas (ODEPA) y pronósticos climáticos (Open-Meteo) sin instalar aplicaciones.
 
-El productor manda un audio y recibe una respuesta hablada con datos oficiales en tiempo real. También puede escribir: el camino de texto salta Whisper y Piper, así que responde en ~100 ms contra los ~11 s del de voz. No siempre se puede mandar audio —lugar ruidoso, una reunión, mala señal—, así que el texto es una vía de entrada de primera clase, no un fallback.
+El productor manda un audio y recibe una respuesta hablada con precios ODEPA sincronizados diariamente a las 06:00 y pronósticos de Open-Meteo actualizados. También puede escribir: el camino de texto salta Whisper y Piper, así que responde en ~100 ms contra los ~11 s del de voz. No siempre se puede mandar audio —lugar ruidoso, una reunión, mala señal—, así que el texto es una vía de entrada de primera clase, no un fallback.
 
 Además de responder, avisa: alertas proactivas cuando el precio de un cultivo se mueve o cuando viene helada o lluvia extrema en la comuna del productor.
 

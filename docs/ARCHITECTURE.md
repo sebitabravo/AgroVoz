@@ -47,20 +47,24 @@ por la misma vía. El texto evita Whisper y TTS.
 ## Flujo de datos end-to-end
 
 ```
-1. Agricultor envía audio o texto por WhatsApp
+1. Agricultor envía audio, texto o una ubicación por WhatsApp
 2. Open-WA recibe mensaje → webhook POST /api/v1/webhook/whatsapp
-3. Para audio, FastAPI extrae media `.ogg`; para texto usa el contenido validado
-4. Solo audio: ffmpeg convierte `.ogg` → `.wav` 16kHz mono
-5. Solo audio: Whisper transcribe `.wav` → texto
-6. Texto → LLM con Tool Calling:
+3. Para `type="location"`, FastAPI valida `lat`/`lng`, actualiza `user_prefs` por `phone_hash` y consulta el pronóstico de la parcela
+4. Para audio, FastAPI extrae media `.ogg`; para texto usa el contenido validado
+5. Solo audio: ffmpeg convierte `.ogg` → `.wav` 16kHz mono
+6. Solo audio: Whisper transcribe `.wav` → texto
+7. Texto → LLM con Tool Calling:
    - Si pregunta por precio → query SQLite ODEPA
    - Si pregunta por clima → GET OpenMeteo API
-   - Whitelist de 10 tools (ver lista completa en `app/services/` más abajo). Si alucina una tool fuera de la whitelist → fallback.
-7. Fast-path determinista o LLM genera respuesta textual (datos crudos de precio/clima, o reglas citadas de fuente oficial)
-8. Solo audio: Piper TTS convierte texto → audio `.wav`
-9. Solo audio: ffmpeg convierte `.wav` → `.ogg`
-10. FastAPI envía texto o audio por Open-WA y registra entrega efectiva
-11. Tras el envío, elimina el staging libre; el historial opcional exige opt-in
+   - Si busca una oficina o cooperativa → query SQLite `directorio_agricola`
+   - Whitelist de 15 tools (ver lista completa en `app/services/` más abajo). Si alucina una tool fuera de la whitelist → fallback.
+8. Fast-path determinista o LLM genera respuesta textual (datos crudos de precio/clima, o reglas citadas de fuente oficial)
+9. Solo audio: Piper TTS convierte texto → audio `.wav`
+10. Solo audio: ffmpeg convierte `.wav` → `.ogg`
+11. FastAPI envía texto o audio por Open-WA y registra entrega efectiva
+12. El cron diario sincroniza ODEPA, compara los dos últimos datos por producto/mercado y detecta variaciones absolutas ≥15%; solo prepara avisos para `cultivos` suscritos con `alert_consent=true`
+13. El job entrega esos avisos por Open-WA mediante un rate limit global configurable; el mensaje conserva el precio crudo, la fecha y la fuente ODEPA
+14. Tras el envío, elimina el staging libre; el historial opcional exige opt-in
 ```
 
 ## Componentes del backend
@@ -75,10 +79,11 @@ por la misma vía. El texto evita Whisper y TTS.
 
 ### `app/services/` — Capa de negocio
 - `whisper_service.py` — transcripción de audio (descarga, ffmpeg, Whisper)
-- `llm_service.py` — interpretación NL + Tool Calling con whitelist (10 tools: get_price, get_price_spread, get_price_history, calculate_sale_value, calculate_margin, get_weather, get_pronostico, get_clima_historico, search_corpus, register_expense) + fallback OpenRouter
+- `llm_service.py` — interpretación NL + Tool Calling con whitelist (15 tools: precios, clima, corpus, gastos, parcelas, reglas, panel y `get_directorio_agricola`) + fallback OpenRouter
 - `tts_service.py` — síntesis de voz con Piper TTS
-- `odepa_service.py` — consultas a SQLite ODEPA + sync diario
+- `odepa_service.py` — consultas a SQLite ODEPA, sync diario y detector determinista de variaciones
 - `weather_service.py` — consultas a OpenMeteo API (forecast + histórico)
+- `location_service.py` — persistencia de coordenadas compartidas, seudonimizadas por `phone_hash`
 - `pipeline_service.py` — orquestador del pipeline end-to-end
 - `openwa_service.py` — cliente HTTP para Open-WA API (enviar/recibir mensajes, webhooks)
 - `rag_service.py` — retrieval de documentos oficiales con TF-IDF + citations
@@ -90,6 +95,7 @@ por la misma vía. El texto evita Whisper y TTS.
 - `consultation_history_service.py` — memoria consentida, TTL y borrado auditado
 - `conversation_state.py` — estado efímero y exclusión de turnos concurrentes
 - `indap_credit_service.py` — derivación determinista a fuentes oficiales, sin asesoría
+- `directorio_agricola_service.py` — contactos públicos de INDAP, PRODESAL y cooperativas por comuna
 - `mcp_service.py` — handlers de la RPC administrativa interna feature-gated
 
 ### `app/core/` — Configuración
@@ -102,10 +108,11 @@ por la misma vía. El texto evita Whisper y TTS.
 - `consultation.py` — métricas y staging libre transitorio, nunca memoria canónica
 - `consultation_history.py` — memoria consentida y evidencia append-only de borrado
 - `alert.py` — modelo para alertas proactivas de precio/clima
-- `user_prefs.py` — identidad individual/grupal, comuna, cultivos y tres opt-ins separados
+- `user_prefs.py` — identidad individual/grupal, comuna, GPS opcional, cultivos y consentimientos separados
+- `directorio_agricola.py` — snapshot SQLite de sedes y contactos públicos por comuna
 
 ### `app/jobs/` — Tareas programadas
-- `sync_odepa.py` — cron job 06:00 AM: descarga CSV ODEPA → upsert SQLite
+- `sync_odepa.py` — cron job 06:00 AM: descarga CSV ODEPA → upsert SQLite → evalúa alertas configuradas y variaciones críticas
 - `purge_consultation_history.py` — purga TTL auditable del historial consentido
 
 ## Componentes del frontend
@@ -167,6 +174,23 @@ CREATE TABLE consultations (
 CREATE INDEX idx_odepa_producto ON odepa_prices(producto, fecha);
 CREATE INDEX idx_odepa_mercado ON odepa_prices(mercado, fecha);
 CREATE INDEX idx_consultations_created ON consultations(created_at);
+
+-- Directorio público de sedes agrícolas (snapshot versionado)
+CREATE TABLE directorio_agricola (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    comuna TEXT NOT NULL,
+    tipo TEXT NOT NULL,  -- 'indap', 'prodesal' o 'cooperativa'
+    nombre TEXT NOT NULL,
+    direccion TEXT,
+    telefono TEXT,
+    horario TEXT,
+    fuente TEXT NOT NULL,
+    fuente_url TEXT NOT NULL,
+    fecha_fuente TEXT,
+    verificado_el DATE NOT NULL
+);
+CREATE INDEX idx_directorio_comuna ON directorio_agricola(comuna);
+CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
 ```
 
 ## Decisiones de arquitectura (NO CAMBIAR)
@@ -363,6 +387,36 @@ CREATE INDEX idx_consultations_created ON consultations(created_at);
 27. **Ampliación de alcance post-MVP y reevaluación de restricciones (#238-#248).**
     Se reevaluaron las restricciones para impulsar el producto post-piloto:
     - **Visión por computador (`VISION_ENABLED=false`):** Procesamiento de imágenes `type="image"` vía Open-WA `decryptMedia` y modelos ONNX locales (MobileNetV3 ~15 MB). Mantiene el hard constraint agronómico: la inferencia clasifica el cultivo/enfermedad determinísticamente y la respuesta verbaliza la regla citada INIA vigente.
-    - **Ubicación GPS por WhatsApp:** Procesamiento de mensajes `type="location"` para clima preciso por parcela.
-    - **Reglas citadas de valor agregado:** Reapertura de calendarios agrícolas por zona (fuente INIA citada), derivación a programas de crédito INDAP (datos públicos) y directorio de cooperativas por comuna (Open Data datos.gob.cl).
+    - **Ubicación GPS por WhatsApp:** Procesamiento de mensajes `type="location"`; `lat`/`lng` se validan, se guardan como pareja opcional en `user_prefs` por `phone_hash` y `get_weather`/`get_pronostico` los priorizan sobre la comuna. El webhook confirma el cambio y entrega el pronóstico de OpenMeteo para la parcela. El pin anterior se reemplaza al compartir uno nuevo y queda sujeto al TTL específico de ubicación documentado en la decisión 28.
+    - **Reglas citadas de valor agregado:** Reapertura de calendarios agrícolas por zona (fuente INIA citada), derivación a programas de crédito INDAP (datos públicos) y directorio de cooperativas por comuna (snapshot local de Open Data datos.gob.cl e INDAP; los campos ausentes en la fuente no se completan).
     - **Reportes PDF (`PDF_REPORTS_ENABLED=false`):** Generación de resumen semanal PDF enviado vía Open-WA `sendFile`.
+
+28. **Ubicación GPS con consentimiento separado, TTL y minimización de salida (#239).**
+    `location_sharing_enabled=false` deja las nuevas escrituras fail-closed y
+    `location_consent` es independiente de dataset, historial, gastos, parcelas
+    y alertas. El pin se guarda en `user_prefs` junto a
+    `location_updated_at`; cada actualización reemplaza el pin anterior y un
+    scheduler/job diario limpia `lat`, `lng` y el timestamp cuando superan
+    `location_retention_days` (180 días por defecto), incluso si el gate se
+    apaga. Revocar el consentimiento por admin limpia el pin sin borrar la fila
+    ni otras preferencias. El valor preciso queda solo en SQLite; antes de
+    enviar coordenadas a OpenMeteo se redondean a dos decimales para no revelar
+    el punto exacto. Si el productor menciona una comuna o coordenadas
+    explícitas, esa ubicación tiene prioridad sobre el GPS guardado; si no,
+    se usa el pin consentido y luego Traiguén como default.
+
+29. **Variación brusca de precios ODEPA (#248).** El cron conserva el
+    procesamiento síncrono y una ventana SQL limita la lectura a los dos datos
+    más recientes del mismo producto, mercado y unidad; un cambio absoluto de
+    al menos 15% se considera crítico. Los destinatarios se resuelven desde
+    `user_prefs.cultivos` y `alert_consent`. Como el hash HMAC no permite
+    derivar el número, el siguiente mensaje entrante autenticado de un contacto
+    con opt-in aprende su `wa_chat_id`; un registro interno inactivo de
+    `Alert(tipo="variacion_precio")` conserva esa ruta y un digest opaco del
+    último conjunto entregado. Así un reintento del mismo boletín es idempotente
+    sin guardar contenido libre ni crear otra tabla/migración. La entrega agrupa
+    hasta tres variaciones por agricultor y usa el mismo TTS/Open-WA local, con
+    una cuota global configurable
+    (`ALERT_RATE_LIMIT_PER_MINUTE`) para evitar ráfagas y sin agregar Redis,
+    Celery ni APIs pagas. El mensaje solo informa precio, variación, fecha y
+    fuente ODEPA; no contiene recomendación agronómica.

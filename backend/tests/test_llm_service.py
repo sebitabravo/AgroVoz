@@ -13,7 +13,7 @@ import asyncio
 import logging
 import os
 import threading
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -31,6 +31,7 @@ from app.services.llm_service import (
     TOOLS,
     WHITELIST_TOOLS,
     LlmBusyError,
+    LlmCircuitOpenError,
     _build_messages,
     _execute_tool,
     _filter_handler_args,
@@ -43,6 +44,7 @@ from app.services.llm_service import (
     answer_via_openrouter,
     get_model_error,
     is_model_available,
+    preload_model,
     reset_model,
 )
 from app.services.llm_worker import LlmWorkerCrashedError
@@ -92,10 +94,11 @@ class TestConstantes:
         assert len(NO_RESPONSE_TEXT) > 10
         assert "reformular" in NO_RESPONSE_TEXT.lower()
 
-    def test_whitelist_quince_tools(self) -> None:
+    def test_whitelist_diecinueve_tools(self) -> None:
         """Whitelist: precio, spread, historico, venta, margen, clima actual,
         pronostico, clima historico, corpus, gastos, parcelas, reglas
-        agronomicas, calendario y link del panel (15 tools)."""
+        agronomicas, calendario, histórico multianual, link del panel,
+        directorio agrícola, reporte PDF y programas INDAP (19 tools)."""
         assert (
             frozenset(
                 {
@@ -107,13 +110,17 @@ class TestConstantes:
                     "get_weather",
                     "get_pronostico",
                     "get_clima_historico",
+                    "get_clima_historico_multianual",
                     "search_corpus",
+                    "get_programas_indap",
                     "register_expense",
                     "register_parcela",
                     "get_parcelas",
                     "get_regla_agronomica",
                     "get_calendario_agricola",
                     "get_link_resumen",
+                    "get_reporte_pdf",
+                    "get_directorio_agricola",
                 }
             )
             == WHITELIST_TOOLS
@@ -124,8 +131,10 @@ class TestConstantes:
         # 5 base + calculate_margin (#155) + search_corpus (#156)
         # + register_expense (#170) + get_price_spread (#171) + get_pronostico
         # + register_parcela/get_parcelas (C5) + get_regla_agronomica (C1+C2)
-        # + get_calendario_agricola (#244) + get_link_resumen (C3)
-        assert len(TOOLS) == 15
+        # + get_link_resumen (C3) + histórico multianual (#247)
+        # + get_directorio_agricola (#246) + get_reporte_pdf (#240)
+        # + get_programas_indap (#245) + get_calendario_agricola (#244)
+        assert len(TOOLS) == 19
         for tool in TOOLS:
             assert tool["type"] == "function"
             fn = tool["function"]
@@ -183,6 +192,15 @@ class TestConstantes:
         with patch.object(settings, "farmer_panel_enabled", True):
             assert "get_link_resumen" in _tool_names(_offered_tools())
 
+    def test_tool_de_reporte_pdf_apagada_por_gate_no_se_ofrece(self) -> None:
+        """El reporte no aumenta el prompt mientras el gate está apagado."""
+        from app.services.llm_service import _offered_tools, _tool_names
+
+        with patch.object(settings, "pdf_reports_enabled", False):
+            assert "get_reporte_pdf" not in _tool_names(_offered_tools())
+        with patch.object(settings, "pdf_reports_enabled", True):
+            assert "get_reporte_pdf" in _tool_names(_offered_tools())
+
     def test_seccion_de_tools_omite_la_tool_apagada(self) -> None:
         """El prefijo del prompt no gasta chars en una tool deshabilitada."""
         from app.services.llm_service import _render_tools_section
@@ -212,17 +230,17 @@ class TestLlmConfig:
     el impacto, estos tests fallan.
     """
 
-    def test_n_ctx_alcanza_para_prompt_con_siete_tools(self) -> None:
-        """n_ctx debe cubrir el prompt real: system+tools (~2771 tokens
+    def test_n_ctx_alcanza_para_prompt_con_tools(self) -> None:
+        """n_ctx debe cubrir el prompt real: system+tools
 
         medidos con el tokenizer real de Qwen2.5) + tool_response de RAG
-        (peor caso, ~360 tokens) + margen para query/respuesta.
+        (peor caso) + margen para query/respuesta.
 
         n_ctx=1024 y 2048 NO alcanzaban ni para el primer prompt (crash
         ValueError instantaneo de llama-cpp-python). n_ctx=3072 alcanzaba
         para la 1a llamada pero no para la 2a vuelta del loop con
         tool_response de search_corpus inyectado. 4096 es el minimo medido
-        que no revienta con las 7 tools actuales.
+        que no revienta con las tools actuales.
 
         RIESGO SIN VALIDAR EN VPS (gate #100, overrideado): medido en
         Apple M3 con Metal (mejor caso, no representativo del VPS CX43 sin
@@ -231,9 +249,9 @@ class TestLlmConfig:
         asumir que la latencia sigue siendo aceptable.
         """
         assert _N_CTX >= 4096, (
-            f"_N_CTX={_N_CTX} no alcanza para el prompt con 7 tools "
-            "(~2771 tokens) + tool_response de RAG (~3171 tokens en la "
-            "2a vuelta). Medir tokens reales con el tokenizer antes de bajarlo."
+            f"_N_CTX={_N_CTX} no alcanza para el prompt con las tools actuales "
+            "+ tool_response de RAG. Medir tokens reales con el tokenizer "
+            "antes de bajarlo."
         )
 
     def test_n_threads_sigue_a_los_cores_sin_sobresuscribir(self) -> None:
@@ -277,7 +295,7 @@ class TestLlmConfig:
         inflan el prompt sin querer. Ratio medido ~3.26 chars/token con el
         tokenizer de Qwen2.5 (ver test_n_ctx_alcanza_para_prompt_con_siete_tools).
 
-        Con 10 tools (se sumo get_pronostico) son ~10359 chars ≈ ~3178 tokens.
+        Con las tools actuales son aproximadamente 10k caracteres.
         Sumado al peor caso de tool_response (~360 tokens de search_corpus) da
         ~3538, y deja ~558 tokens de margen dentro de n_ctx=4096 para la query
         y la respuesta — que esta capada en max_tokens=128. Entra con holgura.
@@ -751,6 +769,29 @@ class TestAnswerGuardasLlm:
         assert heartbeat_completed is True
         assert result == FALLBACK_TEXT
 
+    async def test_fallback_keyword_precede_carga_y_timeout_del_llm(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Una consulta de precio conocida no espera el timeout del LLM."""
+        llamadas: list[str] = []
+
+        async def _forced(*args: object, **kwargs: object) -> str:
+            llamadas.append("keyword")
+            return "Papa está a 900 pesos el kilo según ODEPA."
+
+        def _get_model_no_deberia_correr() -> object:
+            llamadas.append("modelo")
+            raise AssertionError("el preflight debía responder antes de cargar el modelo")
+
+        monkeypatch.setattr("app.services.llm_service._force_keyword_tool", _forced)
+        monkeypatch.setattr("app.services.llm_service._get_model", _get_model_no_deberia_correr)
+
+        result = await answer("a cuanto esta la papa", consulta_tipo="precio")
+
+        assert result == "Papa está a 900 pesos el kilo según ODEPA."
+        assert llamadas == ["keyword"]
+
     async def test_answer_delega_inferencia_al_worker(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -821,6 +862,27 @@ class TestAnswerGuardasLlm:
 
         result = await answer("consulta sin producto ni clima")
         assert "procesando otra consulta" in result.lower()
+
+    async def test_circuito_abierto_no_contamina_con_mensaje_de_cola(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Tras un timeout, una consulta siguiente falla cerrada y no dice "ocupado"."""
+
+        async def _raise_circuit(*args: object, **kwargs: object) -> object:
+            raise LlmCircuitOpenError("llm_circuit_open")
+
+        async def _forced_none(*args: object, **kwargs: object) -> str | None:
+            return None
+
+        monkeypatch.setattr("app.services.llm_service._get_model", lambda: object())
+        monkeypatch.setattr("app.services.llm_service._run_llm_completion", _raise_circuit)
+        monkeypatch.setattr("app.services.llm_service._force_keyword_tool", _forced_none)
+
+        result = await answer("consulta sin producto ni clima")
+
+        assert result == FALLBACK_TEXT
+        assert "procesando otra consulta" not in result.lower()
 
     async def test_error_runtime_llm_prioriza_fallback_determinista(
         self,
@@ -938,6 +1000,39 @@ class TestAnswerGuardasLlm:
         assert "get_price" in caplog.text
         assert "JSONDecodeError" in caplog.text
 
+    async def test_tool_reporte_devuelve_senal_sin_promesa_del_llm(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El pipeline, no otra vuelta del modelo, recibe el intent de adjunto."""
+        from app.services.report_service import REPORT_TOOL_SIGNAL
+
+        completion = AsyncMock(
+            return_value={
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '<tool_call>{"name":"get_reporte_pdf",'
+                                '"arguments":{}}</tool_call>'
+                            )
+                        }
+                    }
+                ]
+            }
+        )
+        monkeypatch.setattr("app.services.llm_service._get_model", lambda: object())
+        monkeypatch.setattr("app.services.llm_service._run_llm_completion", completion)
+        monkeypatch.setattr(
+            "app.services.llm_service._execute_tool",
+            AsyncMock(return_value=REPORT_TOOL_SIGNAL),
+        )
+
+        result = await answer("necesito el documento que ofreciste", phone_hash="a" * 64)
+
+        assert result == REPORT_TOOL_SIGNAL
+        completion.assert_awaited_once()
+
     async def test_loop_agotado_no_loguea_query_ni_tool_call(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -996,6 +1091,22 @@ class TestAnswerGuardasLlm:
 
 class TestUtilidades:
     """is_model_available, get_model_error, reset_model."""
+
+    def test_preload_wait_confirma_carga_antes_de_retornar(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El lifespan puede esperar el handshake sin crear un thread suelto."""
+        llamadas: list[str] = []
+
+        def _fake_get_model() -> None:
+            llamadas.append("cargado")
+
+        monkeypatch.setattr("app.services.llm_service._get_model", _fake_get_model)
+
+        preload_model(wait=True)
+
+        assert llamadas == ["cargado"]
 
     def test_is_model_available_sin_modelo(self) -> None:
         """Sin modelo cargado, is_model_available retorna False."""

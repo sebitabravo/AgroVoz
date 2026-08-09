@@ -40,6 +40,9 @@ class TestPalabrasComunesNoSonProductos:
     def test_semana_no_es_producto(self) -> None:
         assert _extract_product_from_query("¿cómo viene la semana?") is None
 
+    def test_temperatura_no_es_pera(self) -> None:
+        assert _extract_product_from_query("¿qué temperatura hace en temuco?") is None
+
     def test_para_no_es_pera(self) -> None:
         assert _extract_product_from_query("crédito para semillas") is None
 

@@ -14,6 +14,7 @@ from app.services.llm_keywords import (
     _MONTO_RE,
     _VENTA_KILOS_RE,
     _detect_greeting,
+    _extract_mercado_from_query,
     _extract_product_from_query,
     _parse_monto,
 )
@@ -205,6 +206,34 @@ class TestExtractProductFromQuery:
         # El punto es que no retorne None.
         assert result is not None
         assert result in ("sandía", "sandia")
+
+    def test_extracta_leguminosas_y_frutas_con_acentos(self) -> None:
+        """Los productos ODEPA nuevos no deben caer al LLM por alias faltante."""
+        assert _extract_product_from_query("precio del poroto verde") == "poroto verde"
+        assert _extract_product_from_query("a cuanto esta la lenteja") == "lenteja"
+        assert _extract_product_from_query("precio del maiz") == "maiz"
+        assert _extract_product_from_query("precio del plátano") == "plátano"
+
+    def test_temperatura_no_se_confunde_con_pera(self) -> None:
+        """El producto no puede aparecer como parte de otra palabra."""
+        assert _extract_product_from_query("qué temperatura hace en Temuco") is None
+
+
+class TestExtractMercadoFromQuery:
+    """Alias de mercados, regiones y comunas se resuelven de forma determinista."""
+
+    def test_estacion_central_apunta_a_vega_central(self) -> None:
+        assert _extract_mercado_from_query("precio de papa en estacion central") == "vega central"
+
+    def test_region_se_resuelve_al_mercado_mas_cercano(self) -> None:
+        assert _extract_mercado_from_query("precio en la novena region") == "Vega Modelo de Temuco"
+        assert _extract_mercado_from_query("precio en la decima region") == "Vega de Puerto Montt"
+
+    def test_comuna_se_resuelve_al_mercado_mas_cercano(self) -> None:
+        assert _extract_mercado_from_query("precio de papa cerca de Traiguen") == "Vega Modelo de Temuco"
+
+    def test_conce_se_resuelve_a_vega_monumental(self) -> None:
+        assert _extract_mercado_from_query("precio de papa en conce") == "vega monumental"
 
 
 class TestParseMontoJergaChilena:

@@ -12,11 +12,14 @@ Sin red real: MockTransport simula respuestas de OpenMeteo.
 
 import logging
 from collections.abc import Callable
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
+from app.models.user_prefs import UserPrefs
 from app.services.weather_service import (
+    WeatherData,
     _clear_cache,
     _clear_historical_cache,
     _format_historico_text,
@@ -364,6 +367,97 @@ class TestGetWeather:
             assert "25°C" in texto
         finally:
             await mock_client.aclose()
+
+    async def test_get_weather_prioriza_ubicacion_guardada(
+        self,
+        db,  # type: ignore[no-untyped-def]
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El GPS del productor reemplaza las coordenadas default de la comuna."""
+        from unittest.mock import AsyncMock
+
+        phone_hash = "d" * 64
+        db.add(UserPrefs(phone_hash=phone_hash, lat=-33.45, lng=-70.65, location_consent=True))
+        db.commit()
+        weather = WeatherData(
+            lat=-33.45,
+            lon=-70.65,
+            location="Santiago",
+            temperature_c=25.0,
+            feels_like_c=None,
+            humidity=None,
+            description="cielo despejado",
+            wind_speed_ms=None,
+            rain_1h_mm=None,
+            texto="En Santiago ahora: 25°C, según OpenMeteo.",
+        )
+        mocked = AsyncMock(return_value=weather)
+        monkeypatch.setattr("app.services.weather_service.get_weather_full", mocked)
+
+        texto = await get_weather(phone_hash=phone_hash)
+
+        assert texto == weather.texto
+        mocked.assert_awaited_once_with(-33.45, -70.65)
+
+    async def test_coordenadas_explicitas_priorizan_sobre_gps_guardado(
+        self,
+        db,  # type: ignore[no-untyped-def]
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Una ubicación pedida explícitamente no queda pisada por el GPS."""
+        phone_hash = "1" * 64
+        db.add(
+            UserPrefs(
+                phone_hash=phone_hash,
+                lat=-38.23,
+                lng=-72.68,
+                location_consent=True,
+            )
+        )
+        db.commit()
+        weather = WeatherData(
+            lat=-33.45,
+            lon=-70.65,
+            location="Santiago",
+            temperature_c=25.0,
+            feels_like_c=None,
+            humidity=None,
+            description="cielo despejado",
+            wind_speed_ms=None,
+            rain_1h_mm=None,
+            texto="En Santiago ahora: 25°C, según OpenMeteo.",
+        )
+        mocked = AsyncMock(return_value=weather)
+        monkeypatch.setattr("app.services.weather_service.get_weather_full", mocked)
+
+        texto = await get_weather(
+            lat=-33.45,
+            lon=-70.65,
+            phone_hash=phone_hash,
+        )
+
+        assert texto == weather.texto
+        mocked.assert_awaited_once_with(-33.45, -70.65)
+
+    async def test_openmeteo_recibe_coordenadas_redondeadas(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El pin preciso no sale del backend hacia OpenMeteo."""
+        recibido: dict[str, str] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            recibido["lat"] = request.url.params["latitude"]
+            recibido["lon"] = request.url.params["longitude"]
+            return httpx.Response(200, json=_OPENMETEO_RESPUESTA_COMPLETA)
+
+        mock_client = _install_mock_client(monkeypatch, handler)
+        try:
+            await get_weather_full(-38.2412, -72.6911)
+        finally:
+            await mock_client.aclose()
+
+        assert recibido == {"lat": "-38.24", "lon": "-72.69"}
 
     async def test_cache_evita_llamada_repetida(
         self, monkeypatch: pytest.MonkeyPatch

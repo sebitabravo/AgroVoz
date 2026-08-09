@@ -6,12 +6,12 @@
 pytest==9.1.1
 pytest-asyncio==1.4.0
 pytest-cov==7.1.0
-ruff==0.15.22
+ruff==0.16.0
 mypy==2.3.0
 jiwer==4.0.0
 soundfile==0.14.0
-datasets==5.0.0
+datasets==5.0.1
 torchcodec==0.15.0
 # Solo para scripts/ivr_ari_bridge.py (spike IVR, #172, C10): WebSocket de
 # eventos de Asterisk ARI. Nunca se importa desde app/.
-websockets==16.0
+websockets==16.1.1

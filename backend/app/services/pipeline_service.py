@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import time
 import unicodedata
 from pathlib import Path
@@ -34,7 +33,7 @@ from app.services.conversation_state import (
     TransitionStatus,
 )
 from app.services.dataset_service import retain_audio
-from app.services.llm_keywords import _COMMON_PRODUCTS
+from app.services.llm_keywords import _COMMON_PRODUCTS, _contains_product_keyword
 from app.services.llm_service import FALLBACK_TEXT, NO_RESPONSE_TEXT
 from app.services.tts_service import PiperModelNotFoundError, TTSService
 from app.services.whisper_service import WhisperService
@@ -231,6 +230,16 @@ _HISTORY_DELETION_QUERIES = frozenset(
         "borra mis consultas",
         "elimina mis consultas",
         "desactiva mi historial",
+    }
+)
+_LOCATION_DELETION_QUERIES = frozenset(
+    {
+        "borra mi ubicacion",
+        "elimina mi ubicacion",
+        "olvida mi ubicacion",
+        "borra el gps de mi parcela",
+        "elimina el gps de mi parcela",
+        "deja de guardar mi ubicacion",
     }
 )
 
@@ -556,6 +565,40 @@ class AgroVozPipeline:
         return any(kw in q for kw in resumen_keywords)
 
     @staticmethod
+    def _is_reporte_pdf_query(query_text: str) -> bool:
+        """Detecta pedidos explícitos de un documento semanal.
+
+        La detección ocurre antes del resumen hablado para que frases como
+        ``mándame un resumen de la semana`` generen un archivo, mientras que
+        el comando corto ``resumen`` conserva su comportamiento histórico.
+        """
+        decomposed = unicodedata.normalize("NFD", query_text.casefold())
+        normalized = "".join(char for char in decomposed if unicodedata.category(char) != "Mn")
+        normalized = " ".join("".join(char if char.isalnum() else " " for char in normalized).split())
+
+        if any(phrase in normalized for phrase in ("no quiero", "no necesito", "no me mandes", "sin reporte")):
+            return False
+        if any(keyword in normalized for keyword in ("pdf", "reporte", "informe")):
+            return True
+        if "resumen" not in normalized:
+            return False
+        return any(keyword in normalized for keyword in ("semana", "precios y clima", "precio y clima"))
+
+    @staticmethod
+    async def _generate_report_response(phone_hash: str) -> tuple[str, str | None]:
+        """Genera el archivo PDF y devuelve el texto corto para WhatsApp."""
+        from app.services.report_service import ReportGenerationError, generate_weekly_report
+
+        try:
+            report_path = await generate_weekly_report(phone_hash)
+        except ReportGenerationError:
+            logger.warning("Reporte PDF no disponible — identidad seudonimizada")
+            if settings.pdf_reports_enabled:
+                return "No pude generar el reporte ahora. ¿Probamos de nuevo más tarde?", None
+            return "Los reportes PDF todavía no están habilitados.", None
+        return "Listo, te envío el reporte semanal en PDF.", str(report_path)
+
+    @staticmethod
     def _is_explicit_history_query(query_text: str) -> bool:
         """Detecta únicamente pedidos inequívocos de la consulta anterior."""
         decomposed = unicodedata.normalize("NFD", query_text.casefold())
@@ -585,6 +628,16 @@ class AgroVozPipeline:
         return normalized in _HISTORY_DELETION_QUERIES
 
     @staticmethod
+    def _is_location_deletion_query(query_text: str) -> bool:
+        """Detecta órdenes inequívocas de revocar las coordenadas GPS."""
+        decomposed = unicodedata.normalize("NFD", query_text.casefold())
+        without_accents = "".join(char for char in decomposed if unicodedata.category(char) != "Mn")
+        normalized = " ".join("".join(char if char.isalnum() else " " for char in without_accents).split())
+        normalized = normalized.removeprefix("por favor ").strip()
+        normalized = normalized.removesuffix(" por favor").strip()
+        return normalized in _LOCATION_DELETION_QUERIES
+
+    @staticmethod
     def _extract_producto(query_text: str) -> str | None:
         """Extrae el nombre de un producto agrícola de la consulta.
 
@@ -601,7 +654,7 @@ class AgroVozPipeline:
         # Priorizar nombres compuestos y exigir límites de palabra. El
         # substring simple confundía, por ejemplo, "papaya" con "papa".
         for product in sorted(_COMMON_PRODUCTS, key=len, reverse=True):
-            if re.search(rf"(?<!\w){re.escape(product)}(?!\w)", q):
+            if _contains_product_keyword(q, product):
                 return product
         return None
 
@@ -832,6 +885,26 @@ class AgroVozPipeline:
                 "desconocido",
             )
 
+        if AgroVozPipeline._is_location_deletion_query(transcribed_text):
+            from app.services.location_service import clear_user_location
+
+            try:
+                await asyncio.to_thread(clear_user_location, chat_id_hash)
+            except (SQLAlchemyError, OSError, RuntimeError, ValueError):
+                logger.error("Revocación de ubicación GPS no confirmada")
+                _marcar("ubicacion_borrada_error")
+                return (
+                    "No pude confirmar el borrado de tu ubicación. Inténtalo nuevamente en unos minutos.",
+                    "clima",
+                )
+
+            logger.info("Ubicación GPS revocada desde WhatsApp")
+            _marcar("ubicacion_borrada")
+            return (
+                "Listo. Eliminé la ubicación GPS guardada de tu parcela.",
+                "clima",
+            )
+
         if AgroVozPipeline._is_history_deletion_query(transcribed_text):
             from app.services.consultation_history_service import (
                 HistoryOperationError,
@@ -894,11 +967,20 @@ class AgroVozPipeline:
                     "resumen",
                 )
 
-        # P0 #174: crédito se detecta ANTES de saludo, extracción de producto,
-        # fuzzy matching, RAG y LLM. Sin esta precedencia, frases reales como
-        # "crédito para semillas" y "documento que habla de crédito" caían en
-        # precio por similitudes para→pera y habla→haba.
-        from app.services.indap_credit_service import get_indap_credit_referral
+        # P0 #174/#245: crédito y programas se detectan ANTES de saludo,
+        # extracción de producto, fuzzy matching, RAG y LLM. Sin esta
+        # precedencia, "programa para un motocultivador" podía caer en clima
+        # o en precio por similitudes del texto transcrito.
+        from app.services.indap_credit_service import (
+            get_indap_credit_referral,
+            get_programas_indap,
+            is_programas_indap_query,
+        )
+
+        if is_programas_indap_query(transcribed_text):
+            logger.info("Derivación informativa INDAP de programas sin LLM")
+            _marcar("fast_path_programas_indap")
+            return get_programas_indap(transcribed_text), "credito"
 
         credit_referral = get_indap_credit_referral(transcribed_text)
         if credit_referral is not None:
@@ -1349,6 +1431,7 @@ class AgroVozPipeline:
         llm_ms_ref = [0]
         tts_ms_ref = [0]
         welcome_ogg_ref: list[str | None] = [None]
+        report_pdf_ref: list[str | None] = [None]
         primer_contacto_ref: list[bool] = [False]
         conversation_lease, conversation_busy = _claim_conversation(chat_id_hash)
 
@@ -1384,6 +1467,7 @@ class AgroVozPipeline:
                         llm_ms_ref=llm_ms_ref,
                         tts_ms_ref=tts_ms_ref,
                         welcome_ogg_ref=welcome_ogg_ref,
+                        report_pdf_ref=report_pdf_ref,
                         primer_contacto_ref=primer_contacto_ref,
                         texto_directo=texto_directo,
                         generar_audio=generar_audio,
@@ -1416,8 +1500,15 @@ class AgroVozPipeline:
 
             if conversation_lease is not None and conversation_lease.transition(ConversationState.ESPERANDO_CONSULTA):
                 conversation_lease.finish()
+            # Solo al devolver AudioResponse se transfiere el ownership del PDF
+            # al caller, que lo elimina después de intentar el envío.
+            report_pdf_ref[0] = None
             return response
         finally:
+            # Si el pipeline fue cancelado, expiró o falló después de crear el
+            # reporte, el path nunca llegó a AudioService: todavía es nuestro.
+            if report_pdf_ref[0]:
+                Path(report_pdf_ref[0]).unlink(missing_ok=True)
             # En timeout, cancelación o excepción se retira solo la sesión que
             # aún pertenece a esta lease. Una sesión reemplazante queda intacta.
             if conversation_lease is not None:
@@ -1436,6 +1527,7 @@ class AgroVozPipeline:
         llm_ms_ref: list[int],
         tts_ms_ref: list[int],
         welcome_ogg_ref: list[str | None],
+        report_pdf_ref: list[str | None],
         primer_contacto_ref: list[bool],
         texto_directo: str | None = None,
         generar_audio: bool = True,
@@ -1447,6 +1539,18 @@ class AgroVozPipeline:
         dentro de la coroutine (Python no permite asignar nonlocal
         en closures anidadas de forma limpia).
         """
+        if chat_id and chat_id_hash and chat_id_hash != "sin_chat":
+            try:
+                from app.services.alert_service import remember_price_variation_route
+
+                await asyncio.to_thread(
+                    remember_price_variation_route,
+                    chat_id_hash,
+                    chat_id,
+                )
+            except (SQLAlchemyError, RuntimeError, OSError, ValueError):
+                logger.warning("Ruta de alertas proactivas no actualizada")
+
         # ── Etapa 0: Onboarding — deteccion de primer contacto (#86) ─
         # Si el phone_hash no tiene consultas previas, se sintetiza un
         # audio de bienvenida (TTS de texto fijo, sin LLM). AudioService
@@ -1569,6 +1673,7 @@ class AgroVozPipeline:
         response_text = ""
         intent: Intent = "desconocido"
         producto: str | None = None
+        report_pdf_path: str | None = None
         t_llm_start = time.monotonic()
 
         if transcribed_text and transcribed_text.strip():
@@ -1622,13 +1727,27 @@ class AgroVozPipeline:
                     # Extraer producto antes de generar respuesta (para guardar en consulta).
                     producto = self._extract_producto(transcribed_text)
 
-                    # _generate_response detecta internally si es resumen o LLM,
-                    # maneja su propia lógica y error handling.
-                    # Se captura COMO se genero la respuesta para que el log no
-                    # mienta: antes decia "Respuesta LLM generada" incluso cuando
-                    # respondio el fast-path sin tocar el LLM.
                     origen_ref: list[str] = ["desconocido"]
-                    response_text, intent = await self._generate_response(transcribed_text, chat_id_hash, origen_ref)
+                    if settings.pdf_reports_enabled and self._is_reporte_pdf_query(transcribed_text):
+                        response_text, report_pdf_path = await self._generate_report_response(chat_id_hash)
+                        report_pdf_ref[0] = report_pdf_path
+                        intent = "resumen"
+                        origen_ref[0] = "reporte_pdf"
+                    else:
+                        # _generate_response detecta internamente si es resumen o LLM,
+                        # maneja su propia lógica y error handling.
+                        response_text, intent = await self._generate_response(
+                            transcribed_text,
+                            chat_id_hash,
+                            origen_ref,
+                        )
+                        from app.services.report_service import REPORT_TOOL_SIGNAL
+
+                        if response_text == REPORT_TOOL_SIGNAL:
+                            response_text, report_pdf_path = await self._generate_report_response(chat_id_hash)
+                            report_pdf_ref[0] = report_pdf_path
+                            intent = "resumen"
+                            origen_ref[0] = "reporte_pdf_tool"
                     llm_ms_ref[0] = int((time.monotonic() - t_llm_start) * 1000)
 
                     if intent == "resumen":
@@ -1671,7 +1790,12 @@ class AgroVozPipeline:
         if response_text and generar_audio:
             try:
                 tts = _get_tts_service()
-                response_ogg_path = await asyncio.to_thread(tts.synthesize, response_text)
+                voice_response = response_text
+                if intent == "credito":
+                    from app.services.indap_credit_service import format_indap_response_for_voice
+
+                    voice_response = format_indap_response_for_voice(response_text)
+                response_ogg_path = await asyncio.to_thread(tts.synthesize, voice_response)
                 tts_ms_ref[0] = int((time.monotonic() - t_tts_start) * 1000)
                 logger.info(
                     "TTS sintetizado — message_id=%s tts_ms=%d request_id=%s",
@@ -1754,4 +1878,5 @@ class AgroVozPipeline:
             tts_ms=tts_ms_ref[0],
             welcome_audio_path=welcome_ogg_ref[0],
             es_primer_contacto=primer_contacto_ref[0],
+            report_pdf_path=report_pdf_path,
         )

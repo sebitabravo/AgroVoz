@@ -18,10 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.models.odepa_price import OdepaPrice
 from app.schemas.variables import ExtractedVariables
-from app.services.llm_keywords import (
-    _extract_mercado_from_query,
-    _force_keyword_tool,
-)
+from app.services.llm_keywords import _extract_mercado_from_query, _force_keyword_tool
 from app.services.odepa_service import get_price_for_llm
 from app.services.pipeline_service import AgroVozPipeline
 
@@ -60,6 +57,9 @@ class TestExtractMercado:
         """'en el mercado' a secas no es un mercado ODEPA nombrado."""
         assert _extract_mercado_from_query("papa en el mercado") is None
 
+    def test_estacion_central_es_vega_central(self) -> None:
+        assert _extract_mercado_from_query("papa en Estación Central") == "vega central"
+
 
 class TestGetPriceSubstring:
     """Alias hablado resuelve el nombre largo de ODEPA."""
@@ -84,6 +84,19 @@ class TestGetPriceSubstring:
         texto = get_price_for_llm(db, "papa", "vega central")
         assert "1.500" in texto
         assert "Vega Central" in texto
+
+    def test_default_declara_referencia_nacional(self, db: Session) -> None:
+        """Sin comuna, Lo Valledor no se presenta como precio local."""
+        _insertar(
+            db,
+            mercado="Mercado Mayorista Lo Valledor de Santiago",
+            precio_kg=Decimal("1200"),
+        )
+
+        texto = get_price_for_llm(db, "papa")
+
+        assert "Referencia nacional" in texto
+        assert "Lo Valledor de Santiago" in texto
 
 
 class TestFastPathConMercado:
@@ -124,3 +137,71 @@ class TestFastPathConMercado:
         assert resp is not None
         assert "Vega Central" in resp
         assert calls == [{"producto": "papa", "mercado": "vega central"}]
+
+    async def test_force_keyword_resuelve_dos_productos_y_mercados(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Una consulta multi-zona no ignora el primer producto ni mercado."""
+        from app.core import database as db_module
+        from app.services import odepa_service
+
+        calls: list[tuple[str, str]] = []
+
+        class _FakeSession:
+            def close(self) -> None:
+                pass
+
+        def _capture_price(
+            session: object,
+            producto: str,
+            mercado: str = "",
+            phone_hash: str | None = None,
+        ) -> str:
+            calls.append((producto, mercado))
+            return f"{producto} en {mercado}, según ODEPA."
+
+        monkeypatch.setattr(db_module, "SessionLocal", lambda: _FakeSession())
+        monkeypatch.setattr(odepa_service, "get_price_for_llm", _capture_price)
+
+        response = await _force_keyword_tool(
+            "la papa en Temuco y el tomate en Chillán",
+            phone_hash="a" * 64,
+        )
+
+        assert response == (
+            "papa en temuco, según ODEPA.\n\n"
+            "tomate en chillán, según ODEPA."
+        )
+        assert calls == [("papa", "temuco"), ("tomate", "chillán")]
+
+    async def test_force_keyword_repite_producto_para_dos_mercados(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """La segunda zona puede omitir el producto y heredar el anterior."""
+        from app.core import database as db_module
+        from app.services import odepa_service
+
+        calls: list[tuple[str, str]] = []
+
+        class _FakeSession:
+            def close(self) -> None:
+                pass
+
+        def _capture_price(
+            session: object,
+            producto: str,
+            mercado: str = "",
+            phone_hash: str | None = None,
+        ) -> str:
+            calls.append((producto, mercado))
+            return f"{producto} en {mercado}, según ODEPA."
+
+        monkeypatch.setattr(db_module, "SessionLocal", lambda: _FakeSession())
+        monkeypatch.setattr(odepa_service, "get_price_for_llm", _capture_price)
+
+        response = await _force_keyword_tool("papa en Temuco y en Puerto Montt")
+
+        assert response is not None
+        assert calls == [("papa", "temuco"), ("papa", "puerto montt")]

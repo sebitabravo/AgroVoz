@@ -161,6 +161,13 @@ class TestQueryLatestPrice:
         assert result is not None
         assert result.producto == "melón"
 
+    def test_producto_sin_tilde_matchea_catalogo_acentuado(self, db: Session) -> None:
+        """El audio transcrito como "maiz" encuentra el registro "maíz"."""
+        _insertar_precio(db, producto="maíz", mercado="Lo Valledor")
+        result = query_latest_price(db, "maiz", "Lo Valledor")
+        assert result is not None
+        assert result.producto == "maíz"
+
     def test_mercado_con_porcentaje_no_expande_wildcard(self, db: Session) -> None:
         """El carácter % en el input no debe actuar como comodín LIKE."""
         _insertar_precio(db, mercado="Lo Valledor")
@@ -212,6 +219,12 @@ class TestQueryLatestByProduct:
         _insertar_precio(db, producto="papa", mercado="Lo Valledor")
         result = query_latest_by_product(db, "PAPA")
         assert len(result) == 1
+
+    def test_sin_tilde_matchea_producto_acentuado(self, db: Session) -> None:
+        """La consulta "platano" encuentra el nombre ODEPA "plátano"."""
+        _insertar_precio(db, producto="plátano", mercado="Vega Central")
+        result = query_latest_by_product(db, "platano")
+        assert result["Vega Central"].producto == "plátano"
 
     def test_lanza_value_error_si_producto_vacio(self, db: Session) -> None:
         with pytest.raises(ValueError, match="producto no puede estar vacío"):

@@ -445,6 +445,7 @@ class TestSubsetDeTools:
             "get_weather",
             "get_clima_historico",
             "search_corpus",
+            "get_programas_indap",
         ):
             assert f'"name": "{tool}"' in seccion
         assert '"name": "register_expense"' not in seccion
@@ -490,7 +491,7 @@ class TestPrefijoCacheable:
         assert a[0]["content"] == b[0]["content"]
 
     def test_tipo_invalido_cae_a_todas_las_tools(self) -> None:
-        """Un tipo inesperado no debe romper: se usan las 10 tools."""
+        """Un tipo inesperado no debe romper: se usan todas las tools."""
         mensajes = _build_messages("hola", [], consulta_tipo="inventado")
         assert "get_weather" in str(mensajes[0]["content"])
         assert "get_price" in str(mensajes[0]["content"])
