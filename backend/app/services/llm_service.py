@@ -80,6 +80,7 @@ WHITELIST_TOOLS = frozenset(
         "get_clima_historico",
         "get_clima_historico_multianual",
         "search_corpus",
+        "get_programas_indap",
         "register_expense",
         "register_parcela",
         "get_parcelas",
@@ -229,19 +230,18 @@ TOOLS: list[dict[str, object]] = [
                 "Cuando el agricultor pregunte por el valor de un producto agricola, "
                 "por cuanto cuesta, cuanto vale, a como esta, o mencione un producto "
                 "(papa, tomate, cebolla, lechuga, zanahoria, etc). "
-                "Ej: 'a cuanto esta la papa', 'cuanto cuesta el kilo de tomate', "
-                "'precio de la cebolla en Lo Valledor'."
+                "Ej: 'a cuanto esta la papa', 'precio de la cebolla en Lo Valledor'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "producto": {
                         "type": "string",
-                        "description": "Nombre del producto en singular (ej: papa, tomate, lechuga, cebolla)",
+                        "description": "Producto en singular (ej: papa, tomate, lechuga, cebolla)",
                     },
                     "mercado": {
                         "type": "string",
-                        "description": "Nombre del mercado mayorista (ej: Lo Valledor, La Vega, Talca)",
+                        "description": "Mercado mayorista (ej: Lo Valledor, La Vega, Talca)",
                     },
                 },
                 "required": ["producto", "mercado"],
@@ -254,8 +254,8 @@ TOOLS: list[dict[str, object]] = [
             "name": "get_price_spread",
             "description": (
                 "USAR para COMPARAR PRECIOS entre mercados: rango, diferencia "
-                "o variacion de precio de un producto. Muestra minimo, maximo "
-                "y promedio. Ej: 'cuanto varia la papa entre mercados'."
+                "o variacion. Muestra minimo, maximo y promedio. "
+                "Ej: 'cuanto varia la papa entre mercados'."
             ),
             "parameters": {
                 "type": "object",
@@ -278,22 +278,18 @@ TOOLS: list[dict[str, object]] = [
                 "Cuando el agricultor pregunte cuanto ESTABA un producto, "
                 "el precio de la semana pasada, de ayer, de hace unos dias, "
                 "o si el precio subio o bajo. "
-                "Ej: 'a cuanto estaba la papa la semana pasada', "
-                "'cuanto valia el tomate ayer', 'ha subido la cebolla?'."
+                "Ej: 'a cuanto estaba la papa la semana pasada', 'ha subido la cebolla?'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "producto": {
                         "type": "string",
-                        "description": "Nombre del producto en singular (ej: papa, tomate, lechuga, cebolla)",
+                        "description": "Producto en singular (ej: papa, tomate, lechuga, cebolla)",
                     },
                     "dias": {
                         "type": "integer",
-                        "description": (
-                            "Cuantos dias hacia atras comparar "
-                            "(7 = semana pasada, 1 = ayer, 30 = mes pasado). Default: 7."
-                        ),
+                        "description": "Dias hacia atras (7=semana, 1=ayer, 30=mes). Default: 7.",
                     },
                 },
                 "required": ["producto"],
@@ -309,7 +305,7 @@ TOOLS: list[dict[str, object]] = [
                 "Cuando el agricultor pregunte por el clima, la temperatura, si va a "
                 "llover, el pronostico del tiempo, etc. "
                 "Si menciona ubicación, pasar lat/lon; si no, OMITIR ambos (usa GPS o Traiguen). "
-                "Ej: 'como esta el clima', 'va a llover hoy', 'temperatura en Traiguen'."
+                "Ej: 'como esta el clima', 'temperatura en Traiguen'."
             ),
             "parameters": {
                 "type": "object",
@@ -335,7 +331,7 @@ TOOLS: list[dict[str, object]] = [
                 "PRONOSTICO: clima de MANANA o proximos dias. "
                 "NO para clima de ahora (get_weather) ni pasado (get_clima_historico). "
                 "Si menciona comuna, pasarla (prioridad sobre GPS). Si no, OMITIR (usa GPS o Traiguen). "
-                "Ej: 'va a llover manana', 'va a helar', 'como viene el tiempo'."
+                "Ej: 'va a llover manana', 'como viene el tiempo'."
             ),
             "parameters": {
                 "type": "object",
@@ -346,10 +342,7 @@ TOOLS: list[dict[str, object]] = [
                     },
                     "dias": {
                         "type": "integer",
-                        "description": (
-                            "Cuantos dias de pronostico entregar, de 1 a 3. "
-                            "Usar 1 si preguntan solo por manana, 2 por defecto."
-                        ),
+                        "description": "Dias de pronostico (1-3). 1 si preguntan solo por manana, 2 por defecto.",
                     },
                 },
                 "required": [],
@@ -426,18 +419,15 @@ TOOLS: list[dict[str, object]] = [
                 "properties": {
                     "producto": {
                         "type": "string",
-                        "description": "Nombre del producto en singular (ej: papa, tomate, lechuga, cebolla)",
+                        "description": "Producto en singular (ej: papa, tomate, lechuga, cebolla)",
                     },
                     "cantidad_kg": {
                         "type": "string",
-                        "description": (
-                            "Cantidad de kilos a vender como string (ej: '30', '50', '100.5'). "
-                            "La herramienta valida y convierte a Decimal."
-                        ),
+                        "description": "Cantidad de kilos a vender como string (ej: '30', '100.5').",
                     },
                     "mercado": {
                         "type": "string",
-                        "description": "Nombre del mercado mayorista (ej: Lo Valledor, La Vega, Talca). Opcional.",
+                        "description": "Mercado mayorista (ej: Lo Valledor, La Vega, Talca). Opcional.",
                     },
                 },
                 "required": ["producto", "cantidad_kg"],
@@ -452,45 +442,34 @@ TOOLS: list[dict[str, object]] = [
                 "USAR para CALCULAR MARGEN de una venta YA REALIZADA. "
                 "Cuando el agricultor diga que ya VENDIO o ya RECIBIO dinero por "
                 "su cosecha (vendi, vendiste, acabo de vender, recibi por, me pagaron). "
-                "Pide EXPLICITAMENTE: producto, cantidad, unidad (kilo/saco/malla/caja/tonelada) "
-                "y monto total recibido. "
+                "Pide producto, cantidad, unidad (kilo/saco/malla/caja/tonelada) y monto total. "
                 "NO usar para calcular cuanto recibira (usa calculate_sale_value). "
-                "Ej: 'vendi 3 sacos de papa a 150 lucas', "
-                "'me pagaron 250 mil por 4 mallas de tomate'."
+                "Ej: 'vendi 3 sacos de papa a 150 lucas'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "producto": {
                         "type": "string",
-                        "description": "Nombre del producto en singular (ej: papa, tomate, lechuga, cebolla)",
+                        "description": "Producto en singular (ej: papa, tomate, lechuga, cebolla)",
                     },
                     "cantidad": {
                         "type": "string",
-                        "description": (
-                            "Cantidad vendida como string (ej: '3', '100', '2.5'). "
-                            "La herramienta valida y convierte a Decimal."
-                        ),
+                        "description": "Cantidad vendida como string (ej: '3', '2.5').",
                     },
                     "unidad": {
                         "type": "string",
                         "description": (
-                            "Unidad de medida: kilo, saco (50kg), malla (25kg), "
-                            "caja (20kg), tonelada (1000kg). "
-                            "Ej: 'saco', 'malla', 'caja', 'kilo', 'tonelada'."
+                            "Unidad: kilo, saco (50kg), malla (25kg), caja (20kg), tonelada (1000kg)."
                         ),
                     },
                     "precio_total": {
                         "type": "string",
-                        "description": (
-                            "Monto TOTAL recibido en pesos chilenos como string "
-                            "(ej: '150000', '250000', '100000'). "
-                            "La herramienta valida y convierte a Decimal."
-                        ),
+                        "description": "Monto TOTAL recibido en pesos chilenos como string (ej: '150000').",
                     },
                     "mercado": {
                         "type": "string",
-                        "description": "Nombre del mercado mayorista (ej: Lo Valledor, La Vega, Talca). Opcional.",
+                        "description": "Mercado mayorista (ej: Lo Valledor, La Vega, Talca). Opcional.",
                     },
                 },
                 "required": ["producto", "cantidad", "unidad", "precio_total"],
@@ -517,15 +496,35 @@ TOOLS: list[dict[str, object]] = [
                     "query": {
                         "type": "string",
                         "description": (
-                            "La consulta o pregunta del agricultor "
-                            "para buscar en los documentos oficiales. "
-                            "Ej: 'precio de la papa en ferias', "
-                            "'produccion de papa en Chile', "
-                            "'mercado mayorista papa'."
+                            "La consulta del agricultor para buscar en los documentos oficiales. "
+                            "Ej: 'precio de la papa en ferias', 'produccion de papa en Chile'."
                         ),
                     },
                 },
                 "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_programas_indap",
+            "description": (
+                "USAR para consultar PROGRAMAS DE FOMENTO Y CREDITO de INDAP "
+                "en La Araucanía. Entrega únicamente información pública sobre "
+                "objetivo, requisitos generales y forma de postular. "
+                "NUNCA evalúa elegibilidad ni recomienda un programa, monto o tasa. "
+                "Ej: 'qué programa hay para un motocultivador', 'qué apoyo ofrece PRODESAL'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "consulta": {
+                        "type": "string",
+                        "description": "Pregunta del agricultor sobre programas INDAP.",
+                    },
+                },
+                "required": ["consulta"],
             },
         },
     },
@@ -1013,6 +1012,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
     from app.services.agronomic_rules_service import get_agronomic_rule_for_llm
     from app.services.directorio_agricola_service import get_directorio_agricola
     from app.services.expense_service import register_expense_for_llm
+    from app.services.indap_credit_service import get_programas_indap
     from app.services.odepa_service import (
         calculate_margin_for_llm,
         calculate_sale_value_for_llm,
@@ -1042,6 +1042,7 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         "get_clima_historico": get_clima_historico,
         "get_clima_historico_multianual": get_clima_historico_multianual,
         "search_corpus": search_corpus_for_llm,
+        "get_programas_indap": get_programas_indap,
         "register_expense": register_expense_for_llm,
         "register_parcela": register_parcela_for_llm,
         "get_parcelas": get_parcelas_for_llm,

@@ -80,7 +80,8 @@ HERRAMIENTAS = (
     "margen=calculate_margin; mercados=get_price_spread; clima=get_weather; "
     "histórico=get_clima_historico; comparación_multianual=get_clima_historico_multianual; "
     "documentos=search_corpus; "
-    "gasto=register_expense; directorio=get_directorio_agricola. "
+    "programas INDAP=get_programas_indap; gasto=register_expense; "
+    "directorio=get_directorio_agricola. "
     "Usa la herramienta antes de reformular."
 )
 

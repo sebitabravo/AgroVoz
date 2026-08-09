@@ -877,11 +877,20 @@ class AgroVozPipeline:
                     "resumen",
                 )
 
-        # P0 #174: crédito se detecta ANTES de saludo, extracción de producto,
-        # fuzzy matching, RAG y LLM. Sin esta precedencia, frases reales como
-        # "crédito para semillas" y "documento que habla de crédito" caían en
-        # precio por similitudes para→pera y habla→haba.
-        from app.services.indap_credit_service import get_indap_credit_referral
+        # P0 #174/#245: crédito y programas se detectan ANTES de saludo,
+        # extracción de producto, fuzzy matching, RAG y LLM. Sin esta
+        # precedencia, "programa para un motocultivador" podía caer en clima
+        # o en precio por similitudes del texto transcrito.
+        from app.services.indap_credit_service import (
+            get_indap_credit_referral,
+            get_programas_indap,
+            is_programas_indap_query,
+        )
+
+        if is_programas_indap_query(transcribed_text):
+            logger.info("Derivación informativa INDAP de programas sin LLM")
+            _marcar("fast_path_programas_indap")
+            return get_programas_indap(transcribed_text), "credito"
 
         credit_referral = get_indap_credit_referral(transcribed_text)
         if credit_referral is not None:
@@ -1668,7 +1677,12 @@ class AgroVozPipeline:
         if response_text and generar_audio:
             try:
                 tts = _get_tts_service()
-                response_ogg_path = await asyncio.to_thread(tts.synthesize, response_text)
+                voice_response = response_text
+                if intent == "credito":
+                    from app.services.indap_credit_service import format_indap_response_for_voice
+
+                    voice_response = format_indap_response_for_voice(response_text)
+                response_ogg_path = await asyncio.to_thread(tts.synthesize, voice_response)
                 tts_ms_ref[0] = int((time.monotonic() - t_tts_start) * 1000)
                 logger.info(
                     "TTS sintetizado — message_id=%s tts_ms=%d request_id=%s",
