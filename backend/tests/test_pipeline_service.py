@@ -1756,6 +1756,7 @@ class TestProcess:
     ) -> None:
         """El pedido explícito evita el LLM y deja el PDF para AudioService."""
         _mock_first_contact(monkeypatch, is_first=False)
+        monkeypatch.setattr(settings, "pdf_reports_enabled", True)
         save_calls = _mock_db_save(monkeypatch)
         report_path = tmp_path / "agrovoz-test-reporte.pdf"
         report_path.write_bytes(b"%PDF-test")
@@ -1797,6 +1798,58 @@ class TestProcess:
         assert save_calls[0]["intent"] == "resumen"
         report_path.unlink()
 
+    async def test_informe_con_gate_apagado_no_intercepta_consulta_normal(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Con PDF_REPORTS_ENABLED=false, 'informe' no debe secuestrar el flujo normal.
+
+        _is_reporte_pdf_query matchea la palabra suelta 'informe', que aparece en
+        preguntas comunes ('puedes informarme el precio de la papa'). Sin el gate
+        activo, el pipeline debe caer al flujo normal (LLM/precio) en vez de
+        responder 'Los reportes PDF todavía no están habilitados' — regresión de
+        PR #257 encontrada en revisión de seguridad.
+        """
+        _mock_first_contact(monkeypatch, is_first=False)
+        _mock_db_save(monkeypatch)
+        monkeypatch.setattr(settings, "pdf_reports_enabled", False)
+
+        async def no_alerta(
+            _text: str,
+            _phone_hash: str,
+            _chat_id: str | None,
+        ) -> tuple[None, None]:
+            return None, None
+
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_handle_alert_commands",
+            staticmethod(no_alerta),
+        )
+        _mock_generated_response(monkeypatch, response_text="La papa está a 500 pesos el kilo.")
+
+        async def fail_if_called(_phone_hash: str) -> tuple[str, str | None]:
+            raise AssertionError("no debe generar el reporte con el gate apagado")
+
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_generate_report_response",
+            staticmethod(fail_if_called),
+        )
+
+        result = await AgroVozPipeline().process(
+            wav_path=None,
+            audio_duration_ms=0,
+            message_id="test-informe-gate-apagado",
+            chat_id_hash="e" * 64,
+            request_id="req-informe-gate-apagado",
+            texto_directo="mándame un informe de precios del trigo",
+            generar_audio=False,
+        )
+
+        assert result.text_response == "La papa está a 500 pesos el kilo."
+        assert result.report_pdf_path is None
+
     async def test_timeout_despues_de_generar_reporte_elimina_pdf(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -1804,6 +1857,7 @@ class TestProcess:
     ) -> None:
         """El pipeline conserva ownership del PDF hasta devolver AudioResponse."""
         _mock_first_contact(monkeypatch, is_first=False)
+        monkeypatch.setattr(settings, "pdf_reports_enabled", True)
         report_path = tmp_path / "reporte-huerfano.pdf"
         report_path.write_bytes(b"%PDF-test")
 

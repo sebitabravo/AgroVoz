@@ -1554,7 +1554,7 @@ class AgroVozPipeline:
                     producto = self._extract_producto(transcribed_text)
 
                     origen_ref: list[str] = ["desconocido"]
-                    if self._is_reporte_pdf_query(transcribed_text):
+                    if settings.pdf_reports_enabled and self._is_reporte_pdf_query(transcribed_text):
                         response_text, report_pdf_path = await self._generate_report_response(chat_id_hash)
                         report_pdf_ref[0] = report_pdf_path
                         intent = "resumen"
