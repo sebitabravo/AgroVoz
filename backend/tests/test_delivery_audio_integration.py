@@ -10,6 +10,7 @@ from app.core.constants import Intent
 from app.schemas.pipeline import AudioResponse
 from app.services import audio_service, pipeline_service
 from app.services.indap_credit_service import build_indap_sources_message
+from app.services.report_service import REPORT_CAPTION, REPORT_FILENAME
 
 
 def _response(
@@ -20,6 +21,7 @@ def _response(
     welcome_audio_path: str | None = None,
     es_primer_contacto: bool = False,
     intent: Intent = "precio",
+    report_pdf_path: str | None = None,
 ) -> AudioResponse:
     return AudioResponse(
         audio_path=audio_path,
@@ -29,6 +31,7 @@ def _response(
         consultation_id=consultation_id,
         welcome_audio_path=welcome_audio_path,
         es_primer_contacto=es_primer_contacto,
+        report_pdf_path=report_pdf_path,
     )
 
 
@@ -52,6 +55,7 @@ def _install_openwa(
 ) -> Mock:
     openwa = Mock()
     openwa.send_audio = AsyncMock(return_value={})
+    openwa.send_file = AsyncMock(return_value={})
     openwa.send_text = AsyncMock(return_value={})
     openwa.send_typing_indicator = AsyncMock(return_value={})
     monkeypatch.setattr(
@@ -123,6 +127,166 @@ async def test_texto_exitoso_marca_consulta_entregada(
     delivered.assert_called_once_with(101)
     failed.assert_not_called()
     history.assert_called_once_with(101)
+
+
+@pytest.mark.asyncio
+async def test_texto_reporte_envia_pdf_y_borra_temporal(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """El PDF llega antes de la confirmación y el temporal se elimina."""
+    openwa = _install_openwa(monkeypatch)
+    send_order: list[str] = []
+    openwa.send_file.side_effect = lambda *_args: send_order.append("pdf")
+    openwa.send_text.side_effect = lambda *_args: send_order.append("text")
+    delivered, failed, history = _install_delivery_spies(monkeypatch)
+    report_path = tmp_path / "reporte_semanal.pdf"
+    report_path.write_bytes(b"%PDF-1.7 reporte determinista")
+    _install_pipeline(
+        monkeypatch,
+        _response(consultation_id=103, intent="resumen", report_pdf_path=str(report_path)),
+    )
+
+    await audio_service.AudioService(tmp_path).process_text(
+        "envíame el reporte semanal en PDF",
+        "56911111111@c.us",
+        "req-reporte-pdf",
+    )
+
+    openwa.send_text.assert_awaited_once_with(
+        "56911111111@c.us",
+        "Respuesta principal",
+    )
+    openwa.send_file.assert_awaited_once_with(
+        "56911111111@c.us",
+        str(report_path),
+        REPORT_FILENAME,
+        REPORT_CAPTION,
+    )
+    delivered.assert_called_once_with(103)
+    failed.assert_not_called()
+    history.assert_called_once_with(103)
+    assert send_order == ["pdf", "text"]
+    assert not report_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_audio_reporte_envia_pdf_despues_del_audio_y_borra_temporales(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """El canal de voz adjunta primero y limpia todos los temporales."""
+    _install_audio_conversion(monkeypatch)
+    openwa = _install_openwa(monkeypatch)
+    send_order: list[str] = []
+    openwa.send_file.side_effect = lambda *_args: send_order.append("pdf")
+    openwa.send_audio.side_effect = lambda *_args: send_order.append("audio")
+    delivered, failed, history = _install_delivery_spies(monkeypatch)
+    audio_path = tmp_path / "respuesta.ogg"
+    audio_path.write_bytes(b"respuesta")
+    report_path = tmp_path / "reporte_semanal.pdf"
+    report_path.write_bytes(b"%PDF-1.7 reporte determinista")
+    _install_pipeline(
+        monkeypatch,
+        _response(
+            consultation_id=104,
+            audio_path=str(audio_path),
+            intent="resumen",
+            report_pdf_path=str(report_path),
+        ),
+    )
+
+    await audio_service.AudioService(tmp_path).process_audio(
+        b"audio",
+        "56911111111@c.us",
+        "req-audio-reporte-pdf",
+    )
+
+    openwa.send_audio.assert_awaited_once_with("56911111111@c.us", str(audio_path))
+    openwa.send_file.assert_awaited_once_with(
+        "56911111111@c.us",
+        str(report_path),
+        REPORT_FILENAME,
+        REPORT_CAPTION,
+    )
+    delivered.assert_called_once_with(104)
+    failed.assert_not_called()
+    history.assert_called_once_with(104)
+    assert send_order == ["pdf", "audio"]
+    assert not audio_path.exists()
+    assert not report_path.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_texto_reporte_fallido_no_confirma_entrega(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Un send_file fallido marca error y reemplaza la confirmación."""
+    openwa = _install_openwa(monkeypatch)
+    openwa.send_file.side_effect = httpx.ReadTimeout("dato privado")
+    delivered, failed, history = _install_delivery_spies(monkeypatch)
+    report_path = tmp_path / "reporte-fallido.pdf"
+    report_path.write_bytes(b"%PDF-test")
+    _install_pipeline(
+        monkeypatch,
+        _response(consultation_id=105, intent="resumen", report_pdf_path=str(report_path)),
+    )
+
+    await audio_service.AudioService(tmp_path).process_text(
+        "mándame el reporte semanal",
+        "56911111111@c.us",
+        "req-reporte-fallido",
+    )
+
+    openwa.send_text.assert_awaited_once_with(
+        "56911111111@c.us",
+        "No pude adjuntar el reporte ahora. ¿Probamos de nuevo más tarde?",
+    )
+    delivered.assert_not_called()
+    failed.assert_called_once_with(105, "openwa_send_failed")
+    history.assert_not_called()
+    assert not report_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_audio_reporte_fallido_no_envia_confirmacion(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Si falla el adjunto, no se envía el audio que afirma que quedó listo."""
+    _install_audio_conversion(monkeypatch)
+    openwa = _install_openwa(monkeypatch)
+    openwa.send_file.side_effect = httpx.HTTPError("dato privado")
+    delivered, failed, history = _install_delivery_spies(monkeypatch)
+    audio_path = tmp_path / "confirmacion.ogg"
+    audio_path.write_bytes(b"respuesta")
+    report_path = tmp_path / "reporte-fallido.pdf"
+    report_path.write_bytes(b"%PDF-test")
+    _install_pipeline(
+        monkeypatch,
+        _response(
+            consultation_id=106,
+            audio_path=str(audio_path),
+            intent="resumen",
+            report_pdf_path=str(report_path),
+        ),
+    )
+
+    await audio_service.AudioService(tmp_path).process_audio(
+        b"audio",
+        "56911111111@c.us",
+        "req-audio-reporte-fallido",
+    )
+
+    openwa.send_audio.assert_not_awaited()
+    openwa.send_text.assert_awaited_once()
+    delivered.assert_not_called()
+    failed.assert_called_once_with(106, "openwa_send_failed")
+    history.assert_not_called()
+    assert not audio_path.exists()
+    assert not report_path.exists()
 
 
 @pytest.mark.asyncio

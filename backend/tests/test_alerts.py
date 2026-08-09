@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.alert import Alert
 from app.models.odepa_price import OdepaPrice
+from app.models.user_prefs import UserPrefs
 from app.services.alert_service import (
     MAX_ALERTAS_ACTIVAS,
     AlertServiceError,
@@ -274,6 +275,44 @@ class TestCancelAlertas:
     ) -> None:
         count = await cancelar_alertas(db, phone_hash)
         assert count == 0
+
+    @pytest.mark.asyncio
+    async def test_cancelar_todo_revoca_alert_consent(
+        self,
+        db: Session,
+        phone_hash: str,
+    ) -> None:
+        """Cancelar sin tipo también corta las alertas de variación de precio.
+
+        Esas alertas no usan Alert.activa como interruptor: evaluar_variaciones_precio
+        consulta UserPrefs.alert_consent directamente (ver alert_service.py). Sin
+        revocar ese campo, "cancela mis alertas" confirmaba la cancelación mientras
+        el productor seguía recibiendo avisos de variación en cada sync.
+        """
+        db.add(UserPrefs(phone_hash=phone_hash, alert_consent=True))
+        db.commit()
+
+        count = await cancelar_alertas(db, phone_hash)
+
+        assert count == 1
+        prefs = db.query(UserPrefs).filter(UserPrefs.phone_hash == phone_hash).one()
+        assert prefs.alert_consent is False
+
+    @pytest.mark.asyncio
+    async def test_cancelar_por_tipo_no_revoca_alert_consent(
+        self,
+        db: Session,
+        phone_hash: str,
+        seed_alerta_precio: Alert,
+    ) -> None:
+        """Cancelar un tipo específico no toca el consentimiento compartido."""
+        db.add(UserPrefs(phone_hash=phone_hash, alert_consent=True))
+        db.commit()
+
+        await cancelar_alertas(db, phone_hash, tipo="precio")
+
+        prefs = db.query(UserPrefs).filter(UserPrefs.phone_hash == phone_hash).one()
+        assert prefs.alert_consent is True
 
 
 class TestEvaluarAlertasPrecio:

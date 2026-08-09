@@ -10,8 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class WebhookMedia(BaseModel):
     """Archivo multimedia adjunto al mensaje.
 
-    Para mensajes de voz (type=voice), Open-WA incluye el audio como
-    base64 inline en `data`, no como URL para descargar.
+    Los audios pueden llegar como base64 inline. Para imágenes el servicio
+    usa el ``message_id`` y descarga el media con la API REST de Open-WA.
     """
 
     mimetype: str = ""
@@ -25,6 +25,17 @@ class WebhookContact(BaseModel):
 
     name: str = ""
     push_name: str = Field(default="", alias="pushName")
+
+    model_config = ConfigDict(extra="allow")
+
+
+class WebhookLocation(BaseModel):
+    """Coordenadas de ubicación, según la variante del payload de Open-WA."""
+
+    lat: float | None = None
+    lng: float | None = None
+    latitude: float | None = None
+    longitude: float | None = None
 
     model_config = ConfigDict(extra="allow")
 
@@ -55,6 +66,13 @@ class WebhookMessageData(BaseModel):
     is_lid_sender: bool = Field(default=False, alias="isLidSender")
     contact: WebhookContact = Field(default_factory=WebhookContact)
     media: WebhookMedia | None = None
+    # Open-WA envía GPS directamente en data; ``location`` cubre gateways que
+    # agrupan los mismos campos dentro de un objeto anidado.
+    lat: float | None = None
+    lng: float | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    location: WebhookLocation | None = None
 
     model_config = ConfigDict(
         extra="allow",

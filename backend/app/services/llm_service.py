@@ -11,6 +11,10 @@ Tools disponibles (whitelist):
    - get_weather(lat, lon)                      -> weather_service.get_weather()
    - get_pronostico(comuna, dias)               -> weather_service.get_pronostico()
    - get_clima_historico(comuna, metrica)       -> weather_service.get_clima_historico()
+   - get_clima_historico_multianual(comuna, anos, temporada, anio, metrica)
+                                                -> weather_service.get_clima_historico_multianual()
+  - get_directorio_agricola(comuna, tipo)      -> directorio_agricola_service.get_directorio_agricola()
+   - get_reporte_pdf()                          -> report_service.get_reporte_pdf_for_llm()
 
 Si el LLM intenta usar cualquier otra tool, se responde con texto
 de fallback. Si no entiende la query, pide reformular.
@@ -74,12 +78,16 @@ WHITELIST_TOOLS = frozenset(
         "get_weather",
         "get_pronostico",
         "get_clima_historico",
+        "get_clima_historico_multianual",
         "search_corpus",
+        "get_programas_indap",
         "register_expense",
         "register_parcela",
         "get_parcelas",
         "get_regla_agronomica",
         "get_link_resumen",
+        "get_reporte_pdf",
+        "get_directorio_agricola",
     }
 )
 
@@ -101,7 +109,7 @@ _GENERATION_TIMEOUT = 25.0
 _LLM_CIRCUIT_COOLDOWN_SECONDS = 90.0
 _LLM_BUSY_TEXT = "Estoy procesando otra consulta ahora. ¿Podrías intentar de nuevo en un momento?"
 
-# Contexto máximo del modelo (tokens). Con las 10 tools actuales, el system
+# Contexto máximo del modelo (tokens). Con las tools actuales, el system
 # prompt completo + tools ya
 # ocupa ~2771 tokens medidos con el tokenizer real de Qwen2.5 — n_ctx=1024
 # y n_ctx=2048 NO alcanzan ni para el primer prompt (ValueError instantaneo
@@ -124,7 +132,7 @@ _N_CTX = 4096
 # scheduler en maquinas grandes sin beneficio real para un 3B en CPU.
 _N_THREADS: int = min(os.cpu_count() or 4, 8)
 
-# Tamano de lote para prompt eval. El prompt fijo (system + 10 tools) ronda los
+# Tamano de lote para prompt eval. El prompt fijo (system + tools) ronda los
 # 2700 tokens y se evalua en lotes: un batch mas grande procesa mas tokens por
 # pasada y reduce el overhead por lote, que es donde se va el tiempo cuando hay
 # poca CPU. Ver _preload_prompt_cache() para el otro lado del problema.
@@ -222,19 +230,18 @@ TOOLS: list[dict[str, object]] = [
                 "Cuando el agricultor pregunte por el valor de un producto agricola, "
                 "por cuanto cuesta, cuanto vale, a como esta, o mencione un producto "
                 "(papa, tomate, cebolla, lechuga, zanahoria, etc). "
-                "Ej: 'a cuanto esta la papa', 'cuanto cuesta el kilo de tomate', "
-                "'precio de la cebolla en Lo Valledor'."
+                "Ej: 'a cuanto esta la papa', 'precio de la cebolla en Lo Valledor'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "producto": {
                         "type": "string",
-                        "description": "Nombre del producto en singular (ej: papa, tomate, lechuga, cebolla)",
+                        "description": "Producto en singular (ej: papa, tomate, lechuga, cebolla)",
                     },
                     "mercado": {
                         "type": "string",
-                        "description": "Nombre del mercado mayorista (ej: Lo Valledor, La Vega, Talca)",
+                        "description": "Mercado mayorista (ej: Lo Valledor, La Vega, Talca)",
                     },
                 },
                 "required": ["producto", "mercado"],
@@ -247,8 +254,8 @@ TOOLS: list[dict[str, object]] = [
             "name": "get_price_spread",
             "description": (
                 "USAR para COMPARAR PRECIOS entre mercados: rango, diferencia "
-                "o variacion de precio de un producto. Muestra minimo, maximo "
-                "y promedio. Ej: 'cuanto varia la papa entre mercados'."
+                "o variacion. Muestra minimo, maximo y promedio. "
+                "Ej: 'cuanto varia la papa entre mercados'."
             ),
             "parameters": {
                 "type": "object",
@@ -271,22 +278,18 @@ TOOLS: list[dict[str, object]] = [
                 "Cuando el agricultor pregunte cuanto ESTABA un producto, "
                 "el precio de la semana pasada, de ayer, de hace unos dias, "
                 "o si el precio subio o bajo. "
-                "Ej: 'a cuanto estaba la papa la semana pasada', "
-                "'cuanto valia el tomate ayer', 'ha subido la cebolla?'."
+                "Ej: 'a cuanto estaba la papa la semana pasada', 'ha subido la cebolla?'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "producto": {
                         "type": "string",
-                        "description": "Nombre del producto en singular (ej: papa, tomate, lechuga, cebolla)",
+                        "description": "Producto en singular (ej: papa, tomate, lechuga, cebolla)",
                     },
                     "dias": {
                         "type": "integer",
-                        "description": (
-                            "Cuantos dias hacia atras comparar "
-                            "(7 = semana pasada, 1 = ayer, 30 = mes pasado). Default: 7."
-                        ),
+                        "description": "Dias hacia atras (7=semana, 1=ayer, 30=mes). Default: 7.",
                     },
                 },
                 "required": ["producto"],
@@ -301,22 +304,22 @@ TOOLS: list[dict[str, object]] = [
                 "USAR para PREGUNTAS DE CLIMA. "
                 "Cuando el agricultor pregunte por el clima, la temperatura, si va a "
                 "llover, el pronostico del tiempo, etc. "
-                "Usa coordenadas de Traiguen (-38.23, -72.68) si no especifica ubicacion. "
-                "Ej: 'como esta el clima', 'va a llover hoy', 'temperatura en Traiguen'."
+                "Si menciona ubicación, pasar lat/lon; si no, OMITIR ambos (usa GPS o Traiguen). "
+                "Ej: 'como esta el clima', 'temperatura en Traiguen'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "lat": {
                         "type": "number",
-                        "description": "Latitud en grados decimales (-90 a 90). Default: -38.23 para Traiguen.",
+                        "description": "Latitud (-90 a 90). OMITIR si no hay ubicación explícita.",
                     },
                     "lon": {
                         "type": "number",
-                        "description": "Longitud en grados decimales (-180 a 180). Default: -72.68 para Traiguen.",
+                        "description": "Longitud (-180 a 180). OMITIR si no hay ubicación explícita.",
                     },
                 },
-                "required": ["lat", "lon"],
+                "required": [],
             },
         },
     },
@@ -327,24 +330,40 @@ TOOLS: list[dict[str, object]] = [
             "description": (
                 "PRONOSTICO: clima de MANANA o proximos dias. "
                 "NO para clima de ahora (get_weather) ni pasado (get_clima_historico). "
-                "Ej: 'va a llover manana', 'va a helar', 'como viene el tiempo'."
+                "Si menciona comuna, pasarla (prioridad sobre GPS). Si no, OMITIR (usa GPS o Traiguen). "
+                "Ej: 'va a llover manana', 'como viene el tiempo'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "comuna": {
                         "type": "string",
-                        "description": (
-                            "Nombre de la comuna chilena (ej: Traiguen, Temuco, Santiago). "
-                            "Usar Traiguen si no se especifica ubicacion."
-                        ),
+                        "description": "Comuna chilena (ej: Traiguen, Temuco, Santiago). OMITIR si no se especifica.",
                     },
                     "dias": {
                         "type": "integer",
-                        "description": (
-                            "Cuantos dias de pronostico entregar, de 1 a 3. "
-                            "Usar 1 si preguntan solo por manana, 2 por defecto."
-                        ),
+                        "description": "Dias de pronostico (1-3). 1 si preguntan solo por manana, 2 por defecto.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_clima_historico",
+            "description": "Clima histórico de un año: temperatura, lluvia y heladas. No recomienda.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "comuna": {
+                        "type": "string",
+                        "description": "Comuna chilena. Default: Traiguén.",
+                    },
+                    "metrica": {
+                        "type": "string",
+                        "description": "Métrica opcional: temperatura, lluvia o heladas.",
                     },
                 },
                 "required": ["comuna"],
@@ -354,35 +373,30 @@ TOOLS: list[dict[str, object]] = [
     {
         "type": "function",
         "function": {
-            "name": "get_clima_historico",
-            "description": (
-                "USAR para CLIMA HISTORICO. "
-                "Cuando el agricultor pregunte como fue el clima en un periodo "
-                "pasado, la temperatura promedio del año, cuanta lluvia cayo o "
-                "cuantos dias de helada hubo. "
-                "NO usar para clima actual (usa get_weather). "
-                "SOLO INFORMA DATOS, no recomienda cuando sembrar. "
-                "Ej: 'como fue el clima el año pasado en Traiguen', "
-                "'cuanta lluvia cayo el año pasado', "
-                "'cuantos dias de helada hubo en Temuco'."
-            ),
+            "name": "get_clima_historico_multianual",
+            "description": "Compara clima histórico por año/temporada: temperatura, lluvia, heladas.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "comuna": {
                         "type": "string",
-                        "description": (
-                            "Nombre de la comuna chilena (ej: Traiguen, Temuco, Santiago). "
-                            "Usar Traiguen si no se especifica ubicacion."
-                        ),
+                        "description": "Comuna.",
+                    },
+                    "anos": {
+                        "type": "integer",
+                        "description": "Años (1-5).",
+                    },
+                    "temporada": {
+                        "type": "string",
+                        "description": "Temporada opc.",
+                    },
+                    "anio": {
+                        "type": "integer",
+                        "description": "Año final opc.",
                     },
                     "metrica": {
                         "type": "string",
-                        "description": (
-                            "Metrica opcional a enfatizar: "
-                            "'temperatura', 'lluvia', 'heladas'. "
-                            "Si no se especifica, se entrega resumen completo."
-                        ),
+                        "description": "Métrica opc.",
                     },
                 },
                 "required": ["comuna"],
@@ -396,8 +410,7 @@ TOOLS: list[dict[str, object]] = [
             "description": (
                 "USAR para CALCULAR CUANTO RECIBIRA el agricultor por una venta. "
                 "Cuando el agricultor mencione una cantidad de kilos a vender "
-                "(voy a vender 30 kilos de papa, a cuanto recibo por 50 kilos, "
-                "cuanto me pagan por 100 kilos de tomate). "
+                "(voy a vender 30 kilos, a cuanto recibo por 50 kilos). "
                 "EL CALCULO LO HACE LA HERRAMIENTA: nunca lo hagas tu. "
                 "Ej: 'voy a vender 30 kilos de papa', 'a cuanto recibo por 50 kilos de tomate'."
             ),
@@ -406,18 +419,15 @@ TOOLS: list[dict[str, object]] = [
                 "properties": {
                     "producto": {
                         "type": "string",
-                        "description": "Nombre del producto en singular (ej: papa, tomate, lechuga, cebolla)",
+                        "description": "Producto en singular (ej: papa, tomate, lechuga, cebolla)",
                     },
                     "cantidad_kg": {
                         "type": "string",
-                        "description": (
-                            "Cantidad de kilos a vender como string (ej: '30', '50', '100.5'). "
-                            "La herramienta valida y convierte a Decimal."
-                        ),
+                        "description": "Cantidad de kilos a vender como string (ej: '30', '100.5').",
                     },
                     "mercado": {
                         "type": "string",
-                        "description": "Nombre del mercado mayorista (ej: Lo Valledor, La Vega, Talca). Opcional.",
+                        "description": "Mercado mayorista (ej: Lo Valledor, La Vega, Talca). Opcional.",
                     },
                 },
                 "required": ["producto", "cantidad_kg"],
@@ -432,46 +442,34 @@ TOOLS: list[dict[str, object]] = [
                 "USAR para CALCULAR MARGEN de una venta YA REALIZADA. "
                 "Cuando el agricultor diga que ya VENDIO o ya RECIBIO dinero por "
                 "su cosecha (vendi, vendiste, acabo de vender, recibi por, me pagaron). "
-                "Pide EXPLICITAMENTE: producto, cantidad, unidad (kilo/saco/malla/caja/tonelada) "
-                "y monto total recibido. "
+                "Pide producto, cantidad, unidad (kilo/saco/malla/caja/tonelada) y monto total. "
                 "NO usar para calcular cuanto recibira (usa calculate_sale_value). "
-                "Ej: 'vendi 3 sacos de papa a 150 lucas', "
-                "'me pagaron 250 mil por 4 mallas de tomate', "
-                "'recibi 100 lucas por 2 cajas de cebolla'."
+                "Ej: 'vendi 3 sacos de papa a 150 lucas'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "producto": {
                         "type": "string",
-                        "description": "Nombre del producto en singular (ej: papa, tomate, lechuga, cebolla)",
+                        "description": "Producto en singular (ej: papa, tomate, lechuga, cebolla)",
                     },
                     "cantidad": {
                         "type": "string",
-                        "description": (
-                            "Cantidad vendida como string (ej: '3', '100', '2.5'). "
-                            "La herramienta valida y convierte a Decimal."
-                        ),
+                        "description": "Cantidad vendida como string (ej: '3', '2.5').",
                     },
                     "unidad": {
                         "type": "string",
                         "description": (
-                            "Unidad de medida: kilo, saco (50kg), malla (25kg), "
-                            "caja (20kg), tonelada (1000kg). "
-                            "Ej: 'saco', 'malla', 'caja', 'kilo', 'tonelada'."
+                            "Unidad: kilo, saco (50kg), malla (25kg), caja (20kg), tonelada (1000kg)."
                         ),
                     },
                     "precio_total": {
                         "type": "string",
-                        "description": (
-                            "Monto TOTAL recibido en pesos chilenos como string "
-                            "(ej: '150000', '250000', '100000'). "
-                            "La herramienta valida y convierte a Decimal."
-                        ),
+                        "description": "Monto TOTAL recibido en pesos chilenos como string (ej: '150000').",
                     },
                     "mercado": {
                         "type": "string",
-                        "description": "Nombre del mercado mayorista (ej: Lo Valledor, La Vega, Talca). Opcional.",
+                        "description": "Mercado mayorista (ej: Lo Valledor, La Vega, Talca). Opcional.",
                     },
                 },
                 "required": ["producto", "cantidad", "unidad", "precio_total"],
@@ -490,8 +488,7 @@ TOOLS: list[dict[str, object]] = [
                 "NO usar para precios actuales (usa get_price). "
                 "CITA la fuente y fecha que devuelve la herramienta. "
                 "Ej: 'que dice el boletin de la papa', "
-                "'cual es la tendencia del mercado', "
-                "'informacion sobre la papa en Chile'."
+                "'cual es la tendencia del mercado'."
             ),
             "parameters": {
                 "type": "object",
@@ -499,15 +496,35 @@ TOOLS: list[dict[str, object]] = [
                     "query": {
                         "type": "string",
                         "description": (
-                            "La consulta o pregunta del agricultor "
-                            "para buscar en los documentos oficiales. "
-                            "Ej: 'precio de la papa en ferias', "
-                            "'produccion de papa en Chile', "
-                            "'mercado mayorista papa'."
+                            "La consulta del agricultor para buscar en los documentos oficiales. "
+                            "Ej: 'precio de la papa en ferias', 'produccion de papa en Chile'."
                         ),
                     },
                 },
                 "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_programas_indap",
+            "description": (
+                "USAR para consultar PROGRAMAS DE FOMENTO Y CREDITO de INDAP "
+                "en La Araucanía. Entrega únicamente información pública sobre "
+                "objetivo, requisitos generales y forma de postular. "
+                "NUNCA evalúa elegibilidad ni recomienda un programa, monto o tasa. "
+                "Ej: 'qué programa hay para un motocultivador', 'qué apoyo ofrece PRODESAL'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "consulta": {
+                        "type": "string",
+                        "description": "Pregunta del agricultor sobre programas INDAP.",
+                    },
+                },
+                "required": ["consulta"],
             },
         },
     },
@@ -605,8 +622,7 @@ TOOLS: list[dict[str, object]] = [
                 "o pregunte CUANDO sembrar, cosechar o rotar. "
                 "NUNCA improvises la respuesta: esta tool resuelve contra reglas ya citadas "
                 "de INIA. Si no hay una regla que calce, dice que no tiene el dato. "
-                "Ej: 'mis papas tienen manchas en las hojas', 'cuando siembro la papa', "
-                "'que cultivo va antes de la papa'."
+                "Ej: 'mis papas tienen manchas en las hojas', 'cuando siembro la papa'."
             ),
             "parameters": {
                 "type": "object",
@@ -631,7 +647,7 @@ TOOLS: list[dict[str, object]] = [
             "description": (
                 "USAR cuando el agricultor pida VER, MANDAR o ENVIAR un resumen, panel o link "
                 "con sus datos (parcelas, alertas, comuna). "
-                "Ej: 'mandame mi resumen', 'quiero ver mis datos', 'dame el link del panel'."
+                "Ej: 'mandame mi resumen', 'dame el link del panel'."
             ),
             "parameters": {
                 "type": "object",
@@ -640,15 +656,57 @@ TOOLS: list[dict[str, object]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_reporte_pdf",
+            "description": (
+                "USAR cuando el agricultor pida que le MANDES un REPORTE, INFORME "
+                "o PDF semanal con precios y clima. No inventes datos: la herramienta "
+                "arma el documento con ODEPA y OpenMeteo y lo envía por WhatsApp. "
+                "Ej: 'mándame el reporte de la semana', 'envíame un PDF de precios y clima'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_directorio_agricola",
+            "description": (
+                "Sedes INDAP, PRODESAL o cooperativas por comuna. "
+                "Solo datos oficiales. Ej: 'INDAP en Traiguén'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "comuna": {
+                        "type": "string",
+                        "description": "Comuna chilena (ej: Traiguén).",
+                    },
+                    "tipo": {
+                        "type": "string",
+                        "enum": ["indap", "prodesal", "cooperativa"],
+                        "description": "Filtro opc.",
+                    },
+                },
+                "required": ["comuna"],
+            },
+        },
+    },
 ]
 
 # Subconjuntos de tools por tipo de consulta (TipoConsulta en schemas/variables).
-# Las 10 definiciones juntas pesan ~2000 tokens y se re-inyectan en cada consulta:
+# Las definiciones juntas se re-inyectan en cada consulta:
 # es el grueso del prompt y, con poca CPU, el grueso de la latencia. El pipeline
 # ya clasifica la consulta ANTES de llamar al LLM (_extract_variables), asi que
 # mandamos solo las tools del dominio consultado.
 #
-# "ambos" y "desconocido" reciben las 10: si no sabemos qué pregunta, recortar
+# "ambos" y "desconocido" reciben todas: si no sabemos qué pregunta, recortar
 # tools le sacaria capacidad al modelo. Solo recortamos cuando hay certeza.
 #
 # search_corpus va en ambos subconjuntos: responde dudas de contexto agricola
@@ -661,10 +719,20 @@ _TOOLS_PRECIO = frozenset(
         "calculate_sale_value",
         "calculate_margin",
         "register_expense",
+        "get_reporte_pdf",
         "search_corpus",
     }
 )
-_TOOLS_CLIMA = frozenset({"get_weather", "get_pronostico", "get_clima_historico", "search_corpus"})
+_TOOLS_CLIMA = frozenset(
+    {
+        "get_weather",
+        "get_pronostico",
+        "get_clima_historico",
+        "get_clima_historico_multianual",
+        "get_reporte_pdf",
+        "search_corpus",
+    }
+)
 
 
 # Tools apagadas por feature gate: no se anuncian. Ofrecer una tool que el
@@ -676,6 +744,7 @@ _GATED_TOOLS: dict[str, Callable[[], bool]] = {
     "get_parcelas": lambda: settings.parcela_tracking_enabled,
     "get_regla_agronomica": lambda: settings.agronomic_rules_enabled,
     "get_link_resumen": lambda: settings.farmer_panel_enabled,
+    "get_reporte_pdf": lambda: settings.pdf_reports_enabled,
 }
 
 
@@ -1039,7 +1108,9 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
     que el modulo llm_service.py sea importable sin DB ni servicios.
     """
     from app.services.agronomic_rules_service import get_agronomic_rule_for_llm
+    from app.services.directorio_agricola_service import get_directorio_agricola
     from app.services.expense_service import register_expense_for_llm
+    from app.services.indap_credit_service import get_programas_indap
     from app.services.odepa_service import (
         calculate_margin_for_llm,
         calculate_sale_value_for_llm,
@@ -1050,7 +1121,13 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
     from app.services.panel_service import get_panel_link_for_llm
     from app.services.parcela_service import get_parcelas_for_llm, register_parcela_for_llm
     from app.services.rag_service import search_corpus_for_llm
-    from app.services.weather_service import get_clima_historico, get_pronostico, get_weather
+    from app.services.report_service import get_reporte_pdf_for_llm
+    from app.services.weather_service import (
+        get_clima_historico,
+        get_clima_historico_multianual,
+        get_pronostico,
+        get_weather,
+    )
 
     return {
         "get_price": get_price_for_llm,
@@ -1061,12 +1138,16 @@ def _get_tool_handlers() -> dict[str, ToolHandler]:
         "get_weather": get_weather,
         "get_pronostico": get_pronostico,
         "get_clima_historico": get_clima_historico,
+        "get_clima_historico_multianual": get_clima_historico_multianual,
         "search_corpus": search_corpus_for_llm,
+        "get_programas_indap": get_programas_indap,
         "register_expense": register_expense_for_llm,
         "register_parcela": register_parcela_for_llm,
         "get_parcelas": get_parcelas_for_llm,
         "get_regla_agronomica": get_agronomic_rule_for_llm,
         "get_link_resumen": get_panel_link_for_llm,
+        "get_reporte_pdf": get_reporte_pdf_for_llm,
+        "get_directorio_agricola": get_directorio_agricola,
     }
 
 
@@ -1121,11 +1202,20 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
             "register_parcela",
             "get_parcelas",
             "get_link_resumen",
+            "get_reporte_pdf",
+            "get_weather",
+            "get_pronostico",
         )
         and phone_hash
     ):
         arguments = {**arguments, "phone_hash": phone_hash}
     valid_args = _filter_handler_args(handler, arguments)
+
+    if (
+        name in ("get_clima_historico", "get_clima_historico_multianual")
+        and not str(valid_args.get("comuna", "")).strip()
+    ):
+        return "No entendí la comuna. ¿Podrías repetir dónde quieres consultar?"
 
     # Cache de resultados: evita llamadas redundantes al LLM + DB para
     # la misma consulta repetida (precios ODEPA solo cambian 1 vez al dia).
@@ -1135,10 +1225,12 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
             "get_price_history",
             "get_weather",
             "get_clima_historico",
+            "get_clima_historico_multianual",
         }
     )
     # search_corpus es tan rapido (<2ms) que no necesita cache.
-    if name in cacheable:
+    cache_enabled = name in cacheable and not (name in {"get_weather", "get_pronostico"} and phone_hash)
+    if cache_enabled:
         cached = _tool_cache.get(name, **valid_args)
         if cached is not None:
             return cached
@@ -1153,12 +1245,13 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
             "register_expense",
             "register_parcela",
             "get_parcelas",
+            "get_directorio_agricola",
         ):
             from app.core.database import SessionLocal
 
             # register_parcela/get_parcelas no tienen "producto": tienen su
             # propia validación de campos requeridos más abajo.
-            needs_producto = name not in ("register_parcela", "get_parcelas")
+            needs_producto = name not in ("register_parcela", "get_parcelas", "get_directorio_agricola")
             # Completar defaults para argumentos vacios que el LLM no especifico.
             # Si el producto esta vacio, no podemos consultar nada -> fallback.
             if needs_producto and (not valid_args.get("producto") or not str(valid_args.get("producto", "")).strip()):
@@ -1189,6 +1282,8 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
                     return "No entendí la superficie de la parcela. ¿Podrías repetir cuántas hectáreas son?"
                 if not str(valid_args.get("comuna", "")).strip():
                     return "No entendí en qué comuna está la parcela. ¿Podrías repetirla?"
+            if name == "get_directorio_agricola" and not str(valid_args.get("comuna", "")).strip():
+                return "Necesito el nombre de una comuna para buscar el directorio agrícola."
             # Mercado/dias son opcionales: cada handler aplica su default.
 
             session = SessionLocal()
@@ -1213,7 +1308,7 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
         else:
             logger.info("Tool ejecutada")
         # Cachear resultado para evitar futuras llamadas al LLM.
-        if name in cacheable:
+        if cache_enabled:
             _tool_cache.set(name, str(result), **valid_args)
         return str(result)
     except (RuntimeError, ValueError, OSError, SQLAlchemyError) as exc:
@@ -1402,7 +1497,7 @@ def _build_messages(
         system_tip: Instrucción adicional opcional para el system prompt.
         consulta_tipo: Tipo detectado por el pipeline ("precio", "clima",
                        "ambos", "desconocido"). Recorta el bloque de tools al
-                       dominio consultado. None o desconocido = las 10 tools.
+                       dominio consultado. None o desconocido = todas las tools.
     """
     # El bloque de tools va inmediatamente despues del system prompt para que el
     # prefijo quede estable y reusable por el cache KV. Todo lo variable
@@ -1578,6 +1673,11 @@ async def answer(
 
                 # Ejecutar tool.
                 tool_result = await _execute_tool(fn_name, fn_args, phone_hash=phone_hash)
+                if fn_name == "get_reporte_pdf":
+                    from app.services.report_service import REPORT_TOOL_SIGNAL
+
+                    if tool_result == REPORT_TOOL_SIGNAL:
+                        return REPORT_TOOL_SIGNAL
 
                 # Envolver resultado en <tool_response> (formato nativo Qwen2.5).
                 messages.append(
@@ -1731,6 +1831,11 @@ async def answer_via_openrouter(
                     if name in WHITELIST_TOOLS
                     else FALLBACK_TEXT
                 )
+                if name == "get_reporte_pdf":
+                    from app.services.report_service import REPORT_TOOL_SIGNAL
+
+                    if result == REPORT_TOOL_SIGNAL:
+                        return REPORT_TOOL_SIGNAL
                 messages.append(
                     {
                         "role": "tool",
@@ -1753,6 +1858,24 @@ def _mock_answer(query_text: str) -> str:
     Solo para desarrollo; en producción el modelo real debe estar cargado.
     """
     q = query_text.strip().lower()
+
+    historico_keywords = [
+        "histórico",
+        "historico",
+        "invierno",
+        "otoño",
+        "otono",
+        "primavera",
+        "verano",
+        "helada",
+        "llovió",
+        "llovio",
+    ]
+    if any(kw in q for kw in historico_keywords):
+        return (
+            "Modo de prueba: resumen histórico simulado de Traiguén, con "
+            "420 milímetros de lluvia y 14 días de helada, según OpenMeteo."
+        )
 
     # Detección de keywords de clima
     clima_keywords = [

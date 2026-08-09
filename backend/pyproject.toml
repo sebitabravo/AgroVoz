@@ -10,7 +10,7 @@ authors = [
 ]
 
 dependencies = [
-    "fastapi==0.139.2",
+    "fastapi==0.140.1",
     "uvicorn[standard]==0.51.0",
     "sqlalchemy==2.0.51",
     "alembic==1.18.5",
@@ -24,6 +24,10 @@ dependencies = [
     "python-multipart>=0.0.32",
     "scikit-learn>=1.6.0",
     "pyyaml>=6.0.2",
+    "reportlab>=4.2,<5",
+    "pillow>=11.0.0",
+    "numpy>=2.0.0",
+    "onnxruntime>=1.20.0",
 ]
 
 [dependency-groups]
@@ -33,12 +37,12 @@ dev = [
     "pytest-cov==7.1.0",
     "pytest-bdd==8.1.0",
     "mutmut==3.6.0",
-    "ruff==0.15.22",
+    "ruff==0.16.0",
     "mypy==2.3.0",
     # Solo para scripts/ivr_ari_bridge.py (spike IVR, #172, C10): conecta al
     # WebSocket de eventos de Asterisk ARI. Nunca se importa desde app/, no
     # viaja en la imagen de producción.
-    "websockets==16.0",
+    "websockets==16.1.1",
 ]
 
 [tool.ruff]

@@ -4,12 +4,167 @@ import time
 import warnings
 
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from httpx import ASGITransport, AsyncClient
 from starlette.responses import Response as StarletteResponse
+from starlette.types import Message, Receive, Scope, Send
 
 from app.core.config import Settings, settings
-from app.core.security import RateLimitMiddleware, reset_rate_limiter_for_tests
+from app.core.security import (
+    RateLimitMiddleware,
+    VisionUploadGuardMiddleware,
+    _read_limited_webhook_body,
+    _VisionPayloadTooLargeError,
+    reset_rate_limiter_for_tests,
+)
+from app.services.panel_service import generate_panel_token
+
+
+async def test_guard_visual_rechaza_token_antes_de_leer_multipart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Un cliente anónimo no alcanza el spool de Starlette."""
+    monkeypatch.setattr(settings, "vision_enabled", True)
+    consumed = False
+
+    async def receive() -> Message:
+        nonlocal consumed
+        consumed = True
+        return {"type": "http.request", "body": b"payload", "more_body": False}
+
+    messages: list[Message] = []
+
+    async def send(message: Message) -> None:
+        messages.append(message)
+
+    async def inner(_scope: Scope, _receive: Receive, _send: Send) -> None:
+        raise AssertionError("el parser no debe ejecutarse")
+
+    scope: Scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/vision/identify",
+        "query_string": b"token=invalido",
+        "headers": [],
+    }
+
+    await VisionUploadGuardMiddleware(inner)(scope, receive, send)
+
+    assert consumed is False
+    assert messages[0]["status"] == 401
+
+
+async def test_guard_visual_corta_stream_chunked_antes_del_parser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sin Content-Length, el receive acotado corta el multipart real."""
+    from pydantic import SecretStr
+
+    monkeypatch.setattr(settings, "vision_enabled", True)
+    monkeypatch.setattr(settings, "vision_image_max_bytes", 4)
+    monkeypatch.setattr(settings, "panel_link_secret", SecretStr("x" * 32))
+    token = generate_panel_token("a" * 64)
+    chunks = iter(
+        [
+            {"type": "http.request", "body": b"a" * 65_536, "more_body": True},
+            {"type": "http.request", "body": b"xxxxx", "more_body": False},
+        ]
+    )
+    consumed = 0
+
+    async def receive() -> Message:
+        nonlocal consumed
+        consumed += 1
+        return next(chunks)
+
+    messages: list[Message] = []
+
+    async def send(message: Message) -> None:
+        messages.append(message)
+
+    async def inner(scope: Scope, guarded_receive: Receive, send_response: Send) -> None:
+        try:
+            while True:
+                message = await guarded_receive()
+                if not message.get("more_body", False):
+                    break
+        except _VisionPayloadTooLargeError:
+            # FastAPI convierte el corte del receive durante el parseo multipart
+            # en un 400 genérico antes de devolverlo al middleware externo.
+            await StarletteResponse(
+                "There was an error parsing the body",
+                status_code=400,
+            )(scope, guarded_receive, send_response)
+
+    scope: Scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/vision/identify",
+        "query_string": f"token={token}".encode(),
+        "headers": [],
+    }
+
+    await VisionUploadGuardMiddleware(inner)(scope, receive, send)
+
+    assert consumed == 2
+    assert messages[0]["status"] == 413
+
+
+async def test_webhook_body_chunked_se_corta_antes_de_bufferizar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """El receive ASGI deja de consumirse apenas cruza el límite real."""
+    monkeypatch.setattr("app.core.security.MAX_WEBHOOK_BODY_SIZE", 4)
+    messages = iter(
+        [
+            {"type": "http.request", "body": b"123", "more_body": True},
+            {"type": "http.request", "body": b"45", "more_body": True},
+            {"type": "http.request", "body": b"no-debe-leerse", "more_body": False},
+        ]
+    )
+    consumed = 0
+
+    async def receive() -> dict[str, object]:
+        nonlocal consumed
+        consumed += 1
+        return next(messages)
+
+    request = Request({"type": "http", "method": "POST", "path": "/webhook", "headers": []}, receive)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _read_limited_webhook_body(request)
+
+    assert exc_info.value.status_code == 413
+    assert consumed == 2
+
+
+async def test_webhook_content_length_grande_rechaza_sin_leer_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Content-Length permite un fast-reject, pero no reemplaza el conteo chunked."""
+    monkeypatch.setattr("app.core.security.MAX_WEBHOOK_BODY_SIZE", 4)
+    consumed = False
+
+    async def receive() -> dict[str, object]:
+        nonlocal consumed
+        consumed = True
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/webhook",
+            "headers": [(b"content-length", b"5")],
+        },
+        receive,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _read_limited_webhook_body(request)
+
+    assert exc_info.value.status_code == 413
+    assert consumed is False
 
 
 async def test_rate_limit_bloquea_despues_de_n_requests(

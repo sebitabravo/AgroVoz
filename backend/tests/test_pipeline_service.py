@@ -286,6 +286,34 @@ class TestIsResumenQuery:
         assert AgroVozPipeline._is_resumen_query("dame mi resumen por favor") is True
 
 
+class TestIsReportePdfQuery:
+    """Detecta pedidos de archivo sin cambiar el resumen histórico corto."""
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "mándame un resumen de la semana",
+            "envíame un informe en PDF",
+            "quiero mi reporte semanal de precios y clima",
+            "reporte semanal",
+        ],
+    )
+    def test_detecta_pedido_explicito(self, query: str) -> None:
+        assert AgroVozPipeline._is_reporte_pdf_query(query) is True
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "resumen",
+            "dame mi resumen",
+            "precio de la papa",
+            "no quiero un reporte semanal",
+        ],
+    )
+    def test_no_confunde_resumen_historico_con_pdf(self, query: str) -> None:
+        assert AgroVozPipeline._is_reporte_pdf_query(query) is False
+
+
 # ── _is_explicit_history_query ─────────────────────────────────────
 
 
@@ -1723,6 +1751,187 @@ class TestProcess:
         # Verificar que se guardo la consulta con intent "resumen".
         assert len(save_calls) == 1
         assert save_calls[0]["intent"] == "resumen"
+
+    async def test_reporte_pdf_entrega_path_temporal_desde_pipeline(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """El pedido explícito evita el LLM y deja el PDF para AudioService."""
+        _mock_first_contact(monkeypatch, is_first=False)
+        monkeypatch.setattr(settings, "pdf_reports_enabled", True)
+        save_calls = _mock_db_save(monkeypatch)
+        report_path = tmp_path / "agrovoz-test-reporte.pdf"
+        report_path.write_bytes(b"%PDF-test")
+
+        async def no_alerta(
+            _text: str,
+            _phone_hash: str,
+            _chat_id: str | None,
+        ) -> tuple[None, None]:
+            return None, None
+
+        async def fake_report(_phone_hash: str) -> tuple[str, str]:
+            return "Listo, te envío el reporte semanal en PDF.", str(report_path)
+
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_handle_alert_commands",
+            staticmethod(no_alerta),
+        )
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_generate_report_response",
+            staticmethod(fake_report),
+        )
+
+        result = await AgroVozPipeline().process(
+            wav_path=None,
+            audio_duration_ms=0,
+            message_id="test-reporte-pdf",
+            chat_id_hash="f" * 64,
+            request_id="req-reporte-pdf",
+            texto_directo="mándame un resumen de la semana",
+            generar_audio=False,
+        )
+
+        assert result.text_response == "Listo, te envío el reporte semanal en PDF."
+        assert result.intent == "resumen"
+        assert result.report_pdf_path == str(report_path)
+        assert save_calls[0]["intent"] == "resumen"
+        report_path.unlink()
+
+    async def test_informe_con_gate_apagado_no_intercepta_consulta_normal(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Con PDF_REPORTS_ENABLED=false, 'informe' no debe secuestrar el flujo normal.
+
+        _is_reporte_pdf_query matchea la palabra suelta 'informe', que aparece en
+        preguntas comunes ('puedes informarme el precio de la papa'). Sin el gate
+        activo, el pipeline debe caer al flujo normal (LLM/precio) en vez de
+        responder 'Los reportes PDF todavía no están habilitados' — regresión de
+        PR #257 encontrada en revisión de seguridad.
+        """
+        _mock_first_contact(monkeypatch, is_first=False)
+        _mock_db_save(monkeypatch)
+        monkeypatch.setattr(settings, "pdf_reports_enabled", False)
+
+        async def no_alerta(
+            _text: str,
+            _phone_hash: str,
+            _chat_id: str | None,
+        ) -> tuple[None, None]:
+            return None, None
+
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_handle_alert_commands",
+            staticmethod(no_alerta),
+        )
+        _mock_generated_response(monkeypatch, response_text="La papa está a 500 pesos el kilo.")
+
+        async def fail_if_called(_phone_hash: str) -> tuple[str, str | None]:
+            raise AssertionError("no debe generar el reporte con el gate apagado")
+
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_generate_report_response",
+            staticmethod(fail_if_called),
+        )
+
+        result = await AgroVozPipeline().process(
+            wav_path=None,
+            audio_duration_ms=0,
+            message_id="test-informe-gate-apagado",
+            chat_id_hash="e" * 64,
+            request_id="req-informe-gate-apagado",
+            texto_directo="mándame un informe de precios del trigo",
+            generar_audio=False,
+        )
+
+        assert result.text_response == "La papa está a 500 pesos el kilo."
+        assert result.report_pdf_path is None
+
+    async def test_timeout_despues_de_generar_reporte_elimina_pdf(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """El pipeline conserva ownership del PDF hasta devolver AudioResponse."""
+        _mock_first_contact(monkeypatch, is_first=False)
+        monkeypatch.setattr(settings, "pdf_reports_enabled", True)
+        report_path = tmp_path / "reporte-huerfano.pdf"
+        report_path.write_bytes(b"%PDF-test")
+
+        async def no_alerta(
+            _text: str,
+            _phone_hash: str,
+            _chat_id: str | None,
+        ) -> tuple[None, None]:
+            return None, None
+
+        async def fake_report(_phone_hash: str) -> tuple[str, str]:
+            return "Listo, te envío el reporte semanal en PDF.", str(report_path)
+
+        class SlowTTS:
+            def synthesize(self, _text: str) -> str:
+                time.sleep(0.1)
+                return str(tmp_path / "respuesta-tardia.ogg")
+
+        monkeypatch.setattr(AgroVozPipeline, "_handle_alert_commands", staticmethod(no_alerta))
+        monkeypatch.setattr(AgroVozPipeline, "_generate_report_response", staticmethod(fake_report))
+        monkeypatch.setattr(pipeline_module, "_get_tts_service", lambda: SlowTTS())
+
+        result = await AgroVozPipeline(pipeline_timeout=0.01).process(
+            wav_path=None,
+            audio_duration_ms=0,
+            message_id="test-reporte-timeout",
+            chat_id_hash="f" * 64,
+            request_id="req-reporte-timeout",
+            texto_directo="mándame el reporte semanal",
+        )
+
+        assert result.report_pdf_path is None
+        assert not report_path.exists()
+
+    async def test_tool_llm_transfiere_intent_al_generador_de_pdf(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """Una tool seleccionada por Qwen produce un adjunto, no una promesa."""
+        from app.services.report_service import REPORT_TOOL_SIGNAL
+
+        report_path = tmp_path / "reporte-tool.pdf"
+        report_path.write_bytes(b"%PDF-test")
+        _mock_first_contact(monkeypatch, is_first=False)
+        _mock_db_save(monkeypatch)
+
+        async def fake_answer(*_args: object, **_kwargs: object) -> str:
+            return REPORT_TOOL_SIGNAL
+
+        async def fake_report(_phone_hash: str) -> tuple[str, str]:
+            return "Listo, te envío el reporte semanal en PDF.", str(report_path)
+
+        monkeypatch.setattr("app.services.llm_service.answer", fake_answer)
+        monkeypatch.setattr(AgroVozPipeline, "_load_user_cultivos", staticmethod(lambda _hash: None))
+        monkeypatch.setattr(AgroVozPipeline, "_generate_report_response", staticmethod(fake_report))
+
+        result = await AgroVozPipeline().process(
+            wav_path=None,
+            audio_duration_ms=0,
+            message_id="test-reporte-tool",
+            chat_id_hash="f" * 64,
+            request_id="req-reporte-tool",
+            texto_directo="necesito el documento que ofreciste ayer",
+            generar_audio=False,
+        )
+
+        assert result.text_response == "Listo, te envío el reporte semanal en PDF."
+        assert result.intent == "resumen"
+        assert result.report_pdf_path == str(report_path)
+        report_path.unlink()
 
     async def test_historial_explicito_es_compartido_por_audio_y_texto(
         self,

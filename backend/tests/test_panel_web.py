@@ -41,6 +41,20 @@ async def test_shell_html_se_sirve_para_cualquier_token(client: AsyncClient) -> 
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/html")
     assert "AgroVoz" in resp.text
+    assert 'id="identificar-plaga"' in resp.text
+    assert "camera=(self)" in resp.headers["permissions-policy"]
+
+
+async def test_cliente_pwa_captura_y_envia_imagen_de_la_camara(client: AsyncClient) -> None:
+    """El shell incluye el contrato de captura para la cámara trasera móvil."""
+    resp = await client.get("/static/panel/app.js")
+
+    assert resp.status_code == 200
+    assert "getUserMedia" in resp.text
+    assert 'facingMode: "environment"' in resp.text
+    assert 'fetch("/api/v1/vision/identify?token=" + encodeURIComponent(token)' in resp.text
+    assert 'datos.append("image", blob, "captura.jpg")' in resp.text
+    assert "camera=()" in resp.headers["permissions-policy"]
 
 
 async def test_shell_html_bloqueado_si_gate_apagado(
@@ -52,3 +66,39 @@ async def test_shell_html_bloqueado_si_gate_apagado(
     resp = await client.get("/panel/un-token-cualquiera")
 
     assert resp.status_code == 503
+
+
+async def test_shell_incluye_grafico_de_precios_local(client: AsyncClient) -> None:
+    """El shell incluye Chart.js local y el canvas para funcionar sin CDN."""
+    resp = await client.get("/static/panel/index.html")
+
+    assert resp.status_code == 200
+    assert '<section class="card" aria-labelledby="precios-titulo">' in resp.text
+    assert '<canvas id="grafico-precios"' in resp.text
+    assert '<script src="/static/chart.umd.min.js"></script>' in resp.text
+    assert "@media (max-width: 360px)" in resp.text
+
+
+async def test_service_worker_cachea_chart_y_historial_de_precios(client: AsyncClient) -> None:
+    """El SW guarda Chart.js y la respuesta /prices para consultas sin señal."""
+    resp = await client.get("/panel/sw.js")
+
+    assert resp.status_code == 200
+    assert 'const CACHE_NAME = "agrovoz-panel-v3"' in resp.text
+    assert '"/static/chart.umd.min.js"' in resp.text
+    assert "/api/v1/panel/{token}/prices" in resp.text
+
+
+async def test_service_worker_no_sirve_datos_despues_de_vencer_token(
+    client: AsyncClient,
+) -> None:
+    """El fallback offline respeta el expiry firmado y purga 401/403."""
+    resp = await client.get("/panel/sw.js")
+
+    assert resp.status_code == 200
+    assert "function tokenExpiryMs(pathname)" in resp.text
+    assert "!isFreshPanelUrl(url)" in resp.text
+    assert "purgeExpiredPanelEntries()" in resp.text
+    assert "purgePanelToken(panelTokenFromPath(url.pathname))" in resp.text
+    assert "response.status === 401 || response.status === 403" in resp.text
+    assert "await cache.put(event.request, response.clone())" in resp.text

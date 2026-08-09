@@ -20,20 +20,25 @@ import json
 import logging
 import time
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.phone_hash import validate_phone_hash
 from app.models.alert import Alert
+from app.models.odepa_price import OdepaPrice
 from app.models.parcela import Parcela
 from app.models.user_prefs import UserPrefs
+from app.services.odepa_service import COMUNA_TO_MERCADO
 
 logger = logging.getLogger(__name__)
 
 _TOKEN_SEPARATOR = "."
+_PANEL_PRICE_DAYS = 28
+_PANEL_MERCADO_DEFAULT = "Mercado Mayorista Lo Valledor de Santiago"
 
 
 class PanelLinkError(RuntimeError):
@@ -148,6 +153,116 @@ class PanelSummary:
     alertas: list[dict[str, Any]]
 
 
+@dataclass(frozen=True, slots=True)
+class PanelPricePoint:
+    """Punto crudo de precio ODEPA para una fecha determinada."""
+
+    fecha: datetime.date
+    precio: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class PanelPriceSeries:
+    """Serie de un cultivo, mercado y unidad de venta constantes."""
+
+    cultivo: str
+    mercado: str
+    unidad: str
+    fuente: str
+    precios: list[PanelPricePoint]
+
+
+@dataclass(frozen=True, slots=True)
+class PanelPriceHistory:
+    """Historial acotado de precios para los cultivos del productor."""
+
+    desde: datetime.date
+    hasta: datetime.date
+    cultivos: list[PanelPriceSeries]
+
+
+def _panel_today() -> datetime.date:
+    """Devuelve la fecha de referencia; se puede reemplazar en tests."""
+    return datetime.date.today()
+
+
+def _parse_cultivos(raw_cultivos: str | None) -> list[str]:
+    """Deserializa cultivos guardados en SQLite sin romper el resumen."""
+    if not raw_cultivos:
+        return []
+    try:
+        parsed = json.loads(raw_cultivos)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed]
+
+
+def _normalizar_cultivos(cultivos: list[str]) -> list[str]:
+    """Normaliza y deduplica cultivos antes de consultar SQLite."""
+    vistos: set[str] = set()
+    normalizados: list[str] = []
+    for cultivo in cultivos:
+        cultivo_norm = cultivo.strip().lower()
+        if cultivo_norm and cultivo_norm not in vistos:
+            vistos.add(cultivo_norm)
+            normalizados.append(cultivo_norm)
+    return normalizados
+
+
+def _mercado_para_comuna(comuna: str | None) -> str:
+    """Resuelve el mercado ODEPA de referencia sin consultar servicios externos."""
+    comuna_norm = (comuna or "").strip().lower()
+    return COMUNA_TO_MERCADO.get(comuna_norm, _PANEL_MERCADO_DEFAULT)
+
+
+def _query_panel_price_rows(
+    session: Session,
+    cultivos: list[str],
+    mercado: str,
+    desde: datetime.date,
+    hasta: datetime.date,
+) -> list[OdepaPrice]:
+    """Obtiene una sola ventana de datos para evitar una query por cultivo."""
+    if not cultivos:
+        return []
+    query = (
+        select(OdepaPrice)
+        .where(
+            func.lower(OdepaPrice.producto).in_(cultivos),
+            func.lower(OdepaPrice.mercado) == mercado.lower(),
+            OdepaPrice.fecha.between(desde, hasta),
+        )
+        .order_by(OdepaPrice.producto, OdepaPrice.fecha.desc(), OdepaPrice.id.desc())
+    )
+    return list(session.scalars(query).all())
+
+
+def _build_panel_price_series(
+    cultivo: str,
+    rows: list[OdepaPrice],
+    mercado: str,
+) -> PanelPriceSeries | None:
+    """Construye una serie sin mezclar unidades de venta distintas."""
+    crop_rows = [row for row in rows if row.producto.strip().lower() == cultivo]
+    if not crop_rows:
+        return None
+
+    # Si ODEPA cambia la unidad dentro de la ventana, se conserva la unidad
+    # más reciente para no dibujar una variación que mezcle sacos y kilos.
+    latest = crop_rows[0]
+    compatible_rows = [row for row in crop_rows if row.unidad == latest.unidad]
+    precios = [PanelPricePoint(fecha=row.fecha, precio=row.precio_kg) for row in reversed(compatible_rows)]
+    return PanelPriceSeries(
+        cultivo=latest.producto,
+        mercado=mercado,
+        unidad=latest.unidad,
+        fuente=latest.fuente,
+        precios=precios,
+    )
+
+
 def get_panel_summary(session: Session, phone_hash: str) -> PanelSummary | None:
     """Arma el resumen del panel respetando cada consentimiento por separado.
 
@@ -161,14 +276,7 @@ def get_panel_summary(session: Session, phone_hash: str) -> PanelSummary | None:
     if prefs is None:
         return None
 
-    cultivos: list[str] = []
-    if prefs.cultivos:
-        try:
-            parsed = json.loads(prefs.cultivos)
-            if isinstance(parsed, list):
-                cultivos = [str(item) for item in parsed]
-        except (json.JSONDecodeError, TypeError):
-            cultivos = []
+    cultivos = _parse_cultivos(prefs.cultivos)
 
     parcelas: list[dict[str, Any]] = []
     if settings.parcela_tracking_enabled and prefs.parcela_consent:
@@ -206,3 +314,39 @@ def get_panel_summary(session: Session, phone_hash: str) -> PanelSummary | None:
         parcelas=parcelas,
         alertas=alertas,
     )
+
+
+def get_panel_price_history(
+    session: Session,
+    phone_hash: str,
+    *,
+    reference_date: datetime.date | None = None,
+) -> PanelPriceHistory | None:
+    """Obtiene 28 días de precios ODEPA de los cultivos del productor.
+
+    El mercado se resuelve desde la comuna registrada y las series conservan
+    una sola unidad de venta para que el gráfico no compare magnitudes distintas.
+    ``reference_date`` permite tests deterministas sin depender del reloj.
+    """
+    if not settings.farmer_panel_enabled:
+        return None
+
+    prefs = session.scalar(select(UserPrefs).where(UserPrefs.phone_hash == phone_hash))
+    if prefs is None:
+        return None
+
+    hasta = reference_date or _panel_today()
+    desde = hasta - datetime.timedelta(days=_PANEL_PRICE_DAYS - 1)
+    cultivos = _normalizar_cultivos(_parse_cultivos(prefs.cultivos))
+    mercado = _mercado_para_comuna(prefs.comuna)
+    rows = _query_panel_price_rows(session, cultivos, mercado, desde, hasta)
+    rows_by_crop: dict[str, list[OdepaPrice]] = {}
+    for row in rows:
+        rows_by_crop.setdefault(row.producto.strip().lower(), []).append(row)
+
+    series: list[PanelPriceSeries] = []
+    for cultivo in cultivos:
+        serie = _build_panel_price_series(cultivo, rows_by_crop.get(cultivo, []), mercado)
+        if serie is not None:
+            series.append(serie)
+    return PanelPriceHistory(desde=desde, hasta=hasta, cultivos=series)
