@@ -194,6 +194,16 @@ _HISTORY_DELETION_QUERIES = frozenset(
         "desactiva mi historial",
     }
 )
+_LOCATION_DELETION_QUERIES = frozenset(
+    {
+        "borra mi ubicacion",
+        "elimina mi ubicacion",
+        "olvida mi ubicacion",
+        "borra el gps de mi parcela",
+        "elimina el gps de mi parcela",
+        "deja de guardar mi ubicacion",
+    }
+)
 
 # Segundo límite, menor al del servicio de historial, para que una respuesta
 # hablada no se vuelva interminable aunque la fila persistida sea extensa.
@@ -561,6 +571,16 @@ class AgroVozPipeline:
         return normalized in _HISTORY_DELETION_QUERIES
 
     @staticmethod
+    def _is_location_deletion_query(query_text: str) -> bool:
+        """Detecta órdenes inequívocas de revocar las coordenadas GPS."""
+        decomposed = unicodedata.normalize("NFD", query_text.casefold())
+        without_accents = "".join(char for char in decomposed if unicodedata.category(char) != "Mn")
+        normalized = " ".join("".join(char if char.isalnum() else " " for char in without_accents).split())
+        normalized = normalized.removeprefix("por favor ").strip()
+        normalized = normalized.removesuffix(" por favor").strip()
+        return normalized in _LOCATION_DELETION_QUERIES
+
+    @staticmethod
     def _extract_producto(query_text: str) -> str | None:
         """Extrae el nombre de un producto agrícola de la consulta.
 
@@ -773,6 +793,26 @@ class AgroVozPipeline:
             return (
                 "No entendi tu mensaje. ¿Podrias enviar un audio mas claro?",
                 "desconocido",
+            )
+
+        if AgroVozPipeline._is_location_deletion_query(transcribed_text):
+            from app.services.location_service import clear_user_location
+
+            try:
+                await asyncio.to_thread(clear_user_location, chat_id_hash)
+            except (SQLAlchemyError, OSError, RuntimeError, ValueError):
+                logger.error("Revocación de ubicación GPS no confirmada")
+                _marcar("ubicacion_borrada_error")
+                return (
+                    "No pude confirmar el borrado de tu ubicación. Inténtalo nuevamente en unos minutos.",
+                    "clima",
+                )
+
+            logger.info("Ubicación GPS revocada desde WhatsApp")
+            _marcar("ubicacion_borrada")
+            return (
+                "Listo. Eliminé la ubicación GPS guardada de tu parcela.",
+                "clima",
             )
 
         if AgroVozPipeline._is_history_deletion_query(transcribed_text):
@@ -1377,6 +1417,18 @@ class AgroVozPipeline:
         dentro de la coroutine (Python no permite asignar nonlocal
         en closures anidadas de forma limpia).
         """
+        if chat_id and chat_id_hash and chat_id_hash != "sin_chat":
+            try:
+                from app.services.alert_service import remember_price_variation_route
+
+                await asyncio.to_thread(
+                    remember_price_variation_route,
+                    chat_id_hash,
+                    chat_id,
+                )
+            except (SQLAlchemyError, RuntimeError, OSError, ValueError):
+                logger.warning("Ruta de alertas proactivas no actualizada")
+
         # ── Etapa 0: Onboarding — deteccion de primer contacto (#86) ─
         # Si el phone_hash no tiene consultas previas, se sintetiza un
         # audio de bienvenida (TTS de texto fijo, sin LLM). AudioService

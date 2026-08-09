@@ -11,6 +11,7 @@ httpx.AsyncClient se mockea para no tocar la red ni el gateway real.
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
@@ -34,9 +35,7 @@ def _reset_session_cache() -> object:
     OpenWAService._cached_session_id = prev
 
 
-def _patch_async_client(
-    monkeypatch: pytest.MonkeyPatch, mock_client: AsyncMock
-) -> None:
+def _patch_async_client(monkeypatch: pytest.MonkeyPatch, mock_client: AsyncMock) -> None:
     """Reemplaza httpx.AsyncClient por un context manager que retorna mock_client."""
     mock_ctx = AsyncMock()
     mock_ctx.__aenter__.return_value = mock_client
@@ -65,9 +64,7 @@ async def test_resolve_session_id_descubre_primera_ready(
     monkeypatch.setattr(settings, "openwa_api_key", "k")
 
     client = AsyncMock()
-    client.get.return_value = _mock_response(
-        [{"id": "sess-1", "status": "ready"}]
-    )
+    client.get.return_value = _mock_response([{"id": "sess-1", "status": "ready"}])
     _patch_async_client(monkeypatch, client)
 
     service = OpenWAService()
@@ -86,9 +83,7 @@ async def test_resolve_session_id_acepta_status_active(
     monkeypatch.setattr(settings, "openwa_api_key", "k")
 
     client = AsyncMock()
-    client.get.return_value = _mock_response(
-        [{"id": "sess-active", "status": "active"}]
-    )
+    client.get.return_value = _mock_response([{"id": "sess-active", "status": "active"}])
     _patch_async_client(monkeypatch, client)
 
     service = OpenWAService()
@@ -104,9 +99,7 @@ async def test_resolve_session_id_cachea_evita_segundo_http(
     monkeypatch.setattr(settings, "openwa_api_key", "k")
 
     client = AsyncMock()
-    client.get.return_value = _mock_response(
-        [{"id": "sess-cached", "status": "ready"}]
-    )
+    client.get.return_value = _mock_response([{"id": "sess-cached", "status": "ready"}])
     _patch_async_client(monkeypatch, client)
 
     service = OpenWAService()
@@ -241,6 +234,57 @@ async def test_download_media_url_encodea_message_id_con_arroba(
     assert "true_569@c.us" not in called_url
 
 
+@pytest.mark.asyncio
+async def test_download_image_reutiliza_endpoint_de_media(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Las imágenes usan streaming acotado sobre el endpoint decryptMedia."""
+    monkeypatch.setattr(settings, "vision_image_max_bytes", 1024)
+    response = Mock(headers={"content-length": "11"})
+    response.raise_for_status = Mock()
+
+    async def chunks() -> AsyncIterator[bytes]:
+        yield b"IMAGE_"
+        yield b"BYTES"
+
+    response.aiter_bytes = chunks
+    stream_context = AsyncMock()
+    stream_context.__aenter__.return_value = response
+    client = AsyncMock()
+    client.stream = Mock(return_value=stream_context)
+    _patch_async_client(monkeypatch, client)
+    OpenWAService._cached_session_id = "sess-1"
+
+    result = await OpenWAService().download_image("image-message")
+
+    assert result == b"IMAGE_BYTES"
+
+
+@pytest.mark.asyncio
+async def test_download_image_corta_stream_que_supera_limite(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Un gateway sin Content-Length tampoco puede agotar la RAM del backend."""
+    monkeypatch.setattr(settings, "vision_image_max_bytes", 4)
+    response = Mock(headers={})
+    response.raise_for_status = Mock()
+
+    async def chunks() -> AsyncIterator[bytes]:
+        yield b"123"
+        yield b"45"
+
+    response.aiter_bytes = chunks
+    stream_context = AsyncMock()
+    stream_context.__aenter__.return_value = response
+    client = AsyncMock()
+    client.stream = Mock(return_value=stream_context)
+    _patch_async_client(monkeypatch, client)
+    OpenWAService._cached_session_id = "sess-1"
+
+    with pytest.raises(ValueError, match="tamaño máximo"):
+        await OpenWAService().download_image("image-message")
+
+
 # ── send_typing_indicator ──────────────────────────────────────
 
 
@@ -318,6 +362,7 @@ def test_base_url_sin_trailing_slash(monkeypatch: pytest.MonkeyPatch) -> None:
 
 # ── resolve_contact_phone (fix P0: LID resolution) ─────────────────
 
+
 @pytest.mark.asyncio
 async def test_resolve_contact_phone_exitoso(
     monkeypatch: pytest.MonkeyPatch,
@@ -371,9 +416,7 @@ async def test_resolve_contact_phone_http_error_no_lanza(
 
     client = AsyncMock()
     resp = Mock()
-    resp.raise_for_status = Mock(
-        side_effect=httpx.ConnectError("gateway down")
-    )
+    resp.raise_for_status = Mock(side_effect=httpx.ConnectError("gateway down"))
     client.get.return_value = resp
     _patch_async_client(monkeypatch, client)
     OpenWAService._cached_session_id = "sess-1"

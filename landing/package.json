@@ -9,11 +9,16 @@
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",
-    "deploy-landing": "astro build"
+    "deploy-landing": "astro build",
+    "test": "vitest run"
   },
   "dependencies": {
-    "astro": "^7.1.3",
+    "astro": "^7.1.4",
     "@tailwindcss/vite": "^4.3.3",
     "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.10",
+    "vitest": "^4.1.10"
   }
 }

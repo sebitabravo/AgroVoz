@@ -94,6 +94,16 @@ class Settings(BaseSettings):
     llm_model_path: str = "models/qwen2.5-3b-q4_k_m.gguf"
     piper_voice: str = "es_MX-claude-high"
 
+    # Vision por computador para mensajes de imagen de WhatsApp (#238).
+    # Se mantiene apagada por defecto hasta provisionar un modelo ONNX
+    # validado; sin modelo disponible el servicio falla cerrado y no inventa
+    # un diagnóstico.
+    vision_enabled: bool = False
+    vision_model_path: str = "models/vision/plant_disease_mobilenetv3.onnx"
+    vision_labels_path: str = "models/vision/plant_disease_labels.json"
+    vision_confidence_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
+    vision_image_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1, le=25 * 1024 * 1024)
+
     # ── Admin ────────────────────────────
     # API key para el dashboard admin. Default de dev — validar en prod.
     admin_api_key: str = "dev-admin-key"
@@ -144,6 +154,9 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 60
     weather_rate_limit_per_minute: int = 30
     demo_rate_limit_per_minute: int = 5
+    # Cuota global de avisos proactivos que el job entrega a Open-WA por
+    # minuto. Evita ráfagas que puedan provocar bloqueo del número de WhatsApp.
+    alert_rate_limit_per_minute: int = Field(default=30, ge=1, le=1000)
     audio_retention_hours: int = 24
     phone_hash_pepper: str = "agrovoz-dev-pepper"  # Cambiar en producción (PHONE_HASH_PEPPER en .env)
     extra_allowed_hosts: str = ""  # Hosts/IPs extra separadas por coma para TrustedHostMiddleware
@@ -212,6 +225,12 @@ class Settings(BaseSettings):
     parcela_tracking_enabled: bool = False
     # Retención técnica: un ciclo agrícola completo (temporada a temporada).
     parcela_retention_days: int = Field(default=365, ge=1, le=730)
+    # Compartir ubicación GPS queda apagado hasta validar onboarding y revisión
+    # legal. El consentimiento de ubicación es independiente del de parcelas.
+    location_sharing_enabled: bool = False
+    # Retención técnica provisional: un ciclo corto, porque el pin cambia más
+    # seguido que una parcela registrada.
+    location_retention_days: int = Field(default=180, ge=1, le=365)
     # Motor de reglas agronómicas citadas (C1+C2). No persiste datos
     # personales, pero es una capacidad nueva con riesgo real de
     # responsabilidad si un diagnóstico resulta incorrecto: queda apagada

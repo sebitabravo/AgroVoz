@@ -36,6 +36,7 @@ from app.api.demo import router as demo_router
 from app.api.health import router as health_router
 from app.api.panel import router as panel_router
 from app.api.prices import router as prices_router
+from app.api.vision import router as vision_router
 from app.api.weather import router as weather_router
 from app.api.webhooks import router as webhooks_router
 from app.core.config import settings
@@ -44,6 +45,7 @@ from app.core.security import (
     ALLOWED_HOSTS,
     RateLimitMiddleware,
     SecurityHeadersMiddleware,
+    VisionUploadGuardMiddleware,
 )
 from app.panel_web import router as panel_web_router
 
@@ -54,6 +56,7 @@ _CONSULTATION_STAGING_CLEANUP_INTERVAL_SECONDS = 60 * 60
 _EXPENSE_PURGE_INTERVAL_SECONDS = 24 * 60 * 60
 _PARCELA_PURGE_INTERVAL_SECONDS = 24 * 60 * 60
 _REPORT_TEMP_PURGE_INTERVAL_SECONDS = 60 * 60
+_LOCATION_PURGE_INTERVAL_SECONDS = 24 * 60 * 60
 
 # ContextVar para propagar el request_id a los logs.
 # El middleware lo setea por request; el logging.Filter lo inyecta en cada LogRecord.
@@ -263,6 +266,29 @@ async def _report_temp_purge_scheduler() -> None:
         await asyncio.sleep(_REPORT_TEMP_PURGE_INTERVAL_SECONDS)
 
 
+async def _location_purge_scheduler() -> None:
+    """Purga diariamente los pins GPS vencidos según su timestamp de actualización."""
+    from app.services.location_service import LocationOperationError, purge_expired_locations
+
+    while True:
+        try:
+            records_purged = await asyncio.to_thread(purge_expired_locations)
+            logger.info(
+                "Ubicaciones scheduler: purga TTL OK — registros=%d",
+                records_purged,
+            )
+        except LocationOperationError:
+            logger.error("Ubicaciones scheduler: purga TTL no confirmada")
+        except Exception as exc:
+            # Apagar el gate no debe detener la retención de pins existentes.
+            logger.error(
+                "Ubicaciones scheduler: error inesperado — error=%s",
+                type(exc).__name__,
+            )
+
+        await asyncio.sleep(_LOCATION_PURGE_INTERVAL_SECONDS)
+
+
 def _start_consultation_history_scheduler() -> asyncio.Task[None] | None:
     """Crea la tarea TTL solo cuando el feature gate está habilitado."""
     if not settings.consultation_history_enabled:
@@ -310,6 +336,14 @@ def _start_report_temp_purge_scheduler() -> asyncio.Task[None]:
     return asyncio.create_task(
         _report_temp_purge_scheduler(),
         name="report-temp-ttl",
+    )
+
+
+def _start_location_purge_scheduler() -> asyncio.Task[None]:
+    """Crea siempre la purga TTL de ubicación, incluso con el gate apagado."""
+    return asyncio.create_task(
+        _location_purge_scheduler(),
+        name="location-ttl",
     )
 
 
@@ -377,6 +411,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     preload_model()
 
+    # Precalentar visión solo cuando el gate está activo. Si el artefacto ONNX
+    # no fue provisionado, el servicio queda degradado con respuesta honesta
+    # pero no impide arrancar el backend ni los flujos de audio/texto.
+    from app.services.vision_service import preload_model as preload_vision_model
+
+    preload_vision_model()
+
     # Scheduler ODEPA: sync diario a las 06:00 AM hora local.
     # Tarea de fondo del lifespan. Se cancela automáticamente al detener la app.
     odepa_task = asyncio.create_task(_odepa_scheduler())
@@ -385,12 +426,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     expense_purge_task = _start_expense_purge_scheduler()
     parcela_purge_task = _start_parcela_purge_scheduler()
     report_temp_purge_task = _start_report_temp_purge_scheduler()
+    location_purge_task = _start_location_purge_scheduler()
 
     yield
 
     logger.info("AgroVoz deteniendo — liberando conexiones")
     await _cancel_background_task(report_temp_purge_task)
     await _cancel_background_task(parcela_purge_task)
+    await _cancel_background_task(location_purge_task)
     await _cancel_background_task(expense_purge_task)
     await _cancel_background_task(staging_cleanup_task)
     await _cancel_background_task(history_purge_task)
@@ -433,7 +476,8 @@ app = FastAPI(
 # el más externo (outermost).
 #
 # Orden de procesamiento del request (outermost → innermost):
-#   CORSMiddleware → RequestID → SecurityHeaders → TrustedHost → RateLimit → AdminAuth → GZip → app
+#   CORS → RequestID → SecurityHeaders → TrustedHost → RateLimit → AdminAuth
+#   → VisionUploadGuard → GZip → app
 #
 # - CORSMiddleware es el MÁS EXTERNO (agregado último): debe responder OPTIONS
 #   preflight antes que cualquier otro middleware, especialmente TrustedHost
@@ -449,6 +493,8 @@ app = FastAPI(
 # - AdminAuthMiddleware protege /admin/* (excepto login) con cookie firmada.
 #   RequestID, SecurityHeaders, TrustedHost y RateLimit lo envuelven, así que
 #   cubren incluso los redirects de auth.
+# - VisionUploadGuard autentica y acota la ruta multipart antes de que el
+#   parser de FastAPI escriba un UploadFile temporal.
 # - GZipMiddleware es el MÁS INTERNO: se agrega primero (insert(0)), recibe la
 #   respuesta cruda de la app y la comprime antes que la envuelvan los
 #   middlewares externos. Se ubica adentro para recibir el body sin la división
@@ -458,6 +504,7 @@ app = FastAPI(
 #   comprime; es inofensivo para el MVP porque el audio se responde vía Open-WA,
 #   no como response HTTP directa.
 app.add_middleware(GZipMiddleware, minimum_size=500)
+app.add_middleware(VisionUploadGuardMiddleware)
 app.add_middleware(AdminAuthMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
@@ -487,6 +534,7 @@ app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(prices_router, prefix="/api/v1")
 app.include_router(weather_router, prefix="/api/v1")
+app.include_router(vision_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(demo_router, prefix="/api/v1")
 app.include_router(panel_router, prefix="/api/v1")

@@ -937,6 +937,7 @@ class TestGetUserPrefs:
         assert data["group_label"] is None
         assert data["localidad"] is None
         assert data["history_consent"] is False
+        assert data["alert_consent"] is False
 
     async def test_no_existe_retorna_404(self, client: AsyncClient) -> None:
         """GET en phone_hash sin prefs retorna 404."""
@@ -970,8 +971,10 @@ class TestPrivacidad:
             "comuna",
             "dataset_consent",
             "history_consent",
+            "alert_consent",
             "expense_consent",
             "parcela_consent",
+            "location_consent",
             "identity_type",
             "group_label",
             "localidad",
