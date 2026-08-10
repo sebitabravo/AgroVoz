@@ -1,9 +1,14 @@
 # Recursos y matriz RACI
 
 **Proyecto:** AgroVoz  
-**Estado del documento:** línea base de responsabilidades actuales y propuestas para el piloto  
-**Fecha de corte:** 29 de julio de 2026  
+**Estado del documento:** snapshot histórico de responsabilidades y propuesta futura no aprobada
+**Fecha de corte (snapshot histórico):** 29 de julio de 2026
 **Próximo hito:** piloto de validación con 3 a 5 productores de Traiguén durante 4 semanas
+
+> **Alcance del snapshot:** las contribuciones, estados y asignaciones descritos al 29-07-2026 no
+> constituyen una línea base vigente ni prueban capacidad operativa actual. Las responsabilidades
+> futuras siguen **pendientes de confirmación formal**; no se agregan personas, dedicaciones ni
+> aprobaciones que no estén respaldadas por un registro.
 
 ## 1. Propósito y criterio de honestidad
 
@@ -14,9 +19,10 @@ retroactivamente una organización que no existió. Distingue:
 - responsabilidades propuestas para el piloto y la defensa;
 - apoyos externos todavía pendientes de confirmar.
 
-La matriz RACI es una herramienta de coordinación desde esta fecha de corte. No demuestra por sí
+La matriz RACI es una herramienta de coordinación desde esa fecha de corte. No demuestra por sí
 sola quién escribió código ni reemplaza la evidencia de commits, issues, pull requests, documentos
-o registros de terreno.
+o registros de terreno. Los estados técnicos históricos y cualquier claim de operación actual quedan
+pendientes hasta contar con una captura y evidencia fechadas.
 
 ## 2. Recursos humanos internos
 
@@ -49,7 +55,7 @@ afirmación genérica.
 | Recurso | Función | Condición vigente |
 |---|---|---|
 | VPS Hetzner CX43, Ubuntu 24.04 | Ejecutar backend, modelos locales y gateway | Restricción de costo y capacidad definida en `AGENTS.md` |
-| Hardware degradado de referencia: 1 vCPU / 6 GB RAM | Piso para validar funcionamiento y latencia | La evidencia de cada prueba debe adjuntarse; no basta ejecutar solo en el VPS |
+| Hardware degradado de referencia: 1 vCPU / 4 GB RAM | Piso para validar funcionamiento y latencia | La evidencia de cada prueba debe adjuntarse; no basta ejecutar solo en el VPS |
 | FastAPI, SQLite y Docker Compose | Backend, persistencia y despliegue | Stack vigente; no se contempla servidor de base de datos separado |
 | Whisper, LLM cuantizado y Piper | Pipeline local de voz | Stack abierto; Whisper sigue siendo un cuello de botella conocido |
 | Open-WA | Gateway de WhatsApp autohospedado | Dependencia operativa; no equivale a una API oficial contratada |
@@ -74,10 +80,10 @@ Las asignaciones marcadas como **próximas** son un plan de trabajo, no evidenci
 
 | Entregable o actividad | Sebastián | Francisco | Matías | Tercero externo | Momento / estado |
 |---|---:|---:|---:|---:|---|
-| Arquitectura, backend, LLM, Tool Calling y Open-WA | A/R | I | C | — | Implementado; mantener y demostrar |
-| Integración técnica ODEPA y OpenMeteo | A/R | I | C | — | Implementado; validar vigencia de datos |
-| Infraestructura, despliegue y monitoreo | A/R | I | C | — | Operativo; endurecimiento continuo |
-| Testing automatizado y control de calidad técnico | A/R | I | C | — | Implementado; capturar evidencia actualizada |
+| Arquitectura, backend, LLM, Tool Calling y Open-WA | A/R | I | C | — | Histórico al corte; evidencia vigente pendiente |
+| Integración técnica ODEPA y OpenMeteo | A/R | I | C | — | Histórico al corte; vigencia de datos pendiente |
+| Infraestructura, despliegue y monitoreo | A/R | I | C | — | Declarado operativo al corte; operación actual no verificada |
+| Testing automatizado y control de calidad técnico | A/R | I | C | — | Histórico al corte; evidencia vigente pendiente |
 | Investigación del problema y propuesta de valor | C | A/R | C | — | Base del pitch; revisar fuentes antes de defender |
 | Pitch y relato de producto | C | A/R | C | — | Próxima defensa |
 | Validación de fuentes documentales | C | A | R | — | Continua; conservar referencia y fecha |
@@ -121,9 +127,10 @@ de una estimación aprobada o de un registro real.
 
 ## 9. Criterio de aprobación
 
-La matriz se considera vigente cuando los tres integrantes confirman las responsabilidades próximas.
-La falta de confirmación no invalida las contribuciones históricas descritas en `AGENTS.md`, pero
-sí obliga a presentar las asignaciones futuras como propuesta.
+La matriz no se considera vigente para el piloto mientras los tres integrantes no confirmen las
+responsabilidades próximas por escrito. La falta de confirmación no invalida las contribuciones
+históricas descritas en `AGENTS.md`, pero obliga a presentar las asignaciones futuras como propuesta
+pendiente y no como capacidad operativa disponible.
 
 ## 10. Fuentes y evidencia
 
