@@ -7,11 +7,17 @@
 # en este server para no competir por los mismos puertos).
 #
 # REGLAS DOKPLOY + PANGOLIN (actualiza decisión #12):
-#   - `backend` publica en 127.0.0.1:8000 (loopback del host), NO 0.0.0.0 —
-#     así solo Pangolin (mismo host) lo alcanza, nunca queda expuesto directo
-#     a internet. El dominio público se configura como Resource en Pangolin
-#     apuntando a 127.0.0.1:8000, no en la sección Domains de Dokploy.
-#   - NO definir `container_name` (Dokploy gestiona los nombres).
+#   - `backend` NO publica ningún puerto al host (`expose` únicamente) — se une
+#     además a la red externa `pangolin` (gerbil/traefik/crowdsec) con el alias
+#     `agrovoz-backend`, así Traefik lo alcanza por nombre de contenedor dentro
+#     de esa red. IMPORTANTE: `127.0.0.1` dentro de un contenedor es SIEMPRE su
+#     propio loopback, nunca el del host — publicar en loopback del host NO
+#     sirve para que otro contenedor (Traefik) lo alcance.
+#   - El dominio público se configura como Resource en Pangolin, Target
+#     apuntando al hostname `agrovoz-backend` puerto 8000 (no IP ni loopback),
+#     no en la sección Domains de Dokploy.
+#   - NO definir `container_name` (Dokploy gestiona los nombres) — por eso el
+#     alias de red explícito, en vez de depender del nombre real del contenedor.
 #   - Red externa `dokploy-network` (`external: true`) — sigue usándose para
 #     el descubrimiento interno backend↔openwa, no para el ingress público.
 #   - Variables de entorno via Secrets UI de Dokploy (NO .env commiteado).
@@ -100,10 +106,13 @@ services:
       - backend_models:/app/models    # Modelos IA (Piper + Qwen GGUF)
       - backend_data:/app/data        # SQLite DB + audio temporal
       - backend_whisper_cache:/home/agrovoz/.cache  # Cache Whisper (FS read-only)
-    ports:
-      - "127.0.0.1:8000:8000"         # Solo loopback — Pangolin (mismo host) hace de ingress
+    expose:
+      - "8000"                        # Solo entre contenedores — nunca publicado al host
     networks:
-      - dokploy-network               # Red interna: descubrimiento backend↔openwa
+      dokploy-network: {}             # Red interna: descubrimiento backend↔openwa
+      pangolin:                       # Misma red que gerbil/traefik: permite que
+        aliases:                      # Pangolin llegue al backend por nombre estable
+          - agrovoz-backend           # (evita depender del container name random de Dokploy)
     healthcheck:
       test:
         [
@@ -207,3 +216,7 @@ volumes:
 networks:
   dokploy-network:
     external: true                    # Creada por Dokploy automáticamente
+  pangolin:
+    external: true                    # Red de Pangolin (gerbil/traefik) en este VPS —
+                                       # backend se une para ser alcanzable como ingress,
+                                       # 127.0.0.1 del contenedor NO es el localhost del host
