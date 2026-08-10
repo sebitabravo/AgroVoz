@@ -28,7 +28,8 @@ datos crudos, sin interpretación.
 - Los precios provienen de ODEPA y el clima de OpenMeteo.
 - El LLM solo puede invocar herramientas incluidas en una whitelist.
 - El sistema funciona con SQLite y procesamiento síncrono.
-- Las respuestas deben mantenerse bajo 15 segundos en el piso soportado.
+- Las respuestas deben mantenerse bajo 15 segundos en el piso soportado de 1
+  vCPU y 4 GB RAM; el benchmark que lo demuestre sigue pendiente.
 - La identidad del agricultor es su número de WhatsApp.
 - El sistema informa datos; no prescribe acciones.
 - La privacidad se controla con minimización/seudonimización, opt-in y retención limitada.
@@ -46,7 +47,8 @@ datos crudos, sin interpretación.
 - Consulta de corpus oficial y registro de gastos por voz.
 - Alertas de precio, helada y lluvia extrema.
 - Preferencias, conversación con estado e historial consentido.
-- Catálogo de 79 productos y 15 mercados ODEPA.
+- Catálogo ODEPA declarado de 79 productos y 15 mercados; el conteo sobre un
+  snapshot reproducible queda como gate pendiente.
 
 ### Operación y administración
 
@@ -55,13 +57,16 @@ datos crudos, sin interpretación.
 - Landing estática, demo web y dashboard administrativo de ocho vistas.
 - Autenticación de administración mediante sesión firmada o `X-Admin-Key`.
 - Métricas, revisión de consultas, monitor y controles del piloto.
-- Docker Compose de desarrollo y producción, VPS y Dokploy.
+- Configuración de Docker Compose de desarrollo y producción, más
+  documentación de VPS/Dokploy; no se afirma un despliegue efectivo.
 
 ### Validación
 
 - Pruebas automatizadas de servicios, APIs y regresión.
 - Ruff y mypy en modo estricto.
-- Benchmark de latencia y evaluación WER.
+- Smoke CI de tests, Ruff y mypy, separado del benchmark de latencia.
+- Benchmark de latencia en el piso de 1 vCPU y 4 GB RAM, y evaluación WER; ambos
+  permanecen pendientes de evidencia específica.
 - Prueba E2E con WhatsApp autenticado.
 - Piloto planificado de cuatro semanas con 3–5 productores.
 - Auditoría formal de privacidad antes de escalar.
@@ -119,7 +124,7 @@ datos crudos, sin interpretación.
 6. Verificación y validación
    6.1 Tests automatizados, Ruff y mypy
    6.2 Validación E2E con Open-WA autenticado
-   6.3 Rendimiento en 1 vCPU / 6 GB
+   6.3 Rendimiento en 1 vCPU / 4 GB
    6.4 Evaluación WER rural
    6.5 Piloto de Traiguén
    6.6 Auditoría legal pre-escalamiento
@@ -131,7 +136,7 @@ datos crudos, sin interpretación.
 |---|---|---|
 | 1.1–1.4 Dirección y alcance | Cuatro documentos coherentes, enlazados y sin atribuciones no verificadas | Ejecutado por este conjunto; aceptación académica pendiente |
 | 2.1 API y SQLite | La aplicación inicia, persiste y expone rutas previstas sin DB externa | Implementado |
-| 2.2 ODEPA | Sincroniza y consulta el catálogo completo; conserva último dato utilizable ante fallo | Implementado |
+| 2.2 ODEPA | Sincroniza y consulta el catálogo; conserva último dato utilizable ante fallo y requiere contar el snapshot para afirmar 79 productos/15 mercados | Implementado; cardinalidad no verificable documentalmente |
 | 2.3 OpenMeteo | Consulta clima por comuna y usa cache degradado cuando corresponde | Implementado |
 | 2.4 Herramientas | Solo se ejecutan herramientas permitidas y la aritmética monetaria es determinística | Implementado |
 | 2.5 Contexto de usuario | Preferencias y estado se asocian a identidad WhatsApp; historial requiere opt-in | Implementado según línea base; cierre de issues relacionado aún debe reconciliarse |
@@ -145,11 +150,11 @@ datos crudos, sin interpretación.
 | 4.1 Landing | Build estático correcto y contenido del producto accesible | Implementado |
 | 4.2 Demo | Permite demostrar consultas sin WhatsApp cuando el endpoint está habilitado | Implementado con restricción operativa conocida |
 | 4.3–4.4 Admin | Ocho vistas, HTMX, Chart.js local y soporte PWA administrativo | Implementado |
-| 5.1–5.4 Infraestructura | Entornos reproducibles, CI y despliegue documentado | Implementado |
+| 5.1–5.4 Infraestructura | Entornos reproducibles, CI y configuración de despliegue documentada | Parcial; no hay evidencia local de despliegue efectivo |
 | 5.5 Retención | Media temporal (audio/imagen) se elimina dentro del límite y datos sensibles se minimizan | Implementado en diseño y tests; observar en operación |
-| 6.1 Calidad automatizada | Suite, linter y tipos pasan en el commit candidato | Repetible; debe ejecutarse por cambio |
+| 6.1 Calidad automatizada | Smoke CI con suite, linter y tipos; el resultado debe registrarse en el commit candidato | Control reproducible; resultado vigente no registrado |
 | 6.2 E2E autenticado | Audio/texto real cruza WhatsApp y vuelve al usuario | Pendiente |
-| 6.3 Piso degradado | Escenarios críticos cumplen umbrales en 1 vCPU / 6 GB | Pendiente en [#215][i215] |
+| 6.3 Piso degradado | Escenarios críticos cumplen umbrales en 1 vCPU / 4 GB | Benchmark pendiente en [#215][i215]; no lo sustituye el smoke CI |
 | 6.4 WER | Muestra consentida rural obtiene WER menor a 15% | Pendiente del piloto |
 | 6.5 Piloto | 3–5 productores completan cuatro semanas y se registran métricas | Planificado, no ejecutado |
 | 6.6 Auditoría legal | Revisión formal previa al escalamiento | Pendiente |

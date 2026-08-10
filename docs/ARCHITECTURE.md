@@ -12,7 +12,7 @@ por la misma vía. El texto evita Whisper y TTS.
 
 ```
 ┌──────────┐    ┌──────────┐    ┌─────────────────────────────────────┐
-│ Agricultor│    │ WhatsApp │    │  VPS Hetzner CX43 (8 vCPU, 16 GB)    │
+│ Agricultor│    │ WhatsApp │    │  VPS de referencia (no observado)     │
 │  (audio)  │───▶│ (Open-WA)│───▶│                                     │
 └──────────┘    └──────────┘    │  ┌──────────────────────────────┐   │
                                 │  │    Open-WA + FastAPI Backend  │   │
@@ -44,6 +44,13 @@ por la misma vía. El texto evita Whisper y TTS.
 └──────────────┘
 ```
 
+El diagrama representa una topología de referencia, no un despliegue observado.
+La restricción normativa exige funcionar en un piso degradado de **1 vCPU y
+4 GB RAM**, con latencia menor a 15 segundos end-to-end. El smoke CI comprueba
+el código y sus checks automatizados; no prueba ese hardware, una sesión
+Open-WA autenticada ni la existencia de un despliegue. El benchmark reproducible
+del piso sigue pendiente en [#215][i215].
+
 ## Flujo de datos end-to-end
 
 ```
@@ -57,7 +64,7 @@ por la misma vía. El texto evita Whisper y TTS.
    - Si pregunta por precio → query SQLite ODEPA
    - Si pregunta por clima → GET OpenMeteo API
    - Si busca una oficina o cooperativa → query SQLite `directorio_agricola`
-   - Whitelist de 15 tools (ver lista completa en `app/services/` más abajo). Si alucina una tool fuera de la whitelist → fallback.
+   - Whitelist de 19 tools (ver lista completa en `app/services/` más abajo). Si alucina una tool fuera de la whitelist → fallback.
 8. Fast-path determinista o LLM genera respuesta textual (datos crudos de precio/clima, o reglas citadas de fuente oficial)
 9. Solo audio: Piper TTS convierte texto → audio `.wav`
 10. Solo audio: ffmpeg convierte `.wav` → `.ogg`
@@ -79,7 +86,7 @@ por la misma vía. El texto evita Whisper y TTS.
 
 ### `app/services/` — Capa de negocio
 - `whisper_service.py` — transcripción de audio (descarga, ffmpeg, Whisper)
-- `llm_service.py` — interpretación NL + Tool Calling con whitelist (15 tools: precios, clima, corpus, gastos, parcelas, reglas, panel y `get_directorio_agricola`) + fallback OpenRouter
+- `llm_service.py` — interpretación NL + Tool Calling con whitelist (19 tools: precios, clima, corpus, gastos, parcelas, reglas, panel, reportes, programas INDAP y directorio agrícola) + fallback OpenRouter
 - `tts_service.py` — síntesis de voz con Piper TTS
 - `odepa_service.py` — consultas a SQLite ODEPA, sync diario y detector determinista de variaciones
 - `weather_service.py` — consultas a OpenMeteo API (forecast + histórico)
@@ -232,7 +239,8 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     si escala mucho (>100 mensajes/día). Para MVP con 3-5 productores es seguro.
     Para producción escalar a WhatsApp Business API oficial.
 
-12. **Dokploy en vez de nginx + certbot.** Dokploy es PaaS self-hosted que bundla
+12. **Dokploy en vez de nginx + certbot.** Dokploy es el target de despliegue PaaS
+    self-hosted que bundla
     Docker + Traefik + Let's Encrypt SSL automático. Un comando de install y todo listo.
     Elimina 200+ líneas de config nginx manual. Traefik hace routing + SSL al vuelo.
     Dashboard UI para crear apps (Docker Compose, static). Zero-downtime deploys.
@@ -243,7 +251,8 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     `_model_loaded=False` en su copia aislada de memoria, forzando recarga completa
     del modelo en cada proceso (~2 GB RAM extra por worker, I/O contention en disco,
     latencia LLM 25-60x peor). Un solo worker mantiene los modelos en memoria caliente
-    y cumple <15s target con throughput suficiente para el piloto (3-5 productores).
+    y es la configuración prevista para medir el objetivo <15s; el cumplimiento
+    en el piso requiere el benchmark pendiente de [#215][i215].
     Escalar horizontalmente con load balancer + múltiples instancias post-MVP,
     no con workers del mismo proceso.
 
@@ -362,7 +371,7 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     WhatsApp: el webhook recibe una grabación ya terminada y la respuesta es otro
     archivo completo. Esas técnicas se reconsideran solo en un canal síncrono,
     como IVR. `faster-whisper` o reemplazar Piper exige primero benchmark de WER,
-    CPU, RAM, latencia y calidad sobre 1 vCPU/6 GB. Evidencia:
+    CPU, RAM, latencia y calidad sobre 1 vCPU/4 GB. Evidencia:
     `docs/humanizacion-voz.md`.
 
 26. **Registro de gastos fail-closed (#34/#170).** La tool `register_expense`
@@ -420,3 +429,5 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     (`ALERT_RATE_LIMIT_PER_MINUTE`) para evitar ráfagas y sin agregar Redis,
     Celery ni APIs pagas. El mensaje solo informa precio, variación, fecha y
     fuente ODEPA; no contiene recomendación agronómica.
+
+[i215]: https://github.com/sebitabravo/AgroVoz/issues/215
