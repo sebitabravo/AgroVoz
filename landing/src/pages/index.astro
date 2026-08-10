@@ -548,46 +548,6 @@ const equipo = [
     "(prefers-reduced-motion: reduce)",
   ).matches;
 
-  // ===== Drawer de navegacion mobile (boton hamburguesa) =====
-  const header = document.getElementById("site-header");
-  const navToggle = document.getElementById("nav-toggle");
-  const nav = document.getElementById("nav");
-  const navBackdrop = document.getElementById("nav-backdrop");
-
-  function setNav(open: boolean) {
-    if (!header || !navToggle) return;
-    header.classList.toggle("nav-open", open);
-    navToggle.setAttribute("aria-expanded", open ? "true" : "false");
-    navToggle.setAttribute(
-      "aria-label",
-      open ? "Cerrar menú de navegación" : "Abrir menú de navegación",
-    );
-    nav?.setAttribute(
-      "aria-hidden",
-      !open && window.innerWidth <= 920 ? "true" : "false",
-    );
-    document.body.style.overflow = open && window.innerWidth <= 920 ? "hidden" : "";
-  }
-
-  // El estado inicial también debe reflejar si el drawer está oculto en mobile.
-  setNav(false);
-
-  navToggle?.addEventListener("click", () =>
-    setNav(!header?.classList.contains("nav-open")),
-  );
-  // Click en un enlace del menu cierra el drawer.
-  document.querySelectorAll<HTMLElement>("#nav a").forEach((a) =>
-    a.addEventListener("click", () => setNav(false)),
-  );
-  navBackdrop?.addEventListener("click", () => setNav(false));
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") setNav(false);
-  });
-  // Al volver a desktop, cierra y libera el scroll del fondo.
-  window.matchMedia("(min-width: 921px)").addEventListener("change", (e) => {
-    if (e.matches) setNav(false);
-  });
-
   // ===== Diccionario EN (ES es la fuente de verdad en el markup) =====
   const EN: Record<string, string> = {
     "nav.como": "How it works",
