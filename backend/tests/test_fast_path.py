@@ -191,6 +191,52 @@ class TestFastPathCalendario:
         assert origin == ["calendario"]
 
 
+class TestFastPathAgronomicoDegradacion:
+    """Una keyword agronómica no debe bloquear precio o clima con el gate off."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("query", "expected_intent"),
+        [
+            ("a cuanto esta la cosecha de trigo", "precio"),
+            ("como esta el clima para la cosecha", "clima"),
+        ],
+    )
+    async def test_consulta_mixta_usa_fast_path_normal(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        query: str,
+        expected_intent: str,
+    ) -> None:
+        """El pipeline llega a la tool normal y no retorna el texto del gate."""
+        monkeypatch.setattr(settings, "agronomic_rules_enabled", False)
+        monkeypatch.setattr(
+            AgroVozPipeline,
+            "_load_user_cultivos",
+            staticmethod(lambda _phone_hash: None),
+        )
+
+        async def normal_keyword_tool(
+            _query: str,
+            phone_hash: str | None = None,
+        ) -> str:
+            assert phone_hash == "phone-hash"
+            return "Respuesta normal de datos."
+
+        async def fail_llm(*_args: object, **_kwargs: object) -> str:
+            raise AssertionError("la consulta simple debe usar el fast-path normal")
+
+        monkeypatch.setattr("app.services.llm_keywords._force_keyword_tool", normal_keyword_tool)
+        monkeypatch.setattr("app.services.llm_service.answer", fail_llm)
+
+        origin = ["desconocido"]
+        response, intent = await AgroVozPipeline._generate_response(query, "phone-hash", origin)
+
+        assert response == "Respuesta normal de datos."
+        assert intent == expected_intent
+        assert origin == ["fast_path"]
+
+
 class TestGateFastPath:
     """Cuando el pipeline puede saltarse el LLM."""
 

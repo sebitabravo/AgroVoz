@@ -714,10 +714,13 @@ class AgroVozPipeline:
             tiene_precio = "como" in q or "cómo" in q
 
         consulta_tipo: TipoConsulta
-        # La regla agronómica tiene precedencia: un cultivo mencionado en
-        # "cuando siembro trigo" no debe convertirse accidentalmente en una
-        # consulta de precio solo por contener el nombre del producto.
-        if tiene_agronomica:
+        # La regla agronómica tiene precedencia solo cuando está habilitada o
+        # cuando la consulta es exclusivamente agronómica. Con el gate
+        # apagado, una palabra como "cosecha" no puede tapar un precio o el
+        # clima que el agricultor sí pidió explícitamente.
+        if tiene_agronomica and (
+            settings.agronomic_rules_enabled or not (tiene_precio or tiene_clima)
+        ):
             consulta_tipo = "agronomica"
         elif tiene_precio and tiene_clima:
             consulta_tipo = "ambos"
