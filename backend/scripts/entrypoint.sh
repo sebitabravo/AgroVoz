@@ -62,14 +62,18 @@ fi
 if [[ "${SKIP_WHISPER_PRELOAD:-false}" == "true" ]]; then
     warn "SKIP_WHISPER_PRELOAD=true — se omite la precarga remota de Whisper"
 else
-    WHISPER_BACKEND="${WHISPER_BACKEND:-faster}"
-    WHISPER_MODEL="${WHISPER_MODEL:-small}"
-    header "Verificando cache de Whisper ($WHISPER_MODEL; backend=$WHISPER_BACKEND)"
-    warn "Whisper $WHISPER_MODEL no en cache — precargando backend $WHISPER_BACKEND"
-    if WHISPER_BACKEND="$WHISPER_BACKEND" WHISPER_MODEL="$WHISPER_MODEL" python scripts/preload_whisper.py; then
-        info "Whisper $WHISPER_MODEL cacheado con backend $WHISPER_BACKEND"
+    # El script consulta Settings para no duplicar los defaults de modelo y backend.
+    # Su verificación usa solo el cache local, sin tocar la red.
+    header "Verificando cache de Whisper"
+    if python -m scripts.preload_whisper --check-cache; then
+        info "Whisper ya está en cache — skip"
     else
-        warn "No se pudo pre-cargar Whisper (continuando — cargará en runtime)"
+        warn "Whisper no en cache — precargando backend configurado"
+        if python -m scripts.preload_whisper; then
+            info "Whisper cacheado"
+        else
+            warn "No se pudo pre-cargar Whisper (continuando — cargará en runtime)"
+        fi
     fi
 fi
 

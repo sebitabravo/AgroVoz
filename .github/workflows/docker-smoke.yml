@@ -24,9 +24,14 @@ jobs:
         run: docker build --file backend/Dockerfile --tag agrovoz-backend-smoke:ci backend
 
       - name: Verify runtime dependencies
-        run: >-
-          docker run --rm --entrypoint python agrovoz-backend-smoke:ci -c
-          "import PIL, numpy, onnxruntime, reportlab"
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint python agrovoz-backend-smoke:ci -c \
+            "import PIL, numpy, onnxruntime, reportlab"
+          # Resuelve el mismo módulo que ejecuta el entrypoint, sin cargar ni
+          # descargar un modelo Whisper durante el smoke.
+          docker run --rm --entrypoint python agrovoz-backend-smoke:ci \
+            -m scripts.preload_whisper --help
 
       - name: Start backend and verify health with floor resources
         run: |
@@ -98,6 +103,30 @@ jobs:
           wait_for_health liveness
           wait_for_health readiness
 
+          wait_for_log() {
+            local expected_log="$1"
+            local elapsed=0
+
+            while (( elapsed < 30 )); do
+              docker logs "$container" >"$log_file" 2>&1
+              if grep --fixed-strings --quiet "$expected_log" "$log_file"; then
+                return 0
+              fi
+              sleep 1
+              elapsed=$((elapsed + 1))
+            done
+            printf 'Falta evidencia de startup/TTL dentro de 30 segundos: %s\n' "$expected_log" >&2
+            return 1
+          }
+
+          for expected_log in \
+            'Base de datos lista' \
+            'Application startup complete' \
+            'Gastos scheduler: purga TTL OK' \
+            'Parcelas scheduler: purga TTL OK' \
+            'Ubicaciones scheduler: purga TTL OK'; do
+            wait_for_log "$expected_log"
+          done
           docker logs agrovoz-backend-smoke >"$log_file" 2>&1
           cat "$log_file"
           logs_printed=true
@@ -105,19 +134,5 @@ jobs:
             'ERROR|Traceback|purga TTL no confirmada|scheduler: error inesperado' \
             "$log_file"; then
             echo 'El entrypoint reportó un error de startup o retención TTL.' >&2
-            rm -f "$log_file"
             exit 1
           fi
-          for expected_log in \
-            'Base de datos lista' \
-            'Application startup complete' \
-            'Gastos scheduler: purga TTL OK' \
-            'Parcelas scheduler: purga TTL OK' \
-            'Ubicaciones scheduler: purga TTL OK'; do
-            if ! grep --fixed-strings --quiet "$expected_log" "$log_file"; then
-              printf 'Falta evidencia de startup/TTL: %s\n' "$expected_log" >&2
-              rm -f "$log_file"
-              exit 1
-            fi
-          done
-          rm -f "$log_file"
