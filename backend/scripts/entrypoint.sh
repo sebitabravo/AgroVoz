@@ -52,7 +52,7 @@ else
 fi
 
 # ─── 2. Pre-cargar cache de Whisper (best-effort) ────────────────────────────
-# openai-whisper descarga el modelo a ~/.cache/whisper/<model>.pt al primer
+# El backend efectivo gestiona su propio cache y descarga el modelo al primer
 # load_model(). Lo forzamos acá para que el primer request del usuario no
 # pague la latencia de la descarga.
 #
@@ -62,21 +62,14 @@ fi
 if [[ "${SKIP_WHISPER_PRELOAD:-false}" == "true" ]]; then
     warn "SKIP_WHISPER_PRELOAD=true — se omite la precarga remota de Whisper"
 else
+    WHISPER_BACKEND="${WHISPER_BACKEND:-faster}"
     WHISPER_MODEL="${WHISPER_MODEL:-small}"
-    WHISPER_CACHE="${HOME}/.cache/whisper"
-    header "Verificando cache de Whisper ($WHISPER_MODEL)"
-
-    if [[ -f "$WHISPER_CACHE/${WHISPER_MODEL}.pt" ]]; then
-        info "Whisper $WHISPER_MODEL ya en cache — skip"
+    header "Verificando cache de Whisper ($WHISPER_MODEL; backend=$WHISPER_BACKEND)"
+    warn "Whisper $WHISPER_MODEL no en cache — precargando backend $WHISPER_BACKEND"
+    if WHISPER_BACKEND="$WHISPER_BACKEND" WHISPER_MODEL="$WHISPER_MODEL" python scripts/preload_whisper.py; then
+        info "Whisper $WHISPER_MODEL cacheado con backend $WHISPER_BACKEND"
     else
-        warn "Whisper $WHISPER_MODEL no en cache — descargando (~462 MB)..."
-        # Pasar WHISPER_MODEL via os.environ (no interpolar en el string de Python):
-        # defensa en profundidad ante code injection si la env var se manipula.
-        if WHISPER_MODEL="$WHISPER_MODEL" python -c "import os, whisper; whisper.load_model(os.environ['WHISPER_MODEL'])" 2>&1; then
-            info "Whisper $WHISPER_MODEL cacheado"
-        else
-            warn "No se pudo pre-cargar Whisper (continuando — cargará en runtime)"
-        fi
+        warn "No se pudo pre-cargar Whisper (continuando — cargará en runtime)"
     fi
 fi
 

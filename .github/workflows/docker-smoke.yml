@@ -68,6 +68,7 @@ jobs:
             --env ADMIN_SESSION_SECRET=ci-admin-session-secret \
             --env PHONE_HASH_PEPPER=ci-phone-hash-pepper \
             --env DATABASE_URL=sqlite:////app/data/agrovoz.db \
+            --env WHISPER_BACKEND=faster \
             --env SKIP_MODEL_DOWNLOAD=true \
             --env SKIP_WHISPER_PRELOAD=true \
             --env LLM_MODEL_PATH=/tmp/model-not-provisioned.gguf \

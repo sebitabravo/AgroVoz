@@ -257,6 +257,10 @@ class WhisperService:
                 _model_cache[self._cache_key] = model
             return _model_cache[self._cache_key]
 
+    def preload(self) -> None:
+        """Precarga el modelo efectivo sin exponer detalles del cache interno."""
+        self._load_model()
+
     def _transcribe_openai(self, model: object, path: Path) -> dict[str, object]:
         """Ejecuta openai-whisper y devuelve su dict nativo."""
         return model.transcribe(  # type: ignore[attr-defined,no-any-return]
