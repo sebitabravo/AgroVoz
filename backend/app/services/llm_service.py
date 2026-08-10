@@ -33,7 +33,7 @@ import os
 import re
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import cast
 
 import httpx
@@ -96,7 +96,7 @@ WHITELIST_TOOLS = frozenset(
 # Máximo de iteraciones del Tool Calling loop (previene loops infinitos).
 MAX_TOOL_ITERATIONS = 3
 
-# Timeout de generación por llamada al LLM (segundos).
+# Presupuesto E2E del segmento LLM (generaciones, tools y fallback).
 #
 # Bajado de 60s a 25s. Con 60s el peor caso medido fue un pipeline de 86s
 # (Whisper + timeout completo del LLM + fallback), contra un objetivo de 15s:
@@ -105,8 +105,8 @@ MAX_TOOL_ITERATIONS = 3
 # datos reales de ODEPA en vez de un mensaje generico.
 #
 # El worker se precalienta fuera del request. Este es el presupuesto total de
-# todas las generaciones de una respuesta, no un timeout por vuelta del loop;
-# deja margen para Whisper/TTS dentro del presupuesto E2E de 15s.
+# una respuesta LLM, no un timeout por vuelta del loop; deja margen para
+# Whisper/TTS dentro del presupuesto E2E de 15s.
 _GENERATION_TIMEOUT = 10.0
 _LLM_CIRCUIT_COOLDOWN_SECONDS = 90.0
 _LLM_BUSY_TEXT = "Estoy procesando otra consulta ahora. ¿Podrías intentar de nuevo en un momento?"
@@ -1070,6 +1070,46 @@ async def _run_llm_completion(
     return response
 
 
+async def _await_with_deadline[T](
+    operation: Callable[[], Awaitable[T]],
+    *,
+    deadline: float,
+) -> T:
+    """Ejecuta una operación dentro del presupuesto monotónico compartido.
+
+    ``wait_for`` cancela la coroutine de la operación al vencer el plazo y
+    espera su cleanup. El deadline se calcula antes de cada espera para no
+    reiniciar el presupuesto entre generaciones, tools o fallbacks.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("llm_generation_budget_exhausted")
+    try:
+        return await asyncio.wait_for(operation(), timeout=remaining)
+    except TimeoutError as exc:
+        raise TimeoutError("llm_generation_budget_exhausted") from exc
+
+
+async def _run_forced_keyword_tool(
+    query_text: str,
+    phone_hash: str | None,
+    *,
+    deadline: float,
+) -> str | None:
+    """Intenta el fallback determinista sin extender el deadline E2E."""
+    try:
+        return await _await_with_deadline(
+            lambda: _force_keyword_tool(query_text, phone_hash=phone_hash),
+            deadline=deadline,
+        )
+    except (SQLAlchemyError, OSError, RuntimeError, ValueError, TimeoutError) as exc:
+        logger.warning(
+            "Fallback keyword no disponible — error=%s",
+            type(exc).__name__,
+        )
+        return None
+
+
 async def _preflight_keyword_tool(
     query_text: str,
     phone_hash: str | None,
@@ -1631,19 +1671,38 @@ async def answer(
     if not query_text or not query_text.strip():
         return NO_RESPONSE_TEXT
 
-    forced_preflight = await _preflight_keyword_tool(
-        query_text,
-        phone_hash,
-        consulta_tipo,
-        system_tip,
-    )
+    # Un solo reloj monotónico para toda la request: LLM, tools y fallback.
+    # Así una tool de red lenta no puede agregar otra ventana después de la
+    # generación ni hacer que el webhook supere el límite E2E.
+    generation_deadline = time.monotonic() + _GENERATION_TIMEOUT
+
+    try:
+        forced_preflight = await _await_with_deadline(
+            lambda: _preflight_keyword_tool(
+                query_text,
+                phone_hash,
+                consulta_tipo,
+                system_tip,
+            ),
+            deadline=generation_deadline,
+        )
+    except TimeoutError:
+        logger.warning("Timeout del LLM — timeout_seconds=%s", _GENERATION_TIMEOUT)
+        return "Estoy teniendo problemas para responder. ¿Podrías preguntar de nuevo más breve?"
     if forced_preflight:
         logger.info("Fallback keyword ejecutado antes del LLM — tipo=%s", consulta_tipo)
         return forced_preflight
 
     # La carga/reinicialización del hijo puede esperar hasta el timeout de
     # startup. Nunca bloquear el event loop del webhook mientras ocurre.
-    model = await asyncio.to_thread(_get_model)
+    try:
+        model = await _await_with_deadline(
+            lambda: asyncio.to_thread(_get_model),
+            deadline=generation_deadline,
+        )
+    except TimeoutError:
+        logger.warning("Timeout del LLM — timeout_seconds=%s", _GENERATION_TIMEOUT)
+        return "Estoy teniendo problemas para responder. ¿Podrías preguntar de nuevo más breve?"
     history = history or []
 
     if model is None:
@@ -1656,7 +1715,6 @@ async def answer(
         system_tip=system_tip,
         consulta_tipo=consulta_tipo,
     )
-    generation_deadline = time.monotonic() + _GENERATION_TIMEOUT
 
     def _remaining_generation_budget() -> float:
         """Retorna el presupuesto restante para todas las vueltas del LLM."""
@@ -1669,11 +1727,14 @@ async def answer(
             remaining = _remaining_generation_budget()
             if remaining <= 0:
                 raise TimeoutError("llm_generation_budget_exhausted")
-            response = await _run_llm_completion(
-                model,
-                messages,
-                max_tokens=128,
-                timeout_seconds=remaining,
+            response = await _await_with_deadline(
+                lambda remaining=remaining: _run_llm_completion(
+                    model,
+                    messages,
+                    max_tokens=128,
+                    timeout_seconds=remaining,
+                ),
+                deadline=generation_deadline,
             )
 
             content = _parse_content(response)
@@ -1697,7 +1758,11 @@ async def answer(
                     # ("no tengo datos", "reformula") sin llamar tools,
                     # forzar tool call por keyword detection.
                     if _iteration == 0 and _is_generic_response(cleaned):
-                        forced = await _force_keyword_tool(query_text, phone_hash=phone_hash)
+                        forced = await _run_forced_keyword_tool(
+                            query_text,
+                            phone_hash,
+                            deadline=generation_deadline,
+                        )
                         if forced:
                             # Inyectar el tool call + respuesta para que
                             # el LLM lo formatee en la siguiente iteracion.
@@ -1755,7 +1820,14 @@ async def answer(
                     fn_args = {}
 
                 # Ejecutar tool.
-                tool_result = await _execute_tool(fn_name, fn_args, phone_hash=phone_hash)
+                tool_result = await _await_with_deadline(
+                    lambda fn_name=fn_name, fn_args=fn_args: _execute_tool(
+                        fn_name,
+                        fn_args,
+                        phone_hash=phone_hash,
+                    ),
+                    deadline=generation_deadline,
+                )
                 if fn_name == "get_reporte_pdf":
                     from app.services.report_service import REPORT_TOOL_SIGNAL
 
@@ -1788,11 +1860,14 @@ async def answer(
             remaining = _remaining_generation_budget()
             if remaining <= 0:
                 raise TimeoutError("llm_generation_budget_exhausted")
-            final_response = await _run_llm_completion(
-                model,
-                messages,
-                max_tokens=128,
-                timeout_seconds=remaining,
+            final_response = await _await_with_deadline(
+                lambda remaining=remaining: _run_llm_completion(
+                    model,
+                    messages,
+                    max_tokens=128,
+                    timeout_seconds=remaining,
+                ),
+                deadline=generation_deadline,
             )
             content = _parse_content(final_response)
             if content:
@@ -1809,7 +1884,11 @@ async def answer(
 
     except TimeoutError:
         logger.warning("Timeout del LLM — timeout_seconds=%s", _GENERATION_TIMEOUT)
-        forced = await _force_keyword_tool(query_text, phone_hash=phone_hash)
+        forced = await _run_forced_keyword_tool(
+            query_text,
+            phone_hash,
+            deadline=generation_deadline,
+        )
         if forced:
             return forced
         return "Estoy teniendo problemas para responder. ¿Podrías preguntar de nuevo más breve?"
@@ -1818,14 +1897,22 @@ async def answer(
         # durante el cooldown: eso contaminaba las consultas siguientes con un
         # mensaje de cola aunque el lock nativo ya estuviera liberado.
         logger.warning("Circuit breaker LLM activo — usando respuesta degradada")
-        forced = await _force_keyword_tool(query_text, phone_hash=phone_hash)
+        forced = await _run_forced_keyword_tool(
+            query_text,
+            phone_hash,
+            deadline=generation_deadline,
+        )
         return forced or FALLBACK_TEXT
     except LlmGuardError as exc:
         logger.warning(
             "LLM no disponible temporalmente — error=%s",
             type(exc).__name__,
         )
-        forced = await _force_keyword_tool(query_text, phone_hash=phone_hash)
+        forced = await _run_forced_keyword_tool(
+            query_text,
+            phone_hash,
+            deadline=generation_deadline,
+        )
         if forced:
             return forced
         return _LLM_BUSY_TEXT
@@ -1836,7 +1923,11 @@ async def answer(
         # inusualmente largo o un audio muy extenso transcrito podrian
         # seguir gatillandola.
         logger.error("Error en generacion LLM — error=%s", type(exc).__name__)
-        forced = await _force_keyword_tool(query_text, phone_hash=phone_hash)
+        forced = await _run_forced_keyword_tool(
+            query_text,
+            phone_hash,
+            deadline=generation_deadline,
+        )
         if forced:
             return forced
         return "Tuve un problema al procesar tu consulta. ¿Probamos de nuevo?"

@@ -877,6 +877,121 @@ class TestAnswerGuardasLlm:
         assert result != ""
         assert llamadas == 1
 
+    async def test_tool_lenta_respeta_deadline_y_ejecuta_cleanup(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Una tool lenta no abre otra ventana y siempre ejecuta su cleanup."""
+        cleanup = asyncio.Event()
+
+        async def _completion(*args: object, **kwargs: object) -> object:
+            return {"choices": [{"message": {"content": "tool-call"}}]}
+
+        def _tool_calls(content: str) -> list[dict[str, object]]:
+            return [
+                {
+                    "function": {
+                        "name": "get_weather",
+                        "arguments": "{}",
+                    }
+                }
+            ]
+
+        async def _slow_tool(*args: object, **kwargs: object) -> str:
+            try:
+                await asyncio.sleep(0.20)
+            finally:
+                cleanup.set()
+            return "resultado tardío"
+
+        monkeypatch.setattr(llm_service, "_GENERATION_TIMEOUT", 0.05)
+        monkeypatch.setattr(llm_service, "_get_model", lambda: object())
+        monkeypatch.setattr(llm_service, "_run_llm_completion", _completion)
+        monkeypatch.setattr(llm_service, "_parse_text_tool_calls", _tool_calls)
+        monkeypatch.setattr(llm_service, "_execute_tool", _slow_tool)
+        monkeypatch.setattr(llm_service, "_force_keyword_tool", AsyncMock(return_value=None))
+
+        result = await answer("consulta de tool lenta")
+
+        assert cleanup.is_set()
+        assert result == "Estoy teniendo problemas para responder. ¿Podrías preguntar de nuevo más breve?"
+
+    async def test_fallback_forzado_respeta_deadline_y_cancela_tool(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El fallback forzado no puede extender el presupuesto agotado."""
+        cleanup = asyncio.Event()
+
+        async def _completion(*args: object, **kwargs: object) -> object:
+            return {"choices": [{"message": {"content": "No tengo ese dato."}}]}
+
+        async def _slow_forced(*args: object, **kwargs: object) -> str:
+            try:
+                await asyncio.sleep(0.20)
+            finally:
+                cleanup.set()
+            return "dato tardío"
+
+        monkeypatch.setattr(llm_service, "_GENERATION_TIMEOUT", 0.05)
+        monkeypatch.setattr(llm_service, "_get_model", lambda: object())
+        monkeypatch.setattr(llm_service, "_run_llm_completion", _completion)
+        monkeypatch.setattr(llm_service, "_is_generic_response", lambda text: True)
+        monkeypatch.setattr(llm_service, "_force_keyword_tool", _slow_forced)
+
+        result = await answer("consulta ambigua")
+
+        assert cleanup.is_set()
+        assert result == "No tengo ese dato."
+
+    async def test_tool_normal_y_fallback_forzado_feliz(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El camino feliz conserva tools normales y fallback determinista."""
+        completions = iter(
+            [
+                {"choices": [{"message": {"content": "tool-call"}}]},
+                {"choices": [{"message": {"content": "respuesta final"}}]},
+            ]
+        )
+        tool_calls = [{"function": {"name": "get_weather", "arguments": "{}"}}]
+
+        async def _completion(*args: object, **kwargs: object) -> object:
+            return next(completions)
+
+        async def _tool(*args: object, **kwargs: object) -> str:
+            return "resultado seguro"
+
+        monkeypatch.setattr(llm_service, "_get_model", lambda: object())
+        monkeypatch.setattr(llm_service, "_run_llm_completion", _completion)
+        monkeypatch.setattr(
+            llm_service,
+            "_parse_text_tool_calls",
+            lambda content: tool_calls if content == "tool-call" else [],
+        )
+        monkeypatch.setattr(llm_service, "_execute_tool", _tool)
+
+        assert await answer("consulta de clima") == "respuesta final"
+
+        forced_completions = iter(
+            [
+                {"choices": [{"message": {"content": "No tengo ese dato."}}]},
+                {"choices": [{"message": {"content": "respuesta formateada"}}]},
+            ]
+        )
+
+        async def _forced_completion(*args: object, **kwargs: object) -> object:
+            return next(forced_completions)
+
+        monkeypatch.setattr(llm_service, "_run_llm_completion", _forced_completion)
+        monkeypatch.setattr(
+            llm_service,
+            "_force_keyword_tool",
+            AsyncMock(return_value="dato determinista"),
+        )
+        assert await answer("consulta ambigua") == "respuesta formateada"
+
     async def test_llm_ocupado_responde_sin_colgar(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Si la guarda detecta LLM ocupado, retorna mensaje rápido sin esperar."""
 
