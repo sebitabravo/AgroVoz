@@ -302,7 +302,9 @@ class LlmWorkerManager:
         if not self._request_lock.acquire(blocking=False):
             raise LlmWorkerBusyError("worker_busy")
         try:
-            if not self.start():
+            # El ciclo de vida se precalienta fuera del request. Arrancar aquí
+            # un hijo nuevo convierte un crash/timeout en otro cold-start largo.
+            if not self.is_healthy():
                 raise LlmWorkerUnavailableError(
                     self._last_error_code or "worker_unavailable"
                 )

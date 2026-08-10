@@ -9,6 +9,7 @@ from app.services.llm_worker import (
     LlmWorkerManager,
     LlmWorkerProtocolError,
     LlmWorkerTimeoutError,
+    LlmWorkerUnavailableError,
 )
 
 
@@ -98,10 +99,11 @@ def test_happy_path_health_lifecycle_y_restart() -> None:
     assert manager.is_healthy() is False
 
 
-def test_timeout_termina_worker_y_siguiente_request_reinicia() -> None:
-    """Una inferencia colgada no sobrevive y el manager se recupera."""
+def test_timeout_termina_worker_y_restart_explicito_recupera() -> None:
+    """Una inferencia colgada no sobrevive y el manager se recupera explícitamente."""
     manager = _manager()
     try:
+        assert manager.start() is True
         try:
             manager.complete(_messages("timeout"), max_tokens=16)
         except LlmWorkerTimeoutError as exc:
@@ -112,6 +114,7 @@ def test_timeout_termina_worker_y_siguiente_request_reinicia() -> None:
         assert manager.is_healthy() is False
         assert manager.health().last_error_code == "worker_timeout"
 
+        assert manager.restart() is True
         response = manager.complete(_messages("ok"), max_tokens=16)
         assert response["choices"] == [
             {"message": {"content": "respuesta-worker-16"}}
@@ -121,10 +124,11 @@ def test_timeout_termina_worker_y_siguiente_request_reinicia() -> None:
         manager.stop()
 
 
-def test_crash_nativo_no_mata_padre_y_worker_se_reinicia() -> None:
-    """Un os._exit en el hijo se reporta y una inferencia posterior funciona."""
+def test_crash_nativo_no_mata_padre_y_restart_explicito_recupera() -> None:
+    """Un os._exit en el hijo se reporta y permite recuperación explícita."""
     manager = _manager()
     try:
+        assert manager.start() is True
         try:
             manager.complete(_messages("crash"), max_tokens=16)
         except LlmWorkerCrashedError as exc:
@@ -133,6 +137,7 @@ def test_crash_nativo_no_mata_padre_y_worker_se_reinicia() -> None:
             raise AssertionError("Se esperaba crash del worker")
 
         assert manager.is_healthy() is False
+        assert manager.restart() is True
         response = manager.complete(_messages("ok"), max_tokens=8)
         assert response["choices"] == [
             {"message": {"content": "respuesta-worker-8"}}
@@ -141,10 +146,11 @@ def test_crash_nativo_no_mata_padre_y_worker_se_reinicia() -> None:
         manager.stop()
 
 
-def test_respuesta_malformada_descarta_y_reinicia_worker() -> None:
-    """Un payload fuera del contrato nunca llega a answer()."""
+def test_respuesta_malformada_descarta_y_restart_explicito_recupera() -> None:
+    """Un payload fuera del contrato nunca llega a answer(); recupera explícitamente."""
     manager = _manager()
     try:
+        assert manager.start() is True
         try:
             manager.complete(_messages("malformed"), max_tokens=16)
         except LlmWorkerProtocolError as exc:
@@ -153,6 +159,7 @@ def test_respuesta_malformada_descarta_y_reinicia_worker() -> None:
             raise AssertionError("Se esperaba error de protocolo")
 
         assert manager.is_healthy() is False
+        assert manager.restart() is True
         response = manager.complete(_messages("ok"), max_tokens=4)
         assert response["choices"] == [
             {"message": {"content": "respuesta-worker-4"}}
@@ -180,5 +187,22 @@ def test_fallo_de_carga_deja_worker_no_saludable() -> None:
         health = manager.health()
         assert health.running is False
         assert health.last_error_code == "RuntimeError"
+    finally:
+        manager.stop()
+
+
+def test_worker_muerto_no_se_reinicia_dentro_de_la_request() -> None:
+    """La inferencia no debe pagar un cold-start después de perder el hijo."""
+    manager = _manager()
+    try:
+        assert manager.start() is True
+        manager.stop()
+
+        try:
+            manager.complete(_messages("ok"), max_tokens=8)
+        except LlmWorkerUnavailableError as exc:
+            assert exc.code == "worker_unavailable"
+        else:
+            raise AssertionError("Un worker muerto no debe arrancar durante complete")
     finally:
         manager.stop()
