@@ -33,11 +33,15 @@
 | 1.000 | 14 |
 | 5.000 | 3 |
 
-**Capacidad de un solo VPS.** A 20 consultas por usuario al mes y con la latencia medida de 11 s en
-1 vCPU, 10.000 usuarios usando **exclusivamente voz** consumen unas 611 horas-CPU al mes: el **10,5%**
-de las 5.840 disponibles en los 8 vCPU del CX43. Por texto el consumo es dos órdenes de magnitud
-menor. El límite práctico no es la capacidad agregada sino el **pico de concurrencia** —la mañana en
-que pasa el intermediario y varios consultan a la vez—, que debe medirse en el piloto.
+**Escenario teórico de capacidad, no capacidad comprometida.** El cálculo siguiente usa 20 consultas
+por usuario al mes y una referencia de 11 s en 1 vCPU; ambos supuestos están pendientes de validarse
+con usuarios reales y un benchmark E2E reproducible. Por eso, la proyección de 10.000 usuarios de
+voz en un único VPS no debe presentarse como capacidad de producción. La capacidad real requiere
+medir concurrencia, cola, CPU, RAM y percentiles E2E en el piloto; la arquitectura limita el MVP a
+menos de 1.000 usuarios y deja el escalamiento horizontal para una fase posterior.
+
+El texto debería consumir menos CPU al omitir Whisper y Piper, pero esa diferencia también debe
+medirse bajo el mismo protocolo de benchmark.
 
 **Punto de equilibrio.** Hay que distinguir dos, que la versión anterior mezclaba en un solo número:
 
@@ -73,4 +77,3 @@ variable deja de ser cero y el modelo cambia de forma sustancial:
 validado con un productor real.** Bajo el escenario de API oficial el modelo es sensible a ese
 número: a 5 consultas mensuales sigue siendo viable, a 20 queda al límite y sobre 30 el costo
 variable se acerca al precio. Medirlo es el objetivo financiero número uno del piloto de Traiguén.
-

@@ -91,7 +91,7 @@ el control se limita a:
 - evitar APIs pagas;
 - mantener el despliegue dentro del VPS objetivo;
 - impedir que una dependencia nueva aumente recursos sin justificación;
-- validar consumo en el piso de 1 vCPU y 6 GB.
+- validar consumo en el piso de 1 vCPU y 4 GB.
 
 ### Calidad
 
@@ -106,7 +106,16 @@ el control se limita a:
 | Accesibilidad | WhatsApp como canal principal, voz y texto como entradas de primera clase |
 
 Los tests automatizados comprueban software; no sustituyen la prueba con
-Open-WA autenticado ni la validación en terreno.
+Open-WA autenticado ni la validación en terreno. El **smoke CI** y el
+**benchmark del piso** son controles distintos:
+
+- **Smoke CI:** checks automatizados del commit (tests, Ruff y mypy, más los
+  checks que declare el workflow). Aporta evidencia de integración del código,
+  pero no demuestra despliegue, una sesión Open-WA autenticada ni rendimiento
+  en hardware degradado.
+- **Benchmark del piso:** medición reproducible del pipeline end-to-end y por
+  etapa en 1 vCPU y 4 GB RAM, con objetivo menor a 15 segundos. Sigue pendiente
+  en [#215][i215] y no se puede inferir desde un smoke CI.
 
 ## Planes de gestión por área
 
@@ -116,7 +125,7 @@ Open-WA autenticado ni la validación en terreno.
 | Alcance | EDT, exclusiones y matriz de trazabilidad | Formalizado en este conjunto |
 | Cronograma | Hitos por issues y piloto como próximo hito | Parcial; sin calendario aprobado |
 | Costos | Restricciones técnicas, sin API paga | Ejecutado como constraint; presupuesto pendiente |
-| Calidad | pytest, Ruff, mypy, smoke y métricas | Ejecutado; pruebas de terreno pendientes |
+| Calidad | pytest, Ruff, mypy, smoke CI, benchmark y métricas | Controles definidos; resultado de suite completa/cobertura, benchmark y pruebas de terreno pendientes |
 | Recursos | Tres roles definidos, sin asignaciones horarias | Parcial |
 | Comunicaciones | Issues, PRs y discussions como registro | Ejecutado; cadencia formal no registrada |
 | Riesgos | Degradación, fallbacks, monitoreo y backlog de endurecimiento | Ejecutado y abierto a revisión |
@@ -150,8 +159,8 @@ cierre también es trazabilidad: evita que reaparezcan como alcance implícito.
 
 | Señal | Fuente | Decisión que habilita |
 |---|---|---|
-| Tests, Ruff y mypy | CI o ejecución local | Integración técnica |
-| Latencia por etapa | Pipeline y benchmark | Ajustes para el piso operativo |
+| Tests, Ruff y mypy (smoke CI) | CI o ejecución local | Integración técnica; no valida hardware ni despliegue |
+| Latencia por etapa (benchmark de piso) | Ejecución controlada en 1 vCPU y 4 GB | Ajustes para el piso operativo; pendiente en [#215][i215] |
 | Salud de ODEPA/OpenMeteo/Open-WA | Monitor y logs sanitizados | Degradación o intervención |
 | Estado de entrega | Métricas del backend | Distinguir respuesta generada de entrega efectiva |
 | WER y éxito de tareas | Piloto consentido | Validar voz rural y utilidad |

@@ -12,10 +12,12 @@ AgroVoz es un asistente de voz y texto sobre WhatsApp para consultar precios agr
 clima de OpenMeteo. Está orientado a pequeños agricultores chilenos que necesitan acceso simple a
 información oficial sin instalar una aplicación.
 
-La base técnica está implementada y desplegada: entrada por audio o texto, transcripción local,
-consulta de datos mediante herramientas permitidas, respuesta hablada o escrita, alertas y
-administración. El siguiente hito no está completado: ejecutar un piloto de 4 semanas con 3 a 5
-productores de Traiguén y convertir su uso en evidencia.
+La base técnica está implementada en el código y preparada para una demostración controlada: entrada
+por audio o texto, transcripción local, consulta de datos mediante herramientas permitidas, respuesta
+hablada o escrita, alertas y administración. La evidencia de una versión desplegada, smoke E2E y
+rendimiento debe asociarse a una versión antes de presentarse como resultado. El siguiente hito no
+está completado: ejecutar un piloto de 4 semanas con 3 a 5 productores de Traiguén y convertir su
+uso en evidencia.
 
 Por lo tanto, la defensa debe demostrar dos cosas distintas:
 
@@ -28,13 +30,13 @@ Por lo tanto, la defensa debe demostrar dos cosas distintas:
 
 | Área | Estado defendible | Evidencia a mostrar | Lo que no se puede afirmar |
 |---|---|---|---|
-| Pipeline WhatsApp de audio | Implementado | Demo controlada y logs saneados con IDs/tiempos | Disponibilidad perfecta o latencia garantizada sin prueba |
-| Entrada y respuesta por texto | Implementada | Consulta escrita y respuesta correspondiente | Que reemplaza la validación del canal de voz |
-| Precios ODEPA | Implementado para catálogo vigente descrito en el proyecto | Consulta, fecha de dato y herramienta ejecutada | Cobertura de cualquier producto o mercado fuera del catálogo |
-| Clima OpenMeteo | Implementado por comuna configurada | Consulta con fuente y momento | Pronóstico infalible o recomendación agronómica |
-| Tool Calling | Whitelist de 10 herramientas; `register_expense` permanece cerrada por feature gate | Registro estructurado o prueba automatizada | Que el modelo puede ejecutar herramientas arbitrarias o que el registro de gastos esté completo |
-| Alertas | Implementadas | Configuración y ejemplo seguro | Efectividad en terreno no medida |
-| Dashboard admin | Implementado | Vistas y métricas con datos de demostración identificados | Que sus métricas equivalen a impacto del piloto |
+| Pipeline WhatsApp de audio | Implementado en código; demo E2E pendiente | Demo controlada y logs saneados con IDs/tiempos | Disponibilidad perfecta o latencia garantizada sin prueba |
+| Entrada y respuesta por texto | Implementada en código; demo pendiente | Consulta escrita y respuesta correspondiente | Que reemplaza la validación del canal de voz |
+| Precios ODEPA | Implementado en código para el catálogo descrito; revalidación pendiente | Consulta, fecha de dato y herramienta ejecutada | Cobertura de cualquier producto o mercado fuera del catálogo |
+| Clima OpenMeteo | Implementado en código por comuna configurada; evidencia pendiente | Consulta con fuente y momento | Pronóstico infalible o recomendación agronómica |
+| Tool Calling | Whitelist de 10 herramientas en código; `register_expense` permanece cerrada por feature gate | Registro estructurado o prueba automatizada | Que el modelo puede ejecutar herramientas arbitrarias o que el registro de gastos esté completo |
+| Alertas | Implementadas en código; efecto en terreno pendiente | Configuración y ejemplo seguro | Efectividad en terreno no medida |
+| Dashboard admin | Implementado en código; demo pendiente | Vistas y métricas con datos de demostración identificados | Que sus métricas equivalen a impacto del piloto |
 | Privacidad e historial | Controles técnicos implementados, con opt-in explícito | Flujo de consentimiento/revocación y datos redactados | Cumplimiento jurídico certificado |
 | Piloto Traiguén | Planificado | Kit, instrumentos y criterios | Participación, satisfacción, impacto o resultados |
 | WER rural chileno | Por medir | Protocolo y comando cuando exista muestra consentida | Un WER alcanzado o validado |
@@ -82,7 +84,7 @@ WhatsApp → Open-WA → FastAPI
 - SQLite y procesamiento síncrono por decisión de simplicidad y costo.
 - Recomendaciones agronómicas solo por regla citada con fuente INIA/INDAP vigente (actualmente apagadas por feature gate).
 - La auditoría formal por Ley 21.719 está pendiente antes de escalar.
-- El peor caso de 1 vCPU / 6 GB RAM debe respaldarse con una ejecución actual, no solo con diseño.
+- El peor caso de 1 vCPU / 4 GB RAM debe respaldarse con una ejecución actual, no solo con diseño.
 
 ## 5. Contribuciones del equipo
 
@@ -155,7 +157,7 @@ Si falla WhatsApp, Open-WA, la red o una fuente externa:
 | “También responde texto” | Demo del camino sin Whisper/Piper | Preparar evidencia actual |
 | “Define 10 herramientas permitidas; gastos sigue desactivada” | Lista en código/configuración, feature gate y tests | Verificable en repositorio |
 | “Cubre el catálogo ODEPA declarado” | Consulta automatizada con fecha y resultado | Revalidar antes de defensa |
-| “Funciona bajo hardware degradado” | Perfil de 1 vCPU / 6 GB con comandos y latencia | Pendiente de capturar |
+| “Funciona bajo hardware degradado” | Perfil de 1 vCPU / 4 GB con comandos y latencia | Pendiente de capturar |
 | “La latencia cumple el objetivo” | Distribución de mediciones, no un caso aislado | Pendiente de evidencia actual |
 | “Whisper entiende habla rural con WER objetivo” | Dataset consentido, transcripciones de referencia y cálculo | **Sin resultado todavía** |
 | “Los productores lo validaron” | Piloto terminado, muestra, método y resultados | **No disponible** |
@@ -164,6 +166,11 @@ Si falla WhatsApp, Open-WA, la red o una fuente externa:
 | “Reduce pérdidas o mejora ingresos” | Diseño y medición causal/observacional suficiente | **No medido** |
 
 ## 9. Evidencia pendiente para la carpeta de defensa
+
+La carpeta no está cerrada ni cuenta con un checklist ejecutado asociado a una versión. Todas las
+casillas siguientes permanecen pendientes hasta reunir el artefacto, fecha, método y alcance
+correspondientes; los tests locales no sustituyen una demo, piloto, medición de hardware o revisión
+institucional/legal.
 
 ### Técnica
 
@@ -196,7 +203,8 @@ Si falla WhatsApp, Open-WA, la red o una fuente externa:
 - [ ] Auditoría jurídica previa a escalamiento.
 - [ ] Registro de riesgos actualizado.
 
-Una casilla pendiente se presenta como pendiente; no se completa con una estimación.
+Una casilla pendiente se presenta como pendiente; no se completa con una estimación ni con una
+prueba local que no cubra el claim.
 
 ## 10. Preguntas difíciles y respuesta honesta
 

@@ -1,8 +1,12 @@
 # Plan de Gestión de la Calidad
 
 > **Versión:** 0.1 — borrador de control
-> **Fecha de medición:** 29 de julio de 2026
-> **Estado:** criterios definidos; gate de piloto no aprobado
+> **Fecha de medición (snapshot histórico):** 29 de julio de 2026
+> **Estado:** criterios definidos; gates técnicos locales históricos; gate de piloto no aprobado
+
+> **Alcance del snapshot:** los resultados de esta versión corresponden al worktree y entorno
+> medidos al 29-07-2026. No son el estado actual de `HEAD`, `main` ni producción; cada claim no
+> reproducido con una nueva ejecución queda **pendiente**.
 
 ## 1. Objetivo
 
@@ -17,7 +21,7 @@ Este documento distingue:
 - **Reportado:** antecedente de `AGENTS.md` que no se repitió en esta revisión.
 - **Pendiente:** falta ejecutar o aprobar evidencia.
 
-## 2. Resultado técnico del corte
+## 2. Resultado técnico del snapshot histórico
 
 | Verificación | Comando | Resultado medido |
 |---|---|---|
@@ -31,7 +35,7 @@ Este documento distingue:
 | Compose | `docker compose ... config --quiet` | Dev, producción y override de piso válidos |
 | CI remoto reciente | `gh run list` y checks de PR | CI técnico exitoso en ejecuciones observadas; existen fallos de policy checks en PR abiertos |
 
-La suite completa está verde en este snapshot. La contaminación entre instancias del rate limiter y
+La suite completa está verde en este snapshot histórico. La contaminación entre instancias del rate limiter y
 la expectativa obsoleta del test ODEPA fueron corregidas con regresiones focales. Los 25 omitidos
 dependen de integración E2E, modelos o hardware que este entorno local no aporta; no se cuentan como
 validación de WhatsApp real ni del piso operativo.
@@ -43,7 +47,7 @@ ni producción.
 
 | Dimensión | Requisito o meta | Método de verificación | Estado al corte |
 |---|---|---|---|
-| Latencia de voz | Menor a 15 s E2E en 1 vCPU / 6 GB RAM | Benchmark repetible con audio, Whisper, resolución, TTS y entrega | **Pendiente.** `AGENTS.md` reporta ~11 s en caliente, no reejecutado aquí |
+| Latencia de voz | Menor a 15 s E2E en 1 vCPU / 4 GB RAM | Benchmark repetible con audio, Whisper, resolución, TTS y entrega | **Pendiente.** `AGENTS.md` reporta ~11 s en caliente, no reejecutado aquí |
 | Latencia de texto | Camino sin Whisper ni TTS | Medición desde webhook hasta entrega escrita | **Reportado** ~100 ms; pendiente serie fechada |
 | Precisión Whisper | WER menor a 15%; stretch menor a 10% | `eval_wer.py` sobre muestra consentida de español rural de Traiguén | **Pendiente; no hay resultado de piloto** |
 | Funcionalidad de datos | Precios y clima con fuente, sin inventar | Tests por tool, casos de catálogo y smoke con fuentes | Suite automatizada verde; smoke externo pendiente |
@@ -78,11 +82,11 @@ demuestra cómo está configurado el VPS. Nunca se deben guardar los valores de 
 
 | Gate | Condición de salida | Estado |
 |---|---|---|
-| Q0 — Estática | `ruff check app/` y `mypy app/` sin errores | **Cumplido en el worktree medido** |
-| Q1 — Regresión | Suite completa sin fallos inesperados; skips justificados | **Cumplido en el worktree: 1.639 aprobados, 25 omitidos** |
-| Q2 — Hardware mínimo | Latencia sostenida menor a 15 s en 1 vCPU / 6 GB | **Pendiente** |
+| Q0 — Estática | `ruff check app/` y `mypy app/` sin errores | **Cumplido en el snapshot histórico; vigencia pendiente** |
+| Q1 — Regresión | Suite completa sin fallos inesperados; skips justificados | **Cumplido en el snapshot: 1.639 aprobados, 25 omitidos; vigencia pendiente** |
+| Q2 — Hardware mínimo | Latencia sostenida menor a 15 s en 1 vCPU / 4 GB | **Pendiente** |
 | Q3 — Voz rural | WER menor a 15% sobre muestra válida | **Pendiente** |
-| Q4 — Seguridad y privacidad | Hallazgos críticos cerrados y revisión requerida completada | **Pendiente** |
+| Q4 — Seguridad y privacidad | Hallazgos críticos cerrados y revisión requerida completada | **Pendiente / NO-GO:** R03 y R09 siguen sin owner, autoridad ni aceptación formal |
 | Q5 — Preparación de piloto | Smoke real de WhatsApp, recuperación y kit aprobado | **Pendiente** |
 | Q6 — Aceptación de terreno | Resultados reales de 3–5 productores durante 4 semanas | **No iniciado** |
 
@@ -98,7 +102,7 @@ legal/privacidad y un smoke real de WhatsApp.
 - Medir desde recepción del webhook hasta confirmación de entrega.
 - Separar descarga, ffmpeg, Whisper, resolución/tool, LLM, TTS y Open-WA.
 - Publicar la distribución y los fallos; no solo el mejor caso.
-- Comparar siempre con 1 vCPU / 6 GB, aunque también se mida el CX43.
+- Comparar siempre con 1 vCPU / 4 GB, aunque también se mida el CX43.
 
 No se fija aquí un número de repeticiones: debe aprobarse antes de iniciar para evitar seleccionar la
 muestra después de ver los resultados.

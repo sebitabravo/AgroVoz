@@ -10,8 +10,10 @@ aprobado ni firmas. Esos datos quedan explícitamente pendientes.
 El estado funcional se toma de [AGENTS.md](../../AGENTS.md), fuente normativa
 del proyecto. La [Discussion #137][d137] se conserva como antecedente, pero su
 descripción de AgroVoz como producto temprano está desactualizada: las fases
-00–06 ya fueron ejecutadas y el producto se encuentra implementado y
-desplegado.
+00–06 tienen implementaciones y documentación en el checkout. El repositorio no
+aporta evidencia local puntual de un despliegue o de operación efectiva, por lo
+que este documento separa implementación de validación y no declara aceptación
+total.
 
 ## Identificación
 
@@ -20,7 +22,7 @@ desplegado.
 | Nombre | AgroVoz |
 | Propósito | Reducir la asimetría de información que enfrentan pequeños agricultores chilenos al negociar, entregando datos oficiales por voz o texto mediante WhatsApp |
 | Contexto académico | Proyecto de Ingeniería en Informática de INACAP Temuco y participante de Desafío Crea INACAP 2026 |
-| Estado del producto | Implementado y en operación; en endurecimiento operativo previo al piloto |
+| Estado del producto | Implementado en el checkout; despliegue y operación efectiva no verificables localmente |
 | Próximo hito | Piloto planificado con 3–5 productores de Traiguén durante cuatro semanas |
 | Patrocinador formal | No consta en la evidencia revisada |
 | Autorización institucional del piloto | Pendiente; no se presume compromiso de INDAP o PRODESAL |
@@ -44,8 +46,8 @@ con fuente INIA/INDAP vigente, la verbaliza citando fuente y fecha.
 | Objetivo | Criterio verificable | Estado |
 |---|---|---|
 | Entregar consultas por WhatsApp | Audio → transcripción → datos → respuesta hablada; texto → datos → respuesta escrita | Ejecutado en el producto |
-| Cubrir datos agrícolas oficiales | Catálogo ODEPA de 79 productos y 15 mercados, más clima actual e histórico | Ejecutado según la fuente normativa |
-| Mantener latencia útil | Menos de 15 segundos end-to-end, incluido el piso de 1 vCPU y 6 GB RAM | Pendiente de validación reproducible en [#215][i215] |
+| Cubrir datos agrícolas oficiales | Catálogo ODEPA declarado de 79 productos y 15 mercados, más clima actual e histórico | Conteo reproducible sobre un snapshot pendiente; no verificable solo con la documentación |
+| Mantener latencia útil | Menos de 15 segundos end-to-end en el piso de 1 vCPU y 4 GB RAM | Benchmark pendiente en [#215][i215]; no lo sustituye el smoke CI |
 | Validar reconocimiento rural | WER menor a 15% en una muestra del piloto de Traiguén | Pendiente; requiere audios consentidos del piloto |
 | Validar uso real | Piloto de 3–5 productores durante cuatro semanas | Planificado, no se registra como ejecutado |
 | Proteger datos personales | Media temporal (audio/imagen) eliminada antes de 24 horas, transcripciones minimizadas/seudonimizadas y consentimiento explícito donde corresponda | Controles técnicos implementados; auditoría formal pre-escalamiento pendiente |
@@ -64,7 +66,8 @@ con fuente INIA/INDAP vigente, la verbaliza citando fuente y fecha.
 - Persistencia SQLite, preferencias por número de WhatsApp e historial con
   opt-in.
 - Landing, demo interactiva y dashboard administrativo.
-- Despliegue en VPS mediante Docker Compose y Dokploy.
+- Configuración y documentación de despliegue en VPS mediante Docker Compose y
+  Dokploy; el despliegue efectivo no se afirma sin evidencia observable.
 - Instrumentación, pruebas automatizadas y kit documental para el piloto.
 
 ### Excluido
@@ -86,10 +89,10 @@ El detalle y los criterios de aceptación se encuentran en
 |---|---|
 | Pipeline de consultas de voz y texto | Ejecutado |
 | Integraciones ODEPA, OpenMeteo y Open-WA | Ejecutadas; validación E2E autenticada pendiente |
-| Catálogo y herramientas de consulta | Ejecutado |
+| Catálogo y herramientas de consulta | Whitelist implementada; cardinalidad del catálogo pendiente de conteo reproducible |
 | Alertas, historial consentido y estado conversacional | Implementados localmente; historial y estado permanecen apagados por defecto |
 | Landing, demo y dashboard admin | Ejecutados |
-| Infraestructura reproducible de desarrollo y producción | Ejecutada |
+| Infraestructura reproducible de desarrollo y producción | Configurada/documentada; despliegue efectivo no verificado |
 | Kit del piloto | Preparado; uso en terreno pendiente |
 | Evaluación WER rural | Pendiente del piloto |
 | Validación de rendimiento en hardware mínimo | Pendiente |
@@ -121,7 +124,7 @@ horas, aprobaciones ni contribuciones adicionales.
 
 - Stack 100% open-source y sin APIs pagas para el flujo principal.
 - Ejecución síncrona, SQLite y ausencia de Celery/Redis.
-- Piso operativo obligatorio de 1 vCPU y 6 GB RAM.
+- Piso operativo obligatorio de 1 vCPU y 4 GB RAM.
 - VPS objetivo Hetzner CX43; su precio indicado en `AGENTS.md` es una
   restricción técnica de referencia, no un presupuesto PMBOK aprobado.
 - Número de WhatsApp como identidad; no existe autenticación de agricultores.

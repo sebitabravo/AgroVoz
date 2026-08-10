@@ -12,7 +12,7 @@ por la misma vía. El texto evita Whisper y TTS.
 
 ```
 ┌──────────┐    ┌──────────┐    ┌─────────────────────────────────────┐
-│ Agricultor│    │ WhatsApp │    │  VPS Hetzner CX43 (8 vCPU, 16 GB)    │
+│ Agricultor│    │ WhatsApp │    │  VPS de referencia (no observado)     │
 │  (audio)  │───▶│ (Open-WA)│───▶│                                     │
 └──────────┘    └──────────┘    │  ┌──────────────────────────────┐   │
                                 │  │    Open-WA + FastAPI Backend  │   │
@@ -44,6 +44,13 @@ por la misma vía. El texto evita Whisper y TTS.
 └──────────────┘
 ```
 
+El diagrama representa una topología de referencia, no un despliegue observado.
+La restricción normativa exige funcionar en un piso degradado de **1 vCPU y
+4 GB RAM**, con latencia menor a 15 segundos end-to-end. El smoke CI comprueba
+el código y sus checks automatizados; no prueba ese hardware, una sesión
+Open-WA autenticada ni la existencia de un despliegue. El benchmark reproducible
+del piso sigue pendiente en [#215][i215].
+
 ## Flujo de datos end-to-end
 
 ```
@@ -57,7 +64,13 @@ por la misma vía. El texto evita Whisper y TTS.
    - Si pregunta por precio → query SQLite ODEPA
    - Si pregunta por clima → GET OpenMeteo API
    - Si busca una oficina o cooperativa → query SQLite `directorio_agricola`
-   - Whitelist de 15 tools (ver lista completa en `app/services/` más abajo). Si alucina una tool fuera de la whitelist → fallback.
+   - Whitelist de 19 tools: `get_price`, `get_price_spread`, `get_price_history`,
+     `get_weather`, `get_pronostico`, `get_clima_historico`,
+     `get_clima_historico_multianual`, `calculate_sale_value`, `calculate_margin`,
+     `search_corpus`, `get_programas_indap`, `register_expense`, `register_parcela`,
+     `get_parcelas`, `get_regla_agronomica`, `get_calendario_agricola`,
+     `get_link_resumen`, `get_reporte_pdf` y `get_directorio_agricola`. Si alucina
+     una tool fuera de la whitelist → fallback.
 8. Fast-path determinista o LLM genera respuesta textual (datos crudos de precio/clima, o reglas citadas de fuente oficial)
 9. Solo audio: Piper TTS convierte texto → audio `.wav`
 10. Solo audio: ffmpeg convierte `.wav` → `.ogg`
@@ -77,9 +90,28 @@ por la misma vía. El texto evita Whisper y TTS.
 - `demo.py` — endpoint POST `/api/v1/demo/preguntar` (chat web interactivo)
 - `admin/` — APIs JSON administrativas (métricas, ODEPA sync, user prefs) con auth X-Admin-Key
 
+### Whitelist de tools y feature gates
+
+La whitelist efectiva contiene 19 tools: `get_price`, `get_price_history`,
+`calculate_sale_value`, `calculate_margin`, `get_price_spread`, `get_weather`,
+`get_pronostico`, `get_clima_historico`, `get_clima_historico_multianual`,
+`search_corpus`, `get_programas_indap`, `register_expense`, `register_parcela`,
+`get_parcelas`, `get_regla_agronomica`, `get_calendario_agricola`,
+`get_link_resumen`, `get_reporte_pdf` y `get_directorio_agricola`.
+
+Siete tools se mantienen fuera del prompt cuando su feature gate está apagado
+(todos parten en `false`): `register_expense` (`EXPENSE_TRACKING_ENABLED`),
+`register_parcela` y `get_parcelas` (`PARCELA_TRACKING_ENABLED`),
+`get_regla_agronomica` y `get_calendario_agricola`
+(`AGRONOMIC_RULES_ENABLED`), `get_link_resumen` (`FARMER_PANEL_ENABLED`) y
+`get_reporte_pdf` (`PDF_REPORTS_ENABLED`). Este inventario refleja
+`WHITELIST_TOOLS` y `_GATED_TOOLS` de `backend/app/services/llm_service.py`;
+los nombres y defaults se deben sincronizar con esa fuente, sin inferir que
+una tool está habilitada en producción.
+
 ### `app/services/` — Capa de negocio
 - `whisper_service.py` — transcripción de audio (descarga, ffmpeg, Whisper)
-- `llm_service.py` — interpretación NL + Tool Calling con whitelist (15 tools: precios, clima, corpus, gastos, parcelas, reglas, panel y `get_directorio_agricola`) + fallback OpenRouter
+- `llm_service.py` — interpretación NL + Tool Calling con whitelist (19 tools: precios, clima, corpus, INDAP, gastos, parcelas, reglas, panel, reportes y directorio agrícola) + fallback OpenRouter
 - `tts_service.py` — síntesis de voz con Piper TTS
 - `odepa_service.py` — consultas a SQLite ODEPA, sync diario y detector determinista de variaciones
 - `weather_service.py` — consultas a OpenMeteo API (forecast + histórico)
@@ -90,7 +122,9 @@ por la misma vía. El texto evita Whisper y TTS.
 - `demo_service.py` — lógica del chat demo web
 - `monitor_service.py` — salud de servicios (CPU, RAM, disco, Whisper, LLM, TTS)
 - `alert_service.py` — alertas proactivas de precio y clima
-- `metrics_service.py` — agregación de métricas para dashboard y piloto
+- `metrics_service.py` — agregación de métricas para dashboard y piloto; el corte
+  temporal de cuatro semanas y el vínculo automático con cuestionarios pre/post
+  todavía no están implementados
 - `delivery_service.py` — estado real de entrega y redacción de contenido transitorio
 - `consultation_history_service.py` — memoria consentida, TTL y borrado auditado
 - `conversation_state.py` — estado efímero y exclusión de turnos concurrentes
@@ -128,7 +162,10 @@ por la misma vía. El texto evita Whisper y TTS.
 - Métricas: series diarias, latencia, intents, productos top, errores
 - ODEPA: estado de sync, stats, precios recientes, export CSV
 - Monitor: CPU, RAM, disco, estado de servicios (Whisper, LLM, TTS, SQLite, Open-WA)
-- Piloto: métricas para Crea INACAP (productores activos, %útiles, decisiones productivas)
+- Piloto: métricas para Crea INACAP (productores activos, %útiles, decisiones productivas).
+  El dashboard actual lee consultas y feedback técnicos; no persiste formularios
+  pre/post, no los vincula por participante y sus agregaciones son históricas si
+  no se aplica un corte temporal externo.
 - Alertas: gestión de alertas proactivas de precio/clima
 - Revisión: cola de revisión humana para consultas marcadas
 - PWA: manifest, service worker, instalable en dispositivo móvil
@@ -217,8 +254,17 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
 
 8. **Audio temporal y dataset opcional son tratamientos distintos.** El audio operativo
    se elimina del VPS en <24h. Solo `dataset_consent=true` permite copiar audio y
-   transcripción al dataset rural. Son datos seudonimizados, no anónimos, y esta
-   medida técnica no permite declarar cumplimiento de la Ley 21.719.
+   transcripción al dataset rural. `alert_consent` es otro opt-in: habilita avisos
+   proactivos y no autoriza dataset ni historial. Son datos seudonimizados, no
+   anónimos, y una transcripción puede contener datos personales incidentales.
+   Los flags técnicos no sustituyen un consentimiento documentado con versión,
+   fecha/hora, modalidad, soporte/custodia y operador receptor; esta medida
+   técnica no permite declarar cumplimiento de la Ley 21.719. El cambio de
+   `dataset_consent` evita nuevas copias según el flujo actual, pero la retención,
+   purga automatizada y revocación integral del dataset siguen pendientes. No se
+   debe prometer borrado retroactivo de muestras ya retenidas hasta contar con una
+   operación de borrado y evidencia auditable; por eso el dataset no se activa para
+   el piloto hasta contar con controles verificables.
 
 9. **Sin WebSockets.** Respuesta síncrona HTTP. Open-WA entrega el webhook y FastAPI
    responde cuando el pipeline termina. Si latencia >15s → reevaluar modo asíncrono.
@@ -227,12 +273,18 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     Para admin dashboard: API key simple en header.
 
 11. **Open-WA en vez de Twilio para WhatsApp.** Open-WA es self-hosted, gratuito, MIT license.
-    Usa protocolo WhatsApp Web (QR scan). Corre en el mismo VPS como servicio Docker.
-    Sin costos recurrentes de API WhatsApp. Riesgo: Meta puede banear el número
-    si escala mucho (>100 mensajes/día). Para MVP con 3-5 productores es seguro.
-    Para producción escalar a WhatsApp Business API oficial.
+    Usa protocolo WhatsApp Web (QR scan) y está diseñado para correr en el mismo
+    VPS como servicio Docker. Sin costos recurrentes de API WhatsApp. La sesión,
+    QR, entrega de mensajes y continuidad operativa deben verificarse mediante
+    un smoke E2E autorizado y fechado; la configuración, los tests con mocks o
+    la existencia del compose no prueban que el piloto real haya operado.
+    Riesgo/hipótesis sin benchmark ni contrato vigente: Meta podría banear el número
+    si escala mucho (>100 mensajes/día); que 3-5 productores sea un volumen seguro
+    es una hipótesis pendiente de validación, no una garantía.
+    Para producción evaluar una WhatsApp Business API oficial.
 
-12. **Dokploy en vez de nginx + certbot.** Dokploy es PaaS self-hosted que bundla
+12. **Dokploy en vez de nginx + certbot.** Dokploy es el target de despliegue PaaS
+    self-hosted que bundla
     Docker + Traefik + Let's Encrypt SSL automático. Un comando de install y todo listo.
     Elimina 200+ líneas de config nginx manual. Traefik hace routing + SSL al vuelo.
     Dashboard UI para crear apps (Docker Compose, static). Zero-downtime deploys.
@@ -242,8 +294,11 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     cargados en memoria. Con multiprocessing (workers>1), cada worker fork hereda
     `_model_loaded=False` en su copia aislada de memoria, forzando recarga completa
     del modelo en cada proceso (~2 GB RAM extra por worker, I/O contention en disco,
-    latencia LLM 25-60x peor). Un solo worker mantiene los modelos en memoria caliente
-    y cumple <15s target con throughput suficiente para el piloto (3-5 productores).
+    latencia LLM 25-60x peor). Estos números de memoria y latencia son riesgos o
+    hipótesis sin benchmark reproducible en el hardware objetivo. Un solo worker
+    mantiene los modelos en memoria caliente y se espera que cumpla el target <15s
+    con throughput suficiente para el piloto (3-5 productores); esto es una
+    hipótesis de diseño hasta medirla en el hardware y ambiente reales.
     Escalar horizontalmente con load balancer + múltiples instancias post-MVP,
     no con workers del mismo proceso.
 
@@ -265,7 +320,9 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     - Los modelos `:free` exigen, para poder usarse, aceptar en el dashboard de
       OpenRouter que el contenido puede usarse para entrenar o publicarse —
       la consulta transcrita del agricultor sale del VPS hacia ese tercero.
-    - Rate limit del tier gratis: 20 req/min, 50-1000 req/día según créditos.
+    - Riesgo de rate limit del tier gratis: 20 req/min, 50-1000 req/día según
+      créditos; son cifras de referencia sin contrato vigente adjunto, no una
+      capacidad garantizada.
     Por eso es fallback de última instancia, no el camino principal, y por
     eso el flag existe desactivado por defecto (opt-in explícito en `.env`).
     Usa tool calling nativo (`tools=`, formato OpenAI) en vez del parseo de
@@ -274,11 +331,14 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     `llm_service.answer_via_openrouter()`) porque el formato de tool calling
     de cada backend es distinto.
 
-16. **PWA admin dashboard (#102).** El dashboard admin incluye service worker
-    (`admin-sw.js`), manifest PWA (`manifest.json`) y registro automático
-    (`admin-pwa-register.js`). Permite instalar el panel como app y funciona
-    offline para monitoreo en terreno sin internet. El agricultor NO usa PWA
-    — sigue en WhatsApp. Público objetivo: equipo AgroVoz, INDAP, PRODESAL.
+16. **PWA opcional para dashboard y agricultor (#102).** El dashboard admin incluye
+    service worker (`admin-sw.js`), manifest PWA (`manifest.json`) y registro
+    automático (`admin-pwa-register.js`). Permite instalar el panel como app y
+    funciona offline para monitoreo en terreno sin internet. Existe además un panel
+    PWA del agricultor en `/panel`, pero `farmer_panel_enabled=false` por defecto:
+    es un complemento opcional y no un requisito. El canal principal y suficiente
+    sigue siendo WhatsApp; el piloto no debe exigir instalar la PWA. Público objetivo
+    del panel admin: equipo AgroVoz, INDAP, PRODESAL.
 
 17. **Derivación informativa a crédito INDAP (#174).** Un detector determinista
     precede al LLM y responde solo con un snapshot oficial versionado, fecha de
@@ -362,7 +422,7 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     WhatsApp: el webhook recibe una grabación ya terminada y la respuesta es otro
     archivo completo. Esas técnicas se reconsideran solo en un canal síncrono,
     como IVR. `faster-whisper` o reemplazar Piper exige primero benchmark de WER,
-    CPU, RAM, latencia y calidad sobre 1 vCPU/6 GB. Evidencia:
+    CPU, RAM, latencia y calidad sobre 1 vCPU/4 GB. Evidencia:
     `docs/humanizacion-voz.md`.
 
 26. **Registro de gastos fail-closed (#34/#170).** La tool `register_expense`
@@ -420,3 +480,14 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     (`ALERT_RATE_LIMIT_PER_MINUTE`) para evitar ráfagas y sin agregar Redis,
     Celery ni APIs pagas. El mensaje solo informa precio, variación, fecha y
     fuente ODEPA; no contiene recomendación agronómica.
+
+30. **Resultados del piloto con ventana y evidencia separadas.** Las métricas
+    del piloto deben declarar `pilot_started_at`, `pilot_ended_at` y el conjunto
+    de participantes antes de agregarse. Las consultas sintéticas se excluyen
+    con `is_test=true`, pero esa exclusión no prueba por sí sola que una fila
+    pertenezca al piloto ni que el productor haya participado. Los resultados
+    deben distinguir la métrica automática `feedback=util/no_util`, latencia y
+    entrega de las escalas y decisiones registradas manualmente; sin filtros,
+    protocolo y evidencia fechada, se reportan como metas o datos de diseño.
+
+[i215]: https://github.com/sebitabravo/AgroVoz/issues/215

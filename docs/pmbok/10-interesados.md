@@ -1,7 +1,7 @@
 # Registro de interesados
 
 **Proyecto:** AgroVoz  
-**Estado del documento:** registro inicial para defensa y piloto pendiente  
+**Estado del documento:** registro inicial; participación externa, cadencias y autoridad pendientes
 **Fecha de corte:** 29 de julio de 2026
 
 ## 1. Objetivo
@@ -32,7 +32,7 @@ participación.
 
 ## 3. Registro
 
-| Interesado | Relación con AgroVoz | Influencia | Interés | Participación actual verificable | Participación deseada | Responsable de relación | Estrategia |
+| Interesado | Relación con AgroVoz | Influencia | Interés | Participación actual verificable | Participación deseada | Responsable propuesto de relación | Estrategia propuesta |
 |---|---|---:|---:|---|---|---|---|
 | Sebastián Bravo | Líder técnico | Alta | Alta | Confirmada: arquitectura y ejecución técnica | Liderar operación segura y transferencia técnica | Equipo | Gestionar de cerca; evitar dependencia de una sola persona |
 | Francisco Fernández | Product Owner | Alta | Alta | Confirmada: investigación, pitch y enlace territorial | Liderar piloto, relato de valor y contacto institucional | Equipo | Gestionar de cerca; centralizar decisiones de producto |
@@ -48,6 +48,10 @@ participación.
 | Ecosistema WhatsApp / Open-WA | Canal y gateway operacional | Alta | Bajo/no evaluado | Dependencia técnica vigente | Continuidad suficiente para piloto | Sebastián | Gestionar riesgo operativo; no presentarlo como contrato oficial |
 | Hetzner / infraestructura | Hospedaje del producto | Media | Bajo | Proveedor técnico | Disponibilidad dentro de costo y capacidad definidos | Sebastián | Monitorear capacidad, respaldo y seguridad |
 | Especialista jurídico o de privacidad | Revisión pre-escalamiento | Alta | Pendiente | **Pendiente:** no existe auditoría formal reportada | Revisor independiente con alcance definido | Francisco | Incorporar antes de escalar; documentar observaciones y límites |
+
+Los responsables y estrategias de relación son propuestas de trabajo basadas en los roles internos
+documentados; no designan autoridad de aprobación, representación institucional ni un compromiso de
+participación externa. Cualquier cambio de estado requiere una fecha y evidencia verificable.
 
 ## 4. Matriz influencia–interés
 
@@ -146,13 +150,13 @@ matriz se actualiza con niveles agregados, no con contenido conversacional.
 
 | Acción | Dueño | Evidencia de cierre |
 |---|---|---|
-| Confirmar pauta y calendario de defensa | Francisco | Comunicación oficial archivada |
-| Confirmar participantes y consentimiento | Francisco | Registros mínimos y acuerdos versionados |
-| Validar instrumentos del piloto | Matías | Checklist de revisión |
-| Contactar formalmente a PRODESAL/INDAP | Francisco | Solicitud y respuesta |
-| Definir revisión jurídica | Francisco | Alcance y resultado de auditoría |
-| Revisar dependencias operativas antes del piloto | Sebastián | Smoke test y reporte saneado |
-| Actualizar este registro después de cada cambio relevante | Francisco | Nueva versión con fecha y evidencia |
+| Confirmar pauta y calendario de defensa | Responsable por confirmar | Comunicación oficial archivada |
+| Confirmar participantes y consentimiento | Responsable por confirmar | Registros mínimos y acuerdos versionados |
+| Validar instrumentos del piloto | Responsable por confirmar | Checklist de revisión |
+| Contactar formalmente a PRODESAL/INDAP | Responsable por confirmar | Solicitud y respuesta |
+| Definir revisión jurídica | Responsable por confirmar | Alcance y resultado de auditoría |
+| Revisar dependencias operativas antes del piloto | Responsable por confirmar | Smoke test y reporte saneado |
+| Actualizar este registro después de cada cambio relevante | Responsable por confirmar | Nueva versión con fecha y evidencia |
 
 ## 11. Fuentes
 
@@ -165,4 +169,5 @@ matriz se actualiza con niveles agregados, no con contenido conversacional.
 - [`docs/piloto/06-acuerdo-consentimiento.md`](../piloto/06-acuerdo-consentimiento.md).
 
 **Nota de estado:** no hay resultados de piloto, respaldo institucional ni validación jurídica que
-puedan incorporarse como hechos a la fecha de corte.
+puedan incorporarse como hechos a la fecha de corte. Tampoco hay evidencia para convertir las
+responsabilidades propuestas en autoridad formal, cadencia operativa o checklist ejecutado.
