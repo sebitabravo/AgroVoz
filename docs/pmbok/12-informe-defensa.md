@@ -84,7 +84,7 @@ WhatsApp → Open-WA → FastAPI
 - SQLite y procesamiento síncrono por decisión de simplicidad y costo.
 - Recomendaciones agronómicas solo por regla citada con fuente INIA/INDAP vigente (actualmente apagadas por feature gate).
 - La auditoría formal por Ley 21.719 está pendiente antes de escalar.
-- El peor caso de 1 vCPU / 6 GB RAM debe respaldarse con una ejecución actual, no solo con diseño.
+- El peor caso de 1 vCPU / 4 GB RAM debe respaldarse con una ejecución actual, no solo con diseño.
 
 ## 5. Contribuciones del equipo
 
@@ -157,7 +157,7 @@ Si falla WhatsApp, Open-WA, la red o una fuente externa:
 | “También responde texto” | Demo del camino sin Whisper/Piper | Preparar evidencia actual |
 | “Define 10 herramientas permitidas; gastos sigue desactivada” | Lista en código/configuración, feature gate y tests | Verificable en repositorio |
 | “Cubre el catálogo ODEPA declarado” | Consulta automatizada con fecha y resultado | Revalidar antes de defensa |
-| “Funciona bajo hardware degradado” | Perfil de 1 vCPU / 6 GB con comandos y latencia | Pendiente de capturar |
+| “Funciona bajo hardware degradado” | Perfil de 1 vCPU / 4 GB con comandos y latencia | Pendiente de capturar |
 | “La latencia cumple el objetivo” | Distribución de mediciones, no un caso aislado | Pendiente de evidencia actual |
 | “Whisper entiende habla rural con WER objetivo” | Dataset consentido, transcripciones de referencia y cálculo | **Sin resultado todavía** |
 | “Los productores lo validaron” | Piloto terminado, muestra, método y resultados | **No disponible** |

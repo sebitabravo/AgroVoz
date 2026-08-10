@@ -9,7 +9,7 @@
 Este plan controla cambios de alcance, cronograma, costo, calidad, datos, arquitectura y operación.
 No reemplaza los hard constraints de `AGENTS.md`: una solicitud no puede autorizar por sí sola una
 app nativa, recomendaciones agronómicas sin fuente citada, servicios pagos obligatorios, otra base de datos o un
-despliegue que no funcione en 1 vCPU / 6 GB.
+despliegue que no funcione en 1 vCPU / 4 GB.
 
 ## 2. Controles definidos y brechas de evidencia
 
@@ -72,7 +72,7 @@ La evaluación debe responder:
 1. ¿cambia una baseline aprobada?
 2. ¿toca un hard constraint?
 3. ¿crea una finalidad o dato nuevo?
-4. ¿afecta 1 vCPU / 6 GB o el límite de 15 s?
+4. ¿afecta 1 vCPU / 4 GB o el límite de 15 s?
 5. ¿requiere migración, backup o recuperación?
 6. ¿qué tests y mediciones demuestran el resultado?
 7. ¿cómo se revierte sin reescribir historia compartida?
