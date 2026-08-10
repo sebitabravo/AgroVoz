@@ -19,7 +19,7 @@ openai-whisper==20250625
 # NumPy < 2.1. Se pinnea con llvmlite para que el fallback no backtrackee
 # a una versión que falla durante el build de la imagen ARM.
 numba==0.60.0
-llvmlite==0.43.0
+llvmlite==0.48.0
 piper-tts==1.6.0
 llama-cpp-python==0.3.34
 jinja2==3.1.6
