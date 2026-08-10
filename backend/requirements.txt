@@ -4,7 +4,7 @@
 # uv.lock, por lo que sus dependencias transitivas se resuelven al construir la imagen.
 # Para desarrollo usar: uv sync --extra dev
 
-fastapi==0.140.1
+fastapi==0.141.1
 uvicorn[standard]==0.51.0
 sqlalchemy==2.0.51
 alembic==1.18.5
