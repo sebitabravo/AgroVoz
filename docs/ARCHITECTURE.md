@@ -57,7 +57,7 @@ por la misma vía. El texto evita Whisper y TTS.
    - Si pregunta por precio → query SQLite ODEPA
    - Si pregunta por clima → GET OpenMeteo API
    - Si busca una oficina o cooperativa → query SQLite `directorio_agricola`
-   - Whitelist de 15 tools (ver lista completa en `app/services/` más abajo). Si alucina una tool fuera de la whitelist → fallback.
+   - Whitelist de 19 tools (ver inventario y feature gates en la sección siguiente). Si alucina una tool fuera de la whitelist → fallback.
 8. Fast-path determinista o LLM genera respuesta textual (datos crudos de precio/clima, o reglas citadas de fuente oficial)
 9. Solo audio: Piper TTS convierte texto → audio `.wav`
 10. Solo audio: ffmpeg convierte `.wav` → `.ogg`
@@ -77,9 +77,28 @@ por la misma vía. El texto evita Whisper y TTS.
 - `demo.py` — endpoint POST `/api/v1/demo/preguntar` (chat web interactivo)
 - `admin/` — APIs JSON administrativas (métricas, ODEPA sync, user prefs) con auth X-Admin-Key
 
+### Whitelist de tools y feature gates
+
+La whitelist efectiva contiene 19 tools: `get_price`, `get_price_history`,
+`calculate_sale_value`, `calculate_margin`, `get_price_spread`, `get_weather`,
+`get_pronostico`, `get_clima_historico`, `get_clima_historico_multianual`,
+`search_corpus`, `get_programas_indap`, `register_expense`, `register_parcela`,
+`get_parcelas`, `get_regla_agronomica`, `get_calendario_agricola`,
+`get_link_resumen`, `get_reporte_pdf` y `get_directorio_agricola`.
+
+Siete tools se mantienen fuera del prompt cuando su feature gate está apagado
+(todos parten en `false`): `register_expense` (`EXPENSE_TRACKING_ENABLED`),
+`register_parcela` y `get_parcelas` (`PARCELA_TRACKING_ENABLED`),
+`get_regla_agronomica` y `get_calendario_agricola`
+(`AGRONOMIC_RULES_ENABLED`), `get_link_resumen` (`FARMER_PANEL_ENABLED`) y
+`get_reporte_pdf` (`PDF_REPORTS_ENABLED`). Este inventario refleja
+`WHITELIST_TOOLS` y `_GATED_TOOLS` de `backend/app/services/llm_service.py`;
+los nombres y defaults se deben sincronizar con esa fuente, sin inferir que
+una tool está habilitada en producción.
+
 ### `app/services/` — Capa de negocio
 - `whisper_service.py` — transcripción de audio (descarga, ffmpeg, Whisper)
-- `llm_service.py` — interpretación NL + Tool Calling con whitelist (15 tools: precios, clima, corpus, gastos, parcelas, reglas, panel y `get_directorio_agricola`) + fallback OpenRouter
+- `llm_service.py` — interpretación NL + Tool Calling con whitelist (19 tools: precios, clima, corpus, gastos, parcelas, reglas, panel y `get_directorio_agricola`) + fallback OpenRouter
 - `tts_service.py` — síntesis de voz con Piper TTS
 - `odepa_service.py` — consultas a SQLite ODEPA, sync diario y detector determinista de variaciones
 - `weather_service.py` — consultas a OpenMeteo API (forecast + histórico)
@@ -228,8 +247,10 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
 
 11. **Open-WA en vez de Twilio para WhatsApp.** Open-WA es self-hosted, gratuito, MIT license.
     Usa protocolo WhatsApp Web (QR scan). Corre en el mismo VPS como servicio Docker.
-    Sin costos recurrentes de API WhatsApp. Riesgo: Meta puede banear el número
-    si escala mucho (>100 mensajes/día). Para MVP con 3-5 productores es seguro.
+    Sin costos recurrentes de API WhatsApp. Riesgo/hipótesis sin benchmark ni
+    contrato vigente: Meta podría banear el número si escala mucho (>100
+    mensajes/día). Que 3-5 productores sea un volumen seguro es una hipótesis
+    pendiente de validación, no una garantía.
     Para producción escalar a WhatsApp Business API oficial.
 
 12. **Dokploy en vez de nginx + certbot.** Dokploy es PaaS self-hosted que bundla
@@ -242,8 +263,10 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     cargados en memoria. Con multiprocessing (workers>1), cada worker fork hereda
     `_model_loaded=False` en su copia aislada de memoria, forzando recarga completa
     del modelo en cada proceso (~2 GB RAM extra por worker, I/O contention en disco,
-    latencia LLM 25-60x peor). Un solo worker mantiene los modelos en memoria caliente
-    y cumple <15s target con throughput suficiente para el piloto (3-5 productores).
+    latencia LLM 25-60x peor). Estos números de memoria y latencia son riesgos o
+    hipótesis sin benchmark reproducible en el hardware objetivo. Un solo worker
+    mantiene los modelos en memoria caliente; que alcance el target <15s y tenga
+    throughput suficiente para el piloto (3-5 productores) queda sujeto a medición.
     Escalar horizontalmente con load balancer + múltiples instancias post-MVP,
     no con workers del mismo proceso.
 
@@ -265,7 +288,9 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     - Los modelos `:free` exigen, para poder usarse, aceptar en el dashboard de
       OpenRouter que el contenido puede usarse para entrenar o publicarse —
       la consulta transcrita del agricultor sale del VPS hacia ese tercero.
-    - Rate limit del tier gratis: 20 req/min, 50-1000 req/día según créditos.
+    - Riesgo de rate limit del tier gratis: 20 req/min, 50-1000 req/día según
+      créditos; son cifras de referencia sin contrato vigente adjunto, no una
+      capacidad garantizada.
     Por eso es fallback de última instancia, no el camino principal, y por
     eso el flag existe desactivado por defecto (opt-in explícito en `.env`).
     Usa tool calling nativo (`tools=`, formato OpenAI) en vez del parseo de
