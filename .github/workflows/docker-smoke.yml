@@ -1,0 +1,138 @@
+# Smoke de la imagen de producción: evita que requirements.txt se desincronice
+# de los imports que se ejecutan al cargar la aplicación.
+name: Docker production smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: docker-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-health:
+    name: Docker build and health
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Build production image
+        run: docker build --file backend/Dockerfile --tag agrovoz-backend-smoke:ci backend
+
+      - name: Verify runtime dependencies
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint python agrovoz-backend-smoke:ci -c \
+            "import PIL, numpy, onnxruntime, reportlab"
+          # Resuelve el mismo módulo que ejecuta el entrypoint, sin cargar ni
+          # descargar un modelo Whisper durante el smoke.
+          docker run --rm --entrypoint python agrovoz-backend-smoke:ci \
+            -m scripts.preload_whisper --help
+
+      - name: Start backend and verify health with floor resources
+        run: |
+          set -euo pipefail
+          container=agrovoz-backend-smoke
+          data_volume=agrovoz-backend-smoke-data
+          models_volume=agrovoz-backend-smoke-models
+          cache_volume=agrovoz-backend-smoke-cache
+          log_file="$(mktemp)"
+          logs_printed=false
+
+          cleanup() {
+            set +e
+            docker logs "$container" >"$log_file" 2>&1
+            if [[ "$logs_printed" != true ]]; then
+              cat "$log_file"
+            fi
+            docker rm --force "$container" >/dev/null 2>&1
+            docker volume rm "$data_volume" "$models_volume" "$cache_volume" >/dev/null 2>&1
+            rm -f "$log_file"
+          }
+          trap cleanup EXIT
+
+          docker volume create "$data_volume" >/dev/null
+          docker volume create "$models_volume" >/dev/null
+          docker volume create "$cache_volume" >/dev/null
+          docker run --detach --name agrovoz-backend-smoke \
+            --cpus 1 --memory 4g --read-only --tmpfs /tmp \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            --mount "type=volume,src=$data_volume,dst=/app/data" \
+            --mount "type=volume,src=$models_volume,dst=/app/models" \
+            --mount "type=volume,src=$cache_volume,dst=/home/agrovoz/.cache" \
+            --publish 8000:8000 \
+            --env APP_ENV=production \
+            --env DEBUG=false \
+            --env OPENWA_API_KEY=ci-openwa-key \
+            --env OPENWA_WEBHOOK_SECRET=ci-openwa-secret \
+            --env ADMIN_API_KEY=ci-admin-key \
+            --env ADMIN_SESSION_SECRET=ci-admin-session-secret \
+            --env PHONE_HASH_PEPPER=ci-phone-hash-pepper \
+            --env DATABASE_URL=sqlite:////app/data/agrovoz.db \
+            --env WHISPER_BACKEND=faster \
+            --env SKIP_MODEL_DOWNLOAD=true \
+            --env SKIP_WHISPER_PRELOAD=true \
+            --env LLM_MODEL_PATH=/tmp/model-not-provisioned.gguf \
+            agrovoz-backend-smoke:ci
+
+          test "$(docker inspect --format '{{.Config.User}}' "$container")" = agrovoz
+
+          wait_for_health() {
+            local probe="$1"
+            local elapsed=0
+            local response=""
+
+            while (( elapsed < 90 )); do
+              if response="$(curl --fail --silent --show-error \
+                "http://127.0.0.1:8000/api/v1/health?probe=$probe")" \
+                && [[ "$response" == *'"status":"ok"'* ]]; then
+                printf '%s health: %s\n' "$probe" "$response"
+                return 0
+              fi
+              sleep 1
+              elapsed=$((elapsed + 1))
+            done
+            printf 'El backend no respondió a health probe=%s dentro de 90 segundos.\n' "$probe" >&2
+            return 1
+          }
+
+          wait_for_health liveness
+          wait_for_health readiness
+
+          wait_for_log() {
+            local expected_log="$1"
+            local elapsed=0
+
+            while (( elapsed < 30 )); do
+              docker logs "$container" >"$log_file" 2>&1
+              if grep --fixed-strings --quiet "$expected_log" "$log_file"; then
+                return 0
+              fi
+              sleep 1
+              elapsed=$((elapsed + 1))
+            done
+            printf 'Falta evidencia de startup/TTL dentro de 30 segundos: %s\n' "$expected_log" >&2
+            return 1
+          }
+
+          for expected_log in \
+            'Base de datos lista' \
+            'Application startup complete' \
+            'Gastos scheduler: purga TTL OK' \
+            'Parcelas scheduler: purga TTL OK' \
+            'Ubicaciones scheduler: purga TTL OK'; do
+            wait_for_log "$expected_log"
+          done
+          docker logs agrovoz-backend-smoke >"$log_file" 2>&1
+          cat "$log_file"
+          logs_printed=true
+          if grep --extended-regexp --quiet \
+            'ERROR|Traceback|purga TTL no confirmada|scheduler: error inesperado' \
+            "$log_file"; then
+            echo 'El entrypoint reportó un error de startup o retención TTL.' >&2
+            exit 1
+          fi

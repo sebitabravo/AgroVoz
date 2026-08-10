@@ -18,6 +18,7 @@
 #
 # Variable de entorno:
 #   SKIP_MODEL_DOWNLOAD=true  Omite el paso 1 (para CI o debugging).
+#   SKIP_WHISPER_PRELOAD=true Omite la precarga remota de Whisper (para CI).
 # =============================================================================
 
 set -euo pipefail
@@ -51,27 +52,28 @@ else
 fi
 
 # ─── 2. Pre-cargar cache de Whisper (best-effort) ────────────────────────────
-# openai-whisper descarga el modelo a ~/.cache/whisper/<model>.pt al primer
+# El backend efectivo gestiona su propio cache y descarga el modelo al primer
 # load_model(). Lo forzamos acá para que el primer request del usuario no
 # pague la latencia de la descarga.
 #
 # Best-effort: si falla (ej: GPU no disponible, memoria insuficiente), NO
 # aborta — la app arranca y Whisper cargará (o fallará con log claro) en
 # runtime al procesar el primer audio.
-WHISPER_MODEL="${WHISPER_MODEL:-small}"
-WHISPER_CACHE="${HOME}/.cache/whisper"
-header "Verificando cache de Whisper ($WHISPER_MODEL)"
-
-if [[ -f "$WHISPER_CACHE/${WHISPER_MODEL}.pt" ]]; then
-    info "Whisper $WHISPER_MODEL ya en cache — skip"
+if [[ "${SKIP_WHISPER_PRELOAD:-false}" == "true" ]]; then
+    warn "SKIP_WHISPER_PRELOAD=true — se omite la precarga remota de Whisper"
 else
-    warn "Whisper $WHISPER_MODEL no en cache — descargando (~462 MB)..."
-    # Pasar WHISPER_MODEL via os.environ (no interpolar en el string de Python):
-    # defensa en profundidad ante code injection si la env var se manipula.
-    if WHISPER_MODEL="$WHISPER_MODEL" python -c "import os, whisper; whisper.load_model(os.environ['WHISPER_MODEL'])" 2>&1; then
-        info "Whisper $WHISPER_MODEL cacheado"
+    # El script consulta Settings para no duplicar los defaults de modelo y backend.
+    # Su verificación usa solo el cache local, sin tocar la red.
+    header "Verificando cache de Whisper"
+    if python -m scripts.preload_whisper --check-cache; then
+        info "Whisper ya está en cache — skip"
     else
-        warn "No se pudo pre-cargar Whisper (continuando — cargará en runtime)"
+        warn "Whisper no en cache — precargando backend configurado"
+        if python -m scripts.preload_whisper; then
+            info "Whisper cacheado"
+        else
+            warn "No se pudo pre-cargar Whisper (continuando — cargará en runtime)"
+        fi
     fi
 fi
 

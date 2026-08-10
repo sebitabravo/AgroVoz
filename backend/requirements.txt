@@ -1,5 +1,7 @@
 # AgroVoz — Dependencias de producción
-# Versiones exactas sincronizadas con uv.lock.
+# Las dependencias gestionadas por uv usan las versiones exactas de uv.lock.
+# El fallback legacy openai-whisper aún no está declarado en pyproject.toml ni
+# uv.lock, por lo que sus dependencias transitivas se resuelven al construir la imagen.
 # Para desarrollo usar: uv sync --extra dev
 
 fastapi==0.140.1
@@ -13,11 +15,22 @@ faster-whisper==1.2.1
 # Camino de respaldo (WHISPER_BACKEND=openai). Se retira cuando faster-whisper
 # quede validado en el VPS y en el piso de 1 vCPU.
 openai-whisper==20250625
+# Numba 0.60 es la última línea compatible con Python 3.12 y exige
+# NumPy < 2.1. Se pinnea con llvmlite para que el fallback no backtrackee
+# a una versión que falla durante el build de la imagen ARM.
+numba==0.60.0
+llvmlite==0.43.0
 piper-tts==1.6.0
-llama-cpp-python>=0.3.34
+llama-cpp-python==0.3.34
 jinja2==3.1.6
 itsdangerous==2.2.0
 psutil==7.2.2
 python-multipart==0.0.32
-scikit-learn>=1.6.0
-pyyaml>=6.0.2
+scikit-learn==1.9.0
+pyyaml==6.0.3
+reportlab==4.5.1
+pillow==12.3.0
+# Excepción al pin de uv.lock (2.5.0): el fallback openai-whisper usa Numba
+# 0.60, que requiere NumPy < 2.1 en Python 3.12.
+numpy==2.0.0
+onnxruntime==1.27.0
