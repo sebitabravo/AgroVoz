@@ -1146,9 +1146,12 @@ class TestUtilidades:
         monkeypatch.setattr(settings, "llm_model_path", str(model_path))
         monkeypatch.setattr(llm_service, "_worker_manager", manager)
         monkeypatch.setattr(llm_service, "_is_llm_circuit_open", lambda: False)
+        preload_calls: list[None] = []
+        monkeypatch.setattr(llm_service, "preload_model", lambda: preload_calls.append(None))
 
         assert _get_model() is None
         assert manager.start_called is False
+        assert preload_calls == [None]
 
     def test_preload_wait_confirma_carga_antes_de_retornar(
         self,
