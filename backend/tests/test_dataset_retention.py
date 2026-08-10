@@ -16,11 +16,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import SecretStr
 
 from app.models.user_prefs import UserPrefs
 from app.services.dataset_service import (
+    DatasetOperationError,
     has_dataset_consent,
     load_manifest_entries,
+    purge_dataset_for_subject,
     retain_audio,
 )
 from app.services.pipeline_service import AgroVozPipeline
@@ -301,6 +304,87 @@ class TestRetainAudio:
             "+56999999999",
             "secreto-manifest",
         )
+
+
+class TestDatasetPurge:
+    """Revocación de dataset con purga determinista y ledger sin PII."""
+
+    def test_revocacion_purga_solo_sujeto_y_es_idempotente(
+        self,
+        db: Any,
+        dataset_dir: Path,
+        sample_wav: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from app.core.config import settings
+
+        other_hash = "b" * 64
+        event_id = "11111111-1111-4111-8111-111111111111"
+        monkeypatch.setattr(settings, "consultation_history_audit_key", SecretStr("k" * 32))
+        _create_user_prefs(db, _VALID_HASH, consent=True)
+        _create_user_prefs(db, other_hash, consent=True)
+
+        retain_audio(
+            sample_wav,
+            _VALID_HASH,
+            "transcripcion privada target",
+            1000,
+            dataset_dir=dataset_dir,
+            db=db,
+        )
+        retain_audio(
+            sample_wav,
+            other_hash,
+            "transcripcion privada ajena",
+            1000,
+            dataset_dir=dataset_dir,
+            db=db,
+        )
+
+        result = purge_dataset_for_subject(_VALID_HASH, dataset_dir=dataset_dir, event_id=event_id)
+
+        assert result.event_id == event_id
+        assert result.records_deleted == 1
+        assert result.files_deleted == 1
+        assert result.outcome == "completed"
+        assert not list((dataset_dir / _VALID_HASH).glob("*.wav"))
+        assert list((dataset_dir / other_hash).glob("*.wav"))
+        remaining = load_manifest_entries(dataset_dir)
+        assert [entry["phone_hash"] for entry in remaining] == [other_hash]
+
+        audit_text = (dataset_dir / "deletion_audit.jsonl").read_text(encoding="utf-8")
+        assert _VALID_HASH not in audit_text
+        assert "transcripcion privada" not in audit_text
+        retry = purge_dataset_for_subject(_VALID_HASH, dataset_dir=dataset_dir, event_id=event_id)
+        assert retry == result
+        assert len(audit_text.splitlines()) == 1
+        assert len((dataset_dir / "deletion_audit.jsonl").read_text(encoding="utf-8").splitlines()) == 1
+
+    def test_purga_sin_clave_de_auditoria_es_fail_closed(
+        self,
+        db: Any,
+        dataset_dir: Path,
+        sample_wav: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "consultation_history_audit_key", SecretStr(""))
+        _create_user_prefs(db, _VALID_HASH, consent=True)
+        retain_audio(
+            sample_wav,
+            _VALID_HASH,
+            "transcripcion que debe permanecer",
+            1000,
+            dataset_dir=dataset_dir,
+            db=db,
+        )
+
+        with pytest.raises(DatasetOperationError, match="clave dedicada"):
+            purge_dataset_for_subject(_VALID_HASH, dataset_dir=dataset_dir)
+
+        assert list((dataset_dir / _VALID_HASH).glob("*.wav"))
+        assert not (dataset_dir / "deletion_audit.jsonl").exists()
 
 
 # ── Pipeline integration ───────────────────────────────────────────

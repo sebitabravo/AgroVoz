@@ -15,7 +15,7 @@ import json
 import logging
 from typing import cast
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -30,6 +30,7 @@ from app.services.consultation_history_service import (
     HistoryOperationError,
     delete_history,
 )
+from app.services.dataset_service import DatasetOperationError, purge_dataset_for_subject
 from app.services.expense_service import (
     ExpenseOperationError,
     delete_expenses_for_subject,
@@ -267,6 +268,29 @@ def _delete_location_after_consent_revocation(
         ) from None
 
 
+def _purge_dataset_after_consent_revocation(
+    phone_hash: str,
+    dataset_consent: bool | None,
+    event_id: str | None,
+) -> None:
+    """Purga las copias autorizadas después de revocar dataset_consent.
+
+    El consentimiento queda apagado aunque la purga falle; 503 deja claro que
+    la operación sigue pendiente y evita afirmar un borrado no confirmado.
+    """
+    if dataset_consent is not False:
+        return
+
+    try:
+        purge_dataset_for_subject(phone_hash, event_id=event_id)
+    except DatasetOperationError:
+        logger.error("Consentimiento dataset revocado; purga auditable pendiente")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Consentimiento dataset revocado; purga pendiente. Reintente la solicitud.",
+        ) from None
+
+
 @router.put("/{phone_hash}/comuna", response_model=UserPrefsResponse)
 def set_comuna(
     phone_hash: str = Path(
@@ -275,6 +299,10 @@ def set_comuna(
     ),
     body: ComunaRequest = ...,  # type: ignore[assignment]
     db: Session = Depends(get_db),  # noqa: B008
+    event_id: str | None = Query(
+        default=None,
+        description="UUID opcional para hacer idempotente la purga de dataset.",
+    ),
 ) -> UserPrefsResponse:
     """Registra o actualiza la comuna y cultivos de un productor (upsert).
 
@@ -345,6 +373,11 @@ def set_comuna(
     _delete_location_after_consent_revocation(
         phone_hash,
         body.location_consent,
+    )
+    _purge_dataset_after_consent_revocation(
+        phone_hash,
+        body.dataset_consent,
+        event_id,
     )
 
     return UserPrefsResponse(
