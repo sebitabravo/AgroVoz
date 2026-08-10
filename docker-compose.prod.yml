@@ -96,6 +96,16 @@ services:
       # esto el backend responde 400 "Invalid host header" a todo trafico
       # real por Pangolin, aunque el healthcheck interno (localhost) pase.
       - EXTRA_ALLOWED_HOSTS=${EXTRA_ALLOWED_HOSTS:-}
+      # CORSMiddleware (app/main.py) solo permite agrovoz.cl/www.agrovoz.cl
+      # por defecto. La landing real de este deploy esta en un subdominio
+      # distinto (landing.sbravo.app) -- sin esto, el fetch del demo desde
+      # la landing pasa el 404/400 previos pero lo bloquea el navegador
+      # por CORS antes de llegar a la respuesta.
+      - CORS_ORIGINS=${CORS_ORIGINS:-https://agrovoz.cl,https://www.agrovoz.cl}
+      # Apagado por diseño en produccion (ver comentario en config.py:
+      # "evitar abuso del LLM/TTS"). Default false preservado -- activarlo
+      # es decision de producto/costo, no un fix de infra.
+      - DEMO_ENDPOINT_ENABLED=${DEMO_ENDPOINT_ENABLED:-false}
     command:
       [
         "uvicorn",
