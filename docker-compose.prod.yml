@@ -209,6 +209,9 @@ services:
           cpus: "1"
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN   # el entrypoint de esta imagen hace chown de /app/data al arrancar;
+                # sin esto queda en crash-loop ("Operation not permitted")
     security_opt:
       - no-new-privileges:true
 
