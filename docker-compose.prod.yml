@@ -128,9 +128,13 @@ services:
         max-file: "3"
     deploy:
       resources:
+        # cpus limit tope al hardware real del VPS Hostinger (4 vCPU totales,
+        # compartidos con ollama/pangolin en el mismo host) — no al piso 8
+        # vCPU del Hetzner CX43 planeado originalmente en #9. Docker rechaza
+        # cualquier limite de CPU por encima del total de nucleos del host.
         limits:
           memory: 8G
-          cpus: "6"
+          cpus: "3"
         reservations:
           memory: 4G
           cpus: "2"
