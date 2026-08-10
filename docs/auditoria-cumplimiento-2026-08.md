@@ -28,18 +28,19 @@ contra los 24 documentos de negocio/PMBOK/piloto y las 11 discussions. Ver
 
 ## Veredicto
 
-**El pipeline de voz funciona de verdad, corriendo directo en Python — pero
-el contenedor Docker que lo empaqueta para producción no arranca.** Se
-ejecutó Whisper → LLM → Piper con audio real, sin mocks, y produjo una
-respuesta correcta en 4,5 s (dentro del techo de 15 s) cuando se llamó al
-código directamente. Pero al reconstruir la imagen Docker desde `main` para
-medir ese mismo pipeline bajo el piso de hardware documentado, **el
-contenedor crasheó al importar `main.py`, antes de levantar el servidor**.
-Se encontraron **4 bloqueantes críticos**, dos de ellos son la misma causa
-raíz en direcciones opuestas: **los dos manifests de dependencias del
-proyecto (`pyproject.toml` para dev/CI, `requirements.txt` para Docker/prod)
-llevan meses divergiendo sin que nada lo detecte**, porque CI nunca instala
-un motor de voz (G5) y nunca construye ni arranca la imagen real (G10).
+**El pipeline de voz funciona de verdad y, tras la ronda de fixes del
+10-ago, el contenedor Docker que lo empaqueta para producción también
+arranca.** Se ejecutó Whisper → LLM → Piper con audio real, sin mocks, y
+produjo una respuesta correcta en 4,5 s (dentro del techo de 15 s). La
+auditoría original encontró **4 bloqueantes críticos** al reconstruir la
+imagen Docker bajo el piso de hardware documentado — el contenedor crasheaba
+al importar `main.py`, antes de levantar el servidor —, dos de ellos con la
+misma causa raíz en direcciones opuestas: **los dos manifests de
+dependencias del proyecto (`pyproject.toml` para dev/CI, `requirements.txt`
+para Docker/prod) llevaban meses divergiendo sin que nada lo detectara**,
+porque CI no instalaba un motor de voz (G5) ni construía/arrancaba la
+imagen real (G10). **Los 4 están resueltos y verificados** — ver "Estado de
+remediación" abajo.
 
 | Severidad | Cantidad | IDs |
 |---|---|---|
@@ -63,7 +64,7 @@ código real — no solo CI verde) y mergeada a `main`:
 | G8 (link privacidad → repo privado) | #275 | `/privacidad/` servido desde `dist/` real, `curl` devuelve HTTP 200 | **RESUELTO** |
 | G9 (fuente INIA sin allowlist) | #278 | 26 tests cubren spoofing de host, userinfo, puertos no estándar; corre contra el corpus real | **RESUELTO** (el link específico muerto sigue siendo un gap de dato, no de código — ver nota abajo) |
 | G4 (13 flags sin contrato) | #280 | Nuevo `test_feature_flags_matrix.py`: 12 flags (se eliminó `use_typed_extraction`, muerto), cada uno con consumer real ejercitado en OFF/ON | **RESUELTO** |
-| G10 (contenedor no arranca) | #274 | **En revisión por el usuario directamente — no tocado en esta pasada** | Pendiente |
+| G10 (contenedor no arranca) | #274 | Rebuild real de la imagen desde el commit de la PR + `docker run --cpus=1.0 --memory=4864m` (mismo piso donde se encontró el bug). `import PIL, numpy, onnxruntime, reportlab` OK. Health liveness/readiness en 200. `mypy app/` y suite completa (2108 passed) verdes en worktree aislado | **RESUELTO** |
 
 Además, `#303` consolidó y corrigió `docs/ARCHITECTURE.md` (quitó la
 especificación de VPS nunca observada, corrigió el conteo de tools a 19,
@@ -79,9 +80,17 @@ de dato/contenido, no de código, y quedó fuera de alcance de la issue #277 a
 propósito (su propio texto dice "no ampliar artificialmente la cobertura...
 ni cerrar #244"). Sigue pendiente.
 
-**G10 es ahora el único bloqueante crítico sin cerrar** de los 4 originales.
-Con G10 resuelto, corresponde repetir la medición de latencia bajo
-`docker-compose.floor.yml` que motivó encontrarlo.
+**Los 4 bloqueantes críticos originales (G1, G2, G5, G10) están resueltos y
+verificados**, cada uno con evidencia reproducible propia, no solo con CI
+verde. La PR de G10 (#274) de paso agregó `docker-smoke.yml`: un job de CI
+que construye la imagen real y la levanta bajo 1 CPU/4 GB en cada PR — la
+recomendación exacta que este informe hacía para que este tipo de bug no
+vuelva a pasar desapercibido.
+
+Con G10 resuelto, la medición de latencia bajo `docker-compose.floor.yml`
+que motivó encontrarlo sigue siendo el siguiente paso natural (el
+`docker-smoke.yml` nuevo mide arranque y salud, no latencia end-to-end del
+pipeline de voz con modelos reales).
 
 ## Hallazgos confirmados
 
