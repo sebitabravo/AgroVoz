@@ -5,40 +5,44 @@
 
 ---
 
-**Etapa actual: PRODUCTO CONSTRUIDO Y DESPLEGADO, pendiente de validación en terreno.**
+**Etapa actual: PRODUCTO CONSTRUIDO, pendiente de validar el despliegue y la operación en terreno.**
 
 > **Nota sobre este documento.** La versión enviada al Desafío Crea INACAP el 8 de junio de 2026
 > declaraba etapa de idea sin desarrollo iniciado, lo que era exacto en esa fecha. El desarrollo
-> comenzó el 16 de junio de 2026. Esta sección refleja el estado al 26 de julio de 2026.
+> comenzó el 16 de junio de 2026. Esta sección combina el historial de desarrollo con un snapshot
+> técnico local verificado el **9 de agosto de 2026**, sobre el commit `f85b2e4`.
 
 ### Lo construido y verificable
 
-El producto se desarrolló entre el **16 de junio y el 24 de julio de 2026: 38 días**. Todo lo que
-sigue es auditable en el repositorio del proyecto.
+El producto se desarrolló entre el **16 de junio y el 24 de julio de 2026: 38 días**. Las métricas
+técnicas siguientes corresponden al snapshot local indicado arriba; los despliegues y cifras
+externas se marcan cuando no fueron verificados.
 
 | Dimensión | Estado |
 |---|---|
-| Código backend | 65 archivos Python en `app/` |
-| Tests | 1.197 pasando, gate de cobertura del 70% en CI |
+| Código backend | 96 archivos Python en `backend/app/` (snapshot local) |
+| Tests | 2.103 pasando, 26 omitidos, 86,64% de cobertura; gate de 70% en CI |
 | Calidad estática | ruff y mypy en modo estricto, sin hallazgos |
-| Trazabilidad | 91 issues cerrados, 87 pull requests integrados |
+| Trazabilidad | Cifras históricas de issues y pull requests no revalidadas en este snapshot |
 | Pipeline de voz | WhatsApp → Whisper → LLM con Tool Calling → Piper → WhatsApp |
 | Pipeline de texto | Mismo recorrido sin Whisper ni Piper |
-| Catálogo ODEPA | 79 productos y 15 mercados mayoristas, verificados contra 4 herramientas |
-| Dashboard admin | 8 vistas (métricas, piloto, actividad, revisión, ODEPA, alertas, monitor) |
-| Landing | Astro 7 + Tailwind 4, desplegada |
-| CI/CD | GitHub Actions |
+| Catálogo ODEPA | El runtime referencia 79 productos y 15 mercados; la cardinalidad vigente queda pendiente de revalidación |
+| Dashboard admin | 14 templates en `backend/app/admin/templates/`; la cifra de vistas funcionales queda pendiente de revalidación |
+| Landing | Astro 7 + Tailwind 4 en el repositorio; el despliegue no fue verificado en este snapshot |
+| CI/CD | 3 workflows de GitHub Actions en el repositorio |
 
 **Capacidades que no estaban en el diseño original y que el producto sí tiene:**
 
 - **Canal de texto además del de voz.** El productor no siempre puede mandar audio: lugar ruidoso,
-  una reunión, mala señal. El texto responde en ~100 ms contra ~11 s de la voz, porque salta las dos
-  etapas caras del pipeline.
+  una reunión, mala señal. El texto omite las dos etapas caras del pipeline. Las referencias de
+  ~100 ms para texto y ~11 s para voz son hipótesis pendientes de benchmark E2E reproducible; no
+  son una medición vigente.
 - **Alertas proactivas** de precio y de clima (helada, lluvia extrema), con límite de frecuencia y
   consentimiento explícito separado.
 - **Cálculo económico, no solo consulta**: margen, diferencia de precio entre mercados, valor de
   venta y registro de gastos.
-- **Historial de consultas con opt-in** conforme a la Ley 21.719.
+- **Historial de consultas con opt-in** implementado técnicamente; no implica conformidad con la
+  Ley 21.719 y requiere revisión jurídica externa y auditoría formal antes de activarse.
 - **Máquina de estados conversacional** con transiciones y expiración.
 
 ### Cambios de stack respecto del diseño original
@@ -48,7 +52,7 @@ Dos decisiones cambiaron durante la construcción y afectan directamente la estr
 | Componente | Diseño original | Implementado | Efecto |
 |---|---|---|---|
 | Gateway WhatsApp | Twilio Sandbox / Business API | **Open-WA self-hosted** | Elimina el costo por mensaje. Ver sección 8.3 |
-| Clima | OpenWeatherMap (API key, tier gratuito) | **Open-Meteo** (sin API key, CC BY 4.0) | Sin costo y sin límite práctico para el piloto |
+| Clima | OpenWeatherMap (API key, tier gratuito) | **Open-Meteo** (sin API key, CC BY 4.0) | Sin costo de plan/API key; cuota documentada de 10.000 requests/día, con cache y rate limiting |
 
 **Contrapartida de Open-WA, declarada explícitamente:** es un cliente no oficial que opera sobre el
 protocolo de WhatsApp Web. Elimina el costo variable, pero introduce un riesgo de continuidad y de
@@ -67,4 +71,3 @@ contratar con una institución pública. Está registrado en la sección 8.3.
 - Auditoría formal de cumplimiento de la Ley 21.719 antes del 1 de diciembre de 2026.
 
 ---
-
