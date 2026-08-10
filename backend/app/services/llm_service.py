@@ -104,10 +104,10 @@ MAX_TOOL_ITERATIONS = 3
 # vale cortar antes y dejar que responda el fallback por keywords, que entrega
 # datos reales de ODEPA en vez de un mensaje generico.
 #
-# 25s sigue dando aire al cold start del modelo y a una vuelta del tool calling
-# loop. Lo que hace que el caso comun entre en presupuesto no es este timeout,
-# sino el fast-path deterministico y el cache de prompt.
-_GENERATION_TIMEOUT = 25.0
+# El worker se precalienta fuera del request. Este es el presupuesto total de
+# todas las generaciones de una respuesta, no un timeout por vuelta del loop;
+# deja margen para Whisper/TTS dentro del presupuesto E2E de 15s.
+_GENERATION_TIMEOUT = 10.0
 _LLM_CIRCUIT_COOLDOWN_SECONDS = 90.0
 _LLM_BUSY_TEXT = "Estoy procesando otra consulta ahora. ¿Podrías intentar de nuevo en un momento?"
 
@@ -854,6 +854,8 @@ _model_lock = threading.Lock()
 _model_error: str | None = None
 _llm_circuit_lock = threading.Lock()
 _llm_circuit_open_until = 0.0
+_preload_lock = threading.Lock()
+_preload_in_progress = False
 
 
 class LlmGuardError(RuntimeError):
@@ -882,9 +884,9 @@ def preload_model(*, wait: bool = False) -> None:
     conserva su fallback.
     """
     if wait:
-        _get_model()
+        _load_model()
         return
-    threading.Thread(target=_get_model, daemon=True, name="llm-preload").start()
+    threading.Thread(target=_load_model, daemon=True, name="llm-preload").start()
 
 
 def _worker_config(model_path: str) -> LlmWorkerConfig:
@@ -899,42 +901,70 @@ def _worker_config(model_path: str) -> LlmWorkerConfig:
     )
 
 
-def _get_model() -> LlmWorkerManager | None:
-    """Obtiene un worker saludable sin cargar llama.cpp en FastAPI."""
+def _load_model() -> LlmWorkerManager | None:
+    """Carga el worker fuera del request y actualiza sus aliases de salud."""
     global _worker_manager, _model, _model_loaded, _model_error
 
-    with _model_lock:
-        model_path = settings.llm_model_path
-        if not model_path or not os.path.isfile(model_path):
-            if _worker_manager is not None:
-                _worker_manager.stop()
-            _worker_manager = None
+    global _preload_in_progress
+    with _preload_lock:
+        if _preload_in_progress:
+            return _worker_manager
+        _preload_in_progress = True
+    try:
+        with _model_lock:
+            model_path = settings.llm_model_path
+            if not model_path or not os.path.isfile(model_path):
+                if _worker_manager is not None:
+                    _worker_manager.stop()
+                _worker_manager = None
+                _model = None
+                _model_loaded = False
+                _model_error = "model_not_found"
+                logger.warning("Modelo LLM no encontrado — LLM en modo mock")
+                return None
+
+            if _worker_manager is None:
+                _worker_manager = LlmWorkerManager(_worker_config(model_path))
+            if _worker_manager.is_healthy():
+                _model = _worker_manager
+                _model_loaded = True
+                _model_error = None
+                return _worker_manager
+            if _worker_manager.start():
+                _model = _worker_manager
+                _model_loaded = True
+                _model_error = None
+                return _worker_manager
+
             _model = None
             _model_loaded = False
-            _model_error = "model_not_found"
-            logger.warning("Modelo LLM no encontrado — LLM en modo mock; se reintentara en el proximo request")
+            _model_error = _worker_manager.health().last_error_code or "worker_unavailable"
+            logger.warning(
+                "LLM worker no disponible — error=%s; se reintentara",
+                _model_error,
+            )
             return None
+    finally:
+        with _preload_lock:
+            _preload_in_progress = False
 
-        if _worker_manager is None:
-            _worker_manager = LlmWorkerManager(_worker_config(model_path))
-        if not _worker_manager.is_healthy() and _is_llm_circuit_open():
-            # No recargar ~2 GB para una request que el circuit breaker
-            # rechazará inmediatamente; el primer request post-cooldown reinicia.
-            return _worker_manager
-        if _worker_manager.start():
-            _model = _worker_manager
-            _model_loaded = True
-            _model_error = None
-            return _worker_manager
 
-        _model = None
-        _model_loaded = False
-        _model_error = _worker_manager.health().last_error_code or "worker_unavailable"
-        logger.warning(
-            "LLM worker no disponible — error=%s; se reintentara",
-            _model_error,
-        )
+def _get_model() -> LlmWorkerManager | None:
+    """Obtiene un worker saludable sin arrancarlo dentro del request."""
+    model_path = settings.llm_model_path
+    if not model_path or not os.path.isfile(model_path):
         return None
+    with _model_lock:
+        model = _worker_manager
+        if model is not None and model.is_healthy():
+            return model
+        if model is not None and _is_llm_circuit_open():
+            return model
+
+    # El primer request o la recuperación se recalentará en background; la
+    # request actual conserva el presupuesto y usa el fallback disponible.
+    preload_model()
+    return None
 
 
 def _mark_worker_failure(
@@ -943,12 +973,17 @@ def _mark_worker_failure(
 ) -> None:
     """Actualiza aliases de salud sin exponer mensajes del proceso hijo."""
     global _model, _model_loaded, _model_error
+    should_preload = False
     with _model_lock:
         if _worker_manager is not manager or manager.is_healthy():
             return
         _model = None
         _model_loaded = False
         _model_error = error_code
+        should_preload = True
+    if should_preload:
+        # La recuperación ocurre fuera de la request que detectó el fallo.
+        preload_model()
 
 
 def _is_llm_circuit_open() -> bool:
@@ -995,17 +1030,19 @@ async def _run_llm_completion(
     model: LlmWorkerManager,
     messages: list[dict[str, object]],
     max_tokens: int = 128,
+    timeout_seconds: float | None = None,
 ) -> object:
     """Delega inferencia al hijo y traduce fallas al contrato existente."""
     if _is_llm_circuit_open():
         raise LlmCircuitOpenError("llm_circuit_open")
 
     try:
+        request_timeout = timeout_seconds or _GENERATION_TIMEOUT
         response = await asyncio.to_thread(
             model.complete,
             messages,
             max_tokens,
-            _GENERATION_TIMEOUT,
+            request_timeout,
         )
     except LlmWorkerBusyError:
         raise LlmBusyError("llm_busy") from None
@@ -1044,7 +1081,7 @@ async def _preflight_keyword_tool(
     El pipeline ya usa fast-path para preguntas simples. Este segundo control
     cubre las consultas que por longitud o contexto no pasan ese gate, pero
     cuyo resultado sigue siendo un dato crudo de ODEPA/OpenMeteo. Así no se
-    espera el timeout de 25 segundos para ejecutar una tool conocida.
+    espera el timeout completo del LLM para ejecutar una tool conocida.
     """
     if system_tip is not None or consulta_tipo not in {"precio", "clima"}:
         return None
@@ -1619,12 +1656,25 @@ async def answer(
         system_tip=system_tip,
         consulta_tipo=consulta_tipo,
     )
+    generation_deadline = time.monotonic() + _GENERATION_TIMEOUT
+
+    def _remaining_generation_budget() -> float:
+        """Retorna el presupuesto restante para todas las vueltas del LLM."""
+        return generation_deadline - time.monotonic()
 
     try:
         for _iteration in range(MAX_TOOL_ITERATIONS):
             # NO pasar tools/tool_choice — Qwen2.5 genera <tool_call> como texto
             # nativo cuando las definiciones estan en el system prompt.
-            response = await _run_llm_completion(model, messages, max_tokens=128)
+            remaining = _remaining_generation_budget()
+            if remaining <= 0:
+                raise TimeoutError("llm_generation_budget_exhausted")
+            response = await _run_llm_completion(
+                model,
+                messages,
+                max_tokens=128,
+                timeout_seconds=remaining,
+            )
 
             content = _parse_content(response)
             if not content:
@@ -1735,7 +1785,15 @@ async def answer(
             }
         )
         try:
-            final_response = await _run_llm_completion(model, messages, max_tokens=128)
+            remaining = _remaining_generation_budget()
+            if remaining <= 0:
+                raise TimeoutError("llm_generation_budget_exhausted")
+            final_response = await _run_llm_completion(
+                model,
+                messages,
+                max_tokens=128,
+                timeout_seconds=remaining,
+            )
             content = _parse_content(final_response)
             if content:
                 cleaned = _strip_tool_tags(content)
