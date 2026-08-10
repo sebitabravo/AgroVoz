@@ -57,7 +57,7 @@ por la misma vía. El texto evita Whisper y TTS.
    - Si pregunta por precio → query SQLite ODEPA
    - Si pregunta por clima → GET OpenMeteo API
    - Si busca una oficina o cooperativa → query SQLite `directorio_agricola`
-   - Whitelist de 15 tools (ver lista completa en `app/services/` más abajo). Si alucina una tool fuera de la whitelist → fallback.
+   - Whitelist de 19 tools: `get_price`, `get_price_spread`, `get_price_history`, `get_weather`, `get_pronostico`, `get_clima_historico`, `get_clima_historico_multianual`, `calculate_sale_value`, `calculate_margin`, `search_corpus`, `get_programas_indap`, `register_expense`, `register_parcela`, `get_parcelas`, `get_regla_agronomica`, `get_calendario_agricola`, `get_link_resumen`, `get_reporte_pdf` y `get_directorio_agricola`. Si alucina una tool fuera de la whitelist → fallback.
 8. Fast-path determinista o LLM genera respuesta textual (datos crudos de precio/clima, o reglas citadas de fuente oficial)
 9. Solo audio: Piper TTS convierte texto → audio `.wav`
 10. Solo audio: ffmpeg convierte `.wav` → `.ogg`
@@ -79,7 +79,7 @@ por la misma vía. El texto evita Whisper y TTS.
 
 ### `app/services/` — Capa de negocio
 - `whisper_service.py` — transcripción de audio (descarga, ffmpeg, Whisper)
-- `llm_service.py` — interpretación NL + Tool Calling con whitelist (15 tools: precios, clima, corpus, gastos, parcelas, reglas, panel y `get_directorio_agricola`) + fallback OpenRouter
+- `llm_service.py` — interpretación NL + Tool Calling con whitelist (19 tools: precios, clima, corpus, INDAP, gastos, parcelas, reglas, panel, reportes y `get_directorio_agricola`) + fallback OpenRouter
 - `tts_service.py` — síntesis de voz con Piper TTS
 - `odepa_service.py` — consultas a SQLite ODEPA, sync diario y detector determinista de variaciones
 - `weather_service.py` — consultas a OpenMeteo API (forecast + histórico)
