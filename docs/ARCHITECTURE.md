@@ -90,7 +90,9 @@ por la misma vía. El texto evita Whisper y TTS.
 - `demo_service.py` — lógica del chat demo web
 - `monitor_service.py` — salud de servicios (CPU, RAM, disco, Whisper, LLM, TTS)
 - `alert_service.py` — alertas proactivas de precio y clima
-- `metrics_service.py` — agregación de métricas para dashboard y piloto
+- `metrics_service.py` — agregación de métricas para dashboard y piloto; el corte
+  temporal de cuatro semanas y el vínculo automático con cuestionarios pre/post
+  todavía no están implementados
 - `delivery_service.py` — estado real de entrega y redacción de contenido transitorio
 - `consultation_history_service.py` — memoria consentida, TTL y borrado auditado
 - `conversation_state.py` — estado efímero y exclusión de turnos concurrentes
@@ -128,7 +130,10 @@ por la misma vía. El texto evita Whisper y TTS.
 - Métricas: series diarias, latencia, intents, productos top, errores
 - ODEPA: estado de sync, stats, precios recientes, export CSV
 - Monitor: CPU, RAM, disco, estado de servicios (Whisper, LLM, TTS, SQLite, Open-WA)
-- Piloto: métricas para Crea INACAP (productores activos, %útiles, decisiones productivas)
+- Piloto: métricas para Crea INACAP (productores activos, %útiles, decisiones productivas).
+  El dashboard actual lee consultas y feedback técnicos; no persiste formularios
+  pre/post, no los vincula por participante y sus agregaciones son históricas si
+  no se aplica un corte temporal externo.
 - Alertas: gestión de alertas proactivas de precio/clima
 - Revisión: cola de revisión humana para consultas marcadas
 - PWA: manifest, service worker, instalable en dispositivo móvil
@@ -218,7 +223,9 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
 8. **Audio temporal y dataset opcional son tratamientos distintos.** El audio operativo
    se elimina del VPS en <24h. Solo `dataset_consent=true` permite copiar audio y
    transcripción al dataset rural. Son datos seudonimizados, no anónimos, y esta
-   medida técnica no permite declarar cumplimiento de la Ley 21.719.
+   medida técnica no permite declarar cumplimiento de la Ley 21.719. La retención,
+   purga automatizada y revocación integral del dataset siguen pendientes; por eso
+   el dataset no se activa para el piloto hasta contar con controles verificables.
 
 9. **Sin WebSockets.** Respuesta síncrona HTTP. Open-WA entrega el webhook y FastAPI
    responde cuando el pipeline termina. Si latencia >15s → reevaluar modo asíncrono.
@@ -274,11 +281,14 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     `llm_service.answer_via_openrouter()`) porque el formato de tool calling
     de cada backend es distinto.
 
-16. **PWA admin dashboard (#102).** El dashboard admin incluye service worker
-    (`admin-sw.js`), manifest PWA (`manifest.json`) y registro automático
-    (`admin-pwa-register.js`). Permite instalar el panel como app y funciona
-    offline para monitoreo en terreno sin internet. El agricultor NO usa PWA
-    — sigue en WhatsApp. Público objetivo: equipo AgroVoz, INDAP, PRODESAL.
+16. **PWA opcional para dashboard y agricultor (#102).** El dashboard admin incluye
+    service worker (`admin-sw.js`), manifest PWA (`manifest.json`) y registro
+    automático (`admin-pwa-register.js`). Permite instalar el panel como app y
+    funciona offline para monitoreo en terreno sin internet. Existe además un panel
+    PWA del agricultor en `/panel`, pero `farmer_panel_enabled=false` por defecto:
+    es un complemento opcional y no un requisito. El canal principal y suficiente
+    sigue siendo WhatsApp; el piloto no debe exigir instalar la PWA. Público objetivo
+    del panel admin: equipo AgroVoz, INDAP, PRODESAL.
 
 17. **Derivación informativa a crédito INDAP (#174).** Un detector determinista
     precede al LLM y responde solo con un snapshot oficial versionado, fecha de
