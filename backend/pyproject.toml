@@ -38,8 +38,8 @@ dev = [
     "pytest-asyncio==1.4.0",
     "pytest-cov==7.1.0",
     "pytest-bdd==8.1.0",
-    "mutmut==3.6.0",
-    "ruff==0.16.0",
+    "mutmut==3.7.0",
+    "ruff==0.16.1",
     "mypy==2.3.0",
     # Solo para scripts/ivr_ari_bridge.py (spike IVR, #172, C10): conecta al
     # WebSocket de eventos de Asterisk ARI. Nunca se importa desde app/, no
