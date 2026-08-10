@@ -11,23 +11,25 @@ No reemplaza los hard constraints de `AGENTS.md`: una solicitud no puede autoriz
 app nativa, recomendaciones agronómicas sin fuente citada, servicios pagos obligatorios, otra base de datos o un
 despliegue que no funcione en 1 vCPU / 6 GB.
 
-## 2. Controles existentes y brechas
+## 2. Controles definidos y brechas de evidencia
 
 | Control | Evidencia al corte | Estado |
 |---|---|---|
-| Flujo issue-first | Convención obligatoria en `AGENTS.md`; 100 issues consultados | Implementado como práctica; cumplimiento por cambio se verifica en PR |
+| Flujo issue-first | Convención obligatoria en `AGENTS.md`; 100 issues consultados | Definido como práctica; cumplimiento por cambio se verifica en PR |
 | Branch y PR por objetivo | Reglas `feature/*`, `fix/*` y 1 PR = 1 cambio | Definido |
 | Plantilla de PR | Secciones de resumen, tipo, issue, módulos, pruebas y riesgos exigidas | Definido; completar sigue siendo responsabilidad del autor |
-| Checks CI | Backend tests, E2E, lint/types, landing y Compose aparecen en PR observados | Operativo |
-| Checks de política | Referencia a issue, `status:approved` y label `mod:*` | Operativo: PR abiertos muestran fallos detectados |
+| Checks CI | Backend tests, E2E, lint/types, landing y Compose aparecen en PR observados | Definido/observado en PR; no prueba ejecución de todos los cambios |
+| Checks de política | Referencia a issue, `status:approved` y label `mod:*` | Definido/observado; PR abiertos muestran fallos detectados |
 | Historial | Conventional Commits y squash; 89 PR mergeados consultados | Evidencia de uso, no de aprobación independiente |
 | Revisión humana | `reviewDecision=REVIEW_REQUIRED` en PR consultados | Requerida, pero no se verificó una matriz de autoridad |
 | CCB o comité de cambios | Sin evidencia recogida en esta revisión | **Pendiente** |
 | Autorización de despliegue | Dokploy/producción declarados en `AGENTS.md` | Procedimiento y firmante no formalizados aquí |
 | Revisión legal externa | Requerida para cambios de datos y piloto | **Pendiente** |
 
-Los fallos de policy checks en PR abiertos son evidencia de que el control detecta incumplimientos.
-No se deben interpretar como PR aprobados ni corregir omitiendo el gate.
+Los fallos de policy checks en PR abiertos son evidencia de que el control puede detectar
+incumplimientos. No se deben interpretar como PR aprobados ni corregir omitiendo el gate. No hay
+evidencia suficiente para declarar formalizados un CCB, una autoridad de aprobación, cadencias de
+revisión o un checklist operativo; todos quedan pendientes.
 
 ## 3. Clasificación de cambios
 
@@ -77,20 +79,21 @@ La evaluación debe responder:
 
 ### 4.3 Decidir
 
-La autoridad todavía no está formalizada. Esta matriz es **propuesta** y no prueba aprobaciones
-pasadas:
+La autoridad todavía no está formalizada. Esta matriz es **propuesta**, no asigna personas reales y
+no prueba aprobaciones pasadas. Hasta contar con una designación documentada, cada decisión queda
+pendiente de autoridad y no puede presentarse como aprobación institucional:
 
 | Impacto | Revisión necesaria | Decisión requerida |
 |---|---|---|
-| Estándar reversible | Revisor técnico distinto del autor, si está disponible | Responsable del módulo |
-| Producto/piloto | Técnica + Product Owner | Product Owner con evidencia de calidad |
-| Técnico sensible | Técnica + operación/seguridad | Autoridad técnica por formalizar |
-| Datos/legal | Técnica + privacidad + profesional externo cuando aplique | Responsable del tratamiento, aún por designar |
-| Constraint/arquitectura | Técnica + producto + documentación | Equipo con decisión registrada |
-| Emergencia | Responsable operativo disponible | Aceptación posterior por la autoridad correspondiente |
+| Estándar reversible | Revisión técnica distinta del autor, si está disponible | Autoridad por formalizar; registrar decisión y evidencia |
+| Producto/piloto | Revisión técnica y de producto | Autoridad por formalizar; registrar aceptación y evidencia |
+| Técnico sensible | Revisión técnica, operación y seguridad | Autoridad por formalizar; no autoaprobar |
+| Datos/legal | Revisión técnica, privacidad y profesional externo cuando aplique | Responsable por designar; no autoaprobar |
+| Constraint/arquitectura | Revisión técnica, producto y documentación | Autoridad por formalizar; registrar decisión |
+| Emergencia | Contención por la persona disponible | Aceptación posterior por la autoridad correspondiente, aún no designada |
 
-Nadie debe figurar como aprobador por defecto solo por participar en el proyecto. Nombre, fecha y
-decisión deben quedar registrados por la persona real.
+Nadie debe figurar como aprobador por defecto solo por participar en el proyecto. Nombre, autoridad,
+fecha y decisión deben quedar registrados por la persona real cuando la formalización exista.
 
 ### 4.4 Implementar y verificar
 
