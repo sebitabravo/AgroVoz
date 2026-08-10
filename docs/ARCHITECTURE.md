@@ -122,9 +122,10 @@ una tool está habilitada en producción.
 - `demo_service.py` — lógica del chat demo web
 - `monitor_service.py` — salud de servicios (CPU, RAM, disco, Whisper, LLM, TTS)
 - `alert_service.py` — alertas proactivas de precio y clima
-- `metrics_service.py` — agregación de métricas para dashboard y piloto; el corte
-  temporal de cuatro semanas y el vínculo automático con cuestionarios pre/post
-  todavía no están implementados
+- `metrics_service.py` — agregación de métricas para dashboard y piloto; el endpoint
+  admin y las vistas/exportaciones aceptan `pilot_started_at`/`pilot_ended_at` para
+  aplicar una ventana explícita. No persiste formularios ni hace linkage automático
+  pre/post; la operación productiva y la evidencia real del piloto siguen pendientes.
 - `delivery_service.py` — estado real de entrega y redacción de contenido transitorio
 - `consultation_history_service.py` — memoria consentida, TTL y borrado auditado
 - `conversation_state.py` — estado efímero y exclusión de turnos concurrentes
@@ -164,8 +165,9 @@ una tool está habilitada en producción.
 - Monitor: CPU, RAM, disco, estado de servicios (Whisper, LLM, TTS, SQLite, Open-WA)
 - Piloto: métricas para Crea INACAP (productores activos, %útiles, decisiones productivas).
   El dashboard actual lee consultas y feedback técnicos; no persiste formularios
-  pre/post, no los vincula por participante y sus agregaciones son históricas si
-  no se aplica un corte temporal externo.
+  pre/post ni los vincula por participante. Con `pilot_started_at` y
+  `pilot_ended_at` entregados por admin aplica la ventana solicitada; esto no
+  acredita participantes ni operación real del piloto.
 - Alertas: gestión de alertas proactivas de precio/clima
 - Revisión: cola de revisión humana para consultas marcadas
 - PWA: manifest, service worker, instalable en dispositivo móvil
@@ -260,11 +262,12 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
    Los flags técnicos no sustituyen un consentimiento documentado con versión,
    fecha/hora, modalidad, soporte/custodia y operador receptor; esta medida
    técnica no permite declarar cumplimiento de la Ley 21.719. El cambio de
-   `dataset_consent` evita nuevas copias según el flujo actual, pero la retención,
-   purga automatizada y revocación integral del dataset siguen pendientes. No se
-   debe prometer borrado retroactivo de muestras ya retenidas hasta contar con una
-   operación de borrado y evidencia auditable; por eso el dataset no se activa para
-   el piloto hasta contar con controles verificables.
+   `dataset_consent` evita nuevas copias según el flujo actual. Al revocarlo, el
+   flujo técnico implementado purga WAV y manifest y registra un evento idempotente
+   en un ledger JSONL append-only con un token HMAC, sin PII. La operación exige
+   provisionar una clave dedicada de auditoría y verificar la operación productiva;
+   la clave, la operación y su evidencia real siguen pendientes. La purga no prueba el
+   borrado de copias externas/backups ni de la influencia en un modelo ya entrenado.
 
 9. **Sin WebSockets.** Respuesta síncrona HTTP. Open-WA entrega el webhook y FastAPI
    responde cuando el pipeline termina. Si latencia >15s → reevaluar modo asíncrono.

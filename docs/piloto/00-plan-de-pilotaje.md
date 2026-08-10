@@ -76,18 +76,19 @@ muestra, ambiente y mediciones fechadas.
 
 | Métrica | Meta mínima | Fuente y estado |
 |---|---|---|
-| Productores que completan al menos 3 consultas | 3+ | Registro automático filtrado por participantes y ventana del piloto; meta no observada |
+| Productores que completan al menos 3 consultas | 3+ | Registro automático filtrado por ventana; la identificación de participantes y la operación real requieren evidencia separada; meta no observada |
 | Latencia promedio (envío audio → recepción respuesta) | <15 segundos | Timestamps de entrega; meta no observada en productores reales |
 | Respuestas calificadas como "útiles" por los productores | >80% | `feedback=util/no_util` es métrica automática; la nota manual 1–5 se reporta aparte |
 | Productores con intención de uso regular | Al menos 1 | Respuesta manual de check-in; meta no observada |
 | Casos documentados de decisión productiva tomada con apoyo del sistema | 2+ | Registro manual con fecha y evidencia; meta no observada |
 
-Las métricas del piloto deben indicar `pilot_started_at`, `pilot_ended_at` y
-el conjunto de participantes antes de calcularse. El dashboard existente sirve
-como fuente técnica de consultas y latencia, pero no basta por sí solo para
-probar que una fila pertenece a esta ventana o a un productor participante.
-No se deben presentar agregados históricos como resultados del piloto sin ese
-filtro y sin separar las respuestas automáticas de los formularios manuales.
+Las métricas del piloto deben entregar a la interfaz admin `pilot_started_at` y
+`pilot_ended_at` (inicio inclusivo y término exclusivo, con zona horaria); el
+backend aplica esa ventana y queda fail-closed si falta alguna fecha. El conjunto
+de participantes y la evidencia de operación real siguen requiriendo verificación
+separada: el filtro no prueba por sí solo que una fila pertenezca a un productor
+participante. No se deben presentar agregados como resultados del piloto sin esa
+evidencia ni sin separar las respuestas automáticas de los formularios manuales.
 
 ### Riesgos del piloto y plan de contingencia
 

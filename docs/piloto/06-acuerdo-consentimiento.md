@@ -4,8 +4,11 @@
 > Requiere responsable y contactos designados, cierre de las brechas P0 y revisión jurídica externa
 > firmada. No constituye asesoría legal ni acredita cumplimiento. La Ley 21.719 entra en vigencia el
 > 1 de diciembre de 2026.
-> El piloto también queda bloqueado mientras no exista un procedimiento técnico aprobado para la
-> ventana de métricas, el dataset autorizado y su revocación/purga.
+> La ventana explícita de métricas está implementada vía admin cuando se entregan
+> `pilot_started_at`/`pilot_ended_at` (start/end) con zona horaria. El piloto sigue bloqueado
+> hasta contar con evidencia de operación productiva,
+> linkage pre/post y autorización documentada del dataset. La revocación/purga técnica está
+> implementada, pero requiere provisionar la clave dedicada del ledger y verificar operación real.
 >
 > Una vez aprobado: leerlo completo al productor y dejarle una copia firmada.
 
@@ -91,7 +94,7 @@ Las finalidades deben decidirse por separado:
 | Audio temporal | Menos de 24 horas, sujeto a verificar excepciones y backups |
 | Query/respuesta transitorias en `consultations` | Tras entrega/fallo; respaldo horario a 24 horas |
 | Metadatos de `consultations` | Plazo pendiente de aprobación |
-| Dataset de voz autorizado | No se habilita todavía; propuesta hasta diciembre de 2026 y borrado automatizado pendientes |
+| Dataset de voz autorizado | No se habilita todavía sin autorización documentada; revocación/purga técnica ya implementadas; provisión de clave dedicada del ledger y operación productiva pendientes |
 | Memoria contextual | 28 días si se habilita |
 | Preferencias, alertas, logs y auditoría | Plazo pendiente de aprobación |
 | Métricas realmente agregadas | Plazo por definir según riesgo de reidentificación |
@@ -142,11 +145,17 @@ La revocación de memoria desde admin autenticado o WhatsApp verificado elimina
 - preferencias y alertas;
 - datos conservados por WhatsApp/Meta.
 
-Por eso no se promete borrado total en siete días. El flujo integral de acceso, supresión y
-revocación es un bloqueo antes del piloto.
+La revocación de `dataset_consent` desde admin autenticado dispara la purga técnica implementada
+de WAV y manifest del sujeto y registra un evento idempotente en el ledger JSONL append-only con
+conteos y token HMAC, sin PII. La operación rechaza la purga si falta la clave dedicada del ledger;
+la provisión de esa clave, la operación productiva y la evidencia real siguen pendientes.
+Por eso no se promete borrado total en siete días: no se cubren copias externas, backups ni la
+influencia de un modelo ya entrenado. El flujo integral de acceso, supresión y revocación jurídica
+es un bloqueo antes del piloto.
 
-Mientras la purga del dataset y el procedimiento de revocación no estén aprobados y verificables,
-no se debe crear una copia autorizada aunque una persona marque “Sí” en la sección 7.2.
+Mientras la autorización del dataset, la clave dedicada y la operación productiva no estén
+aprobadas y verificadas, no se debe crear una copia autorizada aunque una persona marque “Sí” en
+la sección 7.2.
 
 > Si audio o transcripciones se usan para entrenar un modelo, puede no ser técnicamente posible
 > retirar su influencia del modelo ya entrenado. No se debe realizar entrenamiento antes de que esta
@@ -272,7 +281,8 @@ Fecha de registro en sistema: ____ / ____ / ______
 - Definir y aprobar la custodia física y digital, los accesos y el plazo de conservación antes de
   archivar acuerdos firmados. **No incluir datos personales en el repositorio de código.**
 - No comenzar el piloto mientras los P0 de la auditoría técnica sigan abiertos.
-- No crear copias del dataset hasta contar con retención, purga y revocación verificables.
+- No crear copias del dataset hasta contar con autorización, clave dedicada del ledger y operación
+  productiva de retención, purga y revocación verificadas.
 - No usar `dataset_consent` como consentimiento de memoria.
 - Mantener `CONSULTATION_HISTORY_ENABLED`, `USE_CONVERSATION_STATE` y `MCP_ENABLED` apagados hasta
   su revisión y autorización respectivas.

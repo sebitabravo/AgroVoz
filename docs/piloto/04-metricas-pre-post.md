@@ -146,18 +146,20 @@ métricas. La tabla siguiente separa la definición deseada de lo que hoy entreg
 dashboard: las respuestas pre/post **no se guardan en el sistema ni se contrastan
 automáticamente** con las consultas.
 
-Para el piloto, el equipo debe dejar por escrito antes del onboarding la fecha de
-inicio y la fecha de cierre de la ventana de cuatro semanas. Las métricas que no
-puedan filtrarse por esa ventana se reportan como históricas y no como resultados
-del piloto. La implementación del filtro temporal y del vínculo automático queda
-pendiente de un cambio de backend; este documento no lo da por hecho.
+Para el piloto, el equipo debe entregar al endpoint admin la fecha de inicio y la
+fecha de cierre de la ventana de cuatro semanas (`pilot_started_at` inclusivo y
+`pilot_ended_at` exclusivo, con zona horaria). El backend y las vistas/exportaciones
+aplican ese filtro explícito; sin ambas fechas el cálculo queda fail-closed y no
+lee consultas históricas. El vínculo automático con formularios pre/post, la
+identificación verificable de participantes y la evidencia de operación real
+siguen pendientes.
 
 | Métrica del dashboard | Definición del piloto | Estado y validación honesta |
 |---|---|---|
-| **Productores activos** | COUNT(DISTINCT `phone_hash`) con 3+ consultas dentro de la ventana de cuatro semanas. | El dashboard actual agrupa el histórico y no aplica esa ventana. No reportar su valor como resultado del piloto sin extracción filtrada y revisión del equipo. |
-| **Consultas promedio por productor** | Consultas de la ventana / productores de la ventana. | El dashboard actual calcula sobre el histórico. La comparación con la bitácora de cuatro semanas es manual y no constituye integración automática. |
+| **Productores activos** | COUNT(DISTINCT `phone_hash`) con 3+ consultas dentro de la ventana de cuatro semanas. | El endpoint admin y las vistas/exportaciones aplican `pilot_started_at`/`pilot_ended_at`; el resultado no acredita por sí solo participantes reales ni operación del piloto. |
+| **Consultas promedio por productor** | Consultas de la ventana / productores de la ventana. | Se calcula sobre la ventana entregada; la comparación con la bitácora y los formularios de cuatro semanas es manual y no constituye linkage automático. |
 | **% consultas útiles** | En dashboard: `feedback="util"` / feedback no nulo × 100. | Es un indicador binario de feedback, no equivalente a la escala 1–5 del cuestionario. Reportar ambos por separado; no inventar una conversión. |
-| **Latencia promedio** | Promedio de `latency_ms` de entregas del piloto, comparado con target <15 segundos. | El dashboard actual no filtra la ventana ni solo entregas exitosas. Reportar su valor como histórico hasta contar con un corte filtrado. |
+| **Latencia promedio** | Promedio de `latency_ms` de entregas del piloto, comparado con target <15 segundos. | La ventana se filtra con `pilot_started_at`/`pilot_ended_at`, pero el cálculo no acredita operación real ni reemplaza la revisión de entregas exitosas y evidencia fechada. |
 | **Decisiones productivas** | Conteo de consultas marcadas administrativamente como `decision_productiva=true`. | El toggle administrativo no se alimenta automáticamente de la respuesta post ni de la bitácora. El cuestionario se consolida como evidencia cualitativa separada. |
 
 ### Procedimiento manual y límites
@@ -168,10 +170,11 @@ pendiente de un cambio de backend; este documento no lo da por hecho.
 2. Registrar fechas de inicio y cierre, excluir consultas fuera de la ventana y
    anotar cuántos formularios tienen respuestas válidas para cada pregunta.
 3. Consolidar por separado: métricas del dashboard, respuestas pre/post y bitácora.
-   Si no hay exportación o filtro disponible, informar **no disponible para la
-   ventana del piloto**, no reemplazarlo silenciosamente por el histórico.
+   Entregar siempre `pilot_started_at` y `pilot_ended_at`; no reemplazar una
+   ventana ausente por el histórico.
 4. Este procedimiento describe una revisión manual; no demuestra que exista
-   persistencia, endpoint o linkage automático de cuestionarios.
+   persistencia ni linkage automático de cuestionarios, ni evidencia que el
+   piloto haya operado en terreno.
 
 ---
 
