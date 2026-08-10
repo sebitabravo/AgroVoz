@@ -10,12 +10,20 @@ Cubre:
 """
 
 
+import datetime
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.orm import Session
 
 from app.admin.auth import COOKIE_NAME, create_session_cookie
 from app.models.consultation import Consultation
+
+
+def _pilot_window() -> tuple[datetime.datetime, datetime.datetime]:
+    """Ventana determinista alrededor de las filas creadas por cada test."""
+    now = datetime.datetime.now(datetime.UTC)
+    return now - datetime.timedelta(days=1), now + datetime.timedelta(days=1)
 
 
 def _autenticar(client: AsyncClient) -> None:
@@ -30,6 +38,7 @@ def _crear_consultation(
     feedback: str | None = None,
     decision_productiva: bool = False,
     latency_ms: int = 5000,
+    created_at: datetime.datetime | None = None,
 ) -> Consultation:
     """Helper para crear una consulta de prueba."""
     c = Consultation(
@@ -44,6 +53,7 @@ def _crear_consultation(
         tts_ms=2000,
         feedback=feedback,
         decision_productiva=decision_productiva,
+        created_at=created_at,
     )
     db.add(c)
     db.flush()  # Asegura que el ID esté disponible.
@@ -171,7 +181,7 @@ class TestPilotoMetrics:
         for _ in range(2):
             _crear_consultation(db, phone_hash="user2")
 
-        metrics = get_piloto_metrics(db)
+        metrics = get_piloto_metrics(db, *_pilot_window())
         assert metrics.productores_activos == 1
 
     def test_consultas_por_productor_promedio(self, db: Session) -> None:
@@ -183,7 +193,7 @@ class TestPilotoMetrics:
         for _ in range(2):
             _crear_consultation(db, phone_hash="user2")
 
-        metrics = get_piloto_metrics(db)
+        metrics = get_piloto_metrics(db, *_pilot_window())
         assert metrics.consultas_por_productor == 3.0
 
     def test_pct_utiles(self, db: Session) -> None:
@@ -195,7 +205,7 @@ class TestPilotoMetrics:
         _crear_consultation(db, feedback="util")
         _crear_consultation(db, feedback="no_util")
 
-        metrics = get_piloto_metrics(db)
+        metrics = get_piloto_metrics(db, *_pilot_window())
         assert metrics.pct_utiles == 75.0
 
     def test_pct_utiles_sin_feedback(self, db: Session) -> None:
@@ -203,7 +213,7 @@ class TestPilotoMetrics:
 
         _crear_consultation(db, feedback=None)
 
-        metrics = get_piloto_metrics(db)
+        metrics = get_piloto_metrics(db, *_pilot_window())
         assert metrics.pct_utiles == 0.0
 
     def test_latencia_promedio(self, db: Session) -> None:
@@ -212,7 +222,7 @@ class TestPilotoMetrics:
         _crear_consultation(db, latency_ms=10000)
         _crear_consultation(db, latency_ms=20000)
 
-        metrics = get_piloto_metrics(db)
+        metrics = get_piloto_metrics(db, *_pilot_window())
         assert metrics.latencia_promedio_ms == 15000.0
 
     def test_decisiones_productivas(self, db: Session) -> None:
@@ -222,8 +232,68 @@ class TestPilotoMetrics:
         _crear_consultation(db, decision_productiva=True)
         _crear_consultation(db, decision_productiva=False)
 
-        metrics = get_piloto_metrics(db)
+        metrics = get_piloto_metrics(db, *_pilot_window())
         assert metrics.decisiones_productivas == 2
+
+    def test_ventana_explicita_excluye_consultas_fuera_de_rango(self, db: Session) -> None:
+        """Todas las métricas ignoran filas anteriores y posteriores al piloto."""
+        from app.services.metrics_service import get_piloto_metrics
+
+        start = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
+        end = datetime.datetime(2026, 8, 8, tzinfo=datetime.UTC)
+        inside = datetime.datetime(2026, 8, 4, tzinfo=datetime.UTC)
+        before = datetime.datetime(2026, 7, 31, tzinfo=datetime.UTC)
+        after = datetime.datetime(2026, 8, 9, tzinfo=datetime.UTC)
+
+        for _ in range(3):
+            _crear_consultation(
+                db,
+                phone_hash="inside",
+                feedback="util",
+                decision_productiva=True,
+                latency_ms=1000,
+                created_at=inside,
+            )
+        for timestamp in (before, after):
+            for _ in range(3):
+                _crear_consultation(
+                    db,
+                    phone_hash="outside",
+                    feedback="no_util",
+                    decision_productiva=True,
+                    latency_ms=99_000,
+                    created_at=timestamp,
+                )
+
+        metrics = get_piloto_metrics(db, start, end)
+
+        assert metrics.productores_activos == 1
+        assert metrics.consultas_por_productor == 3.0
+        assert metrics.pct_utiles == 100.0
+        assert metrics.latencia_promedio_ms == 1000.0
+        assert metrics.decisiones_productivas == 3
+        assert metrics.total_consultas == 3
+
+    def test_sin_ventana_es_fail_closed(self, db: Session) -> None:
+        """No entregar ventana nunca mezcla el histórico en el cierre piloto."""
+        from app.services.metrics_service import get_piloto_metrics
+
+        _crear_consultation(db)
+
+        metrics = get_piloto_metrics(db)
+
+        assert metrics.total_consultas == 0
+        assert metrics.productores_activos == 0
+        assert metrics.latencia_promedio_ms == 0.0
+
+    def test_ventana_incompleta_o_naive_rechazada(self, db: Session) -> None:
+        """La API no acepta una ventana ambigua o sin zona horaria."""
+        from app.services.metrics_service import get_piloto_metrics
+
+        with pytest.raises(ValueError, match="requiere inicio"):
+            get_piloto_metrics(db, datetime.datetime.now(datetime.UTC), None)
+        with pytest.raises(ValueError, match="zona horaria"):
+            get_piloto_metrics(db, datetime.datetime(2026, 8, 1), datetime.datetime(2026, 8, 2))
 
 
 # ── Toggle decisión productiva ─────────────────────────────────────
@@ -271,7 +341,7 @@ class TestPilotoExport:
         _crear_consultation(db, feedback="util")
         _crear_consultation(db, feedback="no_util")
 
-        data = get_piloto_export_data(db)
+        data = get_piloto_export_data(db, *_pilot_window())
         assert len(data) == 10
         metricas = [d["metrica"] for d in data]
         assert "Productores activos (3+ consultas)" in metricas
@@ -351,7 +421,7 @@ class TestPrivacidad:
         from app.services.metrics_service import get_piloto_metrics
 
         _crear_consultation(db, phone_hash="hash_anonimo_123")
-        metrics = get_piloto_metrics(db)
+        metrics = get_piloto_metrics(db, *_pilot_window())
         # Las métricas son números, no contienen PII.
         assert isinstance(metrics.productores_activos, int)
         assert isinstance(metrics.pct_utiles, float)
@@ -361,7 +431,7 @@ class TestPrivacidad:
         from app.services.metrics_service import get_piloto_export_data
 
         _crear_consultation(db, phone_hash="hash_anonimo_456")
-        data = get_piloto_export_data(db)
+        data = get_piloto_export_data(db, *_pilot_window())
         for row in data:
             assert "phone" not in str(row["valor"]).lower()
             assert "@" not in str(row["valor"])

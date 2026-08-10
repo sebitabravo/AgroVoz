@@ -200,9 +200,6 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0-dev"
 
     # ── Feature flags ────────────────────
-    # Activar extracción tipada de variables (Pydantic) antes del tool calling.
-    # Issue #191. Default false: usa keyword matching tradicional.
-    use_typed_extraction: bool = False
     # Activar state machine de conversación multi-turno.
     # Issue #192. Default false: pipeline opera en modo stateless.
     use_conversation_state: bool = False

@@ -13,14 +13,17 @@ import asyncio
 import logging
 import os
 import threading
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 
+import app.services.llm_service as llm_service
 from app.core.config import settings
 from app.services.llm_keywords import _VENTA_KILOS_RE, _force_keyword_tool
 from app.services.llm_service import (
+    _GENERATION_TIMEOUT,
     _N_CTX,
     _N_THREADS,
     _TOOLS_SECTION,
@@ -35,6 +38,7 @@ from app.services.llm_service import (
     _build_messages,
     _execute_tool,
     _filter_handler_args,
+    _get_model,
     _mock_answer,
     _parse_content,
     _parse_text_tool_calls,
@@ -229,6 +233,10 @@ class TestLlmConfig:
     en CPU (VPS CX43, 8 vCPU, sin GPU). Si alguien los modifica sin medir
     el impacto, estos tests fallan.
     """
+
+    def test_generation_timeout_deja_presupuesto_e2e(self) -> None:
+        """Un LLM colgado no puede consumir por sí solo todo el presupuesto E2E."""
+        assert 0 < _GENERATION_TIMEOUT < 15.0
 
     def test_n_ctx_alcanza_para_prompt_con_tools(self) -> None:
         """n_ctx debe cubrir el prompt real: system+tools
@@ -847,6 +855,143 @@ class TestAnswerGuardasLlm:
         assert exception_secret not in caplog.text
         assert "timeout_seconds" in caplog.text
 
+    async def test_presupuesto_llm_es_total_y_no_por_vuelta(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El tool loop no puede multiplicar el timeout por sus iteraciones."""
+        llamadas = 0
+
+        async def _completion(*args: object, **kwargs: object) -> object:
+            nonlocal llamadas
+            llamadas += 1
+            await asyncio.sleep(0.02)
+            return {"choices": [{"message": {"content": ""}}]}
+
+        monkeypatch.setattr(llm_service, "_GENERATION_TIMEOUT", 0.01)
+        monkeypatch.setattr(llm_service, "_get_model", lambda: object())
+        monkeypatch.setattr(llm_service, "_run_llm_completion", _completion)
+
+        result = await answer("consulta ambigua de benchmark")
+
+        assert result != ""
+        assert llamadas == 1
+
+    async def test_tool_lenta_respeta_deadline_y_ejecuta_cleanup(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Una tool lenta no abre otra ventana y siempre ejecuta su cleanup."""
+        cleanup = asyncio.Event()
+
+        async def _completion(*args: object, **kwargs: object) -> object:
+            return {"choices": [{"message": {"content": "tool-call"}}]}
+
+        def _tool_calls(content: str) -> list[dict[str, object]]:
+            return [
+                {
+                    "function": {
+                        "name": "get_weather",
+                        "arguments": "{}",
+                    }
+                }
+            ]
+
+        async def _slow_tool(*args: object, **kwargs: object) -> str:
+            try:
+                await asyncio.sleep(0.20)
+            finally:
+                cleanup.set()
+            return "resultado tardío"
+
+        monkeypatch.setattr(llm_service, "_GENERATION_TIMEOUT", 0.05)
+        monkeypatch.setattr(llm_service, "_get_model", lambda: object())
+        monkeypatch.setattr(llm_service, "_run_llm_completion", _completion)
+        monkeypatch.setattr(llm_service, "_parse_text_tool_calls", _tool_calls)
+        monkeypatch.setattr(llm_service, "_execute_tool", _slow_tool)
+        monkeypatch.setattr(llm_service, "_force_keyword_tool", AsyncMock(return_value=None))
+
+        result = await answer("consulta de tool lenta")
+
+        assert cleanup.is_set()
+        assert result == "Estoy teniendo problemas para responder. ¿Podrías preguntar de nuevo más breve?"
+
+    async def test_fallback_forzado_respeta_deadline_y_cancela_tool(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El fallback forzado no puede extender el presupuesto agotado."""
+        cleanup = asyncio.Event()
+
+        async def _completion(*args: object, **kwargs: object) -> object:
+            return {"choices": [{"message": {"content": "No tengo ese dato."}}]}
+
+        async def _slow_forced(*args: object, **kwargs: object) -> str:
+            try:
+                await asyncio.sleep(0.20)
+            finally:
+                cleanup.set()
+            return "dato tardío"
+
+        monkeypatch.setattr(llm_service, "_GENERATION_TIMEOUT", 0.05)
+        monkeypatch.setattr(llm_service, "_get_model", lambda: object())
+        monkeypatch.setattr(llm_service, "_run_llm_completion", _completion)
+        monkeypatch.setattr(llm_service, "_is_generic_response", lambda text: True)
+        monkeypatch.setattr(llm_service, "_force_keyword_tool", _slow_forced)
+
+        result = await answer("consulta ambigua")
+
+        assert cleanup.is_set()
+        assert result == "No tengo ese dato."
+
+    async def test_tool_normal_y_fallback_forzado_feliz(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El camino feliz conserva tools normales y fallback determinista."""
+        completions = iter(
+            [
+                {"choices": [{"message": {"content": "tool-call"}}]},
+                {"choices": [{"message": {"content": "respuesta final"}}]},
+            ]
+        )
+        tool_calls = [{"function": {"name": "get_weather", "arguments": "{}"}}]
+
+        async def _completion(*args: object, **kwargs: object) -> object:
+            return next(completions)
+
+        async def _tool(*args: object, **kwargs: object) -> str:
+            return "resultado seguro"
+
+        monkeypatch.setattr(llm_service, "_get_model", lambda: object())
+        monkeypatch.setattr(llm_service, "_run_llm_completion", _completion)
+        monkeypatch.setattr(
+            llm_service,
+            "_parse_text_tool_calls",
+            lambda content: tool_calls if content == "tool-call" else [],
+        )
+        monkeypatch.setattr(llm_service, "_execute_tool", _tool)
+
+        assert await answer("consulta de clima") == "respuesta final"
+
+        forced_completions = iter(
+            [
+                {"choices": [{"message": {"content": "No tengo ese dato."}}]},
+                {"choices": [{"message": {"content": "respuesta formateada"}}]},
+            ]
+        )
+
+        async def _forced_completion(*args: object, **kwargs: object) -> object:
+            return next(forced_completions)
+
+        monkeypatch.setattr(llm_service, "_run_llm_completion", _forced_completion)
+        monkeypatch.setattr(
+            llm_service,
+            "_force_keyword_tool",
+            AsyncMock(return_value="dato determinista"),
+        )
+        assert await answer("consulta ambigua") == "respuesta formateada"
+
     async def test_llm_ocupado_responde_sin_colgar(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Si la guarda detecta LLM ocupado, retorna mensaje rápido sin esperar."""
 
@@ -1092,6 +1237,37 @@ class TestAnswerGuardasLlm:
 class TestUtilidades:
     """is_model_available, get_model_error, reset_model."""
 
+    def test_get_model_no_reinicia_worker_muerto_en_request(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """El request observa el worker muerto; el recalentamiento va aparte."""
+
+        class _DeadManager:
+            def __init__(self) -> None:
+                self.start_called = False
+
+            def is_healthy(self) -> bool:
+                return False
+
+            def start(self) -> bool:
+                self.start_called = True
+                return True
+
+        model_path = tmp_path / "fake.gguf"
+        model_path.touch()
+        manager = _DeadManager()
+        monkeypatch.setattr(settings, "llm_model_path", str(model_path))
+        monkeypatch.setattr(llm_service, "_worker_manager", manager)
+        monkeypatch.setattr(llm_service, "_is_llm_circuit_open", lambda: False)
+        preload_calls: list[None] = []
+        monkeypatch.setattr(llm_service, "preload_model", lambda: preload_calls.append(None))
+
+        assert _get_model() is None
+        assert manager.start_called is False
+        assert preload_calls == [None]
+
     def test_preload_wait_confirma_carga_antes_de_retornar(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -1102,7 +1278,7 @@ class TestUtilidades:
         def _fake_get_model() -> None:
             llamadas.append("cargado")
 
-        monkeypatch.setattr("app.services.llm_service._get_model", _fake_get_model)
+        monkeypatch.setattr("app.services.llm_service._load_model", _fake_get_model)
 
         preload_model(wait=True)
 

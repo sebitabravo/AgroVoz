@@ -33,7 +33,7 @@ import os
 import re
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import cast
 
 import httpx
@@ -96,7 +96,7 @@ WHITELIST_TOOLS = frozenset(
 # Máximo de iteraciones del Tool Calling loop (previene loops infinitos).
 MAX_TOOL_ITERATIONS = 3
 
-# Timeout de generación por llamada al LLM (segundos).
+# Presupuesto E2E del segmento LLM (generaciones, tools y fallback).
 #
 # Bajado de 60s a 25s. Con 60s el peor caso medido fue un pipeline de 86s
 # (Whisper + timeout completo del LLM + fallback), contra un objetivo de 15s:
@@ -104,10 +104,10 @@ MAX_TOOL_ITERATIONS = 3
 # vale cortar antes y dejar que responda el fallback por keywords, que entrega
 # datos reales de ODEPA en vez de un mensaje generico.
 #
-# 25s sigue dando aire al cold start del modelo y a una vuelta del tool calling
-# loop. Lo que hace que el caso comun entre en presupuesto no es este timeout,
-# sino el fast-path deterministico y el cache de prompt.
-_GENERATION_TIMEOUT = 25.0
+# El worker se precalienta fuera del request. Este es el presupuesto total de
+# una respuesta LLM, no un timeout por vuelta del loop; deja margen para
+# Whisper/TTS dentro del presupuesto E2E de 15s.
+_GENERATION_TIMEOUT = 10.0
 _LLM_CIRCUIT_COOLDOWN_SECONDS = 90.0
 _LLM_BUSY_TEXT = "Estoy procesando otra consulta ahora. ¿Podrías intentar de nuevo en un momento?"
 
@@ -854,6 +854,8 @@ _model_lock = threading.Lock()
 _model_error: str | None = None
 _llm_circuit_lock = threading.Lock()
 _llm_circuit_open_until = 0.0
+_preload_lock = threading.Lock()
+_preload_in_progress = False
 
 
 class LlmGuardError(RuntimeError):
@@ -882,9 +884,9 @@ def preload_model(*, wait: bool = False) -> None:
     conserva su fallback.
     """
     if wait:
-        _get_model()
+        _load_model()
         return
-    threading.Thread(target=_get_model, daemon=True, name="llm-preload").start()
+    threading.Thread(target=_load_model, daemon=True, name="llm-preload").start()
 
 
 def _worker_config(model_path: str) -> LlmWorkerConfig:
@@ -899,42 +901,70 @@ def _worker_config(model_path: str) -> LlmWorkerConfig:
     )
 
 
-def _get_model() -> LlmWorkerManager | None:
-    """Obtiene un worker saludable sin cargar llama.cpp en FastAPI."""
+def _load_model() -> LlmWorkerManager | None:
+    """Carga el worker fuera del request y actualiza sus aliases de salud."""
     global _worker_manager, _model, _model_loaded, _model_error
 
-    with _model_lock:
-        model_path = settings.llm_model_path
-        if not model_path or not os.path.isfile(model_path):
-            if _worker_manager is not None:
-                _worker_manager.stop()
-            _worker_manager = None
+    global _preload_in_progress
+    with _preload_lock:
+        if _preload_in_progress:
+            return _worker_manager
+        _preload_in_progress = True
+    try:
+        with _model_lock:
+            model_path = settings.llm_model_path
+            if not model_path or not os.path.isfile(model_path):
+                if _worker_manager is not None:
+                    _worker_manager.stop()
+                _worker_manager = None
+                _model = None
+                _model_loaded = False
+                _model_error = "model_not_found"
+                logger.warning("Modelo LLM no encontrado — LLM en modo mock")
+                return None
+
+            if _worker_manager is None:
+                _worker_manager = LlmWorkerManager(_worker_config(model_path))
+            if _worker_manager.is_healthy():
+                _model = _worker_manager
+                _model_loaded = True
+                _model_error = None
+                return _worker_manager
+            if _worker_manager.start():
+                _model = _worker_manager
+                _model_loaded = True
+                _model_error = None
+                return _worker_manager
+
             _model = None
             _model_loaded = False
-            _model_error = "model_not_found"
-            logger.warning("Modelo LLM no encontrado — LLM en modo mock; se reintentara en el proximo request")
+            _model_error = _worker_manager.health().last_error_code or "worker_unavailable"
+            logger.warning(
+                "LLM worker no disponible — error=%s; se reintentara",
+                _model_error,
+            )
             return None
+    finally:
+        with _preload_lock:
+            _preload_in_progress = False
 
-        if _worker_manager is None:
-            _worker_manager = LlmWorkerManager(_worker_config(model_path))
-        if not _worker_manager.is_healthy() and _is_llm_circuit_open():
-            # No recargar ~2 GB para una request que el circuit breaker
-            # rechazará inmediatamente; el primer request post-cooldown reinicia.
-            return _worker_manager
-        if _worker_manager.start():
-            _model = _worker_manager
-            _model_loaded = True
-            _model_error = None
-            return _worker_manager
 
-        _model = None
-        _model_loaded = False
-        _model_error = _worker_manager.health().last_error_code or "worker_unavailable"
-        logger.warning(
-            "LLM worker no disponible — error=%s; se reintentara",
-            _model_error,
-        )
+def _get_model() -> LlmWorkerManager | None:
+    """Obtiene un worker saludable sin arrancarlo dentro del request."""
+    model_path = settings.llm_model_path
+    if not model_path or not os.path.isfile(model_path):
         return None
+    with _model_lock:
+        model = _worker_manager
+        if model is not None and model.is_healthy():
+            return model
+        if model is not None and _is_llm_circuit_open():
+            return model
+
+    # El primer request o la recuperación se recalentará en background; la
+    # request actual conserva el presupuesto y usa el fallback disponible.
+    preload_model()
+    return None
 
 
 def _mark_worker_failure(
@@ -943,12 +973,17 @@ def _mark_worker_failure(
 ) -> None:
     """Actualiza aliases de salud sin exponer mensajes del proceso hijo."""
     global _model, _model_loaded, _model_error
+    should_preload = False
     with _model_lock:
         if _worker_manager is not manager or manager.is_healthy():
             return
         _model = None
         _model_loaded = False
         _model_error = error_code
+        should_preload = True
+    if should_preload:
+        # La recuperación ocurre fuera de la request que detectó el fallo.
+        preload_model()
 
 
 def _is_llm_circuit_open() -> bool:
@@ -995,17 +1030,19 @@ async def _run_llm_completion(
     model: LlmWorkerManager,
     messages: list[dict[str, object]],
     max_tokens: int = 128,
+    timeout_seconds: float | None = None,
 ) -> object:
     """Delega inferencia al hijo y traduce fallas al contrato existente."""
     if _is_llm_circuit_open():
         raise LlmCircuitOpenError("llm_circuit_open")
 
     try:
+        request_timeout = timeout_seconds or _GENERATION_TIMEOUT
         response = await asyncio.to_thread(
             model.complete,
             messages,
             max_tokens,
-            _GENERATION_TIMEOUT,
+            request_timeout,
         )
     except LlmWorkerBusyError:
         raise LlmBusyError("llm_busy") from None
@@ -1033,6 +1070,46 @@ async def _run_llm_completion(
     return response
 
 
+async def _await_with_deadline[T](
+    operation: Callable[[], Awaitable[T]],
+    *,
+    deadline: float,
+) -> T:
+    """Ejecuta una operación dentro del presupuesto monotónico compartido.
+
+    ``wait_for`` cancela la coroutine de la operación al vencer el plazo y
+    espera su cleanup. El deadline se calcula antes de cada espera para no
+    reiniciar el presupuesto entre generaciones, tools o fallbacks.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("llm_generation_budget_exhausted")
+    try:
+        return await asyncio.wait_for(operation(), timeout=remaining)
+    except TimeoutError as exc:
+        raise TimeoutError("llm_generation_budget_exhausted") from exc
+
+
+async def _run_forced_keyword_tool(
+    query_text: str,
+    phone_hash: str | None,
+    *,
+    deadline: float,
+) -> str | None:
+    """Intenta el fallback determinista sin extender el deadline E2E."""
+    try:
+        return await _await_with_deadline(
+            lambda: _force_keyword_tool(query_text, phone_hash=phone_hash),
+            deadline=deadline,
+        )
+    except (SQLAlchemyError, OSError, RuntimeError, ValueError, TimeoutError) as exc:
+        logger.warning(
+            "Fallback keyword no disponible — error=%s",
+            type(exc).__name__,
+        )
+        return None
+
+
 async def _preflight_keyword_tool(
     query_text: str,
     phone_hash: str | None,
@@ -1044,7 +1121,7 @@ async def _preflight_keyword_tool(
     El pipeline ya usa fast-path para preguntas simples. Este segundo control
     cubre las consultas que por longitud o contexto no pasan ese gate, pero
     cuyo resultado sigue siendo un dato crudo de ODEPA/OpenMeteo. Así no se
-    espera el timeout de 25 segundos para ejecutar una tool conocida.
+    espera el timeout completo del LLM para ejecutar una tool conocida.
     """
     if system_tip is not None or consulta_tipo not in {"precio", "clima"}:
         return None
@@ -1594,19 +1671,38 @@ async def answer(
     if not query_text or not query_text.strip():
         return NO_RESPONSE_TEXT
 
-    forced_preflight = await _preflight_keyword_tool(
-        query_text,
-        phone_hash,
-        consulta_tipo,
-        system_tip,
-    )
+    # Un solo reloj monotónico para toda la request: LLM, tools y fallback.
+    # Así una tool de red lenta no puede agregar otra ventana después de la
+    # generación ni hacer que el webhook supere el límite E2E.
+    generation_deadline = time.monotonic() + _GENERATION_TIMEOUT
+
+    try:
+        forced_preflight = await _await_with_deadline(
+            lambda: _preflight_keyword_tool(
+                query_text,
+                phone_hash,
+                consulta_tipo,
+                system_tip,
+            ),
+            deadline=generation_deadline,
+        )
+    except TimeoutError:
+        logger.warning("Timeout del LLM — timeout_seconds=%s", _GENERATION_TIMEOUT)
+        return "Estoy teniendo problemas para responder. ¿Podrías preguntar de nuevo más breve?"
     if forced_preflight:
         logger.info("Fallback keyword ejecutado antes del LLM — tipo=%s", consulta_tipo)
         return forced_preflight
 
     # La carga/reinicialización del hijo puede esperar hasta el timeout de
     # startup. Nunca bloquear el event loop del webhook mientras ocurre.
-    model = await asyncio.to_thread(_get_model)
+    try:
+        model = await _await_with_deadline(
+            lambda: asyncio.to_thread(_get_model),
+            deadline=generation_deadline,
+        )
+    except TimeoutError:
+        logger.warning("Timeout del LLM — timeout_seconds=%s", _GENERATION_TIMEOUT)
+        return "Estoy teniendo problemas para responder. ¿Podrías preguntar de nuevo más breve?"
     history = history or []
 
     if model is None:
@@ -1620,11 +1716,26 @@ async def answer(
         consulta_tipo=consulta_tipo,
     )
 
+    def _remaining_generation_budget() -> float:
+        """Retorna el presupuesto restante para todas las vueltas del LLM."""
+        return generation_deadline - time.monotonic()
+
     try:
         for _iteration in range(MAX_TOOL_ITERATIONS):
             # NO pasar tools/tool_choice — Qwen2.5 genera <tool_call> como texto
             # nativo cuando las definiciones estan en el system prompt.
-            response = await _run_llm_completion(model, messages, max_tokens=128)
+            remaining = _remaining_generation_budget()
+            if remaining <= 0:
+                raise TimeoutError("llm_generation_budget_exhausted")
+            response = await _await_with_deadline(
+                lambda remaining=remaining: _run_llm_completion(
+                    model,
+                    messages,
+                    max_tokens=128,
+                    timeout_seconds=remaining,
+                ),
+                deadline=generation_deadline,
+            )
 
             content = _parse_content(response)
             if not content:
@@ -1647,7 +1758,11 @@ async def answer(
                     # ("no tengo datos", "reformula") sin llamar tools,
                     # forzar tool call por keyword detection.
                     if _iteration == 0 and _is_generic_response(cleaned):
-                        forced = await _force_keyword_tool(query_text, phone_hash=phone_hash)
+                        forced = await _run_forced_keyword_tool(
+                            query_text,
+                            phone_hash,
+                            deadline=generation_deadline,
+                        )
                         if forced:
                             # Inyectar el tool call + respuesta para que
                             # el LLM lo formatee en la siguiente iteracion.
@@ -1705,7 +1820,14 @@ async def answer(
                     fn_args = {}
 
                 # Ejecutar tool.
-                tool_result = await _execute_tool(fn_name, fn_args, phone_hash=phone_hash)
+                tool_result = await _await_with_deadline(
+                    lambda fn_name=fn_name, fn_args=fn_args: _execute_tool(
+                        fn_name,
+                        fn_args,
+                        phone_hash=phone_hash,
+                    ),
+                    deadline=generation_deadline,
+                )
                 if fn_name == "get_reporte_pdf":
                     from app.services.report_service import REPORT_TOOL_SIGNAL
 
@@ -1735,7 +1857,18 @@ async def answer(
             }
         )
         try:
-            final_response = await _run_llm_completion(model, messages, max_tokens=128)
+            remaining = _remaining_generation_budget()
+            if remaining <= 0:
+                raise TimeoutError("llm_generation_budget_exhausted")
+            final_response = await _await_with_deadline(
+                lambda remaining=remaining: _run_llm_completion(
+                    model,
+                    messages,
+                    max_tokens=128,
+                    timeout_seconds=remaining,
+                ),
+                deadline=generation_deadline,
+            )
             content = _parse_content(final_response)
             if content:
                 cleaned = _strip_tool_tags(content)
@@ -1751,7 +1884,11 @@ async def answer(
 
     except TimeoutError:
         logger.warning("Timeout del LLM — timeout_seconds=%s", _GENERATION_TIMEOUT)
-        forced = await _force_keyword_tool(query_text, phone_hash=phone_hash)
+        forced = await _run_forced_keyword_tool(
+            query_text,
+            phone_hash,
+            deadline=generation_deadline,
+        )
         if forced:
             return forced
         return "Estoy teniendo problemas para responder. ¿Podrías preguntar de nuevo más breve?"
@@ -1760,14 +1897,22 @@ async def answer(
         # durante el cooldown: eso contaminaba las consultas siguientes con un
         # mensaje de cola aunque el lock nativo ya estuviera liberado.
         logger.warning("Circuit breaker LLM activo — usando respuesta degradada")
-        forced = await _force_keyword_tool(query_text, phone_hash=phone_hash)
+        forced = await _run_forced_keyword_tool(
+            query_text,
+            phone_hash,
+            deadline=generation_deadline,
+        )
         return forced or FALLBACK_TEXT
     except LlmGuardError as exc:
         logger.warning(
             "LLM no disponible temporalmente — error=%s",
             type(exc).__name__,
         )
-        forced = await _force_keyword_tool(query_text, phone_hash=phone_hash)
+        forced = await _run_forced_keyword_tool(
+            query_text,
+            phone_hash,
+            deadline=generation_deadline,
+        )
         if forced:
             return forced
         return _LLM_BUSY_TEXT
@@ -1778,7 +1923,11 @@ async def answer(
         # inusualmente largo o un audio muy extenso transcrito podrian
         # seguir gatillandola.
         logger.error("Error en generacion LLM — error=%s", type(exc).__name__)
-        forced = await _force_keyword_tool(query_text, phone_hash=phone_hash)
+        forced = await _run_forced_keyword_tool(
+            query_text,
+            phone_hash,
+            deadline=generation_deadline,
+        )
         if forced:
             return forced
         return "Tuve un problema al procesar tu consulta. ¿Probamos de nuevo?"

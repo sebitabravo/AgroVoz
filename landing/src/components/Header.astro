@@ -43,3 +43,41 @@
   </div>
   <div class="nav-backdrop" id="nav-backdrop" aria-hidden="true"></div>
 </header>
+
+<script>
+  // Drawer de navegación compartido por la landing y las páginas públicas.
+  const header = document.getElementById("site-header");
+  const navToggle = document.getElementById("nav-toggle");
+  const nav = document.getElementById("nav");
+  const navBackdrop = document.getElementById("nav-backdrop");
+
+  function setNav(open: boolean) {
+    if (!header || !navToggle) return;
+    header.classList.toggle("nav-open", open);
+    navToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    navToggle.setAttribute(
+      "aria-label",
+      open ? "Cerrar menú de navegación" : "Abrir menú de navegación",
+    );
+    nav?.setAttribute(
+      "aria-hidden",
+      !open && window.innerWidth <= 920 ? "true" : "false",
+    );
+    document.body.style.overflow = open && window.innerWidth <= 920 ? "hidden" : "";
+  }
+
+  setNav(false);
+  navToggle?.addEventListener("click", () =>
+    setNav(!header?.classList.contains("nav-open")),
+  );
+  document.querySelectorAll<HTMLElement>("#nav a").forEach((a) =>
+    a.addEventListener("click", () => setNav(false)),
+  );
+  navBackdrop?.addEventListener("click", () => setNav(false));
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") setNav(false);
+  });
+  window.matchMedia("(min-width: 921px)").addEventListener("change", (event) => {
+    if (event.matches) setNav(false);
+  });
+</script>

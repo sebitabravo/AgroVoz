@@ -3,6 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
+from app.core.config import settings
 from app.schemas.variables import ExtractedVariables
 from app.services.pipeline_service import AgroVozPipeline
 
@@ -102,4 +103,32 @@ class TestExtractVariablesDegradacion:
         result = AgroVozPipeline._extract_variables("calendario agrícola del trigo en Traiguén")
 
         assert result.producto == "trigo"
+        assert result.consulta_tipo == "agronomica"
+
+    @pytest.mark.parametrize(
+        ("query", "expected_type"),
+        [
+            ("a cuanto esta la cosecha de trigo", "precio"),
+            ("como esta el clima para la cosecha", "clima"),
+        ],
+    )
+    def test_gate_agronomico_apagado_no_tapa_precio_ni_clima(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        query: str,
+        expected_type: str,
+    ) -> None:
+        """Una keyword agronómica no debe secuestrar una consulta normal."""
+        monkeypatch.setattr(settings, "agronomic_rules_enabled", False)
+
+        result = AgroVozPipeline._extract_variables(query)
+
+        assert result.consulta_tipo == expected_type
+
+    def test_gate_agronomico_habilitado_conserva_precedencia(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Con reglas activas, una consulta mixta sigue siendo agronómica."""
+        monkeypatch.setattr(settings, "agronomic_rules_enabled", True)
+
+        result = AgroVozPipeline._extract_variables("a cuanto esta la cosecha de trigo")
+
         assert result.consulta_tipo == "agronomica"

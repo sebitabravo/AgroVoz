@@ -1,0 +1,240 @@
+---
+import Base from "../layouts/Base.astro";
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
+
+const pageTitle = "Privacidad — AgroVoz";
+const pageDescription =
+  "Información pública sobre el tratamiento de datos personales de AgroVoz y sus controles pendientes bajo la Ley 21.719.";
+---
+
+<Base title={pageTitle} description={pageDescription}>
+  <Header />
+  <main id="top" class="min-h-screen py-16 sm:py-24">
+    <div class="mx-auto max-w-4xl px-5 sm:px-8">
+      <a
+        href="/#top"
+        class="mb-8 inline-flex items-center text-sm font-semibold text-[var(--color-accent-deep)] underline decoration-[var(--color-accent)] underline-offset-4 hover:text-[var(--color-ink)]"
+      >
+        ← Volver a AgroVoz
+      </a>
+
+      <header class="mb-12 max-w-3xl">
+        <p class="eyebrow">Privacidad y protección de datos</p>
+        <h1 class="text-4xl font-extrabold tracking-tight text-[var(--color-ink)] sm:text-6xl">
+          Información de privacidad
+        </h1>
+        <p class="mt-6 text-lg leading-8 text-[var(--color-muted)]">
+          Esta página hace accesible un resumen técnico público de privacidad de AgroVoz. Describe el
+          comportamiento observado y las brechas pendientes; no es una política aprobada, no reemplaza
+          la revisión jurídica externa ni constituye una declaración de cumplimiento.
+        </p>
+      </header>
+
+      <aside
+        class="mb-12 border-l-4 border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-5 text-[var(--color-ink)] sm:p-6"
+        aria-labelledby="estado-documento"
+      >
+        <h2 id="estado-documento" class="text-lg font-bold">Estado del documento</h2>
+        <p class="mt-2 leading-7">
+          <strong>Resumen técnico público — versión 1.1, sujeto a revisión jurídica.</strong>
+          Describe el comportamiento observado al 29 de julio de 2026 y las brechas materiales pendientes.
+          La Ley 21.719 entra en vigencia el 1 de diciembre de 2026. Los datos de responsable,
+          representante y canales de derechos todavía están por designar o completar.
+        </p>
+      </aside>
+
+      <div class="space-y-14 text-base leading-7 text-[var(--color-ink)]">
+        <section aria-labelledby="responsable">
+          <h2 id="responsable" class="text-2xl font-bold tracking-tight sm:text-3xl">
+            1. Responsable y contacto
+          </h2>
+          <p class="mt-4">
+            AgroVoz es un asistente por WhatsApp desarrollado en el contexto académico de INACAP
+            Temuco.
+          </p>
+          <div class="mt-5 overflow-x-auto rounded-lg border border-[var(--color-line)]">
+            <table class="min-w-full text-left text-sm">
+              <caption class="sr-only">Datos de responsable y contacto aún por completar</caption>
+              <thead class="bg-[var(--color-accent-soft)]">
+                <tr>
+                  <th scope="col" class="px-4 py-3 font-bold">Información</th>
+                  <th scope="col" class="px-4 py-3 font-bold">Estado</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-[var(--color-line)]">
+                <tr><th scope="row" class="px-4 py-3 font-semibold">Responsable del tratamiento</th><td class="px-4 py-3">Por designar</td></tr>
+                <tr><th scope="row" class="px-4 py-3 font-semibold">Representante legal, si corresponde</th><td class="px-4 py-3">Por designar</td></tr>
+                <tr><th scope="row" class="px-4 py-3 font-semibold">Domicilio</th><td class="px-4 py-3">Por completar</td></tr>
+                <tr><th scope="row" class="px-4 py-3 font-semibold">Correo para ejercer derechos</th><td class="px-4 py-3">Por completar</td></tr>
+                <tr><th scope="row" class="px-4 py-3 font-semibold">WhatsApp u otro canal verificable</th><td class="px-4 py-3">Por completar</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="mt-4">
+            Hasta completar y validar estos datos no existe un canal formal suficiente para iniciar la
+            captación de consentimientos o tramitar solicitudes de derechos.
+          </p>
+        </section>
+
+        <section aria-labelledby="datos">
+          <h2 id="datos" class="text-2xl font-bold tracking-tight sm:text-3xl">2. Datos que el sistema trata hoy</h2>
+          <p class="mt-4">
+            Los datos seudonimizados siguen siendo datos personales cuando pueden vincularse
+            nuevamente con una persona usando información adicional. AgroVoz no los denomina
+            anónimos.
+          </p>
+          <div class="mt-5 overflow-x-auto rounded-lg border border-[var(--color-line)]">
+            <table class="min-w-[720px] text-left text-sm">
+              <caption class="sr-only">Tratamientos, datos y retención observados</caption>
+              <thead class="bg-[var(--color-accent-soft)]">
+                <tr>
+                  <th scope="col" class="px-4 py-3 font-bold">Tratamiento</th>
+                  <th scope="col" class="px-4 py-3 font-bold">Datos</th>
+                  <th scope="col" class="px-4 py-3 font-bold">Comportamiento y retención observados</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-[var(--color-line)]">
+                <tr><th scope="row" class="px-4 py-3 font-semibold">Canal WhatsApp</th><td class="px-4 py-3">Número/chat ID, audio o texto y metadatos del mensaje</td><td class="px-4 py-3">Meta y Open-WA procesan el mensaje para entregarlo. El backend recibe el identificador durante la solicitud.</td></tr>
+                <tr><th scope="row" class="px-4 py-3 font-semibold">Audio temporal</th><td class="px-4 py-3">Archivos <code>.ogg</code> y <code>.wav</code></td><td class="px-4 py-3">Se eliminan del VPS en menos de 24 horas en el flujo normal. Deben verificarse fallos, backups y cleanup.</td></tr>
+                <tr><th scope="row" class="px-4 py-3 font-semibold">Registro operativo</th><td class="px-4 py-3"><code>phone_hash</code>, intención, producto, tiempos, feedback, fecha y estado de entrega</td><td class="px-4 py-3">Sin <code>history_consent</code> el contenido queda vacío. Con opt-in se redacta tras entrega o fallo y un job horario elimina staging mayor a 24 horas. Los metadatos aún no tienen TTL aprobado.</td></tr>
+                <tr><th scope="row" class="px-4 py-3 font-semibold">Preferencias</th><td class="px-4 py-3">Hash, tipo de identidad, código de grupo, comuna/localidad, cultivos y opt-ins</td><td class="px-4 py-3">Se guardan sin un TTL automático definido. <code>location_consent</code> es separado y no habilita otros tratamientos.</td></tr>
+                <tr><th scope="row" class="px-4 py-3 font-semibold">Ubicación GPS, solo con opt-in</th><td class="px-4 py-3"><code>lat</code>, <code>lng</code> y fecha de actualización del pin</td><td class="px-4 py-3"><code>location_consent</code> y <code>LOCATION_SHARING_ENABLED</code> son necesarios para nuevas escrituras. El pin se limpia tras 180 días desde su última actualización.</td></tr>
+                <tr><th scope="row" class="px-4 py-3 font-semibold">Dataset de voz, solo con opt-in</th><td class="px-4 py-3">Copia de audio, transcripción y metadatos técnicos</td><td class="px-4 py-3"><code>dataset_consent</code> permite crear una copia distinta al audio temporal. Su plazo y borrado E2E deben cerrarse antes de recolectar.</td></tr>
+                <tr><th scope="row" class="px-4 py-3 font-semibold">Logs</th><td class="px-4 py-3">Códigos cerrados, contadores, tiempos e IDs técnicos de correlación</td><td class="px-4 py-3">El código omite texto libre y teléfono/chat/hash. Docker conserva como máximo 3 × 10 MB por servicio, pero aún falta aprobar un plazo temporal y verificar Open-WA.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section aria-labelledby="finalidades">
+          <h2 id="finalidades" class="text-2xl font-bold tracking-tight sm:text-3xl">3. Finalidades y bases propuestas</h2>
+          <p class="mt-4">Esta tabla es una hipótesis de trabajo sujeta a revisión jurídica:</p>
+          <div class="mt-5 overflow-x-auto rounded-lg border border-[var(--color-line)]">
+            <table class="min-w-[720px] text-left text-sm">
+              <caption class="sr-only">Finalidades y bases propuestas</caption>
+              <thead class="bg-[var(--color-accent-soft)]"><tr><th scope="col" class="px-4 py-3 font-bold">Finalidad</th><th scope="col" class="px-4 py-3 font-bold">Base propuesta</th><th scope="col" class="px-4 py-3 font-bold">Estado</th></tr></thead>
+              <tbody class="divide-y divide-[var(--color-line)]">
+                <tr><th scope="row" class="px-4 py-3 font-semibold">Procesar una pregunta y entregar una respuesta</th><td class="px-4 py-3">Ejecución del servicio solicitado</td><td class="px-4 py-3">El contenido no consentido se redacta; la base y retención de metadatos operativos siguen pendientes.</td></tr>
+                <tr><th scope="row" class="px-4 py-3 font-semibold">Dataset de voz para evaluar o mejorar Whisper</th><td class="px-4 py-3">Consentimiento específico de dataset</td><td class="px-4 py-3">Debe cubrir expresamente audio y transcripción.</td></tr>
+                <tr><th scope="row" class="px-4 py-3 font-semibold">Recordar la última consulta durante 28 días</th><td class="px-4 py-3">Consentimiento específico de memoria contextual</td><td class="px-4 py-3"><code>history_consent</code> existe; la feature sigue bloqueada hasta aprobación externa.</td></tr>
+                <tr><th scope="row" class="px-4 py-3 font-semibold">Consultar clima usando un pin GPS guardado</th><td class="px-4 py-3">Consentimiento específico de ubicación</td><td class="px-4 py-3"><code>location_consent</code> es independiente; todavía no existe activación por voz.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="mt-4 font-semibold">Aceptar una finalidad opcional no implica aceptar otra.</p>
+        </section>
+
+        <section aria-labelledby="identidad">
+          <h2 id="identidad" class="text-2xl font-bold tracking-tight sm:text-3xl">4. Identidad y seudonimización</h2>
+          <p class="mt-4">
+            El número de WhatsApp se transforma con HMAC-SHA256 y un secreto
+            (<code>PHONE_HASH_PEPPER</code>) para usarlo como identidad interna. Esta medida dificulta
+            atribuir la base sin la clave, pero no es anonimización irreversible: el servidor recibe el
+            identificador real al procesar el mensaje, y quien controla canal, servidor y clave puede
+            correlacionar actividad. Las alertas pueden guardar <code>wa_chat_id</code> directamente.
+          </p>
+        </section>
+
+        <section aria-labelledby="destinatarios">
+          <h2 id="destinatarios" class="text-2xl font-bold tracking-tight sm:text-3xl">5. Destinatarios e infraestructura</h2>
+          <p class="mt-4">
+            WhatsApp/Meta procesa mensajes, audio, identificadores y metadatos del canal. Open-WA
+            autohospedado procesa la sesión y los mensajes necesarios para operar. El VPS en Hetzner,
+            Alemania, aloja backend, SQLite, archivos temporales, modelos y logs. La transferencia
+            internacional y sus mecanismos todavía están pendientes de documentación.
+          </p>
+          <p class="mt-4">
+            Open-Meteo recibe coordenadas redondeadas a 2 decimales para consultar clima; no recibe
+            hash, texto ni coordenadas precisas del productor. ODEPA no recibe datos del productor.
+            <code>MCP_ENABLED=false</code> y <code>EXPENSE_TRACKING_ENABLED=false</code> permanecen
+            apagados por defecto.
+          </p>
+        </section>
+
+        <section aria-labelledby="derechos">
+          <h2 id="derechos" class="text-2xl font-bold tracking-tight sm:text-3xl">6. Derechos y revocación</h2>
+          <p class="mt-4">
+            La Ley 21.719 contempla acceso, rectificación, supresión, oposición, portabilidad y
+            bloqueo, entre otros derechos. El mecanismo operativo y el procedimiento para autenticar al
+            solicitante están pendientes porque el responsable y los contactos todavía no se designan.
+          </p>
+          <p class="mt-4">
+            La revocación implementada para memoria contextual, desde admin autenticado o WhatsApp
+            verificado, desactiva el opt-in usado, elimina <code>consultation_history</code> del sujeto y
+            registra evidencia append-only mediante un token HMAC. No elimina automáticamente todos
+            los metadatos, dataset de voz, logs, backups, preferencias, alertas ni sesiones del canal.
+          </p>
+        </section>
+
+        <section aria-labelledby="retencion">
+          <h2 id="retencion" class="text-2xl font-bold tracking-tight sm:text-3xl">7. Retención pendiente de aprobación</h2>
+          <div class="mt-5 overflow-x-auto rounded-lg border border-[var(--color-line)]">
+            <table class="min-w-[620px] text-left text-sm">
+              <caption class="sr-only">Plazos técnicos y brechas de retención</caption>
+              <thead class="bg-[var(--color-accent-soft)]"><tr><th scope="col" class="px-4 py-3 font-bold">Datos</th><th scope="col" class="px-4 py-3 font-bold">Plazo técnico actual</th><th scope="col" class="px-4 py-3 font-bold">Brecha</th></tr></thead>
+              <tbody class="divide-y divide-[var(--color-line)]">
+                <tr><th scope="row" class="px-4 py-3 font-semibold">Audio temporal</th><td class="px-4 py-3">Menos de 24 horas</td><td class="px-4 py-3">Auditar excepciones y backups.</td></tr>
+                <tr><th scope="row" class="px-4 py-3 font-semibold">Memoria contextual</th><td class="px-4 py-3">28 días</td><td class="px-4 py-3">Separar consentimiento y probar scheduler en producción.</td></tr>
+                <tr><th scope="row" class="px-4 py-3 font-semibold">Dataset de voz</th><td class="px-4 py-3">Propuesta hasta cierre académico</td><td class="px-4 py-3">Implementar inventario y borrado verificable.</td></tr>
+                <tr><th scope="row" class="px-4 py-3 font-semibold">Preferencias y alertas</th><td class="px-4 py-3">Sin TTL</td><td class="px-4 py-3">Definir término del servicio y revocación.</td></tr>
+                <tr><th scope="row" class="px-4 py-3 font-semibold">Logs y auditoría</th><td class="px-4 py-3">Tope por tamaño, sin plazo temporal</td><td class="px-4 py-3">Aprobar TTL y acceso; verificar rotación productiva y Open-WA.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section aria-labelledby="seguridad">
+          <h2 id="seguridad" class="text-2xl font-bold tracking-tight sm:text-3xl">8. Seguridad y límites declarados</h2>
+          <ul class="mt-4 list-disc space-y-2 pl-6">
+            <li>HMAC del identificador interno: implementada; sigue siendo seudonimización.</li>
+            <li>Audio temporal: eliminado en menos de 24 horas en el flujo normal; requiere evidencia periódica.</li>
+            <li>Firma y autenticación de webhooks y admin: implementadas según configuración.</li>
+            <li>Feature gates de MCP, estado, historial y gastos: apagados por defecto.</li>
+            <li>La minimización de logs de aplicación está implementada; faltan TTL y verificación productiva/Open-WA.</li>
+          </ul>
+          <p class="mt-4">
+            AgroVoz entrega información de precios y clima; no pretende decidir, puntuar o recomendar
+            acciones al productor. Si se detecta participación de menores, el tratamiento debe detenerse
+            y escalarse a revisión antes de conservar datos.
+          </p>
+        </section>
+
+        <section aria-labelledby="pendientes">
+          <h2 id="pendientes" class="text-2xl font-bold tracking-tight sm:text-3xl">9. Bloqueos antes del piloto</h2>
+          <ul class="mt-4 list-disc space-y-2 pl-6">
+            <li>Designar responsable, representante y canales de derechos.</li>
+            <li>Aprobar finalidad, base, TTL y supresión de metadatos operativos.</li>
+            <li>Cerrar retención y borrado del dataset de voz.</li>
+            <li>Definir TTL, acceso y prueba productiva de logs, incluido Open-WA.</li>
+            <li>Documentar Hetzner, backups, contrato y transferencia internacional.</li>
+            <li>Aprobar procedimientos de derechos e incidentes.</li>
+            <li>Obtener revisión jurídica externa firmada.</li>
+            <li>Preparar y publicar una versión formal aprobada y accesible.</li>
+          </ul>
+        </section>
+
+        <section aria-labelledby="fuentes">
+          <h2 id="fuentes" class="text-2xl font-bold tracking-tight sm:text-3xl">10. Fuentes oficiales</h2>
+          <ul class="mt-4 list-disc space-y-2 pl-6">
+            <li>
+              <a class="font-semibold text-[var(--color-accent-deep)] underline underline-offset-4 hover:text-[var(--color-ink)]" href="https://www.bcn.cl/leychile/Navegar?idNorma=1209272&amp;idVersion=2026-12-01" target="_blank" rel="noopener noreferrer">
+                Biblioteca del Congreso Nacional — Ley 21.719, versión 01-12-2026
+              </a>
+            </li>
+            <li>
+              <a class="font-semibold text-[var(--color-accent-deep)] underline underline-offset-4 hover:text-[var(--color-ink)]" href="https://www.diariooficial.interior.gob.cl/publicaciones/2024/12/13/44023/01/2583630.pdf" target="_blank" rel="noopener noreferrer">
+                Diario Oficial — publicación de la Ley 21.719, 13-12-2024
+              </a>
+            </li>
+          </ul>
+          <p class="mt-6 text-sm text-[var(--color-muted)]">
+            Última actualización del contenido técnico: 29 de julio de 2026 · Versión 1.1 (resumen
+            público sujeto a revisión jurídica).
+          </p>
+        </section>
+      </div>
+    </div>
+  </main>
+  <Footer />
+</Base>

@@ -129,6 +129,40 @@ class TestMetricasAuth:
         assert resp.status_code == 200
 
 
+class TestPilotoMetricsEndpoint:
+    """Contrato de ventana explícita para el endpoint de cierre del piloto."""
+
+    async def test_sin_ventana_es_fail_closed(self, client: AsyncClient) -> None:
+        resp = await client.get("/api/v1/admin/metrics/piloto", headers=_ADMIN_HEADERS)
+
+        assert resp.status_code == 200
+        assert resp.json()["window"] == {"pilot_started_at": None, "pilot_ended_at": None}
+        assert resp.json()["metrics"]["total_consultas"] == 0
+
+    async def test_ventana_se_devuelve_y_rechaza_fechas_naive(self, client: AsyncClient) -> None:
+        resp = await client.get(
+            "/api/v1/admin/metrics/piloto",
+            params={
+                "pilot_started_at": "2026-08-01T00:00:00Z",
+                "pilot_ended_at": "2026-08-08T00:00:00Z",
+            },
+            headers=_ADMIN_HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["window"]["pilot_started_at"].endswith("+00:00")
+        assert resp.json()["metrics"]["total_consultas"] == 0
+
+        invalid = await client.get(
+            "/api/v1/admin/metrics/piloto",
+            params={
+                "pilot_started_at": "2026-08-01T00:00:00",
+                "pilot_ended_at": "2026-08-08T00:00:00",
+            },
+            headers=_ADMIN_HEADERS,
+        )
+        assert invalid.status_code == 422
+
+
 # ── /dashboard ─────────────────────────────────────────────────────
 
 
