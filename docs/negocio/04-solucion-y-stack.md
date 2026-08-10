@@ -11,7 +11,7 @@ AgroVoz es un asistente conversacional de inteligencia artificial que responde p
 
 **Flujo técnico**:
 ```
-Productor → WhatsApp (audio o texto) → Open-WA → VPS (Hetzner CX43, 8 vCPU, 16 GB RAM, 160 GB SSD)
+Productor → WhatsApp (audio o texto) → Open-WA → VPS de referencia (Hetzner CX43, 8 vCPU, 16 GB RAM, 160 GB SSD)
          → Whisper (transcripción de voz — se salta si la consulta llega escrita)
          → LLM open-source (interpreta + Tool Calling)
             ├─ ODEPA (precios, SQLite local)
@@ -45,7 +45,7 @@ en ~100 ms contra los ~11 s del camino de voz.
 | Síntesis de voz | TTS open-source español (Piper TTS) | Local (VPS) | $0 |
 | Infraestructura | VPS Hetzner CX43 (8 vCPU, 16 GB RAM, 160 GB SSD, Intel/AMD) | Cloud | EUR 12,49/mes (~CLP 13.000/mes) |
 
-**Nota sobre el dimensionamiento del VPS**: La carga simultánea de Whisper + LLM cuantizado + TTS requiere al menos 8 GB de RAM para operar sin swap. El VPS seleccionado (Hetzner CX43: 8 vCPU, 16 GB RAM, 160 GB SSD, plan Cost-Optimized Intel/AMD) duplica los requisitos mínimos y permite margen para crecimiento del piloto y fine-tuning del modelo de voz. Precio: EUR 12,49/mes (~CLP 13.000/mes). Nota: los modelos ARM (CAX) de Hetzner ofrecen menor rendimiento de inferencia para cargas de PyTorch/Whisper en CPU que las instancias Intel/AMD de la serie CX; se descartaron por razones de rendimiento, no de compatibilidad binaria.
+**Nota sobre el dimensionamiento**: El piso mínimo obligatorio es 1 vCPU/4 GB RAM. El VPS seleccionado (Hetzner CX43: 8 vCPU, 16 GB RAM, 160 GB SSD, plan Cost-Optimized Intel/AMD) es un escenario de referencia para planificación del piloto, no una validación del piso mínimo ni una garantía de rendimiento. El benchmark reproducible de latencia y WER en 1 vCPU/4 GB queda pendiente. Precio de referencia: EUR 12,49/mes (~CLP 13.000/mes). Nota: los modelos ARM (CAX) de Hetzner ofrecen menor rendimiento de inferencia para cargas de PyTorch/Whisper en CPU que las instancias Intel/AMD de la serie CX; se descartaron por razones de rendimiento, no de compatibilidad binaria.
 
 **Nota sobre precios regionales**: ODEPA publica precios por mercado mayorista (Lo Valledor, Mapocho, entre otros), no un único promedio nacional. Sin embargo, estos son precios de terminal mayorista, no el precio que recibe el productor en su predio. La diferencia regional que el equipo ha observado en terreno —la papa en el sur es sistemáticamente más cara— proviene de costos de transporte y márgenes de intermediación entre el mercado mayorista y el predio, no es capturada directamente por ODEPA. Para el piloto en Traiguén (región única), el precio ODEPA de referencia es suficiente. En la versión de producción, el sistema calibrará el diferencial regional combinando datos de ODEPA por mercado con precios de referencia de INDAP y precios reportados por los propios usuarios, aplicando un factor de ajuste por comuna registrada durante el onboarding (sección 7.2). Con el tiempo, el sistema aprende el diferencial Traiguén-Santiago (u otras comunas) y lo aplica automáticamente.
 
