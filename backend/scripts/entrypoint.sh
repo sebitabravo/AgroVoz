@@ -18,6 +18,7 @@
 #
 # Variable de entorno:
 #   SKIP_MODEL_DOWNLOAD=true  Omite el paso 1 (para CI o debugging).
+#   SKIP_WHISPER_PRELOAD=true Omite la precarga remota de Whisper (para CI).
 # =============================================================================
 
 set -euo pipefail
@@ -58,20 +59,24 @@ fi
 # Best-effort: si falla (ej: GPU no disponible, memoria insuficiente), NO
 # aborta — la app arranca y Whisper cargará (o fallará con log claro) en
 # runtime al procesar el primer audio.
-WHISPER_MODEL="${WHISPER_MODEL:-small}"
-WHISPER_CACHE="${HOME}/.cache/whisper"
-header "Verificando cache de Whisper ($WHISPER_MODEL)"
-
-if [[ -f "$WHISPER_CACHE/${WHISPER_MODEL}.pt" ]]; then
-    info "Whisper $WHISPER_MODEL ya en cache — skip"
+if [[ "${SKIP_WHISPER_PRELOAD:-false}" == "true" ]]; then
+    warn "SKIP_WHISPER_PRELOAD=true — se omite la precarga remota de Whisper"
 else
-    warn "Whisper $WHISPER_MODEL no en cache — descargando (~462 MB)..."
-    # Pasar WHISPER_MODEL via os.environ (no interpolar en el string de Python):
-    # defensa en profundidad ante code injection si la env var se manipula.
-    if WHISPER_MODEL="$WHISPER_MODEL" python -c "import os, whisper; whisper.load_model(os.environ['WHISPER_MODEL'])" 2>&1; then
-        info "Whisper $WHISPER_MODEL cacheado"
+    WHISPER_MODEL="${WHISPER_MODEL:-small}"
+    WHISPER_CACHE="${HOME}/.cache/whisper"
+    header "Verificando cache de Whisper ($WHISPER_MODEL)"
+
+    if [[ -f "$WHISPER_CACHE/${WHISPER_MODEL}.pt" ]]; then
+        info "Whisper $WHISPER_MODEL ya en cache — skip"
     else
-        warn "No se pudo pre-cargar Whisper (continuando — cargará en runtime)"
+        warn "Whisper $WHISPER_MODEL no en cache — descargando (~462 MB)..."
+        # Pasar WHISPER_MODEL via os.environ (no interpolar en el string de Python):
+        # defensa en profundidad ante code injection si la env var se manipula.
+        if WHISPER_MODEL="$WHISPER_MODEL" python -c "import os, whisper; whisper.load_model(os.environ['WHISPER_MODEL'])" 2>&1; then
+            info "Whisper $WHISPER_MODEL cacheado"
+        else
+            warn "No se pudo pre-cargar Whisper (continuando — cargará en runtime)"
+        fi
     fi
 fi
 
