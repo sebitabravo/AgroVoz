@@ -16,6 +16,7 @@ from typing import cast
 import yaml
 
 from app.core.config import settings
+from app.services.source_validation import parse_source_date, validate_source_url
 
 _CORPUS_PATH = Path(__file__).resolve().parents[2] / "corpus" / "calendario_agricola.yaml"
 
@@ -97,12 +98,14 @@ def _required_str_list(mapping: dict[object, object], key: str) -> tuple[str, ..
     return tuple(dict.fromkeys(items))
 
 
-def _parse_calendario(raw_calendario: object) -> _Calendario:
+def _parse_calendario(raw_calendario: object, *, today: date) -> _Calendario:
     """Valida una entrada individual del snapshot."""
     calendario = _as_mapping(raw_calendario)
     zona = _normalizar(_required_text(calendario, "zona"))
     if zona not in _ZONAS_DIRECTAS and zona != "todas":
         raise ValueError("zona de calendario no soportada")
+    fuente_url = validate_source_url(_required_text(calendario, "fuente_url"))
+    fecha = parse_source_date(_required_text(calendario, "fecha"), today=today)
     return _Calendario(
         regla_id=_required_text(calendario, "id"),
         cultivo=_required_text(calendario, "cultivo"),
@@ -111,8 +114,8 @@ def _parse_calendario(raw_calendario: object) -> _Calendario:
         siembra=_required_text(calendario, "siembra"),
         cosecha=_required_text(calendario, "cosecha"),
         fuente=_required_text(calendario, "fuente"),
-        fuente_url=_required_text(calendario, "fuente_url"),
-        fecha=date.fromisoformat(_required_text(calendario, "fecha")),
+        fuente_url=fuente_url,
+        fecha=fecha,
     )
 
 
@@ -132,7 +135,9 @@ def _load_catalog(corpus_path: Path, today: date) -> _CatalogoCalendario:
     if not isinstance(reglas_raw, list) or not reglas_raw:
         raise ValueError("corpus de calendario sin contenido")
 
-    reglas = tuple(_parse_calendario(raw_regla) for raw_regla in cast(list[object], reglas_raw))
+    reglas = tuple(
+        _parse_calendario(raw_regla, today=today) for raw_regla in cast(list[object], reglas_raw)
+    )
     ids = {regla.regla_id for regla in reglas}
     if len(ids) != len(reglas):
         raise ValueError("id de calendario duplicado")
