@@ -91,6 +91,11 @@ services:
       - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-60}
       - AUDIO_RETENTION_HOURS=${AUDIO_RETENTION_HOURS:-24}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # TrustedHostMiddleware (app/core/security.py) solo permite agrovoz.cl
+      # por defecto. Este server usa agrovoz.sbravo.app (ver #306) -- sin
+      # esto el backend responde 400 "Invalid host header" a todo trafico
+      # real por Pangolin, aunque el healthcheck interno (localhost) pase.
+      - EXTRA_ALLOWED_HOSTS=${EXTRA_ALLOWED_HOSTS:-}
     command:
       [
         "uvicorn",
