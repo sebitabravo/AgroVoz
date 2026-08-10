@@ -1,0 +1,58 @@
+# Smoke de la imagen de producción: evita que requirements.txt se desincronice
+# de los imports que se ejecutan al cargar la aplicación.
+name: Docker production smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: docker-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-health:
+    name: Docker build and health
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Build production image
+        run: docker build --file backend/Dockerfile --tag agrovoz-backend-smoke:ci backend
+
+      - name: Verify runtime dependencies
+        run: >-
+          docker run --rm --entrypoint python agrovoz-backend-smoke:ci -c
+          "import PIL, numpy, onnxruntime, reportlab"
+
+      - name: Start backend with floor resources
+        run: |
+          docker run --detach --rm --name agrovoz-backend-smoke \
+            --cpus 1 --memory 4g --publish 8000:8000 \
+            --entrypoint uvicorn \
+            --env APP_ENV=production \
+            --env OPENWA_API_KEY=ci-openwa-key \
+            --env OPENWA_WEBHOOK_SECRET=ci-openwa-secret \
+            --env ADMIN_API_KEY=ci-admin-key \
+            --env ADMIN_SESSION_SECRET=ci-admin-session-secret \
+            --env PHONE_HASH_PEPPER=ci-phone-hash-pepper \
+            --env LLM_MODEL_PATH=/tmp/model-not-provisioned.gguf \
+            agrovoz-backend-smoke:ci \
+            app.main:app --host 0.0.0.0 --port 8000 --workers 1
+
+      - name: Wait for liveness health
+        run: |
+          trap 'docker logs agrovoz-backend-smoke 2>&1 || true; docker rm --force agrovoz-backend-smoke >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error \
+              'http://127.0.0.1:8000/api/v1/health?probe=liveness' \
+              | grep --fixed-strings --quiet '"status":"ok"'; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo 'El backend no respondió al healthcheck de liveness dentro de 60 segundos.' >&2
+          exit 1
