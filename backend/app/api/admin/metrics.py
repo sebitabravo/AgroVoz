@@ -7,10 +7,11 @@ consultas recientes. El dashboard HTML usa estos mismos servicios vía SSR.
 Todos requieren header X-Admin-Key (hmac.compare_digest).
 """
 
+import datetime
 from dataclasses import asdict
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.api.admin.deps import require_admin_key
@@ -26,6 +27,41 @@ router = APIRouter(
 # Ventanas y límites acotados para evitar queries pesadas sobre SQLite.
 Days = Annotated[int, Query(ge=1, le=90, description="Días de la ventana")]
 Limit = Annotated[int, Query(ge=1, le=100, description="Máximo de resultados")]
+
+
+def _pilot_metrics_payload(
+    db: Session,
+    pilot_started_at: datetime.datetime | None,
+    pilot_ended_at: datetime.datetime | None,
+) -> dict[str, object]:
+    """Calcula métricas y devuelve la ventana aplicada sin PII."""
+    try:
+        metrics = metrics_service.get_piloto_metrics(db, pilot_started_at, pilot_ended_at)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "window": {
+            "pilot_started_at": pilot_started_at.isoformat() if pilot_started_at else None,
+            "pilot_ended_at": pilot_ended_at.isoformat() if pilot_ended_at else None,
+        },
+        "metrics": asdict(metrics),
+    }
+
+
+@router.get("/piloto")
+def piloto(
+    db: Session = Depends(get_db),  # noqa: B008
+    pilot_started_at: datetime.datetime | None = Query(  # noqa: B008
+        default=None,
+        description="Inicio inclusivo del piloto, con zona horaria ISO-8601.",
+    ),
+    pilot_ended_at: datetime.datetime | None = Query(  # noqa: B008
+        default=None,
+        description="Término exclusivo del piloto, con zona horaria ISO-8601.",
+    ),
+) -> dict[str, object]:
+    """Métricas del piloto sobre una ventana explícita y acotada."""
+    return _pilot_metrics_payload(db, pilot_started_at, pilot_ended_at)
 
 
 @router.get("/dashboard")

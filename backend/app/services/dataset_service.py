@@ -14,16 +14,20 @@ Privacy by design:
 from __future__ import annotations
 
 import datetime
+import hashlib
+import hmac
 import json
 import logging
 import shutil
 import threading
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, cast
 
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.config import settings
 from app.core.phone_hash import validate_phone_hash
 
 if TYPE_CHECKING:
@@ -37,6 +41,25 @@ _DATASET_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "dataset
 
 # Lock para proteger el append concurrente al manifest.jsonl.
 _manifest_lock = threading.Lock()
+_audit_lock = threading.Lock()
+_AUDIT_KEY_VERSION = 1
+
+
+class DatasetOperationError(RuntimeError):
+    """La purga del dataset no pudo confirmarse de forma auditable."""
+
+
+DatasetPurgeOutcome = Literal["completed", "no_records"]
+
+
+@dataclass(frozen=True, slots=True)
+class DatasetPurgeResult:
+    """Resultado sin identificadores directos de una purga de dataset."""
+
+    event_id: str
+    records_deleted: int
+    files_deleted: int
+    outcome: DatasetPurgeOutcome
 
 
 def get_dataset_dir() -> Path:
@@ -49,6 +72,205 @@ def _get_manifest_path(dataset_dir: Path | None = None) -> Path:
     """Ruta al manifest.jsonl dentro del directorio del dataset."""
     directory = dataset_dir or get_dataset_dir()
     return directory / "manifest.jsonl"
+
+
+def _get_audit_path(dataset_dir: Path | None = None) -> Path:
+    """Ruta del ledger append-only de purgas, separado del manifest."""
+    directory = dataset_dir or get_dataset_dir()
+    return directory / "deletion_audit.jsonl"
+
+
+def _get_audit_key() -> str:
+    """Obtiene la clave dedicada o rechaza una operación no auditable."""
+    audit_key = settings.consultation_history_audit_key.get_secret_value().strip()
+    if len(audit_key) < 32:
+        raise DatasetOperationError("La clave dedicada de auditoría no está configurada de forma segura.")
+    return audit_key
+
+
+def _subject_token(phone_hash: str) -> str:
+    """Seudonimiza el sujeto del ledger sin persistir su hash original."""
+    return hmac.new(
+        _get_audit_key().encode("utf-8"),
+        phone_hash.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _normalize_event_id(event_id: str | None) -> str:
+    """Normaliza el UUID idempotente o genera uno nuevo."""
+    try:
+        return str(uuid.UUID(event_id)) if event_id else str(uuid.uuid4())
+    except (AttributeError, ValueError) as exc:
+        raise DatasetOperationError("El event_id no es un UUID válido.") from exc
+
+
+def _load_audit_entries(audit_path: Path) -> list[dict[str, object]]:
+    """Carga eventos válidos, ignorando líneas corruptas sin exponer contenido."""
+    if not audit_path.exists():
+        return []
+    entries: list[dict[str, object]] = []
+    try:
+        with open(audit_path, encoding="utf-8") as audit_file:
+            for line in audit_file:
+                try:
+                    parsed = json.loads(line)
+                except json.JSONDecodeError:
+                    logger.warning("Auditoría dataset parcialmente cargada — estado=linea_corrupta")
+                    continue
+                if isinstance(parsed, dict) and isinstance(parsed.get("event_id"), str):
+                    entries.append(parsed)
+    except OSError as exc:
+        raise DatasetOperationError("No fue posible leer la auditoría del dataset.") from exc
+    return entries
+
+
+def _append_audit_entry(audit_path: Path, entry: dict[str, object]) -> None:
+    """Agrega un evento sin PII al ledger de purgas."""
+    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(audit_path, "a", encoding="utf-8") as audit_file:
+            audit_file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        raise DatasetOperationError("No fue posible registrar la auditoría del dataset.") from exc
+
+
+def _audit_count(entry: dict[str, object], field: str) -> int:
+    """Lee un contador validado del ledger sin confiar en JSON arbitrario."""
+    value = entry.get(field)
+    return value if isinstance(value, int) and value >= 0 else 0
+
+
+def _manifest_entry_belongs_to_subject(entry: dict[str, object], phone_hash: str) -> bool:
+    """Determina pertenencia por hash o ruta relativa segura del manifest."""
+    if entry.get("phone_hash") == phone_hash:
+        return True
+    audio_path = entry.get("audio_path")
+    if not isinstance(audio_path, str):
+        return False
+    try:
+        relative_path = Path(audio_path)
+        return relative_path.parts[0] == phone_hash
+    except (IndexError, TypeError):
+        return False
+
+
+def _purge_manifest_entries(manifest_path: Path, phone_hash: str) -> int:
+    """Quita entradas del sujeto y conserva líneas ajenas o corruptas."""
+    if not manifest_path.exists():
+        return 0
+    try:
+        lines = manifest_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    except OSError as exc:
+        raise DatasetOperationError("No fue posible leer el manifest del dataset.") from exc
+
+    kept: list[str] = []
+    removed = 0
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            kept.append(line)
+            continue
+        try:
+            entry = json.loads(stripped)
+        except json.JSONDecodeError:
+            kept.append(line)
+            continue
+        if isinstance(entry, dict) and _manifest_entry_belongs_to_subject(entry, phone_hash):
+            removed += 1
+        else:
+            kept.append(line)
+
+    if removed == 0:
+        return 0
+    temporary_path = manifest_path.with_name(f"{manifest_path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary_path.write_text("".join(kept), encoding="utf-8")
+        temporary_path.replace(manifest_path)
+    except OSError as exc:
+        temporary_path.unlink(missing_ok=True)
+        raise DatasetOperationError("No fue posible confirmar la purga del manifest.") from exc
+    return removed
+
+
+def purge_dataset_for_subject(
+    phone_hash: str,
+    *,
+    dataset_dir: Path | None = None,
+    event_id: str | None = None,
+) -> DatasetPurgeResult:
+    """Purga WAV y manifest de un sujeto tras revocar dataset_consent.
+
+    La operación exige una clave de auditoría, usa un UUID idempotente y deja
+    únicamente conteos y un token HMAC en el ledger. Sin clave, identificador
+    inválido o fallo de almacenamiento se rechaza sin afirmar borrado.
+    """
+    if not validate_phone_hash(phone_hash):
+        raise DatasetOperationError("phone_hash inválido para purga de dataset.")
+
+    normalized_event_id = _normalize_event_id(event_id)
+    subject_token = _subject_token(phone_hash)
+    directory = dataset_dir or get_dataset_dir()
+    audit_path = _get_audit_path(directory)
+
+    with _audit_lock:
+        existing = [
+            entry
+            for entry in _load_audit_entries(audit_path)
+            if entry.get("event_id") == normalized_event_id
+        ]
+        if existing:
+            latest = existing[-1]
+            if latest.get("subject_token") != subject_token or latest.get("reason") != "consent_revoked":
+                raise DatasetOperationError("El event_id ya pertenece a otra purga de dataset.")
+            if latest.get("outcome") in {"completed", "no_records"}:
+                return DatasetPurgeResult(
+                    event_id=normalized_event_id,
+                    records_deleted=_audit_count(latest, "records_deleted"),
+                    files_deleted=_audit_count(latest, "files_deleted"),
+                    outcome=cast(DatasetPurgeOutcome, latest["outcome"]),
+                )
+
+        target_dir = directory / phone_hash
+        files_deleted = 0
+        if target_dir.exists():
+            try:
+                for wav_path in target_dir.glob("*.wav"):
+                    if wav_path.is_file():
+                        wav_path.unlink()
+                        files_deleted += 1
+            except OSError as exc:
+                raise DatasetOperationError("No fue posible purgar los audios del dataset.") from exc
+
+        manifest_entries_deleted = _purge_manifest_entries(_get_manifest_path(directory), phone_hash)
+        outcome: DatasetPurgeOutcome = (
+            "completed" if files_deleted > 0 or manifest_entries_deleted > 0 else "no_records"
+        )
+        _append_audit_entry(
+            audit_path,
+            {
+                "event_id": normalized_event_id,
+                "subject_token": subject_token,
+                "key_version": _AUDIT_KEY_VERSION,
+                "reason": "consent_revoked",
+                "records_deleted": manifest_entries_deleted,
+                "files_deleted": files_deleted,
+                "outcome": outcome,
+                "occurred_at": datetime.datetime.now(datetime.UTC).isoformat(),
+            },
+        )
+        logger.info(
+            "Purga de dataset completada — estado=%s records=%d files=%d",
+            outcome,
+            manifest_entries_deleted,
+            files_deleted,
+        )
+        return DatasetPurgeResult(
+            event_id=normalized_event_id,
+            records_deleted=manifest_entries_deleted,
+            files_deleted=files_deleted,
+            outcome=outcome,
+        )
 
 
 def has_dataset_consent(phone_hash: str, db: Session | None = None) -> bool:

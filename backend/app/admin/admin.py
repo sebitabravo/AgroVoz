@@ -358,15 +358,24 @@ async def odepa_precios_page(
 async def piloto_page(
     request: Request,
     db: Session = Depends(get_db),  # noqa: B008
+    pilot_started_at: datetime.datetime | None = None,
+    pilot_ended_at: datetime.datetime | None = None,
 ) -> HTMLResponse:
     """Piloto: métricas de éxito del piloto para Crea INACAP (sección 7.3).
 
     Muestra: productores activos, consultas por productor, % útiles,
     latencia promedio vs target, casos de decisión productiva.
     """
-    metrics = metrics_service.get_piloto_metrics(db)
+    try:
+        metrics = metrics_service.get_piloto_metrics(db, pilot_started_at, pilot_ended_at)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     # Consultas recientes con feedback para la tabla.
-    consultas = metrics_service.get_piloto_consultations_with_feedback(db)
+    consultas = metrics_service.get_piloto_consultations_with_feedback(
+        db,
+        pilot_started_at=pilot_started_at,
+        pilot_ended_at=pilot_ended_at,
+    )
     consultas_data = [
         {
             "id": c.id,
@@ -512,6 +521,8 @@ async def toggle_decision(
 @router.get("/piloto/export")
 async def piloto_export(
     db: Session = Depends(get_db),  # noqa: B008
+    pilot_started_at: datetime.datetime | None = None,
+    pilot_ended_at: datetime.datetime | None = None,
 ) -> StreamingResponse:
     """Export CSV de las métricas del piloto.
 
@@ -520,7 +531,10 @@ async def piloto_export(
     import csv
     import io
 
-    data = metrics_service.get_piloto_export_data(db)
+    try:
+        data = metrics_service.get_piloto_export_data(db, pilot_started_at, pilot_ended_at)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=["metrica", "valor"])
     writer.writeheader()

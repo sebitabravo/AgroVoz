@@ -422,6 +422,7 @@ class TestDatasetConsent:
         with (
             patch.object(settings, "consultation_history_enabled", True),
             patch("app.api.admin.user_admin.delete_history") as delete_mock,
+            patch("app.api.admin.user_admin.purge_dataset_for_subject") as purge_mock,
         ):
             resp = await client.put(
                 f"/api/v1/admin/users/{_VALID_HASH}/comuna",
@@ -432,6 +433,7 @@ class TestDatasetConsent:
         assert resp.status_code == 200
         assert resp.json()["dataset_consent"] is False
         delete_mock.assert_not_called()
+        purge_mock.assert_called_once_with(_VALID_HASH, event_id=None)
 
 
 class TestHistoryConsent:

@@ -21,8 +21,9 @@ import datetime
 import logging
 from dataclasses import dataclass, field
 
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, case, false, func, select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.consultation import Consultation
 from app.models.odepa_price import OdepaPrice
@@ -821,16 +822,50 @@ class PilotoMetrics:
     total_con_feedback: int = 0
 
 
-def get_piloto_metrics(db: Session) -> PilotoMetrics:
+def _pilot_window_filters(
+    pilot_started_at: datetime.datetime | None,
+    pilot_ended_at: datetime.datetime | None,
+) -> tuple[ColumnElement[bool], ...]:
+    """Construye el alcance temporal cerrado de las métricas de piloto.
+
+    Sin ventana explícita no se leen consultas: mezclar el histórico con un
+    piloto es un resultado inseguro y puede exponer conclusiones falsas.
+    Las fechas deben incluir zona horaria y el límite final es exclusivo.
+    """
+    if pilot_started_at is None and pilot_ended_at is None:
+        return (false(),)
+    if pilot_started_at is None or pilot_ended_at is None:
+        raise ValueError("La ventana del piloto requiere inicio y término.")
+    if pilot_started_at.tzinfo is None or pilot_ended_at.tzinfo is None:
+        raise ValueError("Las fechas de la ventana del piloto deben incluir zona horaria.")
+
+    started_at = pilot_started_at.astimezone(datetime.UTC).replace(tzinfo=None)
+    ended_at = pilot_ended_at.astimezone(datetime.UTC).replace(tzinfo=None)
+    if ended_at <= started_at:
+        raise ValueError("El término de la ventana del piloto debe ser posterior al inicio.")
+    return (
+        Consultation.created_at >= started_at,
+        Consultation.created_at < ended_at,
+    )
+
+
+def get_piloto_metrics(
+    db: Session,
+    pilot_started_at: datetime.datetime | None = None,
+    pilot_ended_at: datetime.datetime | None = None,
+) -> PilotoMetrics:
     """Calcula las 5 métricas del piloto para Crea INACAP.
 
     Ejecuta queries optimizadas sobre la tabla Consultation.
     """
+    filters = _pilot_window_filters(pilot_started_at, pilot_ended_at)
+    consultation_filters = (*filters, Consultation.is_test.is_(False))
+
     # 1. Productores activos: DISTINCT phone_hash con 3+ consultas.
     # Necesitamos contar los grupos, no los distinct. Usar subquery.
     subq = (
         select(Consultation.phone_hash)
-        .where(Consultation.is_test.is_(False))
+        .where(*consultation_filters)
         .group_by(Consultation.phone_hash)
         .having(func.count(Consultation.id) >= 3)
     ).subquery()
@@ -838,7 +873,7 @@ def get_piloto_metrics(db: Session) -> PilotoMetrics:
 
     # 2. Consultas por productor: AVG de consultas por phone_hash.
     stmt_por_productor = (
-        select(func.count(Consultation.id)).where(Consultation.is_test.is_(False)).group_by(Consultation.phone_hash)
+        select(func.count(Consultation.id)).where(*consultation_filters).group_by(Consultation.phone_hash)
     )
     conteos = [int(c) for c in db.execute(stmt_por_productor).scalars().all()]
     consultas_por_productor = round(sum(conteos) / len(conteos), 1) if conteos else 0.0
@@ -847,22 +882,20 @@ def get_piloto_metrics(db: Session) -> PilotoMetrics:
     total_con_feedback = (
         db.scalar(
             select(func.count(Consultation.id)).where(
-                Consultation.feedback.is_not(None), Consultation.is_test.is_(False)
+                *consultation_filters, Consultation.feedback.is_not(None)
             )
         )
         or 0
     )
     total_feedback_util = (
         db.scalar(
-            select(func.count(Consultation.id)).where(Consultation.feedback == "util", Consultation.is_test.is_(False))
+            select(func.count(Consultation.id)).where(*consultation_filters, Consultation.feedback == "util")
         )
         or 0
     )
     total_feedback_no_util = (
         db.scalar(
-            select(func.count(Consultation.id)).where(
-                Consultation.feedback == "no_util", Consultation.is_test.is_(False)
-            )
+            select(func.count(Consultation.id)).where(*consultation_filters, Consultation.feedback == "no_util")
         )
         or 0
     )
@@ -870,22 +903,22 @@ def get_piloto_metrics(db: Session) -> PilotoMetrics:
 
     # 4. Latencia promedio.
     latencia_promedio = (
-        db.scalar(select(func.avg(Consultation.latency_ms)).where(Consultation.is_test.is_(False))) or 0.0
+        db.scalar(select(func.avg(Consultation.latency_ms)).where(*consultation_filters)) or 0.0
     )
 
     # 5. Decisiones productivas.
     decisiones = (
         db.scalar(
             select(func.count(Consultation.id)).where(
+                *consultation_filters,
                 Consultation.decision_productiva == True,  # noqa: E712
-                Consultation.is_test.is_(False),
             )
         )
         or 0
     )
 
     # Total de consultas.
-    total = db.scalar(select(func.count(Consultation.id)).where(Consultation.is_test.is_(False))) or 0
+    total = db.scalar(select(func.count(Consultation.id)).where(*consultation_filters)) or 0
 
     return PilotoMetrics(
         productores_activos=int(productores_activos),
@@ -900,12 +933,16 @@ def get_piloto_metrics(db: Session) -> PilotoMetrics:
     )
 
 
-def get_piloto_export_data(db: Session) -> list[dict[str, object]]:
+def get_piloto_export_data(
+    db: Session,
+    pilot_started_at: datetime.datetime | None = None,
+    pilot_ended_at: datetime.datetime | None = None,
+) -> list[dict[str, object]]:
     """Datos para export CSV del piloto.
 
     Retorna lista de dicts con las métricas calculadas.
     """
-    metrics = get_piloto_metrics(db)
+    metrics = get_piloto_metrics(db, pilot_started_at, pilot_ended_at)
     return [
         {"metrica": "Productores activos (3+ consultas)", "valor": metrics.productores_activos},
         {"metrica": "Consultas por productor (promedio)", "valor": metrics.consultas_por_productor},
@@ -920,7 +957,12 @@ def get_piloto_export_data(db: Session) -> list[dict[str, object]]:
     ]
 
 
-def get_piloto_consultations_with_feedback(db: Session, limit: int = 50) -> list[Consultation]:
+def get_piloto_consultations_with_feedback(
+    db: Session,
+    limit: int = 50,
+    pilot_started_at: datetime.datetime | None = None,
+    pilot_ended_at: datetime.datetime | None = None,
+) -> list[Consultation]:
     """Obtiene consultas recientes con feedback para la tabla del piloto.
 
     Args:
@@ -930,9 +972,10 @@ def get_piloto_consultations_with_feedback(db: Session, limit: int = 50) -> list
     Returns:
         Lista de Consultation con feedback, ordenadas por created_at descendente.
     """
+    filters = _pilot_window_filters(pilot_started_at, pilot_ended_at)
     consultas = db.scalars(
         select(Consultation)
-        .where(Consultation.feedback.is_not(None), Consultation.is_test.is_(False))
+        .where(*filters, Consultation.feedback.is_not(None), Consultation.is_test.is_(False))
         .order_by(Consultation.created_at.desc())
         .limit(limit)
     ).all()
