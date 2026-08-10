@@ -217,8 +217,15 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
 
 8. **Audio temporal y dataset opcional son tratamientos distintos.** El audio operativo
    se elimina del VPS en <24h. Solo `dataset_consent=true` permite copiar audio y
-   transcripción al dataset rural. Son datos seudonimizados, no anónimos, y esta
-   medida técnica no permite declarar cumplimiento de la Ley 21.719.
+   transcripción al dataset rural. `alert_consent` es otro opt-in: habilita avisos
+   proactivos y no autoriza dataset ni historial. Son datos seudonimizados, no
+   anónimos, y una transcripción puede contener datos personales incidentales.
+   Los flags técnicos no sustituyen un consentimiento documentado con versión,
+   fecha/hora, modalidad, soporte/custodia y operador receptor; esta medida
+   técnica no permite declarar cumplimiento de la Ley 21.719. El cambio de
+   `dataset_consent` evita nuevas copias según el flujo actual, pero no se debe
+   prometer borrado retroactivo de muestras ya retenidas hasta contar con una
+   operación de borrado y evidencia auditable.
 
 9. **Sin WebSockets.** Respuesta síncrona HTTP. Open-WA entrega el webhook y FastAPI
    responde cuando el pipeline termina. Si latencia >15s → reevaluar modo asíncrono.
@@ -227,10 +234,13 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     Para admin dashboard: API key simple en header.
 
 11. **Open-WA en vez de Twilio para WhatsApp.** Open-WA es self-hosted, gratuito, MIT license.
-    Usa protocolo WhatsApp Web (QR scan). Corre en el mismo VPS como servicio Docker.
-    Sin costos recurrentes de API WhatsApp. Riesgo: Meta puede banear el número
-    si escala mucho (>100 mensajes/día). Para MVP con 3-5 productores es seguro.
-    Para producción escalar a WhatsApp Business API oficial.
+    Usa protocolo WhatsApp Web (QR scan) y está diseñado para correr en el mismo
+    VPS como servicio Docker. Sin costos recurrentes de API WhatsApp. La sesión,
+    QR, entrega de mensajes y continuidad operativa deben verificarse mediante
+    un smoke E2E autorizado y fechado; la configuración, los tests con mocks o
+    la existencia del compose no prueban que el piloto real haya operado.
+    Riesgo: Meta puede banear el número si escala mucho (>100 mensajes/día).
+    Para producción evaluar una WhatsApp Business API oficial.
 
 12. **Dokploy en vez de nginx + certbot.** Dokploy es PaaS self-hosted que bundla
     Docker + Traefik + Let's Encrypt SSL automático. Un comando de install y todo listo.
@@ -243,7 +253,9 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     `_model_loaded=False` en su copia aislada de memoria, forzando recarga completa
     del modelo en cada proceso (~2 GB RAM extra por worker, I/O contention en disco,
     latencia LLM 25-60x peor). Un solo worker mantiene los modelos en memoria caliente
-    y cumple <15s target con throughput suficiente para el piloto (3-5 productores).
+    y se espera que cumpla el target <15s con throughput suficiente para el
+    piloto (3-5 productores); esto es una hipótesis de diseño hasta medirla en
+    el hardware y ambiente reales.
     Escalar horizontalmente con load balancer + múltiples instancias post-MVP,
     no con workers del mismo proceso.
 
@@ -420,3 +432,12 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     (`ALERT_RATE_LIMIT_PER_MINUTE`) para evitar ráfagas y sin agregar Redis,
     Celery ni APIs pagas. El mensaje solo informa precio, variación, fecha y
     fuente ODEPA; no contiene recomendación agronómica.
+
+30. **Resultados del piloto con ventana y evidencia separadas.** Las métricas
+    del piloto deben declarar `pilot_started_at`, `pilot_ended_at` y el conjunto
+    de participantes antes de agregarse. Las consultas sintéticas se excluyen
+    con `is_test=true`, pero esa exclusión no prueba por sí sola que una fila
+    pertenezca al piloto ni que el productor haya participado. Los resultados
+    deben distinguir la métrica automática `feedback=util/no_util`, latencia y
+    entrega de las escalas y decisiones registradas manualmente; sin filtros,
+    protocolo y evidencia fechada, se reportan como metas o datos de diseño.

@@ -3,6 +3,11 @@
 > Duración: 15–20 minutos por productor.  
 > Objetivo: que el productor entienda qué es AgroVoz, confíe en el sistema, haga su primera consulta real y firme el consentimiento de datos.
 
+> **Estado del guion:** protocolo propuesto para un piloto de cuatro semanas.
+> La visita, la demo, la sesión de Open-WA y la entrega de mensajes deben
+> quedar respaldadas por evidencia fechada; este formulario no prueba que hayan
+> ocurrido.
+
 ---
 
 ## Datos de la visita
@@ -25,7 +30,7 @@
 Antes de salir al terreno, marcar cada ítem:
 
 - [ ] Celular del encargado con batería suficiente.
-- [ ] Número de WhatsApp de AgroVoz configurado y funcionando.
+- [ ] Número de WhatsApp de AgroVoz disponible y verificado para la demo (registrar fecha/hora y resultado).
 - [ ] Instructivo impreso (`docs/piloto/05-instructivo-impreso.md`) para entregar al productor.
 - [ ] Acuerdo de Uso y Consentimiento impreso (`docs/piloto/06-acuerdo-consentimiento.md`).
 - [ ] Bitácora del productor (`docs/piloto/02-bitacora-productor.md`).
@@ -42,7 +47,7 @@ Antes de salir al terreno, marcar cada ítem:
 
 - Confirmar identidad del productor.
 - Agradecer por recibirnos.
-- Explicar que es una prueba piloto de 4 semanas, sin costo.
+- Explicar que es una prueba piloto propuesta de 4 semanas, sin costo para el productor, sujeta a confirmación de fechas.
 
 ### 2. ¿Qué es AgroVoz? (3 min)
 
@@ -58,10 +63,10 @@ Puntos clave:
 
 ### 3. Demo en vivo (5 min)
 
-1. El encargado graba un audio en el celular del productor (o en el propio) dirigido al número de AgroVoz.
+1. Si el canal fue verificado, el encargado graba un audio en el celular del productor (o en el propio) dirigido al número de AgroVoz.
 2. Ejemplo de audio:  
    > “Hola AgroVoz, ¿cuánto está la papa en Traiguén?”
-3. Esperar la respuesta de audio junto al productor.
+3. Esperar la respuesta de audio junto al productor y registrar si llegó, falló o no fue posible ejecutar la prueba.
 4. Reproducir la respuesta en altavoz.
 5. Preguntar:  
    > “¿Se entendió bien la respuesta? ¿El audio se escuchó claro?”
@@ -93,27 +98,37 @@ Acciones:
 |---|---|
 | Traiguén | Traiguén |
 
-### 6. Acuerdo de Uso y Consentimiento de Datos (Ley 21.719) (3 min)
+### 6. Acuerdo de Uso y Consentimiento de Datos (3 min)
 
 1. Entregar impreso el `06-acuerdo-consentimiento.md`.
 2. Leerlo en voz alta si el productor lo solicita.
 3. Explicar en simple:
    - Se graba el audio que usted envía.
-   - El audio se borra en menos de 24 horas del servidor.
-   - Se guarda una transcripción anónima (con un código, no su nombre ni número).
+   - El diseño técnico prevé borrar el audio operativo en menos de 24 horas del servidor; el equipo debe verificar y registrar ese resultado.
+   - Si existe `dataset_consent`, puede conservarse una transcripción seudonimizada mediante código/hash; no es anónima y puede contener datos personales incidentales.
    - Esa transcripción sirve para mejorar el sistema en el futuro.
-   - Puede retirar su consentimiento cuando quiera.
-4. Si acepta, firmar el acuerdo.
-5. Dejar una copia al productor.
+   - Puede solicitar retirar su consentimiento; el equipo registra la solicitud y explica su alcance. El borrado retroactivo del dataset queda pendiente de un procedimiento verificable.
+4. Si acepta, completar el registro de consentimiento con la versión del texto, fecha/hora, modalidad y operador que recibió la firma.
+5. Entregar una copia al productor y anotar cómo y dónde queda bajo custodia el original.
 
-### 7. Habilitar dataset_consent (#96) (1 min)
+La transcripción y cualquier audio retenido para dataset se describen como
+**seudonimizados** mediante un código/hash, no como anónimos. Una transcripción
+puede contener datos personales incidentales. El audio operativo se elimina del
+VPS en menos de 24 horas según el diseño técnico; el formulario no debe prometer
+que la revocación borra automáticamente muestras de dataset ya retenidas si esa
+operación no tiene evidencia de implementación y auditoría.
 
-- [ ] Si el productor firma el acuerdo, marcar `dataset_consent = true` en el registro del sistema (feature #96).
-- [ ] Si no firma, marcar `dataset_consent = false` y explicar que igual puede usar AgroVoz, pero sus audios no se usarán para entrenar el modelo.
+### 7. Registrar consentimientos separados (#96) (2 min)
+
+- [ ] Explicar y registrar `dataset_consent` como opt-in específico para copiar audio/transcripción al dataset de mejora.
+- [ ] Si no acepta, registrar `dataset_consent = false`; puede usar AgroVoz y el audio operativo sigue sujeto a su eliminación temporal.
+- [ ] Explicar y registrar `alert_consent` de forma independiente: autoriza avisos proactivos, no el dataset.
+- [ ] Si no acepta alertas o revoca ese opt-in, registrar `alert_consent = false` y verificarlo antes de cualquier envío.
+- [ ] Registrar el resultado de ambos flags, la fecha/hora y el operador; un cambio de flag no reemplaza la custodia del consentimiento firmado.
 
 ### 8. Despedida y próximos pasos (1 min)
 
-> “Don/ña __________, muchas gracias por participar. Durante las próximas 4 semanas usted puede enviar audios cuando quiera. Nosotros lo vamos a llamar una vez por semana para saber cómo le va. Cualquier problema, nos avisa por WhatsApp.”
+> “Don/ña __________, muchas gracias por participar. Durante las próximas 4 semanas previstas usted puede enviar audios cuando quiera, si confirmamos el canal. Nosotros lo vamos a llamar una vez por semana para saber cómo le va. Cualquier problema, nos avisa por el canal acordado.”
 
 - Entregar instructivo impreso (`05-instructivo-impreso.md`).
 - Entregar bitácora del productor (`02-bitacora-productor.md`).
@@ -124,11 +139,14 @@ Acciones:
 ## Checklist de cierre de la visita
 
 - [ ] Demo realizada con éxito o falla documentada.
+- [ ] Fecha/hora, versión del sistema/canal y resultado de la demo registrados; una demo no se marca como exitosa por defecto.
 - [ ] Productor realizó su primera consulta.
 - [ ] Comuna registrada (#89).
 - [ ] Acuerdo firmado por el productor.
 - [ ] Copia del acuerdo entregada al productor.
-- [ ] `dataset_consent` registrado (#96).
+- [ ] Versión, fecha/hora, modalidad, operador receptor y custodia del acuerdo registrados.
+- [ ] `dataset_consent` registrado de forma independiente (#96).
+- [ ] `alert_consent` explicado, registrado y verificado de forma independiente.
 - [ ] Instructivo y bitácora entregados.
 - [ ] Próximo check-in agendado.
 
@@ -139,6 +157,16 @@ Acciones:
 Espacio para anotar observaciones, dudas del productor, problemas técnicos o comentarios que no caben en los formularios.
 
 ________________________________________________________________________________
+
+## Custodia y minimización de la hoja
+
+El responsable de la visita entrega el original al custodio designado y registra
+esa entrega. El custodio conserva la hoja en lugar cerrado, limita el acceso al
+equipo autorizado y mantiene un registro de devolución o destrucción segura al
+vencer el plazo aprobado. Usar código de participante y los mínimos datos de
+contacto necesarios; no dejar copias en teléfonos personales ni afirmar que la
+hoja está anonimizada. El plazo, custodio, suplente y canal para ejercer derechos
+deben quedar definidos antes de iniciar el piloto.
 
 ________________________________________________________________________________
 
