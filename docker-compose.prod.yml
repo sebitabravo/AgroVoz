@@ -210,8 +210,9 @@ services:
     cap_drop:
       - ALL
     cap_add:
-      - CHOWN   # el entrypoint de esta imagen hace chown de /app/data al arrancar;
-                # sin esto queda en crash-loop ("Operation not permitted")
+      - CHOWN     # el entrypoint hace chown de /app/data al arrancar
+      - SETUID    # despues baja de root al usuario "openwa" (gosu/su-exec)
+      - SETGID    # ambos fallan con "Operation not permitted" sin estos caps
     security_opt:
       - no-new-privileges:true
 
