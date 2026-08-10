@@ -88,7 +88,8 @@ abierto hasta contar con:
 2. proveedor y condiciones aprobadas;
 3. revisión legal/privacidad de metadatos de llamadas;
 4. prueba E2E con una llamada chilena real;
-5. medición en el hardware mínimo de 1 vCPU y 6 GB RAM.
+5. benchmark reproducible pendiente en el hardware mínimo de 1 vCPU y 4 GB
+   RAM, incluida la latencia; el VPS de referencia no sustituye esta medición.
 
 Una institución PRODESAL/INDAP podría absorber el costo fijo en una fase
 posterior. Esa hipótesis requiere validación comercial y no se considera un

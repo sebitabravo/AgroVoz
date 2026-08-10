@@ -11,7 +11,7 @@ AgroVoz es un asistente conversacional de inteligencia artificial que responde p
 
 **Flujo técnico**:
 ```
-Productor → WhatsApp (audio o texto) → Open-WA → VPS (Hetzner CX43, 8 vCPU, 16 GB RAM, 160 GB SSD)
+Productor → WhatsApp (audio o texto) → Open-WA → VPS de referencia (Hetzner CX43, 8 vCPU, 16 GB RAM, 160 GB SSD)
          → Whisper (transcripción de voz — se salta si la consulta llega escrita)
          → LLM open-source (interpreta + Tool Calling)
             ├─ ODEPA (precios, SQLite local)
@@ -21,8 +21,10 @@ Productor → WhatsApp (audio o texto) → Open-WA → VPS (Hetzner CX43, 8 vCPU
          → WhatsApp (audio o texto) → Productor
 ```
 
-El camino de texto omite Whisper y Piper, que son las dos etapas más caras en CPU limitada: responde
-en ~100 ms contra los ~11 s del camino de voz.
+El camino de texto omite Whisper y Piper, que son las dos etapas más caras en CPU limitada. Las
+referencias de ~100 ms para texto y ~11 s para voz son hipótesis de diseño, pendientes de un
+benchmark E2E reproducible (hardware, modelo, duración del audio, tools y percentiles); el objetivo
+arquitectónico vigente es una latencia menor a 15 s.
 
 ### Stack tecnológico
 
@@ -45,7 +47,7 @@ en ~100 ms contra los ~11 s del camino de voz.
 | Síntesis de voz | TTS open-source español (Piper TTS) | Local (VPS) | $0 |
 | Infraestructura | VPS Hetzner CX43 (8 vCPU, 16 GB RAM, 160 GB SSD, Intel/AMD) | Cloud | EUR 12,49/mes (~CLP 13.000/mes) |
 
-**Nota sobre el dimensionamiento del VPS**: La carga simultánea de Whisper + LLM cuantizado + TTS requiere al menos 8 GB de RAM para operar sin swap. El VPS seleccionado (Hetzner CX43: 8 vCPU, 16 GB RAM, 160 GB SSD, plan Cost-Optimized Intel/AMD) duplica los requisitos mínimos y permite margen para crecimiento del piloto y fine-tuning del modelo de voz. Precio: EUR 12,49/mes (~CLP 13.000/mes). Nota: los modelos ARM (CAX) de Hetzner ofrecen menor rendimiento de inferencia para cargas de PyTorch/Whisper en CPU que las instancias Intel/AMD de la serie CX; se descartaron por razones de rendimiento, no de compatibilidad binaria.
+**Nota sobre el dimensionamiento**: El piso mínimo obligatorio es 1 vCPU/4 GB RAM. El VPS seleccionado (Hetzner CX43: 8 vCPU, 16 GB RAM, 160 GB SSD, plan Cost-Optimized Intel/AMD) es un escenario de referencia para planificación del piloto, no una validación del piso mínimo ni una garantía de rendimiento. El benchmark reproducible de latencia y WER en 1 vCPU/4 GB queda pendiente. Precio de referencia: EUR 12,49/mes (~CLP 13.000/mes). Nota: los modelos ARM (CAX) de Hetzner ofrecen menor rendimiento de inferencia para cargas de PyTorch/Whisper en CPU que las instancias Intel/AMD de la serie CX; se descartaron por razones de rendimiento, no de compatibilidad binaria.
 
 **Nota sobre precios regionales**: ODEPA publica precios por mercado mayorista (Lo Valledor, Mapocho, entre otros), no un único promedio nacional. Sin embargo, estos son precios de terminal mayorista, no el precio que recibe el productor en su predio. La diferencia regional que el equipo ha observado en terreno —la papa en el sur es sistemáticamente más cara— proviene de costos de transporte y márgenes de intermediación entre el mercado mayorista y el predio, no es capturada directamente por ODEPA. Para el piloto en Traiguén (región única), el precio ODEPA de referencia es suficiente. En la versión de producción, el sistema calibrará el diferencial regional combinando datos de ODEPA por mercado con precios de referencia de INDAP y precios reportados por los propios usuarios, aplicando un factor de ajuste por comuna registrada durante el onboarding (sección 7.2). Con el tiempo, el sistema aprende el diferencial Traiguén-Santiago (u otras comunas) y lo aplica automáticamente.
 
@@ -63,15 +65,34 @@ La adopción inicial requerirá un onboarding presencial breve (15-20 minutos) d
 
 El reconocimiento de voz para español chileno rural —con sus modismos, tonadas, vocabulario agrícola local (*chacarero, quintal, feria, remate*) y variaciones fonéticas regionales— es un problema técnico no resuelto. Los modelos comerciales (Whisper, Deepgram, Azure Speech) están optimizados para español neutro o variantes urbanas, y su precisión se degrada significativamente con hablantes rurales, adultos mayores y entornos con ruido ambiente (viento, animales, maquinaria agrícola comprimida en audio de WhatsApp).
 
-Esta es la barrera de entrada más defendible de AgroVoz. Construir este dataset requiere acceso directo y sostenido a hablantes de la AFC (algo que el equipo tiene a través del integrante residente en Traiguén), y que ningún competidor sin presencia territorial puede replicar. Cada interacción del piloto alimenta el dataset, creando un ciclo de mejora continua: más usuarios → más datos de voz → mejor precisión → mejor experiencia → más usuarios. El plan completo de construcción por fases se detalla en la sección 5.4.
+Esta es la barrera de entrada más defendible de AgroVoz. Construir este dataset requiere acceso directo y sostenido a hablantes de la AFC (algo que el equipo tiene a través del integrante residente en Traiguén), y que ningún competidor sin presencia territorial puede replicar. Solo las interacciones con consentimiento explícito y vigente (`dataset_consent=true`) pueden alimentar el dataset, creando un ciclo de mejora continua: más usuarios que optan por participar → más datos de voz autorizados → mejor precisión → mejor experiencia. El plan completo de construcción por fases se detalla en la sección 5.4.
 
 **3. Stack 100% open-source con procesamiento en infraestructura propia**
 
-Whisper, LLM y TTS corren localmente en VPS bajo control del equipo, sin dependencia de APIs pagas de OpenAI, Anthropic o Google para la inferencia. Esto desacopla el costo del modelo del crecimiento de usuarios y minimiza la exposición de datos de los agricultores a terceros. Los audios se transmiten cifrados a través de WhatsApp (Meta), se transcriben en el VPS, y se eliminan del servidor en un plazo máximo de 24 horas tras la verificación de la respuesta. Solo con consentimiento específico, las transcripciones minimizadas y seudonimizadas pueden retenerse para mejorar el reconocimiento de voz en español rural chileno. El cumplimiento total con la Ley 21.719 de Protección de Datos Personales (vigente desde diciembre de 2026) requerirá una auditoría formal de privacidad, planificada como hito previo al escalamiento.
+Whisper, LLM y TTS corren localmente en VPS bajo control del equipo, sin dependencia de APIs pagas de OpenAI, Anthropic o Google para la inferencia. Esto desacopla el costo del modelo del crecimiento de usuarios y minimiza la exposición de datos de los agricultores a terceros. Los audios se transmiten cifrados a través de WhatsApp (Meta), se transcriben en el VPS, y se eliminan del servidor en un plazo máximo de 24 horas tras la verificación de la respuesta. Solo con consentimiento específico, las transcripciones minimizadas y seudonimizadas pueden retenerse para mejorar el reconocimiento de voz en español rural chileno. No se declara conformidad jurídica con la Ley 21.719 de Protección de Datos Personales: se requiere una auditoría formal de privacidad, planificada como hito previo al escalamiento.
 
 **4. Tool Calling con fuentes oficiales: respuestas verificables, no opiniones del modelo**
 
-Como detalle de implementación (no como eje de innovación, sino como garantía de calidad), AgroVoz utiliza Tool Calling con una whitelist estricta de herramientas permitidas: únicamente consultas de lectura a ODEPA y Open-Meteo, sin capacidad de modificar datos ni ejecutar acciones no autorizadas. El LLM no "sabe" precios ni clima: consulta el precio diario disponible en SQLite y el pronóstico de Open-Meteo al responder, y cada respuesta está respaldada por datos verificables. Si el modelo intenta usar una herramienta no autorizada o generar una respuesta sin respaldo de datos, el sistema aplica un fallback determinístico: responde con los datos disponibles o solicita reformular la pregunta. Esta arquitectura se explica en detalle en las secciones 5.1 y 5.2.
+Como detalle de implementación (no como eje de innovación, sino como garantía de calidad), AgroVoz utiliza Tool Calling con una whitelist estricta. La whitelist efectiva contiene 19 tools, agrupadas por capacidad:
+
+- **Precios y economía:** `get_price`, `get_price_history`, `get_price_spread`,
+  `calculate_sale_value`, `calculate_margin` y `register_expense` (esta última es de escritura y
+  queda detrás de `EXPENSE_TRACKING_ENABLED`, apagado por defecto).
+- **Clima:** `get_weather`, `get_pronostico`, `get_clima_historico` y
+  `get_clima_historico_multianual`.
+- **Contexto y entrega:** `search_corpus`, `get_programas_indap`, `get_directorio_agricola`,
+  `get_link_resumen` (gate `FARMER_PANEL_ENABLED`) y `get_reporte_pdf`
+  (gate `PDF_REPORTS_ENABLED`).
+- **Parcelas y agronomía:** `register_parcela` y `get_parcelas` (gate
+  `PARCELA_TRACKING_ENABLED`), además de `get_regla_agronomica` y `get_calendario_agricola`
+  (gate `AGRONOMIC_RULES_ENABLED`).
+
+Los gates de escritura, parcelas, reglas, panel y reportes están apagados por defecto; las demás
+consultas se ofrecen según el tipo de intención. El LLM no "sabe" precios ni clima: consulta el
+precio diario disponible en SQLite y el pronóstico de Open-Meteo al responder. Si intenta usar una
+tool no autorizada o generar una respuesta sin respaldo de datos, el sistema aplica un fallback
+determinístico: responde con los datos disponibles o solicita reformular la pregunta. Esta
+arquitectura se explica en detalle en las secciones 5.1 y 5.2.
 
 **5. Recomendaciones solo por regla citada: el LLM nunca improvisa un consejo**
 
@@ -96,7 +117,11 @@ El reconocimiento de voz para español rural no es trivial: los modelos comercia
 | Traiguén | 2027 | 1.000-2.000 | 50-100 usuarios | Primer fine-tuning de Whisper small con datos locales; reducción de WER en ≥15% vs modelo base |
 | Regional | 2028 | 5.000+ | 200-500 usuarios | Dataset etiquetado con variantes dialectales de La Araucanía, base para modelo de reconocimiento de voz especializado |
 
-**Ciclo de mejora continua**: cada consulta de un agricultor genera una muestra de audio con transcripción verificada, que se incorpora al dataset de fine-tuning. A mayor uso del producto, mejor precisión del reconocimiento de voz. A mejor precisión, mejor experiencia del usuario. Este ciclo es auto-reforzante y crece con cada usuario nuevo. Una dinámica que ninguna solución basada en APIs de terceros puede igualar.
+**Ciclo de mejora continua**: solo una consulta de un agricultor con consentimiento explícito y
+vigente (`dataset_consent=true`) puede generar una muestra de audio y transcripción verificada para
+el dataset de fine-tuning. A mayor uso autorizado del producto, mejor precisión del reconocimiento
+de voz. A mejor precisión, mejor experiencia del usuario. Esta dinámica requiere participación
+opt-in y no se activa automáticamente para todas las interacciones.
 
 Ningún competidor actual (Miido, InstaCrops, Wiagro, AgroGPT) tiene este activo ni el acceso territorial para construirlo.
 

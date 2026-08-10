@@ -23,7 +23,7 @@ issues o en la línea base.
 |---|---|---|---|---|---|
 | RQ-F01 | Recibir consultas de audio por WhatsApp y responder con audio | Línea base del producto | Pipeline, Open-WA, Whisper y Piper | Tests del pipeline + E2E [#214][i214] | Implementado; validar |
 | RQ-F02 | Recibir texto como entrada de primera clase y responder por escrito | `AGENTS.md`, [PR #203][pr203] | Ruta de texto del webhook | Tests de webhook/pipeline | Implementado |
-| RQ-F03 | Consultar precio actual para catálogo ODEPA completo | `AGENTS.md` | `get_price`, 79 productos y 15 mercados | Tests de catálogo y precios | Implementado |
+| RQ-F03 | Consultar precio actual para el catálogo ODEPA declarado | `AGENTS.md` | `get_price`; cardinalidad declarada de 79 productos y 15 mercados | Tests de precios + conteo reproducible de un snapshot | Implementado; cardinalidad no verificable |
 | RQ-F04 | Consultar historia y comparar mercados | [Discussion #34][d34], [#85][i85], [#171][i171] | `get_price_history`, `get_price_spread` | Tests de herramientas | Implementado |
 | RQ-F05 | Calcular valor de venta sin delegar aritmética al LLM | [Discussion #48][d48], [#104][i104] | `calculate_sale_value` con cálculo determinístico | Casos de unidad, cantidad y error | Implementado |
 | RQ-F06 | Calcular margen de venta | [Discussion #34][d34], [#91][i91] | `calculate_margin` | Tests de extracción y cálculo | Implementado |
@@ -38,17 +38,46 @@ issues o en la línea base.
 | RQ-F15 | Incorporar soporte grupal PRODESAL | [Discussion #36][d36], [#173][i173] | Identidad grupal acotada | Tests y cierre del issue | En curso / reconciliar |
 | RQ-F16 | Derivar a información oficial de crédito INDAP | [Discussion #36][d36], [#174][i174] | Contenido y respuesta informativa | Tests y cierre del issue | En curso / reconciliar |
 | RQ-F17 | Registrar gastos y usarlos en el margen con retención acotada | [Discussion #34][d34], [#170][i170] | Persistencia gobernada, extracción y cálculo integrado | Tests de TTL/borrado, margen y precisión >90% | **Incompleto; feature gate apagado** |
-| RQ-NF01 | Mantener menos de 15 s E2E | Restricción de `AGENTS.md` | Fast paths, benchmark y métricas por etapa | Smoke en piso [#215][i215] | Implementado; validar |
-| RQ-NF02 | Funcionar en 1 vCPU / 6 GB | Restricción de `AGENTS.md` | Modelo cuantizado y despliegue de piso | [#215][i215] | Planificado para validación |
+| RQ-NF01 | Mantener menos de 15 s E2E | Restricción de `AGENTS.md` | Fast paths, benchmark y métricas por etapa | Benchmark reproducible en piso [#215][i215], separado del smoke CI | Pendiente de benchmark; el smoke CI no prueba latencia E2E |
+| RQ-NF02 | Funcionar en 1 vCPU / 4 GB | Restricción de `AGENTS.md` | Modelo cuantizado y protocolo de prueba del piso | Benchmark reproducible [#215][i215] | Planificado para validación |
 | RQ-NF03 | Evitar que un crash nativo del LLM mate FastAPI | Auditoría [#207][d207], [#213][i213] | Inferencia aislada y reiniciable | Tests de crash/timeout/no bloqueo | Implementado localmente; integrar |
 | RQ-NF04 | Continuar con datos útiles ante fallos externos | [Discussion #47][d47], [#120][i120], [#121][i121], [#175][i175], [#176][i176] | Cache, fallback y alertas de stale | Tests de degradación | Implementado |
 | RQ-NF05 | Mantener SQLite y procesamiento síncrono | Restricción de `AGENTS.md` | Configuración y persistencia | Inspección + tests | Implementado |
 | RQ-NF06 | Mantener stack principal open-source y sin API paga | Restricción de `AGENTS.md` | Whisper, LLM local, Piper y Open-WA | Revisión de dependencias/config | Implementado |
-| RQ-Q01 | Código Python tipado y validado | Convenciones de `AGENTS.md` | pytest, Ruff y mypy estricto | Comandos de calidad | Implementado por cambio |
+| RQ-Q01 | Código Python tipado y validado | Convenciones de `AGENTS.md` | Smoke CI con pytest, Ruff y mypy estricto | Checks del workflow o comandos reproducibles | Control establecido; resultado vigente no registrado |
 | RQ-Q02 | WER rural menor a 15% | Objetivo del proyecto | Dataset consentido y `eval_wer.py` | Muestra piloto | Planificado |
 | RQ-L01 | Eliminar media temporal (audio/imagen) antes de 24 h y minimizar/seudonimizar transcripciones | Restricción legal | Servicios de retención y dataset | Tests + observación operativa | Implementado; auditar |
 | RQ-L02 | Auditar formalmente Ley 21.719 antes de escalar | Restricción legal | Auditoría y controles de consentimiento | Revisión formal | Planificado |
 | RQ-V01 | Ejecutar piloto con 3–5 productores durante cuatro semanas | Próximo hito de `AGENTS.md`, [#98][i98] | Kit de piloto y ejecución en terreno | Registros y métricas reales | Kit implementado; ejecución pendiente |
+
+### Inventario de whitelist y feature gates
+
+La whitelist vigente contiene 19 tools. Esta tabla separa la existencia de la
+definición runtime de su activación por gate; una tool apagada no se anuncia al
+LLM. La fuente de nombres y gates es `backend/app/services/llm_service.py` y
+los tests de gates son evidencia de configuración, no de despliegue ni de E2E.
+
+| Tool | Entregable/capacidad | Gate de activación | Estado documental |
+|---|---|---|---|
+| `get_price` | Precio actual ODEPA | — | Whitelist; sin gate |
+| `get_price_history` | Historia de precios | — | Whitelist; sin gate |
+| `calculate_sale_value` | Valor de venta determinístico | — | Whitelist; sin gate |
+| `calculate_margin` | Margen determinístico | — | Whitelist; sin gate |
+| `get_price_spread` | Comparación entre mercados | — | Whitelist; sin gate |
+| `get_weather` | Clima actual | — | Whitelist; sin gate |
+| `get_pronostico` | Pronóstico | — | Whitelist; sin gate |
+| `get_clima_historico` | Clima histórico | — | Whitelist; sin gate |
+| `get_clima_historico_multianual` | Clima histórico multianual | — | Whitelist; sin gate |
+| `search_corpus` | Corpus oficial y citas | — | Whitelist; sin gate |
+| `get_programas_indap` | Información oficial INDAP | — | Whitelist; sin gate |
+| `get_directorio_agricola` | Directorio agrícola público | — | Whitelist; sin gate |
+| `register_expense` | Registro de gastos | `expense_tracking_enabled` | Implementada; apagada por defecto |
+| `register_parcela` | Registro de parcela | `parcela_tracking_enabled` | Implementada; apagada por defecto |
+| `get_parcelas` | Consulta de parcelas | `parcela_tracking_enabled` | Implementada; apagada por defecto |
+| `get_regla_agronomica` | Regla agronómica citada | `agronomic_rules_enabled` | Implementada; apagada por defecto |
+| `get_calendario_agricola` | Calendario agrícola citado | `agronomic_rules_enabled` | Implementada; apagada por defecto |
+| `get_link_resumen` | Enlace al panel | `farmer_panel_enabled` | Implementada; apagada por defecto |
+| `get_reporte_pdf` | Reporte PDF | `pdf_reports_enabled` | Implementada; apagada por defecto |
 
 ## Trazabilidad de las discussions
 
@@ -88,7 +117,7 @@ no significa que todas las ideas hayan sido aceptadas.
 1. No hay evidencia registrada de que el piloto haya comenzado o terminado.
 2. No existe aún medición WER con la muestra rural objetivo.
 3. La validación E2E con una sesión Open-WA autenticada sigue abierta.
-4. El smoke de 1 vCPU / 6 GB sigue abierto.
+4. El benchmark de 1 vCPU / 4 GB sigue abierto; el smoke CI no lo sustituye.
 5. La naturalidad y cualquier cambio de Whisper/TTS de #136 carecen de
    benchmark en hardware mínimo y validación con productores.
 6. El registro de gastos #170 está incompleto y permanece apagado.

@@ -29,7 +29,7 @@ Reducir la asimetría de información que afecta a los pequeños agricultores de
 
 ### Objetivos específicos
 
-1. **Desarrollo del MVP funcional**: implementar el pipeline end-to-end de voz (audio de WhatsApp → transcripción Whisper → consulta de datos ODEPA/Open-Meteo → respuesta de audio TTS) en un plazo de 6 semanas sobre un VPS Hetzner CX43 (8 vCPU, 16 GB RAM, 160 GB SSD) a EUR 12,49/mes (~CLP 13.000/mes).
+1. **Desarrollo del MVP funcional**: implementar el pipeline end-to-end de voz (audio de WhatsApp → transcripción Whisper → consulta de datos ODEPA/Open-Meteo → respuesta de audio TTS) en un plazo de 6 semanas tomando como escenario de planificación un VPS Hetzner CX43 (8 vCPU, 16 GB RAM, 160 GB SSD) a EUR 12,49/mes (~CLP 13.000/mes). Ese VPS es una referencia y no evidencia el cumplimiento del piso mínimo obligatorio de 1 vCPU/4 GB; el benchmark reproducible de latencia y WER en ese piso queda pendiente.
 
 2. **Validación técnica de reconocimiento de voz**: medir la precisión de transcripción (métrica WER [Word Error Rate]) de Whisper en español rural chileno con al menos 150-250 muestras de audio real de productores de la AFC, bajo condiciones reales de audio comprimido de WhatsApp y ruido ambiente de predio.
 

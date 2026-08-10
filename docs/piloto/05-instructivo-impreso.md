@@ -126,10 +126,18 @@ AgroVoz le confirmará cuando las alertas se desactiven.
 
 ## Aviso de privacidad
 
-- Sus audios se borran del servidor en menos de 24 horas.
-- Guardamos una transcripción anónima (con un código, no su nombre ni número).
-- Esa transcripción sirve para mejorar AgroVoz en el futuro.
-- Puede dejar de participar cuando quiera. Llame o escriba al encargado del piloto.
+- El audio operativo se elimina del VPS en menos de 24 horas. Esta frase no cubre
+  posibles backups o copias de infraestructura que todavía no han sido auditados.
+- Si existe una autorización separada, podemos guardar una copia seudonimizada
+  del audio y su transcripción para evaluar o mejorar AgroVoz. **No es anónima**:
+  el código HMAC puede ser relacionado por quien controla el canal, el servidor y
+  las claves.
+- Sin esa autorización, la transcripción operativa no se conserva como memoria.
+  La copia de dataset, su plazo y su purga requieren controles aprobados; este
+  instructivo no los da por implementados.
+- El acuerdo de consentimiento sigue bloqueado como borrador técnico. No firme ni
+  entregue este instructivo para captar participantes hasta que se complete el
+  responsable, el canal de retiro, la custodia y la revisión jurídica externa.
 
 ---
 

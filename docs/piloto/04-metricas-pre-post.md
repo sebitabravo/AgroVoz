@@ -1,7 +1,8 @@
 # Métricas pre/post piloto — AgroVoz Traiguén
 
 > Cuestionarios de línea base (inicio) y cierre (fin) del piloto.  
-> Los resultados se contrastan con las 5 métricas del dashboard admin (#97).
+> Son instrumentos en papel para consolidación manual. El dashboard admin (#97)
+> no persiste estas respuestas ni las vincula automáticamente con sus métricas.
 
 ---
 
@@ -15,7 +16,7 @@ Aplicar durante el onboarding, antes de que el productor use AgroVoz por primera
 |---|---|
 | Fecha | ____ / ____ / ______ |
 | Encargado AgroVoz | ______________________________ |
-| Nombre del productor | ______________________________ |
+| Código de participante | ______________________________ |
 | Comuna | ______________________________ |
 
 ### 1. ¿Cómo se informa de precios hoy?
@@ -80,7 +81,7 @@ Aplicar en la última semana del piloto, después de 4 semanas de uso.
 |---|---|
 | Fecha | ____ / ____ / ______ |
 | Encargado AgroVoz | ______________________________ |
-| Nombre del productor | ______________________________ |
+| Código de participante | ______________________________ |
 
 ### 1. ¿Negoció diferente gracias a AgroVoz?
 
@@ -139,15 +140,41 @@ ________________________________________________________________________________
 
 ## Vínculo con las 5 métricas del dashboard admin (#97)
 
-Las respuestas del productor se contrastan con las métricas automáticas del sistema. Esto permite validar si lo que dice el productor se refleja en el uso real.
+El código de participante se copia en los formularios pre y post para permitir una
+consolidación manual. No anotar nombre ni número de WhatsApp en esta planilla de
+métricas. La tabla siguiente separa la definición deseada de lo que hoy entrega el
+dashboard: las respuestas pre/post **no se guardan en el sistema ni se contrastan
+automáticamente** con las consultas.
 
-| Métrica del dashboard | ¿Qué mide? | Cómo se valida con el piloto |
+Para el piloto, el equipo debe entregar al endpoint admin la fecha de inicio y la
+fecha de cierre de la ventana de cuatro semanas (`pilot_started_at` inclusivo y
+`pilot_ended_at` exclusivo, con zona horaria). El backend y las vistas/exportaciones
+aplican ese filtro explícito; sin ambas fechas el cálculo queda fail-closed y no
+lee consultas históricas. El vínculo automático con formularios pre/post, la
+identificación verificable de participantes y la evidencia de operación real
+siguen pendientes.
+
+| Métrica del dashboard | Definición del piloto | Estado y validación honesta |
 |---|---|---|
-| **Productores activos** | COUNT(DISTINCT phone_hash) con 3+ consultas en 4 semanas. Mide adopción real. | Está automático en el sistema. Se reporta al cierre (cuestionario post #2). |
-| **Consultas promedio por productor** | AVG(consultas por phone_hash). Mide intensidad de uso. | Se compara con lo reportado en bitácora (02-bitacora: 4 semanas de registros). |
-| **% consultas útiles** | COUNT(feedback="útil") / COUNT(feedback) * 100. Mide valor percibido. | Se recoge en 02-bitacora cada semana (escala 1-5 de utilidad) y en 04-metricas post #3. |
-| **Latencia promedio** | AVG(tiempo respuesta) vs target <15 segundos. Mide velocidad del sistema. | Se valida en 03-checkin semanal ("¿Tardó mucho?") y en 02-bitacora (notas de problemas técnicos). |
-| **Decisiones productivas** | COUNT(feedback="usé para negociar/vender/planificar"). Mide impacto real. | Se recoge en 04-metricas cuestionario post #2 ("¿Utilizó los datos?") y en 03-checkin semanal #4. |
+| **Productores activos** | COUNT(DISTINCT `phone_hash`) con 3+ consultas dentro de la ventana de cuatro semanas. | El endpoint admin y las vistas/exportaciones aplican `pilot_started_at`/`pilot_ended_at`; el resultado no acredita por sí solo participantes reales ni operación del piloto. |
+| **Consultas promedio por productor** | Consultas de la ventana / productores de la ventana. | Se calcula sobre la ventana entregada; la comparación con la bitácora y los formularios de cuatro semanas es manual y no constituye linkage automático. |
+| **% consultas útiles** | En dashboard: `feedback="util"` / feedback no nulo × 100. | Es un indicador binario de feedback, no equivalente a la escala 1–5 del cuestionario. Reportar ambos por separado; no inventar una conversión. |
+| **Latencia promedio** | Promedio de `latency_ms` de entregas del piloto, comparado con target <15 segundos. | La ventana se filtra con `pilot_started_at`/`pilot_ended_at`, pero el cálculo no acredita operación real ni reemplaza la revisión de entregas exitosas y evidencia fechada. |
+| **Decisiones productivas** | Conteo de consultas marcadas administrativamente como `decision_productiva=true`. | El toggle administrativo no se alimenta automáticamente de la respuesta post ni de la bitácora. El cuestionario se consolida como evidencia cualitativa separada. |
+
+### Procedimiento manual y límites
+
+1. Asignar un código de participante y repetirlo en los formularios pre/post y en la
+   bitácora. La tabla de correspondencia con la identidad se guarda fuera del
+   repositorio, con custodia todavía pendiente de aprobación en el acuerdo.
+2. Registrar fechas de inicio y cierre, excluir consultas fuera de la ventana y
+   anotar cuántos formularios tienen respuestas válidas para cada pregunta.
+3. Consolidar por separado: métricas del dashboard, respuestas pre/post y bitácora.
+   Entregar siempre `pilot_started_at` y `pilot_ended_at`; no reemplazar una
+   ventana ausente por el histórico.
+4. Este procedimiento describe una revisión manual; no demuestra que exista
+   persistencia ni linkage automático de cuestionarios, ni evidencia que el
+   piloto haya operado en terreno.
 
 ---
 
@@ -158,7 +185,16 @@ Las respuestas del productor se contrastan con las métricas automáticas del si
 | Confianza al negociar (1–5) | | | |
 | Frecuencia de información de precios | | | |
 | Utilidad percibida (1–5) | N/A | | |
-| Recomendación (% sí) | N/A | | |
+| Recomendación favorable (% respuestas "sí, definitivamente" o "sí, probablemente") | N/A | | |
+
+**Denominadores:** cada porcentaje usa solo respuestas válidas a esa pregunta;
+las respuestas en blanco, “no sé/no recuerdo” y formularios incompletos se informan
+como faltantes y no se cuentan como “no”. Para recomendación favorable, el
+denominador es el total de respuestas válidas de la pregunta 4.
+
+**Interpretación:** estos formularios describen percepción y uso declarado; no
+prueban por sí solos impacto causal ni reemplazan la medición técnica de entrega,
+latencia o uso real.
 
 ---
 

@@ -1,7 +1,14 @@
 # Check-in semanal — AgroVoz Piloto Traiguén
 
-> Pauta para una llamada de 10 minutos a cada productor.  
+> Pauta para un check-in semanal de 10 minutos por productor. La modalidad
+> (llamada telefónica, llamada de WhatsApp, mensaje de voz o presencial) se
+> acuerda y registra antes de comenzar; si no responde, registrar intento y
+> reprogramación, sin inventar asistencia.
 > Objetivo: detectar problemas tempranos, medir comprensión y recopilar mejoras.
+
+> **Estado:** formulario operativo propuesto para cuatro semanas. La pauta no
+> prueba que el check-in se haya realizado ni que sus resultados alimenten
+> automáticamente el dashboard.
 
 ---
 
@@ -14,9 +21,11 @@
 | Hora inicio | ______ : ______ |
 | Hora término | ______ : ______ |
 | Encargado AgroVoz | ______________________________ |
-| Nombre del productor | ______________________________ |
-| Número de WhatsApp | +56 9 _____________ |
+| Código de participante | ______________________________ |
+| Últimos 4 dígitos del WhatsApp (solo si es necesario) | __________ |
 | Duración real | ______ min |
+| Modalidad y canal acordado | ______________________________ |
+| Resultado | Realizado / No respondió / Reprogramado |
 
 ---
 
@@ -24,13 +33,27 @@
 
 > “Hola don/ña __________, ¿cómo está? Soy __________ de AgroVoz. Le llamamos para saber cómo le ha ido con el asistente de voz esta semana. ¿Tiene 10 minutos?”
 
+Registrar por separado, sin inferir el estado desde la conversación:
+
+- `dataset_consent`: [ ] activo [ ] no activo [ ] revocado [ ] no verificado
+- `alert_consent`: [ ] activo [ ] no activo [ ] revocado [ ] no verificado
+- `history_consent`: [ ] activo [ ] no activo [ ] revocado [ ] no verificado
+
+Estos son opt-ins independientes. `alert_consent` autoriza avisos proactivos y
+no autoriza dataset ni historial; si aparece como no verificado, no se debe
+enviar un aviso por asumir que existe consentimiento.
+
 ---
 
 ## Preguntas clave
 
+Las escalas de claridad y recomendación son respuestas manuales del check-in.
+No son la métrica automática de `feedback=util/no_util`; reportarlas por
+separado dentro de la ventana de cuatro semanas y con el código del participante.
+
 ### 1. ¿Qué entendió bien? (2 min)
 
-Preguntar:  
+Preguntar:
 > “Cuando AgroVoz le respondió, ¿entendió la información? ¿Le pareció clara?”
 
 Respuesta / ejemplo del productor:
@@ -47,7 +70,7 @@ Marcar según escala:
 
 ### 2. ¿Qué no le quedó claro? (2 min)
 
-Preguntar:  
+Preguntar:
 > “¿Hubo alguna respuesta que no entendiera? ¿O alguna palabra que no le sonó?”
 
 Respuesta:
@@ -58,7 +81,7 @@ ________________________________________________________________________________
 
 ### 3. ¿Qué quiso preguntar y no pudo? (2 min)
 
-Preguntar:  
+Preguntar:
 > “Esta semana, ¿intentó preguntar algo y AgroVoz no supo responderle? ¿O le respondió otra cosa?”
 
 Respuesta:
@@ -77,7 +100,7 @@ Marcar si ocurrió:
 
 ### 4. ¿Usó los datos para algo concreto? (2 min)
 
-Preguntar:  
+Preguntar:
 > “¿Usó la información de precios o clima para conversar con un comprador, decidir cuándo cosechar o planificar algo?”
 
 Respuesta:
@@ -93,7 +116,7 @@ ________________________________________________________________________________
 
 ### 5. ¿Recomendaría AgroVoz? (1 min)
 
-Preguntar:  
+Preguntar:
 > “Si un vecino suyo le preguntara, ¿le recomendaría usar AgroVoz?”
 
 - [ ] Sí, sin dudar.
@@ -122,7 +145,7 @@ ________________________________________________________________________________
 
 ## Acciones de seguimiento
 
-| Acción | Responsable | Fecha límite | Estado |
+| Acción | Responsable y suplente | Fecha límite | Estado |
 |---|---|---|---|
 | | | | Pendiente / En progreso / Listo |
 | | | | Pendiente / En progreso / Listo |
@@ -132,12 +155,23 @@ ________________________________________________________________________________
 
 ## Cierre
 
-> “Muchas gracias don/ña __________. Si la próxima semana tiene algún problema, nos avisa por WhatsApp. Que le vaya bien.”
+> “Muchas gracias don/ña __________. Si la próxima semana tiene algún problema,
+> nos avisa por el canal acordado. Que le vaya bien.”
 
 ---
 
 ## Notas adicionales
 
 ________________________________________________________________________________
+
+## Custodia y cierre
+
+El responsable entrega el formulario al custodio designado y registra la
+revisión. Las hojas se mantienen en un lugar cerrado, con acceso solo para el
+equipo autorizado, durante el plazo aprobado; al cierre se devuelven o destruyen
+de forma segura y se registra la acción. No incluir nombres, números completos
+ni notas sensibles si no son necesarios. El custodio, suplente, plazo y canal
+para ejercer derechos son campos obligatorios del procedimiento y quedan
+pendientes de asignación antes del piloto.
 
 ________________________________________________________________________________

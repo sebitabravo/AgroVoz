@@ -2,8 +2,12 @@
 
 > **Versión:** 0.1 — borrador de control
 > **Fecha de corte:** 29 de julio de 2026
-> **Estado:** reconstrucción verificable del trabajo realizado y propuesta de control futuro
+> **Estado:** snapshot histórico del trabajo realizado; propuesta de control futuro sin línea base aprobada
 > **Aprobación de línea base:** pendiente
+
+> **Alcance del snapshot:** los conteos y estados fechados al 29-07-2026 son antecedentes históricos.
+> No representan el estado actual de `HEAD`, `main` ni producción y no deben presentarse como claims
+> vigentes sin repetir la medición con SHA, fecha y worktree identificados.
 
 ## 1. Propósito y criterio de evidencia
 
@@ -13,12 +17,12 @@ hubiera sido comprometida o aprobada de antemano.
 
 Se usan cuatro estados:
 
-- **Medido:** existe un comando y resultado reproducible en la fecha de corte.
+- **Medido al corte:** existe un comando y resultado reproducible en la fecha indicada; no implica vigencia.
 - **Declarado:** consta en `AGENTS.md`, pero no fue vuelto a medir en esta revisión.
 - **Planificado:** trabajo futuro acordado como objetivo, todavía sin resultado.
 - **Pendiente:** falta fecha, responsable, aprobación o evidencia de cierre.
 
-## 2. Snapshot reproducible
+## 2. Snapshot histórico del 29-07-2026
 
 | Fuente | Resultado al corte | Qué demuestra | Qué no demuestra |
 |---|---|---|---|
@@ -29,8 +33,10 @@ Se usan cuatro estados:
 | Worktree local | 143 entradas en `git status --porcelain` | El snapshot contiene trabajo aún no confirmado | Estado de `main` desplegado |
 | Pytest, suite completa | 1.664 tests recolectados: 1.639 aprobados y 25 omitidos | Tamaño y regresión local del worktree | Calidad de terreno ni cumplimiento del cronograma |
 
-Los conteos de GitHub son una fotografía de la consulta del 29-07-2026 y pueden cambiar. Los conteos
-del worktree no deben usarse como evidencia de una entrega hasta quedar en un commit y PR trazables.
+Todos los resultados de esta tabla son una fotografía de la consulta del 29-07-2026 y pueden cambiar.
+El snapshot solo es reproducible reconstruyendo su checkout, entorno y fecha; no prueba el estado
+actual. Los conteos del worktree no deben usarse como evidencia de una entrega hasta quedar en un
+commit y PR trazables. Sin una nueva captura, cualquier claim de estado vigente queda **pendiente**.
 
 ## 3. Reconstrucción histórica, no línea base
 
@@ -57,7 +63,7 @@ La duración de cuatro semanas del piloto sí es un objetivo ya declarado.
 |---|---|---|---|---|---|
 | C0 | Cerrar bloqueos legales y de privacidad previos al piloto | Pendiente | Por definir | Responsable del tratamiento, revisión profesional y controles técnicos | Documento aprobado y hallazgos críticos cerrados |
 | C1 | Endurecer operación del canal y recuperación | Planificado | Por definir | Sesión Open-WA, VPS, backups, monitoreo y smoke test | Prueba fechada de envío/recepción y procedimiento de recuperación |
-| C2 | Validar latencia en 1 vCPU / 6 GB RAM | Planificado | Por definir | Build candidato, modelos locales y protocolo repetible | Distribución de latencia E2E y evidencia de umbral menor a 15 s |
+| C2 | Validar latencia en 1 vCPU / 4 GB RAM | Planificado | Por definir | Build candidato, modelos locales y protocolo repetible | Distribución de latencia E2E y evidencia de umbral menor a 15 s |
 | C3 | Establecer baseline WER rural | Planificado | Por definir | Muestras consentidas de Traiguén y script de evaluación | Dataset identificado, transcripciones de referencia y resultado WER |
 | C4 | Revisión de preparación y decisión de inicio | Pendiente | Por definir | C0–C3 y kit de piloto | Acta explícita de decisión, alcance y responsables |
 | C5 | Ejecutar piloto en Traiguén | Planificado | 4 semanas | C4 aprobado; 3–5 participantes incorporados válidamente | Bitácora real de uso, incidentes y retiros, sin completar por anticipado |
