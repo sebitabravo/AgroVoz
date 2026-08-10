@@ -12,6 +12,14 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 COPY . .
+# PUBLIC_API_URL: Astro/Vite inlinea import.meta.env.PUBLIC_* en el bundle al
+# compilar -- tiene que estar presente ACA, no como env var de runtime del
+# contenedor nginx (demasiado tarde, el JS ya esta compilado).
+# Sin esto, demo.astro asume mismo origen que la landing (ver su propio
+# comentario) y en este deploy landing/backend estan en subdominios
+# distintos: el fetch a /api/v1/demo/preguntar da 404 contra nginx.
+ARG PUBLIC_API_URL
+ENV PUBLIC_API_URL=${PUBLIC_API_URL}
 RUN bun run build
 
 FROM nginx:alpine
