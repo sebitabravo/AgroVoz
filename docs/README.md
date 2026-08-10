@@ -7,6 +7,7 @@
 | Documento | Contenido |
 |---|---|
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Arquitectura, esquema de base de datos, decisiones técnicas |
+| [`DEPLOYMENT.md`](./DEPLOYMENT.md) | Deploy real en producción: NAS + Dokploy + Pangolin, reemplaza el plan de #9 |
 | [`DEV-GUIDE.md`](./DEV-GUIDE.md) | Guía de desarrollo y setup local |
 | [`validacion-operativa.md`](./validacion-operativa.md) | Checklist y preflight saneado para E2E real de Open-WA (#214) |
 | [`humanizacion-voz.md`](./humanizacion-voz.md) | Decisión por propuesta de humanización para el canal WhatsApp |
