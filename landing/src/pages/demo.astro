@@ -4,7 +4,7 @@ import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";
 
 const pageTitle = "Demo Interactiva — AgroVoz";
-const pageDescription = "Probá AgroVoz desde el navegador. Escribí una pregunta sobre precios agrícolas o clima y recibí la respuesta por voz.";
+const pageDescription = "Prueba AgroVoz desde el navegador. Escribe una pregunta sobre precios agrícolas o clima y recibe la respuesta por voz.";
 ---
 
 <Base title={pageTitle} description={pageDescription}>
@@ -14,9 +14,9 @@ const pageDescription = "Probá AgroVoz desde el navegador. Escribí una pregunt
   <main id="top" class="demo-page">
     <section class="demo-hero">
       <div class="demo-hero__inner">
-        <h1>Probá AgroVoz</h1>
+        <h1>Prueba AgroVoz</h1>
         <p>
-          Escribí una pregunta sobre precios de productos agrícolas o el clima
+          Escribe una pregunta sobre precios de productos agrícolas o el clima
           en Traiguén. AgroVoz te responde con voz, como en WhatsApp.
         </p>
       </div>
@@ -37,7 +37,7 @@ const pageDescription = "Probá AgroVoz desde el navegador. Escribí una pregunt
 
           <div class="chat-bubble chat-bubble--received">
             <div class="chat-bubble__text">
-              Hola! Soy AgroVoz. Preguntáme por el precio de la papa,
+              ¡Hola! Soy AgroVoz. Pregúntame por el precio de la papa,
               el tomate, la cebolla, o por el clima en Traiguén.
             </div>
             <span class="chat-bubble__time">Ahora</span>
@@ -45,7 +45,7 @@ const pageDescription = "Probá AgroVoz desde el navegador. Escribí una pregunt
 
           <div class="chat-bubble chat-bubble--received">
             <div class="chat-bubble__text">
-              Probá con:
+              Prueba con:
               <ul>
                 <li>¿A cuánto está la papa?</li>
                 <li>¿Va a llover en Traiguén mañana?</li>
@@ -62,9 +62,9 @@ const pageDescription = "Probá AgroVoz desde el navegador. Escribí una pregunt
               type="text"
               id="chat-input"
               class="chat-input"
-              placeholder="Escribí tu pregunta..."
+              placeholder="Escribe tu pregunta..."
               maxlength="500"
-              aria-label="Escribí tu consulta"
+              aria-label="Escribe tu consulta"
               autofocus
             />
             <button
@@ -250,9 +250,9 @@ const pageDescription = "Probá AgroVoz desde el navegador. Escribí una pregunt
 
       if (!resp.ok) {
         if (resp.status === 429) {
-          showError("Demasiadas consultas. Espera un minuto y volve a intentar.");
+          showError("Demasiadas consultas. Espera un minuto y vuelve a intentarlo.");
         } else if (resp.status === 503) {
-          showError("La demo no esta disponible en este momento.");
+          showError("La demo no está disponible en este momento.");
         } else {
           const errData = await resp.json().catch(() => ({ detail: "Error inesperado" }));
           showError(errData.detail || "Error al procesar tu consulta.");
@@ -264,7 +264,7 @@ const pageDescription = "Probá AgroVoz desde el navegador. Escribí una pregunt
       addBubble(data.texto, "received", undefined, data.audio_base64 || undefined);
       clearLoading();
     } catch {
-      showError("No se pudo conectar con AgroVoz. Esta corriendo el backend?");
+      showError("No se pudo conectar con AgroVoz. ¿Está funcionando el backend?");
     }
   }
 

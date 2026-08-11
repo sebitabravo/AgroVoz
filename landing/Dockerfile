@@ -20,6 +20,10 @@ COPY . .
 # distintos: el fetch a /api/v1/demo/preguntar da 404 contra nginx.
 ARG PUBLIC_API_URL
 ENV PUBLIC_API_URL=${PUBLIC_API_URL}
+# Un build de producción sin esta URL publica una landing que intenta llamar
+# a su propio nginx y responde 404. Fallar acá es preferible a desplegar una
+# demo rota silenciosamente; el valor se inyecta como Build Arg en Dokploy.
+RUN test -n "${PUBLIC_API_URL}" || (echo "PUBLIC_API_URL es obligatorio para el build de producción" >&2 && exit 1)
 RUN bun run build
 
 FROM nginx:alpine

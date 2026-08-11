@@ -126,8 +126,8 @@ en Dokploy:
 | Variable | Por qué | Valor en este deploy |
 |---|---|---|
 | `EXTRA_ALLOWED_HOSTS` | `TrustedHostMiddleware` solo acepta `agrovoz.cl`/`.agrovoz.cl` por defecto → 400 "Invalid host header" a todo tráfico real | `agrovoz.sbravo.app` |
-| `CORS_ORIGINS` | Igual, solo `agrovoz.cl`/`www.agrovoz.cl` por defecto → el navegador bloquea el fetch del demo desde la landing | `https://landing.sbravo.app,https://agrovoz.sbravo.app` |
-| `DEMO_ENDPOINT_ENABLED` | Apagado por diseño en prod ("evitar abuso del LLM/TTS"), decisión de producto no de infra — activar solo si se quiere el demo público (rate limit 5/min ya incluido en el código) | `true` |
+| `CORS_ORIGINS` | Solo permite los orígenes configurados → el navegador bloquea el fetch del demo desde la landing si falta `landing.sbravo.app` | `https://landing.sbravo.app,https://agrovoz.sbravo.app,https://agrovoz.cl,https://www.agrovoz.cl` |
+| `DEMO_ENDPOINT_ENABLED` | La demo pública necesita estar habilitada; el endpoint conserva rate limit de 5/min por IP | `true` |
 
 **Networking** — el compose original asumía el Traefik propio de Dokploy
 (`expose` + `dokploy-network`, sin publicar puertos). Con Pangolin como
@@ -154,9 +154,9 @@ propio, `buildType: dockerfile`, `customGitBuildPath: /landing`.
 `PUBLIC_API_URL` (URL del backend, ej. `https://agrovoz.sbravo.app`) tiene que
 pasarse como **build arg**, no env var de runtime — Astro/Vite inlinea
 `import.meta.env.PUBLIC_*` en el bundle al compilar, demasiado tarde en el
-nginx final. `ARG PUBLIC_API_URL` + `ENV PUBLIC_API_URL=${PUBLIC_API_URL}`
-antes de `bun run build` en el Dockerfile; el valor real va en Build Args de
-Dokploy, no hardcodeado en el repo.
+nginx final. El Dockerfile ahora falla si el argumento está vacío, en vez de
+publicar una landing que llama al nginx de la propia landing y devuelve 404.
+El valor real va en Build Args de Dokploy, no hardcodeado en el repo.
 
 Application (no Compose) en Dokploy corre como **Docker Swarm service** — ver
 sección de networking arriba para cómo conectarlo al ingress.
@@ -179,7 +179,7 @@ humano).
 | 502 Bad Gateway | Target apunta a `127.0.0.1`/loopback en vez de un alias de red compartida | `docker network inspect pangolin` / `dokploy-network` |
 | 400 "Invalid host header" | Falta `EXTRA_ALLOWED_HOSTS` con el dominio real | `app/core/security.py` |
 | CORS bloqueado en el navegador (curl funciona) | Falta `CORS_ORIGINS` con el origen de la landing | `app/main.py` (CORSMiddleware) |
-| 503 en `/api/v1/demo/preguntar` | `DEMO_ENDPOINT_ENABLED=false` (default) | `app/core/config.py` |
+| 503 en `/api/v1/demo/preguntar` | `DEMO_ENDPOINT_ENABLED=false` explícito en Dokploy | `docker-compose.prod.yml` / `app/core/config.py` |
 | Contenedor crash-loop "Operation not permitted" | Falta alguna capability que el entrypoint de la imagen necesita | `docker logs <container>` para ver en qué paso falla |
 | Docker rechaza crear el contenedor, build OK | `cpus` del límite excede los vCPU reales del host | `docker service ls` / `docker info` |
 | `could not read Username for 'https://github.com'` | Repo privado clonado por HTTPS sin credenciales | Usar SSH + deploy key |

@@ -30,20 +30,20 @@ logger = logging.getLogger(__name__)
 _DEMO_CHAT_ID_HASH = "demo"
 _MAX_AUDIO_BYTES = 5 * 1024 * 1024
 _DEMO_GREETING_TEXT = (
-    "Hola! Preguntame por el precio de algun producto o por el clima de Traiguen."
+    "¡Hola! Pregúntame por el precio de algún producto o por el clima de Traiguén."
 )
 
 
 def _decode_audio_base64(audio_base64: str) -> bytes:
-    """Decodifica audio base64 validando limites de tamano."""
+    """Decodifica audio base64 validando límites de tamaño."""
     try:
         audio_bytes = base64.b64decode(audio_base64, validate=True)
     except ValueError as exc:
-        raise ValueError("El audio no esta en formato base64 valido") from exc
+        raise ValueError("El audio no está en formato base64 válido") from exc
 
     if len(audio_bytes) > _MAX_AUDIO_BYTES:
         raise ValueError(
-            f"El audio excede el tamano maximo permitido de {_MAX_AUDIO_BYTES} bytes"
+            f"El audio excede el tamaño máximo permitido de {_MAX_AUDIO_BYTES} bytes"
         )
 
     return audio_bytes
@@ -130,7 +130,7 @@ async def _generate_demo_response(query_text: str) -> tuple[str, str]:
             "Error en generación LLM para demo — error=%s",
             type(exc).__name__,
         )
-        response_text = "Tuve un problema al procesar tu consulta. Podrias intentar de nuevo?"
+        response_text = "Tuve un problema al procesar tu consulta. ¿Podrías intentarlo de nuevo?"
 
     intent = AgroVozPipeline._detect_intent(query_text, response_text)
     return response_text, intent
@@ -154,7 +154,7 @@ async def process_demo_request(request: DemoPreguntaRequest) -> DemoRespuestaRes
     response_text, intent = await _generate_demo_response(query_text)
 
     if not response_text.strip():
-        response_text = "No entendi tu consulta. Podrias intentar de nuevo?"
+        response_text = "No entendí tu consulta. ¿Podrías intentarlo de nuevo?"
         intent = "desconocido"
 
     audio_base64 = ""

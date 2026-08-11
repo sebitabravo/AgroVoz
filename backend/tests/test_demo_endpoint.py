@@ -192,3 +192,16 @@ async def test_demo_no_registra_consulta_ni_error_llm(
     assert "SECRETO-DEMO" not in caplog.text
     assert "dato privado" not in caplog.text
     assert "56912345678" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_demo_saludo_usa_copy_chileno_y_acentos() -> None:
+    """El saludo directo de la demo no usa voseo rioplatense ni texto mutilado."""
+    from app.services.demo_service import _generate_demo_response
+
+    response, intent = await _generate_demo_response("hola")
+
+    assert intent == "saludo"
+    assert response == (
+        "¡Hola! Pregúntame por el precio de algún producto o por el clima de Traiguén."
+    )
