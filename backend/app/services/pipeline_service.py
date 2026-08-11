@@ -1062,13 +1062,14 @@ class AgroVozPipeline:
                 _marcar("regla_agronomica")
             return response_text, "agronomica"
 
-        # 2. Pipeline normal: LLM con tool calling.
-        # Import local para permitir mocking en tests
+        # 2. Pipeline normal: OpenRouter primero y Qwen después si el remoto
+        # no responde dentro de su deadline. El orquestador mantiene la
+        # política de no reintentar escrituras con otro proveedor.
         from app.services.llm_keywords import (
             _force_compound_keyword_tools,
             _force_keyword_tool,
         )
-        from app.services.llm_service import answer
+        from app.services.llm_service import answer_with_provider_order
 
         # Cargar cultivos de interés del agricultor para personalizar el
         # contexto del LLM. Si no tiene cultivos registrados, se pasa None
@@ -1148,50 +1149,35 @@ class AgroVozPipeline:
                 return fast, intent_fast
 
         try:
-            response_text = await answer(
+            response_text, provider = await answer_with_provider_order(
                 transcribed_text.strip(),
                 phone_hash=chat_id_hash,
                 cultivos=cultivos,
                 system_tip=system_tip,
                 consulta_tipo=extracted.consulta_tipo,
             )
-            _marcar("llm")
+            _marcar(provider)
         except (TimeoutError, RuntimeError, OSError, ValueError):
-            logger.error("Error en generacion LLM local — probando fallbacks")
+            logger.error("Error en proveedores LLM — probando fallback determinista")
+            try:
+                fallback_result = await _force_keyword_tool(
+                    transcribed_text.strip(), phone_hash=chat_id_hash
+                )
+            except (TimeoutError, RuntimeError, OSError, ValueError, SQLAlchemyError):
+                logger.error("Fallback determinista tambien fallo")
+                fallback_result = None
 
-            # Fallback de 3 capas cuando el LLM local falla:
-            # 1. OpenRouter (tool calling remoto, deshabilitado por defecto —
-            #    solo si OPENROUTER_API_KEY esta configurada). Ver riesgos
-            #    documentados en llm_service.answer_via_openrouter().
-            # 2. Keywords deterministas (Issue #121): datos reales de
-            #    ODEPA/OpenMeteo en vez de un mensaje generico.
-            # 3. Mensaje generico si ambos anteriores fallan.
-            from app.services.llm_service import answer_via_openrouter
-
-            forced_result = await answer_via_openrouter(
-                transcribed_text.strip(), phone_hash=chat_id_hash, cultivos=cultivos
-            )
-            if forced_result:
-                _marcar("openrouter")
-                logger.warning("Respuesta via OpenRouter (LLM local fallo)")
+            if fallback_result:
+                _marcar("fallback_keywords")
+                logger.warning(
+                    "Respuesta DEGRADADA (sin LLM) — producto=%s consulta_tipo=%s",
+                    extracted.producto,
+                    extracted.consulta_tipo,
+                )
+                response_text = fallback_result
             else:
-                try:
-                    forced_result = await _force_keyword_tool(transcribed_text.strip(), phone_hash=chat_id_hash)
-                except (TimeoutError, RuntimeError, OSError, ValueError, SQLAlchemyError):
-                    logger.error("Fallback determinista tambien fallo")
-                    forced_result = None
-
-                if forced_result:
-                    _marcar("fallback_keywords")
-                    logger.warning(
-                        "Respuesta DEGRADADA (sin LLM) — producto=%s consulta_tipo=%s",
-                        extracted.producto,
-                        extracted.consulta_tipo,
-                    )
-
-            if not forced_result:
                 _marcar("generico")
-            response_text = forced_result or ("Tuve un problema al procesar tu consulta. ¿Podrias intentar de nuevo?")
+                response_text = "Tuve un problema al procesar tu consulta. ¿Podrias intentar de nuevo?"
 
         intent = AgroVozPipeline._detect_intent(transcribed_text, response_text)
         return response_text, intent

@@ -1,13 +1,15 @@
-"""Cliente OpenRouter — fallback LLM remoto cuando Qwen2.5 local no responde.
+"""Cliente OpenRouter para el proveedor remoto primario y su fallback.
 
-Deshabilitado por defecto: se activa solo si OPENROUTER_API_KEY esta
-configurada. Usa el router "openrouter/free" (modelos gratuitos que rotan
-sin aviso segun disponibilidad del proveedor) via la API OpenAI-compatible
-de OpenRouter, con tool calling nativo (tools=, tool_calls en la respuesta).
+Se usa solo si OPENROUTER_API_KEY esta configurada. En el orden global de
+proveedores puede atender primero consultas de lectura; el orquestador aplica
+un deadline corto y deriva a Qwen2.5 local cuando falla. Usa el router
+"openrouter/free" (modelos gratuitos que rotan sin aviso segun disponibilidad
+del proveedor) via la API OpenAI-compatible de OpenRouter, con tool calling
+nativo (tools=, tool_calls en la respuesta).
 
-Es la SEGUNDA capa de un fallback de 3 niveles orquestado en
-pipeline_service.py: LLM local -> este modulo -> keywords deterministas.
-Este modulo nunca decide esa cadena, solo intenta responder o retorna None.
+Este modulo no decide la cadena de proveedores: solo ejecuta una llamada
+remota o propaga el error para que llm_service.py aplique el fallback local y,
+si corresponde, el fallback determinista.
 """
 
 from __future__ import annotations
@@ -30,12 +32,12 @@ _http_client_lock = asyncio.Lock()
 
 
 def is_configured() -> bool:
-    """True si hay una API key configurada — el fallback esta habilitado."""
+    """True si hay una API key configurada para habilitar el remoto."""
     return bool(settings.openrouter_api_key.strip())
 
 
 async def _get_http_client() -> httpx.AsyncClient:
-    """Cliente HTTP singleton con timeout corto (es un fallback, no el camino feliz)."""
+    """Cliente HTTP singleton con timeout configurable para OpenRouter."""
     global _http_client
     if _http_client is None or _http_client.is_closed:
         async with _http_client_lock:

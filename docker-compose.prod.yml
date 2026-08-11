@@ -49,7 +49,7 @@ services:
       - OPENWA_WEBHOOK_SECRET=${OPENWA_WEBHOOK_SECRET:?OPENWA_WEBHOOK_SECRET requerido — configurar en Dokploy Secrets UI}
       - OPENWA_API_URL=http://openwa:2785
       - OPENWEATHERMAP_API_KEY=${OPENWEATHERMAP_API_KEY}
-      - ADMIN_API_KEY=${ADMIN_API_KEY}
+      - ADMIN_API_KEY=${ADMIN_API_KEY:?ADMIN_API_KEY requerida — configurar en Dokploy Secrets UI}
       # Secret para firmar cookies de sesión del dashboard SSR (itsdangerous).
       # Sin esto el backend arranca con default y validate_admin_keys_not_default
       # bloquea el arranque en producción.
@@ -87,7 +87,7 @@ services:
       - ODEPA_SYNC_HOUR=${ODEPA_SYNC_HOUR:-6}
       - ODEPA_SYNC_MINUTE=${ODEPA_SYNC_MINUTE:-0}
       # ── Seguridad ────────────────────
-      - PHONE_HASH_PEPPER=${PHONE_HASH_PEPPER}
+      - PHONE_HASH_PEPPER=${PHONE_HASH_PEPPER:?PHONE_HASH_PEPPER requerida — configurar en Dokploy Secrets UI}
       - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-60}
       - AUDIO_RETENTION_HOURS=${AUDIO_RETENTION_HOURS:-24}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
@@ -107,6 +107,14 @@ services:
       # consultas/minuto por IP; para apagarla, definir explícitamente false
       # en Dokploy (no dejar que un default silencioso rompa la demo).
       - DEMO_ENDPOINT_ENABLED=${DEMO_ENDPOINT_ENABLED:-true}
+      # OpenRouter es el primer proveedor global cuando hay key; Qwen queda
+      # como segundo. La key debe venir de Dokploy Secrets UI.
+      - LLM_PRIMARY_PROVIDER=${LLM_PRIMARY_PROVIDER:-openrouter}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-openrouter/free}
+      - OPENROUTER_TIMEOUT_SECONDS=${OPENROUTER_TIMEOUT_SECONDS:-8.0}
+      - OPENROUTER_MAX_OUTPUT_TOKENS=${OPENROUTER_MAX_OUTPUT_TOKENS:-120}
+      - OPENROUTER_PRIMARY_TIMEOUT_SECONDS=${OPENROUTER_PRIMARY_TIMEOUT_SECONDS:-2.0}
     command:
       [
         "uvicorn",
@@ -220,10 +228,15 @@ services:
           cpus: "1"
     cap_drop:
       - ALL
+    # El entrypoint de Open-WA arranca como root, crea los subdirectorios del
+    # volumen y luego hace chown/gosu hacia el usuario openwa. En un volumen
+    # nuevo, cap_drop: ALL impide ese mkdir antes del chown. La capability se
+    # usa durante el bootstrap; el proceso final baja a openwa.
     cap_add:
-      - CHOWN     # el entrypoint hace chown de /app/data al arrancar
-      - SETUID    # despues baja de root al usuario "openwa" (gosu/su-exec)
-      - SETGID    # ambos fallan con "Operation not permitted" sin estos caps
+      - DAC_OVERRIDE # permite crear dirs antes del chown inicial
+      - CHOWN         # el entrypoint hace chown de /app/data al arrancar
+      - SETUID        # despues baja de root al usuario "openwa" (gosu/su-exec)
+      - SETGID        # ambos fallan con "Operation not permitted" sin estos caps
     security_opt:
       - no-new-privileges:true
 

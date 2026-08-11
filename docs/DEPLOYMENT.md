@@ -128,6 +128,20 @@ en Dokploy:
 | `EXTRA_ALLOWED_HOSTS` | `TrustedHostMiddleware` solo acepta `agrovoz.cl`/`.agrovoz.cl` por defecto → 400 "Invalid host header" a todo tráfico real | `agrovoz.sbravo.app` |
 | `CORS_ORIGINS` | Solo permite los orígenes configurados → el navegador bloquea el fetch del demo desde la landing si falta `landing.sbravo.app` | `https://landing.sbravo.app,https://agrovoz.sbravo.app,https://agrovoz.cl,https://www.agrovoz.cl` |
 | `DEMO_ENDPOINT_ENABLED` | La demo pública necesita estar habilitada; el endpoint conserva rate limit de 5/min por IP | `true` |
+| `LLM_PRIMARY_PROVIDER` | `openrouter` primero con fallback Qwen; `local` fuerza solo Qwen | `openrouter` |
+| `OPENROUTER_API_KEY` | Key remota; configurarla solo en Dokploy Secrets UI, nunca en git | `<secret>` |
+| `OPENROUTER_MODEL` | Modelo/router compatible con tool calling nativo | `openrouter/free` |
+| `OPENROUTER_TIMEOUT_SECONDS` | Timeout por request HTTP interna | `8.0` |
+| `OPENROUTER_PRIMARY_TIMEOUT_SECONDS` | Deadline total del intento remoto antes de pasar a Qwen | `2.0` |
+| `OPENROUTER_MAX_OUTPUT_TOKENS` | Tope de salida para controlar latencia/costo | `120` |
+
+Para habilitar el orden remoto primero, configurar `LLM_PRIMARY_PROVIDER=openrouter`
+y una `OPENROUTER_API_KEY` válida. El fast-path determinístico sigue primero.
+Las consultas salen del VPS hacia OpenRouter; revisá sus condiciones de
+privacidad y límites. Si OpenRouter falla dentro del deadline, el runtime pasa
+al Qwen local. Las operaciones con efectos persistentes van directo al local
+para evitar duplicados. Para rollback sin tráfico remoto, configurar
+`LLM_PRIMARY_PROVIDER=local` y reiniciar el backend.
 
 **Networking** — el compose original asumía el Traefik propio de Dokploy
 (`expose` + `dokploy-network`, sin publicar puertos). Con Pangolin como
@@ -139,10 +153,12 @@ Dokploy. Sin `ports:`, solo `expose:`.
 de vCPU reales del VPS (Docker rechaza cualquier límite por encima del total
 de núcleos del host, con un error de creación de contenedor, no de build).
 
-**`openwa`** — la imagen (`ghcr.io/rmyndharis/openwa:latest`) necesita 3
-capabilities que `cap_drop: ALL` le saca por defecto: `CHOWN` (ajusta owner de
-`/app/data` al arrancar) y `SETUID`+`SETGID` (baja de root al usuario `openwa`
-vía gosu/su-exec). Sin las 3, crash-loop con "Operation not permitted".
+**`openwa`** — la imagen (`ghcr.io/rmyndharis/openwa:latest`) necesita 4
+capabilities después de `cap_drop: ALL`: `DAC_OVERRIDE` para que el bootstrap
+pueda crear los subdirectorios de un volumen nuevo, `CHOWN` para ajustar el
+owner de `/app/data` y `SETUID`+`SETGID` para bajar al usuario `openwa` vía
+gosu/su-exec. Sin ellas, el volumen nuevo puede quedar en crash-loop con
+`mkdir: cannot create directory '/app/data/plugins': Permission denied`.
 
 ### 5. Landing (Dokploy Application, Astro estático)
 
