@@ -36,7 +36,7 @@ NAS (Proxmox, permanente)
     │   └── application "AgroVoz Landing" (Astro estático)
     └── Remote Server "VPS Hostinger" ──SSH──┐
                                               ▼
-VPS Hostinger 93.127.212.206 (expira abril 2027)
+VPS Hostinger <IP_VPS> (expira abril 2027)
 ├── Pangolin (gerbil + traefik + crowdsec) — ingress, TLS, 80/443
 │   ├── site "vps-hostinger-local" (type=local)
 │   ├── resource agrovoz.sbravo.app  → target agrovoz-backend:8000
