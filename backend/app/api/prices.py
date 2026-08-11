@@ -19,7 +19,7 @@ from app.services.odepa_service import (
     list_mercados,
     list_products,
     query_latest_by_product,
-    query_latest_price,
+    query_latest_price_for_market,
 )
 
 logger = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ def get_prices(
             raise HTTPException(
                 status_code=400, detail="El mercado no puede estar vacío."
             )
-        record = query_latest_price(db, producto_norm, mercado_norm)
+        record = query_latest_price_for_market(db, producto_norm, mercado_norm)
 
         if record is None:
             # Distinguir si no existe el producto o solo el mercado
