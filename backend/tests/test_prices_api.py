@@ -472,6 +472,33 @@ class TestGetPriceForLlmSeleccionMercado:
         assert "8.833" in texto
         assert "1.200" not in texto
 
+    def test_mercado_explicito_prioriza_nombre_odepa_actualizado(
+        self, db: Session
+    ) -> None:
+        """El alias Lo Valledor no debe devolver el registro legado corto."""
+        _insertar_precio(
+            db,
+            mercado="Lo Valledor",
+            precio_kg=Decimal("1200"),
+            unidad="kg",
+            fecha=datetime.date(2026, 6, 21),
+            fuente="legacy-test",
+        )
+        _insertar_precio(
+            db,
+            mercado="Mercado Mayorista Lo Valledor de Santiago",
+            precio_kg=Decimal("15000"),
+            unidad="$/saco 25 kilos",
+            fecha=datetime.date(2026, 8, 7),
+            fuente="odepa-test",
+        )
+
+        texto = get_price_for_llm(db, "papa", "Lo Valledor")
+
+        assert "15.000 pesos por saco de 25 kilos" in texto
+        assert "07/08/2026" in texto
+        assert "1.200" not in texto
+
     def test_sin_valledor_gana_el_mas_reciente_no_el_alfabetico(
         self, db: Session
     ) -> None:
@@ -919,6 +946,37 @@ class TestPricesApiEndpoint:
         assert "Papa" in data["texto"]
         assert "1.200 pesos" in data["texto"]
         assert "$" not in data["texto"]
+
+    async def test_get_producto_con_alias_valledor_prefiere_nombre_oficial(
+        self, client: AsyncClient, tmp_path: Path
+    ) -> None:
+        """El endpoint no debe exponer el seed legado de Lo Valledor."""
+        with next(_session_test_db(tmp_path)) as db:
+            _insertar_precio(
+                db,
+                producto="papa",
+                mercado="Lo Valledor",
+                precio_kg=Decimal("1200"),
+                unidad="kg",
+                fecha=datetime.date(2026, 6, 21),
+            )
+            _insertar_precio(
+                db,
+                producto="papa",
+                mercado="Mercado Mayorista Lo Valledor de Santiago",
+                precio_kg=Decimal("15000"),
+                unidad="$/saco 25 kilos",
+                fecha=datetime.date(2026, 8, 7),
+            )
+
+        response = await client.get("/api/v1/prices/papa?mercado=Lo+Valledor")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["mercado"] == "Mercado Mayorista Lo Valledor de Santiago"
+        assert data["precio_kg"] == 15000.0
+        assert data["fecha"] == "2026-08-07"
+
 
     async def test_get_producto_sin_mercado_devuelve_todos(
         self, client: AsyncClient, tmp_path: Path

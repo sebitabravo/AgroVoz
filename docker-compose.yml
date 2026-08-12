@@ -26,6 +26,17 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       - OPENWA_API_URL=http://openwa:2785
+      # La demo web queda apagada por defecto en desarrollo para no abrir un
+      # endpoint costoso sin consentimiento explícito en .env.
+      - DEMO_ENDPOINT_ENABLED=${DEMO_ENDPOINT_ENABLED:-false}
+      # OpenRouter es el primer proveedor global cuando hay key; Qwen queda
+      # como segundo. La API key se lee desde .env; nunca se escribe aquí.
+      - LLM_PRIMARY_PROVIDER=${LLM_PRIMARY_PROVIDER:-openrouter}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-openrouter/free}
+      - OPENROUTER_TIMEOUT_SECONDS=${OPENROUTER_TIMEOUT_SECONDS:-8.0}
+      - OPENROUTER_MAX_OUTPUT_TOKENS=${OPENROUTER_MAX_OUTPUT_TOKENS:-120}
+      - OPENROUTER_PRIMARY_TIMEOUT_SECONDS=${OPENROUTER_PRIMARY_TIMEOUT_SECONDS:-2.0}
     command:
       [
         "uvicorn",
@@ -117,7 +128,9 @@ services:
     environment:
       # Credencial ARI del puente local (C10, #172). Solo alcanzable dentro
       # de la red interna de Compose: este servicio no publica puertos.
-      - IVR_ARI_PASSWORD=${IVR_ARI_PASSWORD:?IVR_ARI_PASSWORD requerida para habilitar ARI — ver .env.example}
+      # Compose interpola también profiles inactivos. El valor por defecto es
+      # solo local; sobreescribirlo al usar el profile ivr si hace falta.
+      - IVR_ARI_PASSWORD=${IVR_ARI_PASSWORD:-dev-ivr-password}
     volumes:
       - ./backend/data/ivr:/usr/share/asterisk/sounds/agrovoz:ro
     tmpfs:

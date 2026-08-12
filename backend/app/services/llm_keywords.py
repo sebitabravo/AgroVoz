@@ -169,6 +169,40 @@ _PRECIO_HISTORIA_KW = (
     "bajó",
     "antes",
 )
+
+_PRECIO_EXPLICITO_KW = frozenset(
+    {
+        "precio",
+        "cuanto",
+        "cuánto",
+        "cuesta",
+        "vale",
+        "valor",
+        "kilo",
+        "kilos",
+        "saco",
+        "sacos",
+        "luca",
+        "lucas",
+        "peso",
+        "pesos",
+    }
+)
+
+
+def _tiene_intencion_precio_explicita(query: str) -> bool:
+    """Indica si la consulta pide un precio de forma inequívoca."""
+    normalized = query.casefold()
+    tokens = set(re.findall(r"[a-záéíóúñü]+", normalized))
+    if tokens & _PRECIO_EXPLICITO_KW:
+        return True
+
+    # "A cómo está" es una forma frecuente de preguntar precio, pero
+    # "cómo cultivar" sigue siendo una consulta agronómica y no debe recibir
+    # un mensaje de precio ausente.
+    return re.search(r"\ba\s+c[oó]mo\s+(?:est[aá]|vale|cuesta|se vende)\b", normalized) is not None
+
+
 _CLIMA_FUTURO_KW = (
     "mañana",
     "manana",
@@ -1204,6 +1238,11 @@ async def _force_keyword_tool(query_text: str, phone_hash: str | None = None) ->
                     "Fallback tool forzado — tool=%s",
                     "get_price_history" if es_historia else "get_price",
                 )
+                return result
+            if _tiene_intencion_precio_explicita(q):
+                # La ausencia de un dato ODEPA es una respuesta válida para
+                # una pregunta de precio; no debe abrir otra ventana de LLM
+                # que termine ocultándola detrás de un timeout genérico.
                 return result
         except SQLAlchemyError as exc:
             # Fire-and-forget: un error de DB (database is locked, disk I/O)

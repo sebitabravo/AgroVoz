@@ -111,7 +111,7 @@ una tool está habilitada en producción.
 
 ### `app/services/` — Capa de negocio
 - `whisper_service.py` — transcripción de audio (descarga, ffmpeg, Whisper)
-- `llm_service.py` — interpretación NL + Tool Calling con whitelist (19 tools: precios, clima, corpus, INDAP, gastos, parcelas, reglas, panel, reportes y `get_directorio_agricola`) + fallback OpenRouter
+- `llm_service.py` — interpretación NL + Tool Calling con whitelist (19 tools: precios, clima, corpus, INDAP, gastos, parcelas, reglas, panel, reportes y `get_directorio_agricola`) con orden OpenRouter primario para lectura y Qwen local como fallback
 - `tts_service.py` — síntesis de voz con Piper TTS
 - `odepa_service.py` — consultas a SQLite ODEPA, sync diario y detector determinista de variaciones
 - `weather_service.py` — consultas a OpenMeteo API (forecast + histórico)
@@ -240,8 +240,10 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
 2. **Whisper local, no API.** Costo $0 vs ~$150-200/mes. Precisión suficiente con small.
    Fine-tuning futuro con dataset de voz rural chilena.
 
-3. **LLM cuantizado local, no API.** ≤3B parámetros, 4-bit. Corre en CPU.
-   Tool Calling con whitelist estricta para evitar alucinaciones.
+3. **Qwen local como fallback operativo.** ≤3B parámetros, 4-bit, corre en
+   CPU y queda siempre disponible para degradación. OpenRouter puede ser el
+   proveedor primario de consultas de lectura cuando `LLM_PRIMARY_PROVIDER`
+   está en `openrouter`; ambos caminos usan Tool Calling con whitelist estricta.
 
 4. **Piper TTS, no ElevenLabs/Google.** Open-source, español, calidad aceptable para datos numéricos.
 
@@ -313,10 +315,12 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     metrics_service.py. Backfill manual para filas existentes con patrones
     de prueba conocidos. Reversible: desmarcar is_test restaura la visibilidad.
 
-15. **OpenRouter como fallback LLM remoto — deshabilitado por defecto.**
-    Segunda capa de un fallback de 3 niveles (LLM local → OpenRouter → keywords
-    deterministas) que se activa SOLO si `OPENROUTER_API_KEY` está configurada.
-    Excepción explícita y acotada al hard constraint "sin APIs pagas externas":
+15. **OpenRouter como fallback LLM remoto — decisión histórica supersedida por ADR 32.**
+    Esta entrada documenta la primera integración y conserva los riesgos que
+    siguen vigentes. Originalmente era la segunda capa de un fallback de 3
+    niveles (LLM local → OpenRouter → keywords deterministas) y se activaba
+    SOLO si `OPENROUTER_API_KEY` estaba configurada. Excepción explícita y
+    acotada al hard constraint "sin APIs pagas externas":
     el tier gratuito de OpenRouter (`openrouter/free`) no cobra, pero sigue
     siendo un tercero no auditado. Riesgos evaluados y aceptados conscientemente:
     - El catálogo de modelos gratuitos rota sin aviso (no es un modelo fijo).
@@ -326,9 +330,10 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     - Riesgo de rate limit del tier gratis: 20 req/min, 50-1000 req/día según
       créditos; son cifras de referencia sin contrato vigente adjunto, no una
       capacidad garantizada.
-    Por eso es fallback de última instancia, no el camino principal, y por
-    eso el flag existe desactivado por defecto (opt-in explícito en `.env`).
-    Usa tool calling nativo (`tools=`, formato OpenAI) en vez del parseo de
+    La política operativa actual está en ADR 32: OpenRouter puede ser el
+    primer proveedor para lectura con deadline total corto, mientras Qwen
+    sigue como respaldo y las escrituras permanecen locales. Usa tool calling
+    nativo (`tools=`, formato OpenAI) en vez del parseo de
     texto `<tool_call>` que necesita Qwen2.5 vía llama-cpp-python — son
     implementaciones separadas (`llm_service.answer()` vs
     `llm_service.answer_via_openrouter()`) porque el formato de tool calling
@@ -494,3 +499,26 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     protocolo y evidencia fechada, se reportan como metas o datos de diseño.
 
 [i215]: https://github.com/sebitabravo/AgroVoz/issues/215
+
+
+31. **OpenRouter inicialmente acotado a la demo web.** Esta decisión fue la
+    primera integración del cliente remoto y queda supersedida por la decisión
+    32, aprobada después para priorizar OpenRouter globalmente con fallback
+    local y protección contra duplicación de escrituras. Se conservan sus
+    riesgos de privacidad, rate limit y catálogo rotativo como antecedentes.
+
+
+32. **Orden global de proveedores LLM con fallback local y deadline total.**
+    `LLM_PRIMARY_PROVIDER=openrouter` hace que el runtime intente OpenRouter
+    antes de `answer()` con Qwen para consultas de lectura en la demo y
+    WhatsApp. El fast-path determinístico permanece primero. El intento remoto
+    tiene un deadline total configurable de dos segundos por defecto, no dos
+    segundos por cada request del loop de tool calling; si vence, falla, recibe
+    rate limit o no ejecuta una tool válida, el orquestador pasa al Qwen local.
+    Las consultas que pueden ejecutar escrituras (`register_expense`,
+    `register_parcela`, links y reportes) van directamente al local y el intento
+    remoto primario solo recibe tools de lectura, evitando duplicados cuando una
+    respuesta remota vence después de un efecto lateral. Sin API key, el remoto
+    se salta y el camino local sigue funcionando. `LLM_PRIMARY_PROVIDER=local`
+    fuerza solo Qwen y permite rollback operativo sin tráfico remoto ni cambio
+    de código.

@@ -20,7 +20,7 @@ from app.services.audio_service import (
     validate_path_in_audio_dir,
 )
 from app.services.llm_keywords import _detect_greeting, _force_keyword_tool
-from app.services.llm_service import answer
+from app.services.llm_service import answer_with_provider_order
 from app.services.pipeline_service import AgroVozPipeline
 from app.services.tts_service import TTSService
 from app.services.whisper_service import WhisperService
@@ -124,7 +124,11 @@ async def _generate_demo_response(query_text: str) -> tuple[str, str]:
         logger.warning("Fast-path de demo falló — fallback=llm")
 
     try:
-        response_text = await answer(query_text, phone_hash=_DEMO_CHAT_ID_HASH)
+        response_text, provider = await answer_with_provider_order(
+            query_text,
+            phone_hash=_DEMO_CHAT_ID_HASH,
+        )
+        logger.info("Proveedor LLM demo seleccionado — provider=%s", provider)
     except (TimeoutError, RuntimeError, OSError, ValueError) as exc:
         logger.error(
             "Error en generación LLM para demo — error=%s",

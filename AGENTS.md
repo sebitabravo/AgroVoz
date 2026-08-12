@@ -10,7 +10,9 @@
 Precios agrícolas (ODEPA: 79 productos, 15 mercados) y pronósticos climáticos (OpenMeteo).
 Pipeline E2E: Whisper small → LLM Qwen2.5-3B Q4_K_M (llama-cpp) → Piper TTS.
 Backend: FastAPI + SQLite + SQLAlchemy 2.0. Infra: Docker Compose.
-Sin APIs pagas. Sin app nativa. WhatsApp es la vía principal, la PWA es complemento opcional.
+Sin APIs pagas obligatorias. OpenRouter puede ser el proveedor primario global
+cuando existe una key; Qwen local queda como fallback. Sin app nativa. WhatsApp
+es la vía principal, la PWA es complemento opcional.
 
 **Stack:** Python 3.12+, FastAPI 0.115+, SQLAlchemy 2.0+, SQLite, Alembic.
 Frontend: Astro 7 + Tailwind 4 (landing), Jinja2 + HTMX (admin dashboard).
@@ -18,7 +20,7 @@ Linter: ruff. Type checker: mypy strict. Tests: pytest + pytest-asyncio + pytest
 
 ## Hard constraints (NO negociables)
 
-- **Stack 100% open-source.** Whisper, LLM, TTS y WhatsApp gateway corren local. Sin APIs pagas externas.
+- **Fallback local obligatorio.** OpenRouter puede atender primero las consultas de lectura con `LLM_PRIMARY_PROVIDER=openrouter`; si falla en 2 segundos totales, Qwen local responde. Las tools con efectos persistentes van al local para evitar duplicados. Whisper, Qwen, Piper y WhatsApp gateway siguen disponibles localmente.
 - **WhatsApp es la vía principal y suficiente.** Ningún flujo puede exigir instalar algo. La PWA es un complemento opcional, nunca un requisito.
 - **Sin app nativa iOS/Android.** Si hace falta una interfaz instalable, es PWA sobre el mismo backend.
 - **Sin IoT/sensores.** Solo micrófono y cámara del teléfono.

@@ -1003,6 +1003,39 @@ def _find_market_record(precios_por_mercado: dict[str, OdepaPrice], substring: s
     return None
 
 
+def _select_valledor_oficial(
+    precios_por_mercado: dict[str, OdepaPrice],
+) -> OdepaPrice | None:
+    """Prefiere el nombre oficial de Lo Valledor sobre seeds legados."""
+    nombre_oficial = "mercado mayorista lo valledor de santiago"
+    candidatos = [
+        registro
+        for nombre, registro in precios_por_mercado.items()
+        if nombre.lower() == nombre_oficial
+    ]
+    if not candidatos:
+        return None
+    return max(candidatos, key=lambda registro: registro.fecha)
+
+
+def query_latest_price_for_market(
+    session: Session, producto: str, mercado: str
+) -> OdepaPrice | None:
+    """Resuelve aliases de mercado antes del lookup exacto.
+
+    ``query_latest_price`` conserva semántica exacta para no confundir
+    mercados parecidos. Esta capa es la entrada para consultas de usuario:
+    el alias hablado ``Lo Valledor`` debe preferir el nombre oficial vigente
+    de ODEPA sobre el seed legado con nombre corto.
+    """
+    if mercado.strip().lower() in {"valledor", "lo valledor"}:
+        precios_por_mercado = query_latest_by_product(session, producto)
+        registro_oficial = _select_valledor_oficial(precios_por_mercado)
+        if registro_oficial is not None:
+            return registro_oficial
+    return query_latest_price(session, producto, mercado)
+
+
 def get_price_for_llm(
     session: Session,
     producto: str,
@@ -1143,7 +1176,7 @@ def _obtener_registro_referencia(session: Session, producto: str, mercado: str =
             return None
         return _select_registro_referencia(precios_por_mercado)
 
-    exacto = query_latest_price(session, producto, mercado)
+    exacto = query_latest_price_for_market(session, producto, mercado)
     if exacto is not None:
         return exacto
 

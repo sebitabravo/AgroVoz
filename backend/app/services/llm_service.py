@@ -34,7 +34,8 @@ import re
 import threading
 import time
 from collections.abc import Awaitable, Callable
-from typing import cast
+from dataclasses import dataclass
+from typing import Literal, cast
 
 import httpx
 from sqlalchemy.exc import SQLAlchemyError
@@ -92,6 +93,28 @@ WHITELIST_TOOLS = frozenset(
         "get_directorio_agricola",
     }
 )
+
+# En el intento remoto primario solo se anuncian tools de lectura. Si una
+# request OpenRouter vence justo despues de ejecutar una escritura y el caller
+# reintenta con Qwen, se podria duplicar el registro. Las operaciones con
+# efectos persistentes quedan para el modelo local, que no se reintenta a
+# ciegas desde este orquestador.
+OPENROUTER_PRIMARY_READ_ONLY_TOOLS = WHITELIST_TOOLS - frozenset(
+    {
+        "register_expense",
+        "register_parcela",
+        "get_link_resumen",
+        "get_reporte_pdf",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class OpenRouterPolicy:
+    """Política acotada para una invocación de OpenRouter."""
+
+    tool_names: frozenset[str] | None = None
+    require_tool_call: bool = False
 
 # Máximo de iteraciones del Tool Calling loop (previene loops infinitos).
 MAX_TOOL_ITERATIONS = 3
@@ -1951,19 +1974,24 @@ async def answer_via_openrouter(
     query_text: str,
     phone_hash: str | None = None,
     cultivos: list[str] | None = None,
+    max_tokens: int | None = None,
+    *,
+    history: list[dict[str, object]] | None = None,
+    system_tip: str | None = None,
+    consulta_tipo: str | None = None,
+    policy: OpenRouterPolicy | None = None,
 ) -> str | None:
-    """Segunda capa de fallback: responde via OpenRouter (tool calling nativo).
+    """Responde via OpenRouter usando tool calling nativo.
 
-    Se usa SOLO cuando el LLM local (Qwen2.5 via llama-cpp-python) no esta
-    disponible o fallo generando. Reusa TOOLS/WHITELIST_TOOLS/_execute_tool
+    Reusa TOOLS/WHITELIST_TOOLS/_execute_tool
     del modelo local — el unico cambio es el transporte (HTTP remoto en vez
     de llama-cpp local) y el formato de tool calls (tool_calls nativo OpenAI
     en vez de <tool_call> como texto plano).
 
-    Nunca lanza excepcion: retorna None si OpenRouter no esta configurado
-    (OPENROUTER_API_KEY vacia) o si falla por cualquier motivo (red, timeout,
-    respuesta invalida, rate limit). El caller (pipeline_service) decide el
-    siguiente escalon (fallback determinista de keywords).
+    Nunca lanza excepcion por fallas normales del transporte: retorna None si
+    OpenRouter no esta configurado (OPENROUTER_API_KEY vacia) o si falla por
+    red, timeout, respuesta invalida o rate limit. El orquestador global decide
+    si debe pasar a Qwen local; el pipeline conserva el fallback determinista.
 
     Riesgos conocidos (evaluados explicitamente, no accidentales):
     - El catalogo de "openrouter/free" rota sin aviso: el modelo real detras
@@ -1973,7 +2001,8 @@ async def answer_via_openrouter(
       en el dashboard de OpenRouter, no en este codigo). La consulta del
       agricultor sale del VPS hacia un tercero no auditado.
     - Rate limit del tier gratis: 20 req/min, 50-1000 req/dia segun creditos
-      cargados. Es un fallback ocasional, no el camino principal.
+      cargados. El caller debe mantener el rate limit de la demo y un limite
+      de salida acotado.
     """
     from app.services import openrouter_service
 
@@ -1983,36 +2012,58 @@ async def answer_via_openrouter(
     system_content = _OPENROUTER_SYSTEM_PROMPT
     if cultivos:
         system_content += f" El agricultor cultiva: {', '.join(cultivos)}."
+    if system_tip:
+        system_content += f" {system_tip}"
+
+    type_tools = {
+        "precio": _TOOLS_PRECIO,
+        "clima": _TOOLS_CLIMA,
+        "agronomica": _TOOLS_AGRONOMICA,
+    }.get(consulta_tipo or "")
+    offered_names = policy.tool_names if policy is not None else None
+    if type_tools is not None:
+        offered_names = type_tools if offered_names is None else offered_names & type_tools
 
     messages: list[dict[str, object]] = [
         {"role": "system", "content": system_content},
-        {"role": "user", "content": query_text},
     ]
+    messages.extend(history or [])
+    messages.append({"role": "user", "content": query_text})
+    allowed_names = offered_names if offered_names is not None else WHITELIST_TOOLS
+    tool_called = False
 
     try:
         for _iteration in range(MAX_TOOL_ITERATIONS):
             # Mismo criterio que el prompt local: no ofrecer tools apagadas.
-            response = await openrouter_service.chat_completion_with_tools(messages, _offered_tools())
+            response = await openrouter_service.chat_completion_with_tools(
+                messages,
+                _offered_tools(offered_names),
+                max_tokens=max_tokens or 256,
+            )
             message = response["choices"][0]["message"]
             tool_calls = message.get("tool_calls")
 
             if not tool_calls:
+                if policy is not None and policy.require_tool_call and not tool_called:
+                    return None
                 content = message.get("content")
                 return content.strip() if content else None
 
+            tool_called = True
             messages.append(message)
             for call in tool_calls:
                 name = call["function"]["name"]
-                try:
-                    arguments = json.loads(call["function"]["arguments"])
-                except json.JSONDecodeError:
-                    arguments = {}
+                if name not in allowed_names:
+                    if policy is not None and policy.tool_names is not None:
+                        return None
+                    result = FALLBACK_TEXT
+                else:
+                    try:
+                        arguments = json.loads(call["function"]["arguments"])
+                    except json.JSONDecodeError:
+                        arguments = {}
 
-                result = (
-                    await _execute_tool(name, arguments, phone_hash=phone_hash)
-                    if name in WHITELIST_TOOLS
-                    else FALLBACK_TEXT
-                )
+                    result = await _execute_tool(name, arguments, phone_hash=phone_hash)
                 if name == "get_reporte_pdf":
                     from app.services.report_service import REPORT_TOOL_SIGNAL
 
@@ -2029,8 +2080,119 @@ async def answer_via_openrouter(
         logger.warning("OpenRouter Tool Calling loop agoto %d iteraciones", MAX_TOOL_ITERATIONS)
         return None
     except (httpx.HTTPError, KeyError, IndexError, TypeError) as exc:
-        logger.warning("Fallback OpenRouter fallo — error=%s", type(exc).__name__)
+        logger.warning("OpenRouter no pudo completar la respuesta — error=%s", type(exc).__name__)
         return None
+
+
+_REMOTE_PRIMARY_SIDE_EFFECT_MARKERS = (
+    "registr",
+    "anot",
+    "guard",
+    "agreg",
+    "añad",
+    "crea",
+    "actualiza",
+    "modifica",
+    "gasto",
+    "parcela",
+    "reporte",
+    "informe",
+    "resumen",
+    "enlace",
+    "link",
+    "borra",
+    "elimina",
+)
+
+
+def _query_may_have_side_effect(query_text: str) -> bool:
+    """Evita el intento remoto primario en comandos potencialmente mutables."""
+    normalized = query_text.strip().lower()
+    return any(marker in normalized for marker in _REMOTE_PRIMARY_SIDE_EFFECT_MARKERS)
+
+
+async def _try_openrouter_primary(
+    query_text: str,
+    history: list[dict[str, object]] | None,
+    phone_hash: str | None,
+    cultivos: list[str] | None,
+    system_tip: str | None,
+    consulta_tipo: str | None,
+) -> str | None:
+    """Intenta OpenRouter dentro de un deadline total y solo con lecturas."""
+    from app.services import openrouter_service
+
+    if not openrouter_service.is_configured() or _query_may_have_side_effect(query_text):
+        return None
+
+    policy = OpenRouterPolicy(
+        tool_names=OPENROUTER_PRIMARY_READ_ONLY_TOOLS,
+        require_tool_call=True,
+    )
+    try:
+        return await asyncio.wait_for(
+            answer_via_openrouter(
+                query_text,
+                phone_hash=phone_hash,
+                cultivos=cultivos,
+                max_tokens=settings.openrouter_max_output_tokens,
+                history=history,
+                system_tip=system_tip,
+                consulta_tipo=consulta_tipo,
+                policy=policy,
+            ),
+            timeout=settings.openrouter_primary_timeout_seconds,
+        )
+    except (TimeoutError, RuntimeError, OSError, ValueError, TypeError) as exc:
+        logger.warning("OpenRouter primario no disponible — error=%s", type(exc).__name__)
+        return None
+
+
+async def answer_with_provider_order(
+    query_text: str,
+    history: list[dict[str, object]] | None = None,
+    phone_hash: str | None = None,
+    cultivos: list[str] | None = None,
+    system_tip: str | None = None,
+    consulta_tipo: str | None = None,
+) -> tuple[str, Literal["openrouter", "llm"]]:
+    """Genera respuesta con el proveedor configurado y fallback controlado."""
+    remote_first = settings.llm_primary_provider == "openrouter"
+
+    if not remote_first:
+        local_result = await answer(
+            query_text,
+            history=history,
+            phone_hash=phone_hash,
+            cultivos=cultivos,
+            system_tip=system_tip,
+            consulta_tipo=consulta_tipo,
+        )
+        return local_result, "llm"
+
+    remote_result = await _try_openrouter_primary(
+        query_text,
+        history,
+        phone_hash,
+        cultivos,
+        system_tip,
+        consulta_tipo,
+    )
+    if remote_result:
+        return remote_result, "openrouter"
+
+    try:
+        local_result = await answer(
+            query_text,
+            history=history,
+            phone_hash=phone_hash,
+            cultivos=cultivos,
+            system_tip=system_tip,
+            consulta_tipo=consulta_tipo,
+        )
+        return local_result, "llm"
+    except (TimeoutError, RuntimeError, OSError, ValueError):
+        raise
 
 
 def _mock_answer(query_text: str) -> str:

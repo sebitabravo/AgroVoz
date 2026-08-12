@@ -78,12 +78,18 @@ def _mock_whisper_transcribe(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _mock_llm_answer(monkeypatch: pytest.MonkeyPatch, answer_text: str) -> None:
-    """Mockea llm_service.answer para retornar texto fijo."""
+    """Mockea el camino LLM y desactiva el fast-path determinista."""
 
     async def fake_answer(query: str, phone_hash: str | None = None, **kwargs: object) -> str:
         return answer_text
 
+    async def fake_force_none(_query: str, phone_hash: str | None = None) -> None:
+        return None
+
     monkeypatch.setattr("app.services.llm_service.answer", fake_answer)
+    # Estos tests verifican el contrato del proveedor LLM. No deben usar una
+    # base vacía como bypass accidental del fast-path de precio/clima.
+    monkeypatch.setattr("app.services.llm_keywords._force_keyword_tool", fake_force_none)
 
 
 def _mock_tts_synthesize(monkeypatch: pytest.MonkeyPatch, output_path: str) -> None:
@@ -410,6 +416,28 @@ class TestGenerateResponse:
         )
         text, intent = await AgroVozPipeline._generate_response("precio de la papa en lo valledor", "test-chat-hash")
         assert "450" in text
+        assert intent == "precio"
+
+    async def test_precio_sin_datos_no_cae_en_respuesta_generica(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Una ausencia ODEPA se entrega como dato faltante, no como timeout."""
+
+        async def provider_no_deberia_correr(*_args: object, **_kwargs: object) -> str:
+            raise AssertionError("el precio sin datos no debe invocar al LLM")
+
+        monkeypatch.setattr(
+            "app.services.llm_service.answer_with_provider_order",
+            provider_no_deberia_correr,
+        )
+
+        text, intent = await AgroVozPipeline._generate_response(
+            "a cuanto esta el pepino en temuco",
+            "test-chat-hash",
+        )
+
+        assert text == "No tengo datos de precio para pepino en temuco."
         assert intent == "precio"
 
     async def test_query_vacia(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2189,6 +2217,12 @@ class TestProcess:
             return "muy tarde"
 
         monkeypatch.setattr("app.services.llm_service.answer", fake_answer_slow)
+        async def fake_force_none(_query: str, phone_hash: str | None = None) -> None:
+            return None
+
+        # El timeout debe probar el proveedor LLM, no depender de que el
+        # fast-path de precio sin datos encuentre o no registros en la DB.
+        monkeypatch.setattr("app.services.llm_keywords._force_keyword_tool", fake_force_none)
         _mock_db_save(monkeypatch)
 
         # Usar un timeout MUY corto para el test (0.1s)

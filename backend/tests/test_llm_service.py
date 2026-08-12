@@ -30,6 +30,7 @@ from app.services.llm_service import (
     FALLBACK_TEXT,
     MAX_TOOL_ITERATIONS,
     NO_RESPONSE_TEXT,
+    OPENROUTER_PRIMARY_READ_ONLY_TOOLS,
     SYSTEM_PROMPT,
     TOOLS,
     WHITELIST_TOOLS,
@@ -46,6 +47,7 @@ from app.services.llm_service import (
     _strip_tool_tags,
     answer,
     answer_via_openrouter,
+    answer_with_provider_order,
     get_model_error,
     is_model_available,
     preload_model,
@@ -1485,6 +1487,61 @@ class TestForceKeywordToolDbError:
         assert result is None
 
 
+class TestForceKeywordToolNoData:
+    """Conserva la ausencia de datos y no la convierte en timeout del LLM."""
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "a cuanto esta el pepino en temuco",
+            "a cómo está el pepino en temuco",
+        ],
+    )
+    async def test_precio_sin_datos_retorna_mensaje_determinista(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        query: str,
+    ) -> None:
+        from app.core import database as db_module
+        from app.services import odepa_service
+
+        class _FakeSession:
+            def close(self) -> None:
+                pass
+
+        monkeypatch.setattr(db_module, "SessionLocal", lambda: _FakeSession())
+        monkeypatch.setattr(
+            odepa_service,
+            "get_price_for_llm",
+            lambda *_args, **_kwargs: "No tengo datos de precio para pepino en temuco.",
+        )
+
+        result = await _force_keyword_tool(query)
+
+        assert result == "No tengo datos de precio para pepino en temuco."
+
+    async def test_consulta_agronomica_no_se_convierte_en_precio_sin_datos(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.core import database as db_module
+        from app.services import odepa_service
+
+        class _FakeSession:
+            def close(self) -> None:
+                pass
+
+        monkeypatch.setattr(db_module, "SessionLocal", lambda: _FakeSession())
+        monkeypatch.setattr(
+            odepa_service,
+            "get_price_for_llm",
+            lambda *_args, **_kwargs: "No tengo datos de precio para pepino en temuco.",
+        )
+
+        result = await _force_keyword_tool("como cultivar pepino en temuco")
+
+        assert result is None
+
+
 class TestVentaKilosRegex:
     """Regex determinista para deteccion de venta (Issue #104).
 
@@ -2359,3 +2416,107 @@ class TestAnswerViaOpenrouter:
 
         result = await answer_via_openrouter("a cuanto esta la papa")
         assert result is None
+
+
+class TestProviderOrder:
+    """Proveedor remoto primero y Qwen local como segundo escalón."""
+
+    async def test_openrouter_primero_no_invoca_qwen_si_responde(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Una respuesta remota válida termina el flujo sin llamar al local."""
+        monkeypatch.setattr(settings, "llm_primary_provider", "openrouter")
+        monkeypatch.setattr(settings, "openrouter_api_key", "sk-or-test")
+
+        async def remote_answer(*args: object, **kwargs: object) -> str:
+            policy = kwargs["policy"]
+            assert policy.tool_names == OPENROUTER_PRIMARY_READ_ONLY_TOOLS
+            assert policy.require_tool_call is True
+            return "Respuesta remota."
+
+        async def local_must_not_run(*args: object, **kwargs: object) -> str:
+            raise AssertionError("Qwen no debe ejecutarse si OpenRouter responde")
+
+        monkeypatch.setattr("app.services.llm_service.answer_via_openrouter", remote_answer)
+        monkeypatch.setattr("app.services.llm_service.answer", local_must_not_run)
+
+        result, provider = await answer_with_provider_order("a cuanto esta la papa")
+
+        assert result == "Respuesta remota."
+        assert provider == "openrouter"
+
+    async def test_timeout_remoto_saltea_al_qwen(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El deadline remoto vence y el segundo proveedor responde."""
+        monkeypatch.setattr(settings, "llm_primary_provider", "openrouter")
+        monkeypatch.setattr(settings, "openrouter_api_key", "sk-or-test")
+        monkeypatch.setattr(settings, "openrouter_primary_timeout_seconds", 0.01)
+
+        async def remote_slow(*args: object, **kwargs: object) -> str:
+            await asyncio.sleep(0.1)
+            return "demasiado tarde"
+
+        async def local_answer(*args: object, **kwargs: object) -> str:
+            return "Respuesta local."
+
+        monkeypatch.setattr("app.services.llm_service.answer_via_openrouter", remote_slow)
+        monkeypatch.setattr("app.services.llm_service.answer", local_answer)
+
+        result, provider = await answer_with_provider_order("consulta ambigua")
+
+        assert result == "Respuesta local."
+        assert provider == "llm"
+
+    async def test_comando_con_escritura_va_directo_al_local(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Una escritura no se arriesga a duplicarse tras un timeout remoto."""
+        monkeypatch.setattr(settings, "llm_primary_provider", "openrouter")
+        monkeypatch.setattr(settings, "openrouter_api_key", "sk-or-test")
+        llamadas_remotas = 0
+
+        async def remote_must_not_run(*args: object, **kwargs: object) -> str:
+            nonlocal llamadas_remotas
+            llamadas_remotas += 1
+            return "respuesta remota"
+
+        async def local_answer(*args: object, **kwargs: object) -> str:
+            return "Gasto registrado localmente."
+
+        monkeypatch.setattr("app.services.llm_service.answer_via_openrouter", remote_must_not_run)
+        monkeypatch.setattr("app.services.llm_service.answer", local_answer)
+
+        result, provider = await answer_with_provider_order("guarda un gasto de 5 lucas")
+
+        assert result == "Gasto registrado localmente."
+        assert provider == "llm"
+        assert llamadas_remotas == 0
+
+    async def test_rollback_local_no_intenta_openrouter_si_qwen_falla(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El rollback local no vuelve a enviar la consulta a un tercero."""
+        monkeypatch.setattr(settings, "llm_primary_provider", "local")
+        monkeypatch.setattr(settings, "openrouter_api_key", "sk-or-test")
+        llamadas_remotas = 0
+
+        async def remote_must_not_run(*args: object, **kwargs: object) -> str:
+            nonlocal llamadas_remotas
+            llamadas_remotas += 1
+            return "respuesta remota"
+
+        async def local_fails(*args: object, **kwargs: object) -> str:
+            raise RuntimeError("qwen unavailable")
+
+        monkeypatch.setattr("app.services.llm_service.answer_via_openrouter", remote_must_not_run)
+        monkeypatch.setattr("app.services.llm_service.answer", local_fails)
+
+        with pytest.raises(RuntimeError, match="qwen unavailable"):
+            await answer_with_provider_order("consulta ambigua")
+
+        assert llamadas_remotas == 0

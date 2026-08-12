@@ -8,9 +8,24 @@ import logging
 
 import pytest
 from httpx import AsyncClient
+from pydantic import ValidationError
 
 from app.core import config
 from app.core.rate_limiter import SlidingWindowRateLimiter
+
+
+def test_demo_provider_y_deadline_global_por_defecto_y_valida_opciones(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Settings prioriza OpenRouter y conserva un deadline permisivo de 2 s."""
+    monkeypatch.delenv("LLM_PRIMARY_PROVIDER", raising=False)
+    monkeypatch.delenv("OPENROUTER_PRIMARY_TIMEOUT_SECONDS", raising=False)
+    settings = config.Settings(_env_file=None)
+
+    assert settings.llm_primary_provider == "openrouter"
+    assert settings.openrouter_primary_timeout_seconds == 2.0
+    with pytest.raises(ValidationError):
+        config.Settings(_env_file=None, llm_primary_provider="otro")
 
 
 @pytest.fixture
@@ -183,7 +198,7 @@ async def test_demo_no_registra_consulta_ni_error_llm(
     async def answer_falla(*_args: object, **_kwargs: object) -> str:
         raise RuntimeError(f"error con {consulta} teléfono 56912345678")
 
-    monkeypatch.setattr("app.services.demo_service.answer", answer_falla)
+    monkeypatch.setattr("app.services.llm_service.answer", answer_falla)
 
     response, intent = await _generate_demo_response(consulta)
 
@@ -192,6 +207,96 @@ async def test_demo_no_registra_consulta_ni_error_llm(
     assert "SECRETO-DEMO" not in caplog.text
     assert "dato privado" not in caplog.text
     assert "56912345678" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_demo_openrouter_no_llama_al_responder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """El proveedor remoto de demo no cae al Qwen local."""
+    from app.services.demo_service import _generate_demo_response
+
+    monkeypatch.setattr(config.settings, "llm_primary_provider", "openrouter")
+    monkeypatch.setattr(config.settings, "openrouter_api_key", "sk-or-test")
+    captured: dict[str, object] = {}
+
+    async def fake_openrouter(*args: object, **kwargs: object) -> str:
+        captured.update(kwargs)
+        return "Respuesta remota de prueba."
+
+    async def local_must_not_run(*_args: object, **_kwargs: object) -> str:
+        raise AssertionError("la demo remota no debe invocar answer() local")
+
+    monkeypatch.setattr("app.services.llm_service.answer_via_openrouter", fake_openrouter)
+    monkeypatch.setattr("app.services.llm_service.answer", local_must_not_run)
+    monkeypatch.setattr(config.settings, "openrouter_max_output_tokens", 96)
+    monkeypatch.setattr(
+        "app.services.demo_service.AgroVozPipeline._puede_usar_fast_path",
+        staticmethod(lambda *_args: False),
+    )
+
+    response, intent = await _generate_demo_response("cuéntame algo de mi cultivo")
+
+    assert response == "Respuesta remota de prueba."
+    assert intent == "desconocido"
+    assert captured["max_tokens"] == 96
+
+
+@pytest.mark.asyncio
+async def test_demo_openrouter_fallido_saltea_al_llm_local(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """La caída remota pasa al Qwen local como segundo proveedor."""
+    from app.services.demo_service import _generate_demo_response
+
+    monkeypatch.setattr(config.settings, "llm_primary_provider", "openrouter")
+    monkeypatch.setattr(config.settings, "openrouter_api_key", "sk-or-test")
+
+    async def remote_unavailable(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    async def local_response(*_args: object, **_kwargs: object) -> str:
+        return "Respuesta local de respaldo."
+
+    monkeypatch.setattr("app.services.llm_service.answer_via_openrouter", remote_unavailable)
+    monkeypatch.setattr("app.services.llm_service.answer", local_response)
+    monkeypatch.setattr(
+        "app.services.demo_service.AgroVozPipeline._puede_usar_fast_path",
+        staticmethod(lambda *_args: False),
+    )
+
+    response, intent = await _generate_demo_response("cuéntame algo de mi cultivo")
+
+    assert response == "Respuesta local de respaldo."
+    assert intent == "desconocido"
+
+
+@pytest.mark.asyncio
+async def test_demo_fast_path_omite_openrouter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Una consulta rápida mantiene el dato determinístico y no usa API."""
+    from app.services.demo_service import _generate_demo_response
+
+    monkeypatch.setattr(config.settings, "llm_primary_provider", "openrouter")
+
+    async def remote_must_not_run(*_args: object, **_kwargs: object) -> str:
+        raise AssertionError("el fast-path no debe consultar OpenRouter")
+
+    async def deterministic_response(*_args: object, **_kwargs: object) -> str:
+        return "La papa está a 600 pesos el kilo según ODEPA."
+
+    monkeypatch.setattr("app.services.llm_service.answer_via_openrouter", remote_must_not_run)
+    monkeypatch.setattr(
+        "app.services.demo_service.AgroVozPipeline._puede_usar_fast_path",
+        staticmethod(lambda *_args: True),
+    )
+    monkeypatch.setattr("app.services.demo_service._force_keyword_tool", deterministic_response)
+
+    response, intent = await _generate_demo_response("a cuanto esta la papa")
+
+    assert "600" in response
+    assert intent == "precio"
 
 
 @pytest.mark.asyncio
