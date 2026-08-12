@@ -1487,6 +1487,61 @@ class TestForceKeywordToolDbError:
         assert result is None
 
 
+class TestForceKeywordToolNoData:
+    """Conserva la ausencia de datos y no la convierte en timeout del LLM."""
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "a cuanto esta el pepino en temuco",
+            "a cómo está el pepino en temuco",
+        ],
+    )
+    async def test_precio_sin_datos_retorna_mensaje_determinista(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        query: str,
+    ) -> None:
+        from app.core import database as db_module
+        from app.services import odepa_service
+
+        class _FakeSession:
+            def close(self) -> None:
+                pass
+
+        monkeypatch.setattr(db_module, "SessionLocal", lambda: _FakeSession())
+        monkeypatch.setattr(
+            odepa_service,
+            "get_price_for_llm",
+            lambda *_args, **_kwargs: "No tengo datos de precio para pepino en temuco.",
+        )
+
+        result = await _force_keyword_tool(query)
+
+        assert result == "No tengo datos de precio para pepino en temuco."
+
+    async def test_consulta_agronomica_no_se_convierte_en_precio_sin_datos(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.core import database as db_module
+        from app.services import odepa_service
+
+        class _FakeSession:
+            def close(self) -> None:
+                pass
+
+        monkeypatch.setattr(db_module, "SessionLocal", lambda: _FakeSession())
+        monkeypatch.setattr(
+            odepa_service,
+            "get_price_for_llm",
+            lambda *_args, **_kwargs: "No tengo datos de precio para pepino en temuco.",
+        )
+
+        result = await _force_keyword_tool("como cultivar pepino en temuco")
+
+        assert result is None
+
+
 class TestVentaKilosRegex:
     """Regex determinista para deteccion de venta (Issue #104).
 
