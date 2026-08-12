@@ -2217,6 +2217,12 @@ class TestProcess:
             return "muy tarde"
 
         monkeypatch.setattr("app.services.llm_service.answer", fake_answer_slow)
+        async def fake_force_none(_query: str, phone_hash: str | None = None) -> None:
+            return None
+
+        # El timeout debe probar el proveedor LLM, no depender de que el
+        # fast-path de precio sin datos encuentre o no registros en la DB.
+        monkeypatch.setattr("app.services.llm_keywords._force_keyword_tool", fake_force_none)
         _mock_db_save(monkeypatch)
 
         # Usar un timeout MUY corto para el test (0.1s)
