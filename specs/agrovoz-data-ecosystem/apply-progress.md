@@ -102,7 +102,7 @@
 - `backend/corpus/fuentes_datos.yaml`, `backend/corpus/inia_agrometeorologia.yaml`, `backend/corpus/ciren_ide_minagri.yaml`, `backend/corpus/ine_censo_agropecuario.yaml` — catálogo y hechos trazables.
 - `backend/tests/test_data_hub_remote.py` — contratos de payload, error, parcialidad y no descarga masiva.
 
-**Evidence:** suite focalizada Data Hub: 20 passed; sync local: 10 fuentes y 121 hechos; cada error remoto queda como `key:code` y el sync local no usa red.
+**Evidence:** suite focalizada Data Hub: 26 passed; sync local: 10 fuentes y 121 hechos; cada error remoto queda como `key:code`, el sync local no usa red y las respuestas remotas se cortan antes de parsearse si superan 12 MiB.
 - **Sensitive gates:** panel, reportes, registro de gastos, parcelas y reglas agronómicas no se activaron automáticamente.
 
 ### Batch 6 — Regresión E2E de ubicación explícita
@@ -112,4 +112,4 @@
 - `backend/app/services/llm_keywords.py` — el fast-path conserva el lugar desconocido y permite que el servicio responda fail-closed.
 - `backend/tests/test_demo_safe_fallbacks.py` — regresiones para Concepción, Buenos Aires y Villa Felicidad.
 
-**Evidence:** `make test` → 2254 passed, 3 skipped, 86.34% coverage; Playwright real contra Astro + FastAPI en viewport 390x844 verificó semillas/quinua sin datos falsos, Temuco con fuente OpenMeteo, seguimiento con historial, Concepción rechazada sin caer a Traiguén, botón TTS y reintento ante error de red; cero errores de consola. La reproducción TTS cambió el control a `Pausar` sin `pageerror`.
+**Evidence:** `make test` → 2255 passed, 3 skipped, 86.39% coverage; Playwright real contra Astro + FastAPI en viewport 390x844 verificó semillas/quinua sin datos falsos, Temuco con fuente OpenMeteo, seguimiento con historial, Concepción rechazada sin caer a Traiguén, botón TTS y reintento ante error de red; cero errores de consola. La reproducción TTS cambió el control a `Pausar` sin `pageerror`.
