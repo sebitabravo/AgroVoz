@@ -10,6 +10,7 @@ Cache en memoria con TTL 30 min para clima actual y 24 h para histórico.
 import asyncio
 import datetime
 import logging
+import re
 import time
 import unicodedata
 from dataclasses import dataclass, replace
@@ -100,6 +101,48 @@ _COMUNAS: dict[str, tuple[float, float]] = {
     # Referencia nacional
     "santiago": (-33.45, -70.65),
 }
+
+# Solo se usa para detectar que el usuario escribió una ubicación explícita
+# fuera del catálogo. No intenta geocodificar ni amplía la cobertura por su
+# cuenta: el servicio debe rechazar la consulta antes de caer a Traiguén.
+_UBICACION_EXPLICITA_RE = re.compile(
+    r"\b(?:en|para)\s+"
+    r"(?:(?:la|el)\s+)?"
+    r"(?:(?:comuna|ciudad|localidad)\s+de\s+)?"
+    r"(?P<lugar>[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+){0,2})",
+    re.IGNORECASE,
+)
+_UBICACION_STOP_WORDS = frozenset(
+    {
+        "ahora",
+        "alla",
+        "allá",
+        "aqui",
+        "aquí",
+        "esta",
+        "está",
+        "hoy",
+        "llover",
+        "lluvia",
+        "manana",
+        "mañana",
+        "pasado",
+        "proximo",
+        "próximo",
+        "tiempo",
+    }
+)
+_UBICACION_GENERICA = frozenset(
+    {
+        "el campo",
+        "el predio",
+        "mi campo",
+        "mi parcela",
+        "mi predio",
+        "mi ubicación",
+        "mi ubicacion",
+    }
+)
 
 # Temporadas meteorológicas usadas por la herramienta multianual. Verano
 # cruza el año calendario: el verano de 2024 es diciembre de 2023 a febrero
@@ -1081,6 +1124,28 @@ def extraer_comuna_de_consulta(query: str) -> str | None:
             key=lambda n: (any(c in n for c in "áéíóúñ"), len(n)),
         )
         return " ".join(parte.capitalize() for parte in bonita.split())
+    return None
+
+
+def extraer_ubicacion_explicita_de_consulta(query: str) -> str | None:
+    """Extrae una ubicación escrita que no está en el catálogo soportado.
+
+    Se limita a patrones explícitos como ``en Concepción`` o ``para Buenos
+    Aires``. No consulta geocoders ni trata una pregunta sin lugar como una
+    ubicación desconocida; así se conserva el default de Traiguén cuando el
+    usuario no especifica comuna.
+    """
+    for match in _UBICACION_EXPLICITA_RE.finditer(query):
+        tokens = match.group("lugar").strip().split()
+        lugar_tokens: list[str] = []
+        for token in tokens:
+            if token.casefold() in _UBICACION_STOP_WORDS:
+                break
+            lugar_tokens.append(token)
+        lugar = " ".join(lugar_tokens).strip()
+        if not lugar or lugar.casefold() in _UBICACION_GENERICA:
+            continue
+        return " ".join(parte.capitalize() for parte in lugar.split())
     return None
 
 

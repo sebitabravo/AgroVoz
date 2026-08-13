@@ -1013,6 +1013,7 @@ async def _compound_weather_block(
 ) -> tuple[str | None, str]:
     """Obtiene el bloque OpenMeteo de una consulta compuesta."""
     from app.services.weather_service import (
+        extraer_ubicacion_explicita_de_consulta,
         get_clima_historico_multianual,
         get_pronostico,
         get_weather,
@@ -1020,6 +1021,8 @@ async def _compound_weather_block(
     )
 
     comuna = _extract_comuna_from_query(query_text)
+    if comuna is None:
+        comuna = extraer_ubicacion_explicita_de_consulta(query_text)
     try:
         if any(kw in query_text for kw in _CLIMA_HISTORICO_KW):
             anos, temporada, anio, metrica = _extract_historico_request(query_text)
@@ -1362,6 +1365,7 @@ async def _force_keyword_tool(query_text: str, phone_hash: str | None = None) ->
     ]
     if any(kw in q for kw in clima_kw):
         from app.services.weather_service import (
+            extraer_ubicacion_explicita_de_consulta,
             get_clima_historico_multianual,
             get_pronostico,
             get_weather,
@@ -1374,6 +1378,8 @@ async def _force_keyword_tool(query_text: str, phone_hash: str | None = None) ->
 
         try:
             comuna = _extract_comuna_from_query(q)
+            if comuna is None:
+                comuna = extraer_ubicacion_explicita_de_consulta(q)
             if any(kw in q for kw in _CLIMA_HISTORICO_KW):
                 anos, temporada, anio, metrica = _extract_historico_request(q)
                 result = await get_clima_historico_multianual(

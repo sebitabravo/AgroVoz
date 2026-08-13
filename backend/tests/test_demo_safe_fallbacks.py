@@ -8,7 +8,10 @@ from pydantic import ValidationError
 from app.schemas.demo import DemoPreguntaRequest
 from app.services.llm_keywords import _extract_product_mentions, _force_keyword_tool
 from app.services.llm_service import LLM_UNAVAILABLE_TEXT, answer
-from app.services.weather_service import get_weather
+from app.services.weather_service import (
+    extraer_ubicacion_explicita_de_consulta,
+    get_weather,
+)
 
 
 class TestFallbackSeguro:
@@ -74,6 +77,35 @@ class TestSemillasYPlurales:
 
 class TestUbicacionExplicita:
     """Una comuna no soportada nunca puede recibir el clima de Traiguén."""
+
+    @pytest.mark.parametrize(
+        ("query", "expected"),
+        [
+            ("¿Qué clima hay en Concepción?", "Concepción"),
+            ("¿Qué tiempo hace en Buenos Aires mañana?", "Buenos Aires"),
+            ("¿Hay lluvia en la ciudad de Villa Felicidad?", "Villa Felicidad"),
+        ],
+    )
+    def test_extrae_ubicacion_explicita_fuera_del_catalogo(
+        self,
+        query: str,
+        expected: str,
+    ) -> None:
+        """Detecta el lugar solicitado sin pretender geocodificarlo."""
+        assert extraer_ubicacion_explicita_de_consulta(query) == expected
+
+    async def test_fallback_climatico_no_usa_traiguen_para_lugar_desconocido(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El fast-path pasa la comuna desconocida y el servicio falla cerrado."""
+        weather_mock = AsyncMock(return_value="Ubicación no disponible.")
+        monkeypatch.setattr("app.services.weather_service.get_weather", weather_mock)
+
+        response = await _force_keyword_tool("¿Qué clima hay en Concepción?")
+
+        assert response == "Ubicación no disponible."
+        weather_mock.assert_awaited_once_with(comuna="Concepción")
 
     async def test_clima_actual_rechaza_comuna_desconocida(
         self,
