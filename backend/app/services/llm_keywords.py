@@ -195,7 +195,6 @@ _SEMILLA_SIN_DATOS_TEXT = (
     "ODEPA informa precios de productos frescos, no de semillas."
 )
 
-
 def _tiene_intencion_precio_explicita(query: str) -> bool:
     """Indica si la consulta pide un precio de forma inequívoca."""
     normalized = query.casefold()
@@ -212,7 +211,6 @@ def _tiene_intencion_precio_explicita(query: str) -> bool:
 def _is_seed_price_query(query: str) -> bool:
     """Evita confundir semillas con precios ODEPA de productos frescos."""
     return _SEMILLA_QUERY_RE.search(query) is not None and _tiene_intencion_precio_explicita(query)
-
 
 _CLIMA_FUTURO_KW = (
     "mañana",

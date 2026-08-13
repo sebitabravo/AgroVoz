@@ -157,8 +157,10 @@ async def _generate_demo_response(
     # Fast-path deterministico: mismo gate que usa el pipeline de voz y texto.
     # Para la consulta tipica las tools ya arman la frase final con el dato de
     # ODEPA y el LLM no aporta nada que el productor escuche.
+    consulta_tipo: str | None = None
     try:
         extracted = AgroVozPipeline._extract_variables(resolved_query)
+        consulta_tipo = extracted.consulta_tipo
         if "semilla" in resolved_query.casefold():
             semilla = await _force_keyword_tool(resolved_query, phone_hash=_DEMO_CHAT_ID_HASH)
             if semilla:
@@ -186,7 +188,7 @@ async def _generate_demo_response(
             resolved_query,
             history=history,
             phone_hash=_DEMO_CHAT_ID_HASH,
-            consulta_tipo=extracted.consulta_tipo,
+            consulta_tipo=consulta_tipo,
         )
         logger.info("Proveedor LLM demo seleccionado — provider=%s", provider)
     except (TimeoutError, RuntimeError, OSError, ValueError) as exc:

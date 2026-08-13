@@ -158,7 +158,7 @@ una tool está habilitada en producción.
 
 ### `app/services/` — Capa de negocio
 - `whisper_service.py` — transcripción de audio (descarga, ffmpeg, Whisper)
-- `llm_service.py` — interpretación NL + Tool Calling con whitelist (19 tools: precios, clima, Data Hub, INDAP, gastos, parcelas, reglas, panel, reportes y `get_directorio_agricola`) con orden OpenRouter primario para lectura y Qwen local como fallback; el resumen de capacidades usa un fast path determinista
+- `llm_service.py` — interpretación NL + Tool Calling con whitelist (19 tools: precios, clima, Data Hub/corpus, INDAP, gastos, parcelas, reglas, panel, reportes y `get_directorio_agricola`) con orden OpenRouter primario para lectura y Qwen local como fallback; el resumen de capacidades usa un fast path determinista
 - `tts_service.py` — síntesis de voz con Piper TTS
 - `odepa_service.py` — consultas a SQLite ODEPA, sync diario y detector determinista de variaciones
 - `weather_service.py` — consultas a OpenMeteo API (forecast + histórico)
@@ -616,7 +616,6 @@ CREATE INDEX idx_data_facts_product ON data_facts(product);
     se salta y el camino local sigue funcionando. `LLM_PRIMARY_PROVIDER=local`
     fuerza solo Qwen y permite rollback operativo sin tráfico remoto ni cambio
     de código.
-
 33. **Data Hub integrado con procedencia y vigencia.** El ecosistema se
     implementa como una capa conversacional que ordena fuentes públicas, no
     como marketplace ni como un dataset único para fine-tuning. El manifest
