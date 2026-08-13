@@ -20,7 +20,7 @@ from app.services.audio_service import (
     validate_path_in_audio_dir,
 )
 from app.services.llm_keywords import _detect_greeting, _force_keyword_tool
-from app.services.llm_service import answer_with_provider_order
+from app.services.llm_service import FALLBACK_TEXT, answer_with_provider_order
 from app.services.pipeline_service import AgroVozPipeline
 from app.services.tts_service import TTSService
 from app.services.whisper_service import WhisperService
@@ -32,6 +32,18 @@ _MAX_AUDIO_BYTES = 5 * 1024 * 1024
 _DEMO_GREETING_TEXT = (
     "¡Hola! Pregúntame por el precio de algún producto o por el clima de Traiguén."
 )
+_DEMO_CLIMATE_MARKERS = (
+    "clima",
+    "tiempo",
+    "llov",
+    "temperatura",
+    "humedad",
+    "viento",
+    "helad",
+    "granizo",
+    "nieve",
+)
+_DEMO_FOLLOW_UP_MARKERS = ("mañana", "manana")
 
 
 def _decode_audio_base64(audio_base64: str) -> bytes:
@@ -92,7 +104,42 @@ async def _synthesize_response(text: str, audio_temp_dir: Path) -> str:
         Path(ogg_path).unlink(missing_ok=True)
 
 
-async def _generate_demo_response(query_text: str) -> tuple[str, str]:
+def _resolve_demo_weather_follow_up(
+    query_text: str,
+    history: list[dict[str, object]],
+) -> str:
+    """Completa un seguimiento climático breve con la última comuna conocida."""
+    normalized = query_text.casefold()
+    if not any(marker in normalized for marker in _DEMO_FOLLOW_UP_MARKERS):
+        return query_text
+
+    from app.services.weather_service import extraer_comuna_de_consulta
+
+    if extraer_comuna_de_consulta(query_text) is not None:
+        return query_text
+
+    for turn in reversed(history):
+        if turn.get("role") != "user":
+            continue
+        previous_raw = turn.get("content", "")
+        if not isinstance(previous_raw, str):
+            continue
+        previous = previous_raw
+        if not any(marker in previous.casefold() for marker in _DEMO_CLIMATE_MARKERS):
+            continue
+        comuna = extraer_comuna_de_consulta(previous)
+        if comuna is None:
+            continue
+        periodo = "pasado mañana" if "pasado" in normalized else "mañana"
+        return f"¿Va a llover {periodo} en {comuna}?"
+
+    return query_text
+
+
+async def _generate_demo_response(
+    query_text: str,
+    history: list[dict[str, object]] | None = None,
+) -> tuple[str, str]:
     """Genera la respuesta de la demo por el MISMO camino que WhatsApp.
 
     Antes esto iba directo al LLM, saltandose el fast-path. El efecto era que
@@ -101,16 +148,27 @@ async def _generate_demo_response(query_text: str) -> tuple[str, str]:
     tocar el LLM. Una demo que se comporta distinto al producto no demuestra
     nada; por eso replica el orden real: fast-path primero, LLM despues.
     """
-    if _detect_greeting(query_text):
+    history = history or []
+    resolved_query = _resolve_demo_weather_follow_up(query_text, history)
+
+    if _detect_greeting(resolved_query):
         return _DEMO_GREETING_TEXT, "saludo"
 
     # Fast-path deterministico: mismo gate que usa el pipeline de voz y texto.
     # Para la consulta tipica las tools ya arman la frase final con el dato de
     # ODEPA y el LLM no aporta nada que el productor escuche.
     try:
-        extracted = AgroVozPipeline._extract_variables(query_text)
-        if AgroVozPipeline._puede_usar_fast_path(query_text, extracted, None):
-            rapida = await _force_keyword_tool(query_text, phone_hash=_DEMO_CHAT_ID_HASH)
+        extracted = AgroVozPipeline._extract_variables(resolved_query)
+        if "semilla" in resolved_query.casefold():
+            semilla = await _force_keyword_tool(resolved_query, phone_hash=_DEMO_CHAT_ID_HASH)
+            if semilla:
+                return semilla, "precio"
+        if extracted.consulta_tipo == "desconocido":
+            return FALLBACK_TEXT, "desconocido"
+        if extracted.consulta_tipo == "precio" and extracted.producto is None:
+            return "No tengo datos ODEPA para ese producto. ¿Podrías consultar otro producto?", "precio"
+        if AgroVozPipeline._puede_usar_fast_path(resolved_query, extracted, None):
+            rapida = await _force_keyword_tool(resolved_query, phone_hash=_DEMO_CHAT_ID_HASH)
             if rapida:
                 intent_rapido = "precio" if extracted.consulta_tipo == "precio" else "clima"
                 logger.info(
@@ -125,8 +183,10 @@ async def _generate_demo_response(query_text: str) -> tuple[str, str]:
 
     try:
         response_text, provider = await answer_with_provider_order(
-            query_text,
+            resolved_query,
+            history=history,
             phone_hash=_DEMO_CHAT_ID_HASH,
+            consulta_tipo=extracted.consulta_tipo,
         )
         logger.info("Proveedor LLM demo seleccionado — provider=%s", provider)
     except (TimeoutError, RuntimeError, OSError, ValueError) as exc:
@@ -136,7 +196,7 @@ async def _generate_demo_response(query_text: str) -> tuple[str, str]:
         )
         response_text = "Tuve un problema al procesar tu consulta. ¿Podrías intentarlo de nuevo?"
 
-    intent = AgroVozPipeline._detect_intent(query_text, response_text)
+    intent = AgroVozPipeline._detect_intent(resolved_query, response_text)
     return response_text, intent
 
 
@@ -151,11 +211,17 @@ async def process_demo_request(request: DemoPreguntaRequest) -> DemoRespuestaRes
     if request.texto.strip():
         query_text = request.texto.strip()
     elif request.audio_base64:
+        if request.historial:
+            raise ValueError("El historial solo está disponible para consultas de texto")
         query_text = await _transcribe_audio_base64(request.audio_base64, audio_temp_dir)
     else:
         raise ValueError("Debes enviar texto o audio")
 
-    response_text, intent = await _generate_demo_response(query_text)
+    history: list[dict[str, object]] = [
+        {"role": message.rol, "content": message.texto}
+        for message in request.historial
+    ]
+    response_text, intent = await _generate_demo_response(query_text, history=history)
 
     if not response_text.strip():
         response_text = "No entendí tu consulta. ¿Podrías intentarlo de nuevo?"

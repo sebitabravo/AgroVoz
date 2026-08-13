@@ -101,6 +101,8 @@ const pageDescription = "Prueba AgroVoz desde el navegador. Escribe una pregunta
   const stateText = document.getElementById("demo-state-text") as HTMLSpanElement;
 
   let loading = false;
+  type DemoHistoryMessage = { rol: "user" | "assistant"; texto: string };
+  const chatHistory: DemoHistoryMessage[] = [];
 
   input.addEventListener("input", () => {
     sendBtn.disabled = input.value.trim().length === 0 || loading;
@@ -132,6 +134,11 @@ const pageDescription = "Prueba AgroVoz desde el navegador. Escribe una pregunta
       stateEl.hidden = true;
       stateEl.classList.remove("demo-state--error");
     }, 6000);
+  }
+
+  function rememberTurn(rol: "user" | "assistant", texto: string) {
+    chatHistory.push({ rol, texto });
+    if (chatHistory.length > 6) chatHistory.splice(0, chatHistory.length - 6);
   }
 
   function addBubble(
@@ -209,6 +216,29 @@ const pageDescription = "Prueba AgroVoz desde el navegador. Escribe una pregunta
     messages.scrollTop = messages.scrollHeight;
   }
 
+  function addRetryBubble(text: string, retryText: string) {
+    const bubble = document.createElement("div");
+    bubble.className = "chat-bubble chat-bubble--received chat-bubble--error";
+
+    const textDiv = document.createElement("div");
+    textDiv.className = "chat-bubble__text";
+    textDiv.textContent = text;
+
+    const retryBtn = document.createElement("button");
+    retryBtn.className = "chat-retry-btn";
+    retryBtn.type = "button";
+    retryBtn.textContent = "Reintentar";
+    retryBtn.addEventListener("click", () => {
+      if (loading) return;
+      retryBtn.disabled = true;
+      void sendQuery(retryText);
+    });
+
+    bubble.append(textDiv, retryBtn);
+    messages.appendChild(bubble);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
   /**
    * Base del backend.
    *
@@ -237,7 +267,9 @@ const pageDescription = "Prueba AgroVoz desde el navegador. Escribe una pregunta
   async function sendQuery(text: string) {
     if (loading || !text.trim()) return;
 
+    const historial = [...chatHistory];
     addBubble(text, "sent");
+    rememberTurn("user", text);
     setLoading("Consultando...");
 
     try {
@@ -245,26 +277,32 @@ const pageDescription = "Prueba AgroVoz desde el navegador. Escribe una pregunta
       const resp = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ texto: text }),
+        body: JSON.stringify({ texto: text, historial }),
       });
 
       if (!resp.ok) {
+        let errorMessage: string;
         if (resp.status === 429) {
-          showError("Demasiadas consultas. Espera un minuto y vuelve a intentarlo.");
+          errorMessage = "Demasiadas consultas. Espera un minuto y vuelve a intentarlo.";
         } else if (resp.status === 503) {
-          showError("La demo no está disponible en este momento.");
+          errorMessage = "La demo no está disponible en este momento.";
         } else {
           const errData = await resp.json().catch(() => ({ detail: "Error inesperado" }));
-          showError(errData.detail || "Error al procesar tu consulta.");
+          errorMessage = errData.detail || "Error al procesar tu consulta.";
         }
+        showError(errorMessage);
+        addRetryBubble(errorMessage, text);
         return;
       }
 
       const data = await resp.json();
       addBubble(data.texto, "received", undefined, data.audio_base64 || undefined);
+      rememberTurn("assistant", data.texto);
       clearLoading();
     } catch {
-      showError("No se pudo conectar con AgroVoz. ¿Está funcionando el backend?");
+      const errorMessage = "No se pudo conectar con AgroVoz. Revisa tu conexión e inténtalo de nuevo.";
+      showError(errorMessage);
+      addRetryBubble(errorMessage, text);
     }
   }
 
@@ -415,6 +453,11 @@ const pageDescription = "Prueba AgroVoz desde el navegador. Escribe una pregunta
     border-top-left-radius: 2px;
   }
 
+  .chat-bubble--error {
+    border: 1px solid #e8a6a0;
+    background: #fff7f6;
+  }
+
   .chat-bubble__text {
     font-size: 0.925rem;
     line-height: 1.45;
@@ -445,6 +488,24 @@ const pageDescription = "Prueba AgroVoz desde el navegador. Escribe una pregunta
     font-size: 0.7rem;
     color: #8696a0;
     margin-top: 0.25rem;
+  }
+
+  .chat-retry-btn {
+    margin-top: 0.5rem;
+    border: 1px solid #c0392b;
+    border-radius: 16px;
+    background: #fff;
+    color: #a93226;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 0.3rem 0.7rem;
+  }
+
+  .chat-retry-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
   }
 
   .chat-audio-player {

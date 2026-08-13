@@ -3,7 +3,16 @@
 Issue #119 — endpoint de chat web interactivo para el pitch de Crea INACAP.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+
+class DemoHistorialMensaje(BaseModel):
+    """Turno textual efímero de la conversación mostrada en la demo."""
+
+    rol: Literal["user", "assistant"]
+    texto: str = Field(min_length=1, max_length=500)
 
 
 class DemoPreguntaRequest(BaseModel):
@@ -23,6 +32,11 @@ class DemoPreguntaRequest(BaseModel):
         default=None,
         max_length=7_000_000,
         description="Audio en base64 (OGG/Opus) opcional",
+    )
+    historial: list[DemoHistorialMensaje] = Field(
+        default_factory=list,
+        max_length=6,
+        description="Hasta seis turnos textuales previos, no persistidos.",
     )
 
 

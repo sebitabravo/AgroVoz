@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
@@ -28,10 +29,12 @@ from app.admin.admin import router as admin_html_router
 from app.admin.auth import AdminAuthMiddleware
 from app.agronomist_web import router as agronomist_web_router
 from app.api.admin.agronomist_admin import router as admin_agronomist_router
+from app.api.admin.data_hub import router as admin_data_hub_router
 from app.api.admin.metrics import router as admin_metrics_router
 from app.api.admin.odepa_admin import router as admin_odepa_router
 from app.api.admin.user_admin import router as admin_user_router
 from app.api.agronomist import router as agronomist_router
+from app.api.data_hub import router as data_hub_router
 from app.api.demo import router as demo_router
 from app.api.health import router as health_router
 from app.api.panel import router as panel_router
@@ -356,6 +359,18 @@ async def _cancel_background_task(task: asyncio.Task[None] | None) -> None:
         await task
 
 
+def _sync_data_hub_local() -> None:
+    """Sincroniza snapshots locales sin depender de red durante el request."""
+    from app.core.database import SessionLocal
+    from app.services.data_hub_service import sync_data_hub
+
+    db = SessionLocal()
+    try:
+        sync_data_hub(db)
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Maneja el ciclo de vida de la aplicación.
@@ -404,6 +419,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.app_env,
         settings.debug,
     )
+
+    # El Data Hub solo sincroniza el manifest/corpus versionado en el arranque.
+    # No descarga fuentes externas ni bloquea el backend si la última migración
+    # todavía no fue aplicada: en ese caso el catálogo queda degradado y el
+    # operador recibe el error desde el endpoint admin.
+    from app.services.data_hub_service import DataHubValidationError
+
+    try:
+        await asyncio.to_thread(_sync_data_hub_local)
+    except (DataHubValidationError, OSError, SQLAlchemyError) as exc:
+        logger.error(
+            "Data Hub: sync local de arranque no confirmada — error=%s",
+            type(exc).__name__,
+        )
 
     # Precalentar el modelo LLM antes de aceptar tráfico (~6s en VPS CX43).
     # El handshake ocurre fuera del event loop y evita el cold start del primer
@@ -538,6 +567,7 @@ app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(prices_router, prefix="/api/v1")
 app.include_router(weather_router, prefix="/api/v1")
+app.include_router(data_hub_router, prefix="/api/v1")
 app.include_router(vision_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(demo_router, prefix="/api/v1")
@@ -548,6 +578,7 @@ app.include_router(agronomist_web_router)  # prefix "/agronomo" va en el router
 # Admin — APIs JSON (autenticadas con X-Admin-Key) + dashboard HTML (cookie).
 app.include_router(admin_metrics_router, prefix="/api/v1")
 app.include_router(admin_odepa_router, prefix="/api/v1")
+app.include_router(admin_data_hub_router, prefix="/api/v1")
 app.include_router(admin_user_router, prefix="/api/v1")
 app.include_router(admin_agronomist_router, prefix="/api/v1")
 app.include_router(admin_html_router)  # prefix "/admin" va en el router

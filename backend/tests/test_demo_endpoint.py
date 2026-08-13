@@ -202,7 +202,7 @@ async def test_demo_no_registra_consulta_ni_error_llm(
 
     response, intent = await _generate_demo_response(consulta)
 
-    assert "problema" in response
+    assert response == "No tengo ese dato, pero puedo consultarte el precio en ODEPA o el clima."
     assert intent == "desconocido"
     assert "SECRETO-DEMO" not in caplog.text
     assert "dato privado" not in caplog.text
@@ -235,10 +235,10 @@ async def test_demo_openrouter_no_llama_al_responder(
         staticmethod(lambda *_args: False),
     )
 
-    response, intent = await _generate_demo_response("cuéntame algo de mi cultivo")
+    response, intent = await _generate_demo_response("¿Cuándo puedo sembrar papa?")
 
     assert response == "Respuesta remota de prueba."
-    assert intent == "desconocido"
+    assert intent == "agronomica"
     assert captured["max_tokens"] == 96
 
 
@@ -265,10 +265,10 @@ async def test_demo_openrouter_fallido_saltea_al_llm_local(
         staticmethod(lambda *_args: False),
     )
 
-    response, intent = await _generate_demo_response("cuéntame algo de mi cultivo")
+    response, intent = await _generate_demo_response("¿Cuándo puedo sembrar papa?")
 
     assert response == "Respuesta local de respaldo."
-    assert intent == "desconocido"
+    assert intent == "agronomica"
 
 
 @pytest.mark.asyncio

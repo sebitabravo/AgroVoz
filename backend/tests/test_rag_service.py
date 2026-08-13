@@ -12,6 +12,7 @@ Cubre:
 
 from __future__ import annotations
 
+import datetime
 from pathlib import Path
 
 import pytest
@@ -112,6 +113,13 @@ class TestRealCorpusDirectory:
         results = corpus.search("variedad de trigo invernal", top_k=5)
 
         assert any("Galactiko" in str(r.get("text")) for r in results)
+
+    def test_corpus_real_excluye_snapshots_vencidos(self) -> None:
+        """La búsqueda no sirve snapshots posteriores a su revisión."""
+        corpus_dir = Path(__file__).resolve().parent.parent / "corpus"
+        corpus = RAGCorpus(corpus_dir=corpus_dir, today=datetime.date(2028, 1, 1))
+
+        assert corpus.search("programa INDAP") == []
 
 
 # ── RAGCorpus: carga y disponibilidad ────────────────────────────────
@@ -327,3 +335,24 @@ class TestRAGCorpusRobustez:
 
         assert rag.is_available()
         assert len(rag._chunks) == 1
+
+    def test_manifest_invalido_falla_cerrado(self, tmp_path: Path) -> None:
+        """Un manifest presente pero inválido nunca activa el cargador legado."""
+        corpus_dir = tmp_path / "corpus"
+        corpus_dir.mkdir()
+        (corpus_dir / "fuentes_datos.yaml").write_text("fuentes: [", encoding="utf-8")
+        (corpus_dir / "documento.yaml").write_text(
+            """
+documentos:
+  - titulo: Documento no validado
+    fuente: Fuente no validada
+    fecha: 2026
+    chunks:
+      - texto: la papa cuesta ocho mil pesos
+""",
+            encoding="utf-8",
+        )
+
+        rag = RAGCorpus(corpus_dir=str(corpus_dir))
+
+        assert rag.search("precio de la papa") == []

@@ -1,10 +1,33 @@
 # AgroVoz — Tu voz tiene el precio justo
 
-Asistente de IA que responde por WhatsApp, diseñado para que pequeños agricultores chilenos accedan a precios agrícolas (ODEPA) y pronósticos climáticos (Open-Meteo) sin instalar aplicaciones.
+Asistente de IA que responde por WhatsApp, diseñado para que pequeños agricultores chilenos accedan a precios agrícolas, clima y orientación pública sin instalar aplicaciones.
 
 El productor manda un audio y recibe una respuesta hablada con precios ODEPA sincronizados diariamente a las 06:00 y pronósticos de Open-Meteo actualizados. También puede escribir: el camino de texto salta Whisper y Piper, así que responde en ~100 ms contra los ~11 s del de voz. No siempre se puede mandar audio —lugar ruidoso, una reunión, mala señal—, así que el texto es una vía de entrada de primera clase, no un fallback.
 
 Además de responder, avisa: alertas proactivas cuando el precio de un cultivo se mueve o cuando viene helada o lluvia extrema en la comuna del productor.
+
+## El ecosistema y los datos
+
+AgroVoz no trata al agricultor como alguien “atrasado”: el problema es que la
+información está fragmentada entre ODEPA, Open-Meteo, INIA, INDAP, CIREN e INE,
+con formatos, fechas y canales distintos. El Data Hub de AgroVoz ordena esas
+fuentes y las entrega por conversación:
+
+- **Catálogo de procedencia:** institución, URL, cobertura, modo (`live`,
+  `snapshot` o `database`), fecha de verificación y revisión.
+- **Dataset integrado operativo:** hechos públicos normalizados en SQLite,
+  separados de teléfonos, audio, historial, parcelas y gastos.
+- **Frescura fail-closed:** un snapshot vencido o una fuente todavía no
+  conectada no se presenta como dato actual; AgroVoz lo declara.
+- **Consulta conversacional:** el RAG local busca INIA/INDAP/directorio y los
+  servicios estructurados mantienen prioridad para ODEPA y clima.
+
+La primera versión conecta ODEPA, Open-Meteo, el corpus verificado INIA,
+programas INDAP y directorios agrícolas. CIREN/IDE Minagri, INE, Pulso
+Agroclimático y CampoClick quedan catalogados explícitamente como fuentes no
+conectadas hasta contar con un adaptador y contrato de datos verificables. No
+se implementa un marketplace ni se entrena un modelo nuevo con un dataset
+gigante: primero se protege la vigencia, la fuente y la utilidad del dato.
 
 ## Stack
 

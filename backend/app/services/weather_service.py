@@ -764,8 +764,9 @@ async def get_weather(
             lat, lon = user_coords
         elif comuna:
             comuna_coords = _resolver_comuna(comuna)
-            if comuna_coords is not None:
-                lat, lon = comuna_coords
+            if comuna_coords is None:
+                return _unsupported_comuna_message(comuna)
+            lat, lon = comuna_coords
         else:
             lat, lon = DEFAULT_LAT, DEFAULT_LON
 
@@ -1040,6 +1041,16 @@ def _resolver_comuna(comuna: str) -> tuple[float, float] | None:
         Tupla (lat, lon) si la comuna está en el diccionario, None si no.
     """
     return _COMUNAS.get(comuna.strip().lower())
+
+
+def _unsupported_comuna_message(comuna: str) -> str:
+    """Explica la cobertura actual sin atribuir el clima a otra comuna."""
+    return (
+        f"Disculpa, no reconozco la comuna '{comuna}'. "
+        "Puedo consultar Traiguén, Temuco, Padre Las Casas, Lautaro, "
+        "Villarrica y otras de la Araucanía, o Santiago. "
+        "¿Cuál te interesa?"
+    )
 
 
 def resolver_comuna(comuna: str) -> tuple[float, float] | None:
@@ -1518,12 +1529,7 @@ async def get_pronostico(
 
     if coords is None:
         unknown_comuna = comuna or "esa ubicación"
-        return (
-            f"Disculpa, no reconozco la comuna '{unknown_comuna}'. "
-            "Puedo consultar Traiguén, Temuco, Padre Las Casas, Lautaro, "
-            "Villarrica y otras de la Araucanía, o Santiago. "
-            "¿Cuál te interesa?"
-        )
+        return _unsupported_comuna_message(unknown_comuna)
 
     lat, lon = coords
     dias_pedidos = min(max(dias, 1), 3)
@@ -1561,12 +1567,7 @@ async def get_clima_historico_multianual(
     """
     coords = _resolver_comuna(comuna)
     if coords is None:
-        return (
-            f"Disculpa, no reconozco la comuna '{comuna}'. "
-            "Puedo consultar Traiguén, Temuco, Padre Las Casas, Lautaro, "
-            "Villarrica y otras de la Araucanía, o Santiago. "
-            "¿Cuál te interesa?"
-        )
+        return _unsupported_comuna_message(comuna)
 
     lat, lon = coords
     try:
@@ -1612,12 +1613,7 @@ async def get_clima_historico(comuna: str, metrica: str | None = None) -> str:
     """
     coords = _resolver_comuna(comuna)
     if coords is None:
-        return (
-            f"Disculpa, no reconozco la comuna '{comuna}'. "
-            "Puedo consultar Traiguén, Temuco, Padre Las Casas, Lautaro, "
-            "Villarrica y otras de la Araucanía, o Santiago. "
-            "¿Cuál te interesa?"
-        )
+        return _unsupported_comuna_message(comuna)
 
     lat, lon = coords
 

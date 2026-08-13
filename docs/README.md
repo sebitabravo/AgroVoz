@@ -14,6 +14,7 @@
 | [`spike-kapso.md`](./spike-kapso.md) | Evaluación de Kapso como alternativa de gateway |
 | [`spike-ivr.md`](./spike-ivr.md) | Prueba local Asterisk y decisión de costo PSTN |
 | [`vision-model.md`](./vision-model.md) | Contrato y configuración del modelo ONNX de imágenes de WhatsApp |
+| [`../specs/agrovoz-data-ecosystem/`](../specs/agrovoz-data-ecosystem/) | SDD del Data Hub, catálogo de fuentes, vigencia y dataset integrado operativo |
 
 ## Negocio
 

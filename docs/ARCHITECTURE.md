@@ -5,8 +5,11 @@
 ## Visión general
 
 AgroVoz = asistente por WhatsApp para pequeños agricultores.
-El productor envía audio o texto → el sistema consulta ODEPA/clima → responde
-por la misma vía. El texto evita Whisper y TTS.
+El productor envía audio o texto → el sistema consulta el Data Hub y los
+servicios estructurados ODEPA/OpenMeteo → responde por la misma vía. El texto
+evita Whisper y TTS. El problema de producto no es que el agricultor esté
+“atrasado”, sino que la información oficial está fragmentada y llega por
+canales poco accesibles.
 
 ## Diagrama de arquitectura
 
@@ -64,14 +67,17 @@ del piso sigue pendiente en [#215][i215].
    - Si pregunta por precio → query SQLite ODEPA
    - Si pregunta por clima → GET OpenMeteo API
    - Si busca una oficina o cooperativa → query SQLite `directorio_agricola`
+   - Si busca conocimiento, programas o capacidades → búsqueda local del Data Hub con procedencia
    - Whitelist de 19 tools: `get_price`, `get_price_spread`, `get_price_history`,
      `get_weather`, `get_pronostico`, `get_clima_historico`,
      `get_clima_historico_multianual`, `calculate_sale_value`, `calculate_margin`,
      `search_corpus`, `get_programas_indap`, `register_expense`, `register_parcela`,
      `get_parcelas`, `get_regla_agronomica`, `get_calendario_agricola`,
-     `get_link_resumen`, `get_reporte_pdf` y `get_directorio_agricola`. Si alucina
-     una tool fuera de la whitelist → fallback.
-8. Fast-path determinista o LLM genera respuesta textual (datos crudos de precio/clima, o reglas citadas de fuente oficial)
+     `get_link_resumen`, `get_reporte_pdf` y `get_directorio_agricola`. La consulta
+     de capacidades del ecosistema usa un fast path determinista y no agrega otra
+     tool al prompt. Si alucina una tool fuera de la whitelist → fallback.
+8. Fast-path determinista o LLM genera respuesta textual (datos crudos de precio/clima,
+   hechos documentales vigentes o reglas citadas de fuente oficial)
 9. Solo audio: Piper TTS convierte texto → audio `.wav`
 10. Solo audio: ffmpeg convierte `.wav` → `.ogg`
 11. FastAPI envía texto o audio por Open-WA y registra entrega efectiva
@@ -79,6 +85,45 @@ del piso sigue pendiente en [#215][i215].
 13. El job entrega esos avisos por Open-WA mediante un rate limit global configurable; el mensaje conserva el precio crudo, la fecha y la fuente ODEPA
 14. Tras el envío, elimina el staging libre; el historial opcional exige opt-in
 ```
+
+### Data Hub y dataset integrado
+
+El Data Hub es una capa de procedencia y operación, no un dataset gigante de
+fine-tuning. `backend/corpus/fuentes_datos.yaml` mantiene el catálogo declarativo
+de fuentes; cada entrada indica institución, categoría, URL HTTPS, cobertura,
+frecuencia, modo (`live`, `snapshot` o `database`), fecha de verificación y
+revisión. `data_hub_service.py` valida el manifest, ingiere snapshots locales y
+deduplica hechos por SHA-256.
+
+La sincronización crea dos tablas separadas:
+
+- `data_sources`: estado `healthy`, `stale`, `error`, `disabled`,
+  `not_connected` o `not_synced`, último intento/éxito, vigencia, conteo y hash.
+- `data_facts`: texto normalizado con fuente, URL, fecha del dato, verificación,
+  revisión, dominio, producto/ubicación y hash único. No contiene teléfono,
+  audio, transcripción, historial, parcela, gasto ni consentimiento.
+
+El RAG TF-IDF local sigue siendo el índice conversacional porque es determinista
+y compatible con 1 vCPU/4 GB. Ahora carga metadata de procedencia y excluye
+snapshots vencidos. ODEPA y OpenMeteo mantienen sus servicios estructurados;
+INIA, INDAP y el directorio usan snapshots versionados. Pulso Agroclimático,
+CIREN/IDE Minagri, INE y CampoClick están catalogados como `not_connected` hasta
+que exista un adaptador y contrato de datos verificados; una URL en el catálogo
+no activa una integración ni una feature gate.
+
+Las tablas `data_sources`/`data_facts` son el registro operativo y auditable de
+la carga. Para no sumar una consulta SQLite al camino crítico, el RAG lee el
+mismo manifest y los mismos YAML validados directamente desde el repositorio;
+no son dos datasets independientes ni se permite que uno sirva hechos que el
+otro no pueda atribuir.
+
+Endpoints:
+
+- `GET /api/v1/data/sources`: catálogo público read-only.
+- `GET /api/v1/data/search?q=...`: búsqueda documental con citas y vigencia.
+- `GET /api/v1/admin/data-hub/status`: estado operativo con `X-Admin-Key`.
+- `POST /api/v1/admin/data-hub/sync`: sincroniza manifest y snapshots locales,
+  sin descargar fuentes externas en el request.
 
 ## Componentes del backend
 
@@ -98,6 +143,8 @@ La whitelist efectiva contiene 19 tools: `get_price`, `get_price_history`,
 `search_corpus`, `get_programas_indap`, `register_expense`, `register_parcela`,
 `get_parcelas`, `get_regla_agronomica`, `get_calendario_agricola`,
 `get_link_resumen`, `get_reporte_pdf` y `get_directorio_agricola`.
+La pregunta sobre qué puede hacer AgroVoz se resuelve antes del LLM mediante un
+fast path determinista del catálogo, sin inflar el prompt ni inventar una fuente.
 
 Siete tools se mantienen fuera del prompt cuando su feature gate está apagado
 (todos parten en `false`): `register_expense` (`EXPENSE_TRACKING_ENABLED`),
@@ -111,7 +158,7 @@ una tool está habilitada en producción.
 
 ### `app/services/` — Capa de negocio
 - `whisper_service.py` — transcripción de audio (descarga, ffmpeg, Whisper)
-- `llm_service.py` — interpretación NL + Tool Calling con whitelist (19 tools: precios, clima, corpus, INDAP, gastos, parcelas, reglas, panel, reportes y `get_directorio_agricola`) con orden OpenRouter primario para lectura y Qwen local como fallback
+- `llm_service.py` — interpretación NL + Tool Calling con whitelist (19 tools: precios, clima, Data Hub, INDAP, gastos, parcelas, reglas, panel, reportes y `get_directorio_agricola`) con orden OpenRouter primario para lectura y Qwen local como fallback; el resumen de capacidades usa un fast path determinista
 - `tts_service.py` — síntesis de voz con Piper TTS
 - `odepa_service.py` — consultas a SQLite ODEPA, sync diario y detector determinista de variaciones
 - `weather_service.py` — consultas a OpenMeteo API (forecast + histórico)
@@ -119,6 +166,7 @@ una tool está habilitada en producción.
 - `pipeline_service.py` — orquestador del pipeline end-to-end
 - `openwa_service.py` — cliente HTTP para Open-WA API (enviar/recibir mensajes, webhooks)
 - `rag_service.py` — retrieval de documentos oficiales con TF-IDF + citations
+- `data_hub_service.py` — catálogo de fuentes, snapshots, hechos normalizados, frescura y estado operativo
 - `demo_service.py` — lógica del chat demo web
 - `monitor_service.py` — salud de servicios (CPU, RAM, disco, Whisper, LLM, TTS)
 - `alert_service.py` — alertas proactivas de precio y clima
@@ -145,6 +193,7 @@ una tool está habilitada en producción.
 - `alert.py` — modelo para alertas proactivas de precio/clima
 - `user_prefs.py` — identidad individual/grupal, comuna, GPS opcional, cultivos y consentimientos separados
 - `directorio_agricola.py` — snapshot SQLite de sedes y contactos públicos por comuna
+- `data_hub.py` — catálogo SQLite de fuentes y hechos públicos normalizados, separado de PII
 
 ### `app/jobs/` — Tareas programadas
 - `sync_odepa.py` — cron job 06:00 AM: descarga CSV ODEPA → upsert SQLite → evalúa alertas configuradas y variaciones críticas
@@ -153,7 +202,7 @@ una tool está habilitada en producción.
 ## Componentes del frontend
 
 ### Landing (Astro 7.x + Tailwind CSS 4.x)
-- `index.astro` — página principal: hero, problema, cómo funciona, demo, stack, planes, impacto, equipo, contacto
+- `index.astro` — página principal: hero, problema, cómo funciona, demo, ecosistema, stack, planes, impacto, equipo, contacto
 - `demo.astro` — chat web interactivo (prueba AgroVoz desde el navegador)
 - Componentes: Header, Footer, Hero, FeatureCard, StatCard, PlanCard, TeamCard, DemoPhone, ContactForm, Waveform
 
@@ -230,6 +279,51 @@ CREATE TABLE directorio_agricola (
 );
 CREATE INDEX idx_directorio_comuna ON directorio_agricola(comuna);
 CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
+
+-- Catálogo operacional del Data Hub (sin PII)
+CREATE TABLE data_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    organization TEXT NOT NULL,
+    category TEXT NOT NULL,
+    mode TEXT NOT NULL, -- live, snapshot o database
+    url TEXT NOT NULL,
+    license TEXT NOT NULL,
+    refresh_policy TEXT NOT NULL,
+    coverage TEXT NOT NULL,
+    schema_version INTEGER NOT NULL,
+    enabled BOOLEAN NOT NULL,
+    status TEXT NOT NULL,
+    verified_on DATE NOT NULL,
+    review_before DATE NOT NULL,
+    last_attempt_at TIMESTAMP,
+    last_success_at TIMESTAMP,
+    valid_until DATE,
+    record_count INTEGER NOT NULL DEFAULT 0,
+    content_hash TEXT,
+    last_error_code TEXT
+);
+
+CREATE TABLE data_facts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_key TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    location TEXT,
+    product TEXT,
+    title TEXT NOT NULL,
+    text TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    source_date TEXT,
+    verified_on DATE NOT NULL,
+    review_before DATE,
+    fact_hash TEXT NOT NULL UNIQUE
+);
+CREATE INDEX idx_data_facts_source ON data_facts(source_key);
+CREATE INDEX idx_data_facts_domain ON data_facts(domain);
+CREATE INDEX idx_data_facts_location ON data_facts(location);
+CREATE INDEX idx_data_facts_product ON data_facts(product);
 ```
 
 ## Decisiones de arquitectura (NO CAMBIAR)
@@ -522,3 +616,14 @@ CREATE INDEX idx_directorio_tipo ON directorio_agricola(tipo);
     se salta y el camino local sigue funcionando. `LLM_PRIMARY_PROVIDER=local`
     fuerza solo Qwen y permite rollback operativo sin tráfico remoto ni cambio
     de código.
+
+33. **Data Hub integrado con procedencia y vigencia.** El ecosistema se
+    implementa como una capa conversacional que ordena fuentes públicas, no
+    como marketplace ni como un dataset único para fine-tuning. El manifest
+    `backend/corpus/fuentes_datos.yaml` distingue fuentes conectadas de
+    catalogadas; `data_sources` conserva estado/frescura y `data_facts` guarda
+    hechos públicos sin PII. El RAG local agrega URL, fuente, fecha de dato,
+    verificación y revisión, y excluye snapshots vencidos. ODEPA/OpenMeteo
+    siguen siendo servicios estructurados; las fuentes sin adaptador estable
+    fallan cerrado y se muestran como `not_connected`. Registrar una fuente no
+    activa panel, reglas, reportes ni otros gates sensibles.
