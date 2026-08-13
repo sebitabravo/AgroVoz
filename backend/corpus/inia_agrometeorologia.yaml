@@ -1,0 +1,13 @@
+version: 1
+fuente: Red Agrometeorológica INIA
+fuente_url: https://agrometeorologia.cl/
+verificado_el: "2026-08-13"
+revisar_antes_de: "2026-09-13"
+documentos:
+  - titulo: Red Agrometeorológica INIA
+    fuente: Instituto de Investigaciones Agropecuarias (INIA)
+    fuente_url: https://agrometeorologia.cl/
+    fecha: "2026-08-13"
+    chunks:
+      - "El portal oficial de la Red Agrometeorológica INIA publica monitoreo meteorológico, datos históricos y alertas para apoyar decisiones agrícolas."
+      - "AgroVoz verifica el catálogo público de estaciones de INIA durante una sincronización administrativa; no descarga coordenadas ni series completas en cada consulta de voz."

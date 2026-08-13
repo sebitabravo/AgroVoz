@@ -135,6 +135,13 @@ en Dokploy:
 | `OPENROUTER_PRIMARY_TIMEOUT_SECONDS` | Deadline total del intento remoto antes de pasar a Qwen | `2.0` |
 | `OPENROUTER_MAX_OUTPUT_TOKENS` | Tope de salida para controlar latencia/costo | `120` |
 
+El Compose de producción activa además la verificación remota diaria del Data
+Hub fuera del request: `DATA_HUB_REMOTE_SYNC_ENABLED=true`, a las
+`DATA_HUB_REMOTE_SYNC_HOUR=4` y `DATA_HUB_REMOTE_SYNC_MINUTE=30` hora local del
+servidor. El endpoint admin y `make sync-data-hub` permiten forzarla; en
+desarrollo permanece apagada por defecto para que los tests no dependan de
+internet.
+
 Para habilitar el orden remoto primero, configurar `LLM_PRIMARY_PROVIDER=openrouter`
 y una `OPENROUTER_API_KEY` válida. El fast-path determinístico sigue primero.
 Las consultas salen del VPS hacia OpenRouter; revisá sus condiciones de

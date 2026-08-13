@@ -3,6 +3,7 @@
 from httpx import AsyncClient
 
 from app.core.config import settings
+from app.services.data_hub_remote import RemoteDataHubSyncResult
 
 
 class TestDataHubPublicAPI:
@@ -11,7 +12,7 @@ class TestDataHubPublicAPI:
 
         assert response.status_code == 200
         data = response.json()
-        assert len(data) == 9
+        assert len(data) == 10
         assert {row["key"] for row in data} >= {
             "odepa_precios_mayoristas",
             "ciren_ide_minagri",
@@ -56,6 +57,31 @@ class TestDataHubAdminAPI:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["sources_synced"] == 9
-        assert data["facts_synced"] == 114
-        assert "ciren_ide_minagri" in data["not_connected_sources"]
+        assert data["sources_synced"] == 10
+        assert data["facts_synced"] == 121
+        assert "inia_agroclima" in data["not_connected_sources"]
+        assert data["remote_sources_synced"] == 0
+        assert data["remote_source_errors"] == []
+
+    async def test_sync_remoto_expone_resultado_saneado(
+        self, client: AsyncClient, monkeypatch
+    ) -> None:
+        """La verificación remota es opt-in y no filtra mensajes externos."""
+        monkeypatch.setattr(
+            "app.api.admin.data_hub.sync_remote_data_hub",
+            lambda _db: RemoteDataHubSyncResult(
+                sources_synced=2,
+                source_errors=("ciren_ide_minagri:http_status",),
+            ),
+        )
+
+        response = await client.post(
+            "/api/v1/admin/data-hub/sync?remote=true",
+            headers={"X-Admin-Key": settings.admin_api_key},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["remote_sources_synced"] == 2
+        assert response.json()["remote_source_errors"] == [
+            "ciren_ide_minagri:http_status"
+        ]

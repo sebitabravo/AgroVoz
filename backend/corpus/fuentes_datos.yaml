@@ -47,6 +47,21 @@ fuentes:
     verificado_el: "2026-08-13"
     revisar_antes_de: "2026-09-13"
 
+  - clave: inia_red_agrometeorologica
+    nombre: Red Agrometeorológica INIA
+    institucion: Instituto de Investigaciones Agropecuarias (INIA)
+    categoria: clima_agricola
+    modo: live
+    url: https://agrometeorologia.cl/
+    licencia: Datos públicos de INIA; citar el portal y revisar condiciones de reutilización
+    frecuencia: diaria
+    cobertura: Verificación del catálogo público de estaciones INIA; no descarga coordenadas ni series al consultar
+    corpus: [inia_agrometeorologia.yaml]
+    adaptador: inia_red_agrometeorologica
+    conectado: true
+    verificado_el: "2026-08-13"
+    revisar_antes_de: "2026-09-13"
+
   - clave: inia_conocimiento_agronomico
     nombre: Fichas y reglas agronómicas INIA
     institucion: Instituto de Investigaciones Agropecuarias (INIA)
@@ -93,13 +108,14 @@ fuentes:
     nombre: Infraestructura de Datos Espaciales del Ministerio de Agricultura
     institucion: Centro de Información de Recursos Naturales (CIREN)
     categoria: territorio
-    modo: snapshot
-    url: https://www.ciren.cl/noticias/ciren-fortalece-la-arquitectura-tecnologica-de-ide-minagri-con-la-actualizacion-de-su-geoportal-orientado-a-interoperabilidad-y-escalabilidad/
+    modo: live
+    url: https://ide.minagri.gob.cl/
     licencia: Revisar licencia de cada capa IDE Minagri
     frecuencia: según actualización de cada capa
     cobertura: Capas geográficas y servicios interoperables del Ministerio de Agricultura
-    corpus: []
-    conectado: false
+    corpus: [ciren_ide_minagri.yaml]
+    adaptador: ciren_ide_minagri
+    conectado: true
     verificado_el: "2026-08-13"
     revisar_antes_de: "2026-09-13"
 
@@ -112,8 +128,9 @@ fuentes:
     licencia: Estadísticas públicas del INE; revisar condiciones de uso
     frecuencia: según publicación censal
     cobertura: Línea base estadística de explotaciones silvoagropecuarias de Chile
-    corpus: []
-    conectado: false
+    corpus: [ine_censo_agropecuario.yaml]
+    adaptador: ine_censo_catalogo
+    conectado: true
     verificado_el: "2026-08-13"
     revisar_antes_de: "2026-09-13"
 

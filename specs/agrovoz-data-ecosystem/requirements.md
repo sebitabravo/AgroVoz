@@ -174,9 +174,9 @@ La información que necesita una explotación familiar —precio, clima, reglas 
 ### Measurable Outcomes
 
 - **SC-001:** 100% de las respuestas del buscador de conocimiento contienen fuente y fecha o declaran que no hay dato vigente. **Verificado:** tests RAG/API.
-- **SC-002:** 0 hechos duplicados por `fact_hash` después de ejecutar dos sincronizaciones idénticas. **Verificado:** 114 hashes únicos.
+- **SC-002:** 0 hechos duplicados por `fact_hash` después de ejecutar dos sincronizaciones idénticas. **Verificado:** 121 hashes únicos.
 - **SC-003:** 100% de snapshots vencidos quedan fuera de la búsqueda conversacional. **Verificado:** test con fecha 2028.
-- **SC-004:** El catálogo identifica explícitamente cada fuente como conectada, snapshot o no conectada. **Verificado:** 9 fuentes en manifest/API.
+- **SC-004:** El catálogo identifica explícitamente cada fuente como conectada, snapshot o no conectada. **Verificado:** 10 fuentes en manifest/API.
 - **SC-005:** Tests, lint, mypy y build de landing pasan sin degradar el gate nativo. **Verificado:** `make test`, `make lint`, `make typecheck`, build.
 - **SC-006:** Ningún cambio de esta feature activa por defecto una capacidad que requiere consentimiento o revisión legal. **Verificado:** flags existentes permanecen apagados.
 

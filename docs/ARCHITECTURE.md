@@ -106,10 +106,13 @@ La sincronización crea dos tablas separadas:
 El RAG TF-IDF local sigue siendo el índice conversacional porque es determinista
 y compatible con 1 vCPU/4 GB. Ahora carga metadata de procedencia y excluye
 snapshots vencidos. ODEPA y OpenMeteo mantienen sus servicios estructurados;
-INIA, INDAP y el directorio usan snapshots versionados. Pulso Agroclimático,
-CIREN/IDE Minagri, INE y CampoClick están catalogados como `not_connected` hasta
-que exista un adaptador y contrato de datos verificados; una URL en el catálogo
-no activa una integración ni una feature gate.
+INIA, INDAP, el directorio, la Red Agrometeorológica, CIREN e INE tienen
+snapshots o verificadores explícitos. El adaptador de INIA cuenta estaciones, el
+de CIREN valida un endpoint oficial con una coordenada fija y el de INE valida
+el catálogo de archivos del Censo: ninguno descarga series, capas GIS o bases
+masivas durante una pregunta o el arranque. Pulso Agroclimático y CampoClick
+siguen `not_connected` hasta tener un contrato reproducible/autorizado; una URL
+en el catálogo no activa una integración ni una feature gate.
 
 Las tablas `data_sources`/`data_facts` son el registro operativo y auditable de
 la carga. Para no sumar una consulta SQLite al camino crítico, el RAG lee el
@@ -123,7 +126,10 @@ Endpoints:
 - `GET /api/v1/data/search?q=...`: búsqueda documental con citas y vigencia.
 - `GET /api/v1/admin/data-hub/status`: estado operativo con `X-Admin-Key`.
 - `POST /api/v1/admin/data-hub/sync`: sincroniza manifest y snapshots locales,
-  sin descargar fuentes externas en el request.
+  sin red por defecto.
+- `POST /api/v1/admin/data-hub/sync?remote=true`: además verifica los
+  endpoints oficiales declarados; requiere `X-Admin-Key`, devuelve éxitos y
+  códigos de error por fuente y no expone mensajes externos.
 
 ## Componentes del backend
 
@@ -167,6 +173,8 @@ una tool está habilitada en producción.
 - `openwa_service.py` — cliente HTTP para Open-WA API (enviar/recibir mensajes, webhooks)
 - `rag_service.py` — retrieval de documentos oficiales con TF-IDF + citations
 - `data_hub_service.py` — catálogo de fuentes, snapshots, hechos normalizados, frescura y estado operativo
+- `data_hub_remote.py` — verificadores opt-in de INIA, CIREN e INE con límites
+  de tamaño, endpoints fijos y fallas por fuente
 - `demo_service.py` — lógica del chat demo web
 - `monitor_service.py` — salud de servicios (CPU, RAM, disco, Whisper, LLM, TTS)
 - `alert_service.py` — alertas proactivas de precio y clima
@@ -623,6 +631,8 @@ CREATE INDEX idx_data_facts_product ON data_facts(product);
     catalogadas; `data_sources` conserva estado/frescura y `data_facts` guarda
     hechos públicos sin PII. El RAG local agrega URL, fuente, fecha de dato,
     verificación y revisión, y excluye snapshots vencidos. ODEPA/OpenMeteo
-    siguen siendo servicios estructurados; las fuentes sin adaptador estable
-    fallan cerrado y se muestran como `not_connected`. Registrar una fuente no
-    activa panel, reglas, reportes ni otros gates sensibles.
+    siguen siendo servicios estructurados; los adaptadores remotos opt-in de
+    INIA, CIREN e INE validan disponibilidad/metadatos sin traer bases masivas.
+    Las fuentes sin adaptador estable fallan cerrado y se muestran como
+    `not_connected`. Registrar una fuente no activa panel, reglas, reportes ni
+    otros gates sensibles.

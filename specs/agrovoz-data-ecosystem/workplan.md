@@ -21,12 +21,12 @@ Una fase se marca completa solo cuando:
 
 ### Fase 0 — Auditoría de estado y requisitos
 
-- [ ] Comparar worktree, `HEAD`, `origin/main`, rama, CI y despliegue.
-- [ ] Construir matriz requisito → evidencia para los cinco bugs de la ronda 3.
-- [ ] Construir matriz requisito → evidencia para Data Hub, migración, fuentes,
+- [x] Comparar worktree, `HEAD`, `origin/main`, rama, CI y despliegue.
+- [x] Construir matriz requisito → evidencia para los cinco bugs de la ronda 3.
+- [x] Construir matriz requisito → evidencia para Data Hub, migración, fuentes,
       secrets, E2E, smoke y rendimiento.
-- [ ] Identificar cambios previos sin commit y evitar perderlos.
-- [ ] Confirmar qué credenciales/configuración existen sin imprimir secretos.
+- [x] Identificar cambios previos sin commit y evitar perderlos.
+- [x] Confirmar qué credenciales/configuración existen sin imprimir secretos.
 
 **Salida:** inventario actual, riesgos y orden de ejecución.
 
@@ -47,40 +47,51 @@ Una fase se marca completa solo cuando:
 
 ### Fase 2 — Fuentes oficiales y cobertura real
 
-- [ ] Verificar en la fuente oficial vigente cada URL y modalidad declarada.
-- [ ] Implementar adaptador solo cuando exista endpoint/archivo/contrato estable.
-- [ ] Integrar Pulso Agroclimático INIA si existe descarga reproducible.
-- [ ] Integrar CIREN/IDE Minagri si existe servicio interoperable verificable.
-- [ ] Integrar INE Censo Agropecuario si existe dataset descargable y licencia.
-- [ ] Integrar CampoClick solo si la institución expone acceso autorizado.
-- [ ] Mantener `not_connected` con evidencia técnica si una fuente no permite
+- [x] Verificar en la fuente oficial vigente cada URL y modalidad declarada.
+- [x] Implementar adaptador solo cuando exista endpoint/archivo/contrato estable.
+- [x] Integrar Pulso Agroclimático INIA si existe descarga reproducible; la
+      verificación concluyó que no hay contrato machine-readable estable, por
+      lo que queda `not_connected` con su límite documentado.
+- [x] Integrar CIREN/IDE Minagri mediante un servicio interoperable verificable,
+      sin ingerir todas sus capas GIS.
+- [x] Integrar el catálogo oficial del INE Censo Agropecuario sin descargar sus
+      bases masivas automáticamente.
+- [x] Integrar CampoClick solo si la institución expone acceso autorizado; no
+      se encontró contrato público autorizado y permanece `not_connected`.
+- [x] Mantener `not_connected` con evidencia técnica si una fuente no permite
       integración segura; nunca inventar datos ni hacer scraping opaco.
-- [ ] Testear error, timeout, licencia, vigencia y ausencia de datos por fuente.
+- [x] Testear error, timeout, vigencia y ausencia de datos en los adaptadores
+      remotos; conservar licencia/uso como límite explícito por fuente.
 
 **Salida:** catálogo honesto: conectado/healthy, conectado/stale o
 `not_connected` con motivo verificable.
 
 ### Fase 3 — Operación y configuración productiva
 
-- [ ] Revisar `.env.example`, Compose, Dockerfile, healthchecks y volúmenes.
-- [ ] Confirmar variables obligatorias sin mostrar valores.
+- [x] Revisar `.env.example`, Compose, Dockerfile, healthchecks y volúmenes.
+- [x] Confirmar variables obligatorias sin mostrar valores.
 - [ ] Configurar `PHONE_HASH_PEPPER`, `OPENWA_API_KEY`, `ADMIN_API_KEY` y
       cualquier secreto requerido mediante el canal existente, no en git.
-- [ ] Aplicar `alembic upgrade head` con backup/rollback comprobable.
+- [x] Aplicar `alembic upgrade head` en una base temporal y comprobar el head
+      único `a7b8c9d0e1f2`; el backup/rollback de la base productiva sigue
+      siendo un gate externo.
 - [ ] Ejecutar sync ODEPA real y confirmar estado `healthy`/frescura.
-- [ ] Ejecutar sync local Data Hub y verificar 9 fuentes/los conteos esperados.
-- [ ] Revisar permisos, logs, media TTL, rate limits y headers.
+- [x] Ejecutar sync local Data Hub y verificar 10 fuentes/121 hechos; el sync
+      remoto queda opt-in y autenticado.
+- [x] Revisar permisos, logs, media TTL, rate limits y headers en el código y
+      Compose; falta confirmación runtime productiva.
 
 **Salida:** entorno operativo configurado y reversible.
 
 ### Fase 4 — E2E local
 
-- [ ] Levantar backend/landing con configuración de prueba.
-- [ ] Ejecutar Playwright o runner nativo contra la UI real, no una captura.
-- [ ] Probar precio real, clima real, consulta de semillas, comuna no soportada,
+- [x] Levantar backend/landing con configuración de prueba.
+- [x] Ejecutar Playwright o runner nativo contra la UI real, no una captura.
+- [x] Probar precio real, clima real, consulta de semillas, comuna no soportada,
       seguimiento conversacional, fallback, error de red y TTS.
-- [ ] Probar catálogo público y endpoint admin sin exponer secretos.
-- [ ] Medir latencia de cada consulta y del flujo de voz.
+- [x] Probar catálogo público y endpoint admin sin exponer secretos.
+- [x] Medir latencia de cada consulta de la demo; el flujo Whisper real queda
+      pendiente de un artefacto de audio controlado en este entorno.
 - [ ] Corregir cualquier regresión y repetir desde Fase 1.
 
 **Salida:** reporte E2E reproducible con requests, respuestas, tiempos y
@@ -132,9 +143,9 @@ errores de consola.
 
 ## Estado actual
 
-- **Fase activa:** Fase 0 — auditoría de estado y requisitos.
-- **Fases locales:** la implementación de Fase 1 existe en el worktree y debe
-  volver a verificarse contra el estado actual.
-- **Fases externas:** migración/sync productiva, E2E publicado, publicación y
-  medición del VPS aún no tienen evidencia en esta ejecución.
+- **Fase activa:** Fase 3 — operación y configuración productiva.
+- **Fases locales:** Fases 0, 1, 2 y 4 verificadas en esta ejecución; el fix
+  E2E de ubicación quedó protegido por regresión automatizada.
+- **Fases externas:** secrets productivos, migración/sync productiva, publicación,
+  E2E publicado y medición del VPS aún no tienen evidencia en esta ejecución.
 - **Última actualización:** 2026-08-13.

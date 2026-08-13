@@ -8,7 +8,7 @@
         lint lint-fix typecheck \
         dev-backend dev-frontend \
         db-init db-migrate db-seed db-shell db-reset \
-        sync-odepa tunnel \
+        sync-odepa sync-data-hub tunnel \
         build-landing preview-landing
 
 # ─────────────────────────────────────────────
@@ -66,6 +66,9 @@ tunnel: ## ngrok para exponer webhook Open-WA local (test remoto)
 
 sync-odepa: ## Forzar sincronización de precios ODEPA
 	cd backend && uv run python -m app.jobs.sync_odepa
+
+sync-data-hub: ## Verificar fuentes oficiales y recargar el Data Hub
+	cd backend && uv run python -m app.jobs.sync_data_hub
 
 # ─────────────────────────────────────────────
 # Base de datos

@@ -86,6 +86,12 @@ services:
       # ── ODEPA ────────────────────────
       - ODEPA_SYNC_HOUR=${ODEPA_SYNC_HOUR:-6}
       - ODEPA_SYNC_MINUTE=${ODEPA_SYNC_MINUTE:-0}
+      # Verificación diaria de catálogos INIA/CIREN/INE fuera del request.
+      # El sync admin/manual sigue disponible; este default se activa solo en
+      # el compose de producción, no en desarrollo.
+      - DATA_HUB_REMOTE_SYNC_ENABLED=${DATA_HUB_REMOTE_SYNC_ENABLED:-true}
+      - DATA_HUB_REMOTE_SYNC_HOUR=${DATA_HUB_REMOTE_SYNC_HOUR:-4}
+      - DATA_HUB_REMOTE_SYNC_MINUTE=${DATA_HUB_REMOTE_SYNC_MINUTE:-30}
       # ── Seguridad ────────────────────
       - PHONE_HASH_PEPPER=${PHONE_HASH_PEPPER:?PHONE_HASH_PEPPER requerida — configurar en Dokploy Secrets UI}
       - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-60}

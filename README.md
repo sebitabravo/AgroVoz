@@ -22,11 +22,15 @@ fuentes y las entrega por conversación:
 - **Consulta conversacional:** el RAG local busca INIA/INDAP/directorio y los
   servicios estructurados mantienen prioridad para ODEPA y clima.
 
-La primera versión conecta ODEPA, Open-Meteo, el corpus verificado INIA,
-programas INDAP y directorios agrícolas. CIREN/IDE Minagri, INE, Pulso
-Agroclimático y CampoClick quedan catalogados explícitamente como fuentes no
-conectadas hasta contar con un adaptador y contrato de datos verificables. No
-se implementa un marketplace ni se entrena un modelo nuevo con un dataset
+La versión actual conecta ODEPA, Open-Meteo, el corpus verificado INIA, la Red
+Agrometeorológica INIA, programas INDAP, directorios agrícolas, un verificador
+del servicio IDE Minagri de CIREN y el catálogo oficial de archivos del Censo
+Agropecuario del INE. El Pulso Agroclimático y CampoClick siguen catalogados
+explícitamente como fuentes no conectadas porque no se encontró un contrato de
+descarga reproducible/autorizado para ingerirlos sin inventar datos. Los
+verificadores remotos solo corren en el sync admin autenticado; no se consulta
+internet por cada pregunta ni se descargan bases masivas al arrancar. No se
+implementa un marketplace ni se entrena un modelo nuevo con un dataset
 gigante: primero se protege la vigencia, la fuente y la utilidad del dato.
 
 ## Stack

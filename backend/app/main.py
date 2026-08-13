@@ -51,6 +51,7 @@ from app.core.security import (
     VisionUploadGuardMiddleware,
 )
 from app.panel_web import router as panel_web_router
+from app.services.data_hub_remote import RemoteDataHubSyncResult
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,41 @@ async def _odepa_scheduler() -> None:
             # no se captura -> shutdown limpio via odepa_task.cancel() en lifespan.
             logger.error(
                 "ODEPA scheduler: error en sync automática — error=%s",
+                type(exc).__name__,
+            )
+
+
+async def _data_hub_remote_scheduler() -> None:
+    """Verifica catálogos oficiales una vez al día fuera del camino crítico."""
+    while True:
+        now = datetime.datetime.now()
+        target = now.replace(
+            hour=settings.data_hub_remote_sync_hour,
+            minute=settings.data_hub_remote_sync_minute,
+            second=0,
+            microsecond=0,
+        )
+        if now >= target:
+            target += datetime.timedelta(days=1)
+        wait_seconds = (target - now).total_seconds()
+        logger.info(
+            "Data Hub remoto scheduler: próxima verificación en %.1f horas (%s)",
+            wait_seconds / 3600,
+            target.isoformat(),
+        )
+        await asyncio.sleep(wait_seconds)
+        try:
+            result = await asyncio.to_thread(_sync_data_hub_remote)
+            logger.info(
+                "Data Hub remoto scheduler: %d fuentes OK, %d con error",
+                result.sources_synced,
+                len(result.source_errors),
+            )
+        except Exception as exc:
+            # Boundary de resiliencia del scheduler: una caída remota no debe
+            # matar el proceso ni afectar las preguntas de agricultores.
+            logger.error(
+                "Data Hub remoto scheduler: error en verificación — error=%s",
                 type(exc).__name__,
             )
 
@@ -371,6 +407,18 @@ def _sync_data_hub_local() -> None:
         db.close()
 
 
+def _sync_data_hub_remote() -> RemoteDataHubSyncResult:
+    """Ejecuta el sync remoto en un thread con una sesión SQLite propia."""
+    from app.core.database import SessionLocal
+    from app.services.data_hub_remote import sync_remote_data_hub
+
+    db = SessionLocal()
+    try:
+        return sync_remote_data_hub(db)
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Maneja el ciclo de vida de la aplicación.
@@ -451,6 +499,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Scheduler ODEPA: sync diario a las 06:00 AM hora local.
     # Tarea de fondo del lifespan. Se cancela automáticamente al detener la app.
     odepa_task = asyncio.create_task(_odepa_scheduler())
+    data_hub_remote_task = (
+        asyncio.create_task(_data_hub_remote_scheduler())
+        if settings.data_hub_remote_sync_enabled
+        else None
+    )
     history_purge_task = _start_consultation_history_scheduler()
     staging_cleanup_task = _start_consultation_staging_cleanup_scheduler()
     expense_purge_task = _start_expense_purge_scheduler()
@@ -467,6 +520,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await _cancel_background_task(expense_purge_task)
     await _cancel_background_task(staging_cleanup_task)
     await _cancel_background_task(history_purge_task)
+    await _cancel_background_task(data_hub_remote_task)
     await _cancel_background_task(odepa_task)
     engine.dispose()
     from app.services.weather_service import _close_http_client

@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     # ── ODEPA ────────────────────────────
     odepa_sync_hour: int = 6
     odepa_sync_minute: int = 0
+    # Verificación diaria de catálogos oficiales del Data Hub. Se deja
+    # apagada por defecto en desarrollo; producción la activa explícitamente.
+    data_hub_remote_sync_enabled: bool = False
+    data_hub_remote_sync_hour: int = Field(default=4, ge=0, le=23)
+    data_hub_remote_sync_minute: int = Field(default=30, ge=0, le=59)
     # URL del CSV de precios mayoristas ODEPA (frutas y hortalizas).
     # Dataset CKAN: precios-mayoristas-de-frutas-y-hortalizas
     # La URL apunta al año actual. ODEPA publica un CSV por año, así que

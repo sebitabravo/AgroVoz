@@ -1,7 +1,7 @@
 """Matriz determinista de los feature flags definidos en ``Settings``.
 
 La auditoría detectó inicialmente 13 flags en ``Settings``. Tras eliminar el
-flag obsoleto ``use_typed_extraction``, quedan 12 flags runtime activos. La
+flag obsoleto ``use_typed_extraction``, quedan 13 flags runtime activos. La
 matriz no inicia modelos ni llama servicios externos: verifica que cada flag
 permanezca cerrado por defecto, acepte el opt-in explícito y conserve el guard
 fail-closed de su consumer conocido.
@@ -164,6 +164,11 @@ def _probe_agronomist_console() -> str:
     return _probe_http_guard(_require_agronomist_console_enabled)
 
 
+def _probe_data_hub_remote_sync() -> str:
+    """Comprueba que el scheduler remoto dependa de su opt-in explícito."""
+    return "enabled" if settings.data_hub_remote_sync_enabled else "disabled"
+
+
 def _probe_flags() -> tuple[str, ...]:
     """Retorna los nombres de flags bool auditables, excluyendo ``debug``."""
     return tuple(
@@ -316,6 +321,14 @@ _FLAG_CONTRACTS: tuple[FeatureFlagContract, ...] = (
         "disabled",
         "identity",
     ),
+    FeatureFlagContract(
+        "data_hub_remote_sync_enabled",
+        "DATA_HUB_REMOTE_SYNC_ENABLED",
+        ("app/main.py:_data_hub_remote_scheduler", "app/jobs/sync_data_hub.py:main"),
+        _probe_data_hub_remote_sync,
+        "disabled",
+        "enabled",
+    ),
 )
 
 
@@ -323,8 +336,8 @@ def test_feature_flag_inventory_matches_settings() -> None:
     """Falla si config agrega o quita una flag sin consumer y contrato."""
     fields = tuple(contract.field for contract in _FLAG_CONTRACTS)
 
-    assert len(fields) == 12
-    assert len(set(fields)) == 12
+    assert len(fields) == 13
+    assert len(set(fields)) == 13
     assert set(fields) == set(_probe_flags())
     assert all(contract.consumers for contract in _FLAG_CONTRACTS)
 

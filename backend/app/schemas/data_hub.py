@@ -38,12 +38,14 @@ class DataHubStatusResponse(BaseModel):
 
 
 class DataHubSyncResponse(BaseModel):
-    """Resultado de una sincronización local del manifest/corpus."""
+    """Resultado de sincronizar corpus local y, opcionalmente, fuentes remotas."""
 
     sources_synced: int = Field(ge=0)
     facts_synced: int = Field(ge=0)
     stale_sources: list[str]
     not_connected_sources: list[str]
+    remote_sources_synced: int = Field(default=0, ge=0)
+    remote_source_errors: list[str] = Field(default_factory=list)
 
 
 class DataHubSearchResult(BaseModel):

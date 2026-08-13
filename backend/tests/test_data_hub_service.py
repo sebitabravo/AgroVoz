@@ -37,12 +37,14 @@ class TestDataHubManifest:
     def test_manifest_real_valido_y_distingue_fuentes(self) -> None:
         entries = load_manifest(_MANIFEST)
 
-        assert len(entries) == 9
+        assert len(entries) == 10
         assert {entry.key for entry in entries} >= {
             "odepa_precios_mayoristas",
             "openmeteo_clima",
             "inia_conocimiento_agronomico",
             "ciren_ide_minagri",
+            "inia_red_agrometeorologica",
+            "ine_censo_agropecuario",
         }
         assert all(entry.url.startswith("https://") for entry in entries)
         assert any(not entry.connected for entry in entries)
@@ -95,12 +97,12 @@ class TestDataHubSync:
                 today=datetime.date(2026, 8, 13),
             )
 
-            assert first.sources_synced == second.sources_synced == 9
-            assert first.facts_synced == second.facts_synced == 114
+            assert first.sources_synced == second.sources_synced == 10
+            assert first.facts_synced == second.facts_synced == 121
             assert first_count is not None
-            assert db.query(DataFact).count() == total_first == 114
-            assert db.query(DataSource).count() == 9
-            assert db.query(DataFact.fact_hash).distinct().count() == 114
+            assert db.query(DataFact).count() == total_first == 121
+            assert db.query(DataSource).count() == 10
+            assert db.query(DataFact.fact_hash).distinct().count() == 121
 
     def test_sync_marca_stale_sin_servirlo_como_actual(self) -> None:
         with _session() as db:
@@ -113,8 +115,8 @@ class TestDataHubSync:
             status = get_data_hub_status(db, today=datetime.date(2028, 1, 1))
 
             assert result.stale_sources
-            assert status["stale_sources"] == 5
-            assert status["not_connected_sources"] == 4
+            assert status["stale_sources"] == 8
+            assert status["not_connected_sources"] == 2
             sources = status["sources"]
             assert isinstance(sources, list)
             odepa = next(
@@ -127,7 +129,7 @@ class TestDataHubSync:
             result = sync_data_hub(db, manifest_path=_MANIFEST, corpus_dir=_CORPUS_DIR)
 
             assert result.facts_synced > 100
-            assert "ciren_ide_minagri" in result.not_connected_sources
+            assert "inia_agroclima" in result.not_connected_sources
 
     def test_sync_invalido_no_reemplaza_la_carga_anterior(self, tmp_path: Path) -> None:
         """Una falla de validación conserva los hechos ya confirmados."""
@@ -146,8 +148,8 @@ class TestDataHubSync:
             with pytest.raises(DataHubValidationError):
                 sync_data_hub(db, manifest_path=invalid_manifest, corpus_dir=_CORPUS_DIR)
 
-            assert db.query(DataFact).count() == 114
-            assert db.query(DataSource).count() == 9
+            assert db.query(DataFact).count() == 121
+            assert db.query(DataSource).count() == 10
 
     def test_adaptador_odepa_marca_frescura_real(self) -> None:
         """El sync estructurado de ODEPA puede confirmar el estado del catálogo."""

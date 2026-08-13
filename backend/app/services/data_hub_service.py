@@ -36,9 +36,17 @@ _ALLOWED_HOSTS = (
     "odepa.gob.cl",
     "indap.gob.cl",
     "inia.cl",
+    "agrometeorologia.cl",
     "ciren.cl",
     "ine.gob.cl",
     "open-meteo.com",
+)
+_ALLOWED_REMOTE_ADAPTERS = frozenset(
+    {
+        "inia_red_agrometeorologica",
+        "ciren_ide_minagri",
+        "ine_censo_catalogo",
+    }
 )
 
 
@@ -62,6 +70,7 @@ class SourceManifestEntry:
     schema_version: int
     corpus_files: tuple[str, ...]
     connected: bool
+    remote_adapter: str | None
     verified_on: datetime.date
     review_before: datetime.date
 
@@ -189,6 +198,13 @@ def load_manifest(path: str | Path | None = None) -> list[SourceManifestEntry]:
         connected = raw.get("conectado")
         if not isinstance(connected, bool):
             raise DataHubValidationError(f"conectado debe ser booleano en {key}")
+        raw_adapter = raw.get("adaptador")
+        if raw_adapter is None:
+            remote_adapter = None
+        else:
+            remote_adapter = _text(raw_adapter, f"{key}.adaptador", required=True)
+            if remote_adapter not in _ALLOWED_REMOTE_ADAPTERS:
+                raise DataHubValidationError(f"Adaptador remoto no soportado para {key}")
         try:
             schema_version = int(raw.get("version_esquema", 1))
         except (TypeError, ValueError) as exc:
@@ -209,6 +225,7 @@ def load_manifest(path: str | Path | None = None) -> list[SourceManifestEntry]:
                 schema_version=schema_version,
                 corpus_files=tuple(corpus),
                 connected=connected,
+                remote_adapter=remote_adapter,
                 verified_on=verified_on,
                 review_before=review_before,
             )
@@ -412,14 +429,15 @@ def _source_status(
         return "not_connected"
     if today > entry.review_before:
         return "stale"
+    if persisted is not None:
+        if persisted.status == "disabled":
+            return "disabled"
+        if persisted.status == "error":
+            return "error"
     if entry.mode == "live":
         return "healthy"
     if persisted is None:
         return "not_synced"
-    if persisted.status == "disabled":
-        return "disabled"
-    if persisted.status == "error":
-        return "error"
     if entry.mode == "database" and persisted.last_success_at is None:
         return "not_synced"
     if persisted.valid_until is not None and today > persisted.valid_until:
@@ -523,8 +541,6 @@ def sync_data_hub(
 
             persisted.last_attempt_at = now
             persisted.valid_until = entry.review_before
-            persisted.last_error_code = None
-
             if facts:
                 db.query(DataFact).filter(DataFact.source_key == entry.key).delete(
                     synchronize_session=False
@@ -563,7 +579,23 @@ def sync_data_hub(
                 # actuales.
                 if entry.mode != "database":
                     persisted.last_success_at = now
-                persisted.status = status
+                if facts or entry.mode == "snapshot":
+                    remote_error = entry.remote_adapter is not None and persisted.status == "error"
+                    if remote_error:
+                        # El corpus local aporta contexto, pero no demuestra que
+                        # el endpoint remoto siga disponible después de fallar.
+                        persisted.status = "error"
+                    else:
+                        persisted.status = (
+                            "stale" if current_day > entry.review_before else "healthy"
+                        )
+                        persisted.last_error_code = None
+                else:
+                    # Un adaptador remoto puede haber dejado un error en una
+                    # fuente live; el sync local no debe ocultarlo.
+                    persisted.status = status
+            else:
+                persisted.last_error_code = None
 
         db.commit()
     except Exception:
@@ -617,6 +649,7 @@ def mark_data_source_success(
     *,
     record_count: int,
     valid_until: datetime.date | None,
+    content_hash: str | None = None,
 ) -> None:
     """Registra éxito de un adaptador de datos estructurados ya sincronizado."""
     try:
@@ -638,6 +671,8 @@ def mark_data_source_success(
     source.last_success_at = source.last_attempt_at
     source.record_count = record_count
     source.valid_until = valid_until
+    if content_hash is not None:
+        source.content_hash = content_hash
     source.status = "healthy"
     source.last_error_code = None
     try:
@@ -645,6 +680,31 @@ def mark_data_source_success(
     except SQLAlchemyError:
         db.rollback()
         logger.warning("No se pudo confirmar estado del Data Hub — key=%s", source_key)
+
+
+def mark_data_source_error(db: Session, source_key: str, *, error_code: str) -> None:
+    """Registra un error remoto estable sin persistir mensajes ni URLs externas."""
+    if not error_code or len(error_code) > 80 or not all(
+        char.isalnum() or char in {"_", "-"} for char in error_code
+    ):
+        raise ValueError("error_code inválido")
+    try:
+        source = db.scalar(select(DataSource).where(DataSource.key == source_key))
+    except SQLAlchemyError:
+        db.rollback()
+        logger.warning("No se pudo leer estado del Data Hub — key=%s", source_key)
+        return
+    if source is None:
+        logger.warning("Fuente remota no está en el manifest — key=%s", source_key)
+        return
+    source.last_attempt_at = _utcnow_naive()
+    source.status = "error"
+    source.last_error_code = error_code
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        logger.warning("No se pudo registrar error del Data Hub — key=%s", source_key)
 
 
 def get_data_hub_catalog(
@@ -708,6 +768,7 @@ __all__ = [
     "get_ecosystem_for_llm",
     "load_manifest",
     "load_snapshot_facts",
+    "mark_data_source_error",
     "mark_data_source_success",
     "sync_data_hub",
 ]

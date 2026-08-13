@@ -1,0 +1,13 @@
+version: 1
+fuente: Infraestructura de Datos Espaciales del Ministerio de Agricultura
+fuente_url: https://ide.minagri.gob.cl/
+verificado_el: "2026-08-13"
+revisar_antes_de: "2026-09-13"
+documentos:
+  - titulo: IDE Minagri y servicios territoriales
+    fuente: CIREN / Ministerio de Agricultura
+    fuente_url: https://ide.minagri.gob.cl/
+    fecha: "2026-08-13"
+    chunks:
+      - "IDE Minagri centraliza capas y servicios geoespaciales del Ministerio de Agricultura para consultar información territorial con servicios interoperables."
+      - "La integración de AgroVoz verifica un endpoint oficial de CIREN con una coordenada pública fija; todavía no ingiere automáticamente todas las capas GIS ni reemplaza su consulta cartográfica."

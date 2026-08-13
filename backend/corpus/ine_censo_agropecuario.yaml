@@ -1,0 +1,14 @@
+version: 1
+fuente: Instituto Nacional de Estadísticas (INE)
+fuente_url: https://www.ine.gob.cl/estadisticas-por-tema/agricultura-y-medio-ambiente/censo-agropecuario
+verificado_el: "2026-08-13"
+revisar_antes_de: "2026-09-13"
+documentos:
+  - titulo: VIII Censo Agropecuario y Forestal
+    fuente: Instituto Nacional de Estadísticas (INE)
+    fuente_url: https://www.ine.gob.cl/estadisticas-por-tema/agricultura-y-medio-ambiente/censo-agropecuario
+    fecha: "2020-2021"
+    chunks:
+      - "El VIII Censo Agropecuario y Forestal entrega resultados y tablas para describir la actividad silvoagropecuaria de Chile a escala nacional, regional y comunal."
+      - "El portal oficial del INE publica bases de datos, diccionarios de variables, metodología y visualizaciones; AgroVoz verifica el catálogo de archivos sin descargar las bases masivas durante el arranque."
+      - "Los datos censales son una línea base estadística y no deben presentarse como precio actual, pronóstico meteorológico ni recomendación agronómica personalizada."
