@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.database import Base
 from app.models.data_hub import DataSource
 from app.services.data_hub_remote import (
+    _MAX_RESPONSE_BYTES,
     RemoteDataHubError,
     sync_remote_data_hub,
     verify_remote_source,
@@ -116,6 +117,22 @@ def test_adaptador_falla_cerrado_con_json_invalido() -> None:
     with (
         httpx.Client(transport=httpx.MockTransport(handler)) as client,
         pytest.raises(RemoteDataHubError, match="invalid_json"),
+    ):
+        verify_remote_source(_entry("inia_red_agrometeorologica"), client)
+
+
+def test_adaptador_rechaza_respuesta_remota_demasiado_grande() -> None:
+    """El límite de bytes se aplica antes de parsear el JSON."""
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-length": str(_MAX_RESPONSE_BYTES + 1)},
+            content=b"{}",
+        )
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as client,
+        pytest.raises(RemoteDataHubError, match="response_too_large"),
     ):
         verify_remote_source(_entry("inia_red_agrometeorologica"), client)
 

@@ -82,25 +82,42 @@ def _request_json(
     method: str,
     url: str,
     data: dict[str, str] | None = None,
+    params: dict[str, str] | None = None,
 ) -> object:
     """Consulta un endpoint fijo con límite de tamaño y errores saneados."""
     try:
         if method == "GET":
-            response = client.get(url)
+            request_method = "GET"
         elif method == "POST":
-            response = client.post(url, data=data or {})
+            request_method = "POST"
         else:
             raise ValueError(f"Método no soportado: {method}")
-        response.raise_for_status()
+        with client.stream(
+            request_method,
+            url,
+            params=params,
+            data=data or {},
+        ) as response:
+            response.raise_for_status()
+            content_length = response.headers.get("content-length")
+            if content_length:
+                try:
+                    declared_size = int(content_length)
+                except ValueError:
+                    declared_size = 0
+                if declared_size > _MAX_RESPONSE_BYTES:
+                    raise RemoteDataHubError("response_too_large")
+            payload = bytearray()
+            for chunk in response.iter_bytes():
+                payload.extend(chunk)
+                if len(payload) > _MAX_RESPONSE_BYTES:
+                    raise RemoteDataHubError("response_too_large")
     except httpx.HTTPStatusError as exc:
         raise RemoteDataHubError("http_status") from exc
     except httpx.RequestError as exc:
         raise RemoteDataHubError("network_error") from exc
-
-    if len(response.content) > _MAX_RESPONSE_BYTES:
-        raise RemoteDataHubError("response_too_large")
     try:
-        return response.json()
+        return json.loads(payload)
     except ValueError as exc:
         raise RemoteDataHubError("invalid_json") from exc
 
@@ -133,22 +150,12 @@ def _verify_inia_stations(client: httpx.Client) -> RemoteSourceVerification:
 
 def _verify_ciren_ide(client: httpx.Client) -> RemoteSourceVerification:
     """Verifica el validador público IDE Minagri con una coordenada fija."""
-    try:
-        response = client.get(
-            _CIREN_VALIDATOR_URL,
-            params={"x": "-72.67", "y": "-38.74", "comuna": "09101", "sr": "4326"},
-        )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        raise RemoteDataHubError("http_status") from exc
-    except httpx.RequestError as exc:
-        raise RemoteDataHubError("network_error") from exc
-    if len(response.content) > _MAX_RESPONSE_BYTES:
-        raise RemoteDataHubError("response_too_large")
-    try:
-        payload = response.json()
-    except ValueError as exc:
-        raise RemoteDataHubError("invalid_json") from exc
+    payload = _request_json(
+        client,
+        method="GET",
+        url=_CIREN_VALIDATOR_URL,
+        params={"x": "-72.67", "y": "-38.74", "comuna": "09101", "sr": "4326"},
+    )
     if not isinstance(payload, dict) or payload.get("mensaje") != "Ok":
         raise RemoteDataHubError("invalid_ide_response")
     data = payload.get("data")
