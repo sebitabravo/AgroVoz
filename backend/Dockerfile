@@ -48,6 +48,13 @@ RUN apt-get update && \
 RUN groupadd --system --gid 1000 agrovoz && \
     useradd --system --uid 1000 --gid agrovoz --create-home agrovoz
 
+# Preparar el destino del volumen de cache de Whisper con ownership no-root.
+# Si el named volume esta vacio, Docker copia este directorio al montarlo;
+# sin este paso lo crea como root y faster-whisper no puede descargar el
+# snapshot al arrancar el contenedor con USER agrovoz.
+RUN mkdir -p /home/agrovoz/.cache && \
+    chown -R agrovoz:agrovoz /home/agrovoz
+
 # Copiar virtualenv desde builder
 COPY --from=builder --chown=agrovoz:agrovoz /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"

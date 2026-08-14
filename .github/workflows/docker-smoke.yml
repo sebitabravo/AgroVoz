@@ -58,6 +58,15 @@ jobs:
           docker volume create "$data_volume" >/dev/null
           docker volume create "$models_volume" >/dev/null
           docker volume create "$cache_volume" >/dev/null
+
+          # El volumen fresco debe heredar ownership del usuario runtime;
+          # si queda root-owned, faster-whisper no puede precargar el snapshot.
+          cache_owner="$(docker run --rm \
+            --mount "type=volume,src=$cache_volume,dst=/home/agrovoz/.cache" \
+            --entrypoint sh agrovoz-backend-smoke:ci \
+            -c 'stat -c "%u:%g" /home/agrovoz/.cache')"
+          test "$cache_owner" = "1000:1000"
+
           docker run --detach --name agrovoz-backend-smoke \
             --cpus 1 --memory 4g --read-only --tmpfs /tmp \
             --cap-drop ALL --security-opt no-new-privileges:true \
