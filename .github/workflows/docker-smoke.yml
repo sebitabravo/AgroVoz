@@ -28,6 +28,12 @@ jobs:
           set -euo pipefail
           docker run --rm --entrypoint python agrovoz-backend-smoke:ci -c \
             "import PIL, numpy, onnxruntime, reportlab"
+          # El manifest del Data Hub debe viajar dentro de la imagen de
+          # producción; sin él el endpoint de fuentes queda inutilizable.
+          docker run --rm --entrypoint sh agrovoz-backend-smoke:ci -c \
+            'test -s /app/corpus/fuentes_datos.yaml'
+          docker run --rm --entrypoint python agrovoz-backend-smoke:ci -c \
+            "from app.services.data_hub_service import load_manifest; assert len(load_manifest()) == 10"
           # Resuelve el mismo módulo que ejecuta el entrypoint, sin cargar ni
           # descargar un modelo Whisper durante el smoke.
           docker run --rm --entrypoint python agrovoz-backend-smoke:ci \

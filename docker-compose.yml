@@ -60,6 +60,9 @@ services:
       # del último build y el schema de la DB deriva del de los modelos
       # (ej: "no such column: user_prefs.cultivos" con imagen vieja).
       - ./backend/migrations:/app/migrations
+      # Manifest y corpus montados para que el Data Hub local no dependa de
+      # reconstruir la imagen cada vez que cambia una fuente.
+      - ./backend/corpus:/app/corpus:ro
     healthcheck:
       test:
         ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health?probe=liveness"]
