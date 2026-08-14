@@ -195,6 +195,31 @@ backend/app maneja su propia auth — si no, el login de Pangolin bloquea
 health checks y webhooks (llamadas de máquina, no pueden pasar por un login
 humano).
 
+### Verificación post-deploy
+
+El smoke básico comprueba liveness, readiness, `X-Request-ID`, headers de
+seguridad y que `/docs` no quede expuesto cuando el destino es remoto:
+
+```bash
+make smoke API_URL=https://agrovoz.sbravo.app
+```
+
+Para verificar además los cinco contratos críticos de la demo —semillas sin
+precio fresco inventado, productos fuera de catálogo sin precio simulado,
+comunas no soportadas transparentes, fuente climática y seguimiento con
+historial— ejecutar:
+
+```bash
+SMOKE_DELAY_SECONDS=12 make smoke-demo API_URL=https://agrovoz.sbravo.app
+```
+
+La regresión de demo hace exactamente cinco requests y el endpoint público
+mantiene el límite de 5 consultas por minuto. En local no agrega espera; en
+un destino remoto el script usa 12 segundos entre requests por defecto. Este
+smoke no reemplaza el E2E de la landing: el manejo de errores de `fetch`, el
+reintento visual, el foco móvil y la reproducción TTS se validan con
+Playwright.
+
 ## Troubleshooting rápido
 
 | Síntoma | Causa | Dónde mirar |

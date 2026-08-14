@@ -97,6 +97,6 @@
 La implementación local y sus regresiones están verificadas. CHK040 se deja
 abierto deliberadamente: archivar la spec antes de publicar y ejecutar el
 smoke productivo ocultaría que la producción todavía reproduce los fallos de
-quinua y de ubicaciones no soportadas. La rama local está 12 commits adelante
+quinua y de ubicaciones no soportadas. La rama local está 13 commits adelante
 de `origin/main`, pero no existe rama remota/PR porque el push fue rechazado
 por la política de aprobación del entorno.

@@ -9,7 +9,7 @@
         dev-backend dev-frontend \
         db-init db-migrate db-seed db-shell db-reset \
         sync-odepa sync-data-hub tunnel \
-        build-landing preview-landing
+        smoke smoke-demo build-landing preview-landing
 
 # ─────────────────────────────────────────────
 # Ayuda
@@ -69,6 +69,16 @@ sync-odepa: ## Forzar sincronización de precios ODEPA
 
 sync-data-hub: ## Verificar fuentes oficiales y recargar el Data Hub
 	cd backend && uv run python -m app.jobs.sync_data_hub
+
+# ─────────────────────────────────────────────
+# Smoke post-deploy
+# ─────────────────────────────────────────────
+
+smoke: ## Ejecutar smoke de salud, trazabilidad y headers
+	./scripts/smoke-test.sh "$(API_URL)"
+
+smoke-demo: ## Ejecutar regresiones críticas de la demo (cinco consultas)
+	SMOKE_DEMO_REGRESSION=1 ./scripts/smoke-test.sh "$(API_URL)"
 
 # ─────────────────────────────────────────────
 # Base de datos

@@ -106,7 +106,7 @@ errores de consola.
       árbol está limpio, el diff no contiene credenciales y `git diff --check`
       pasa.
 - [x] Resolver divergencia con `origin/main` sin perder cambios ni reescribir
-      historia compartida; `HEAD` está 12 commits adelante y comparte el
+      historia compartida; `HEAD` está 13 commits adelante y comparte el
       `merge-base` `ddf21ea`.
 - [x] Crear commit(s) Conventional Commit enfocados: `3a85b00`, `557f2d7` y
       `5374297` son los tres commits finales de esta ejecución.
