@@ -220,6 +220,13 @@ smoke no reemplaza el E2E de la landing: el manejo de errores de `fetch`, el
 reintento visual, el foco móvil y la reproducción TTS se validan con
 Playwright.
 
+En GitHub Actions se puede configurar la variable de repositorio
+`AGROVOZ_SMOKE_BASE_URL` con el dominio que debe verificarse. El workflow
+`.github/workflows/production-smoke.yml` la usa después de cada push a `main`
+o mediante `workflow_dispatch`, activa también la comprobación del catálogo
+Data Hub y conserva los 12 segundos entre consultas. Si la variable no existe,
+el job se omite en vez de inventar un entorno de prueba.
+
 ## Troubleshooting rápido
 
 | Síntoma | Causa | Dónde mirar |

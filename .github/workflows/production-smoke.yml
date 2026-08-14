@@ -1,0 +1,35 @@
+# Smoke público posterior a publicación. No reemplaza el deploy ni la
+# migración: comprueba que el dominio realmente sirve el artefacto publicado.
+name: Production smoke
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: production-smoke
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Public API and demo regression
+    # El repositorio configura esta variable cuando el dominio apunta al
+    # entorno que se quiere verificar. Sin URL no se ejecuta una prueba falsa.
+    if: vars.AGROVOZ_SMOKE_BASE_URL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Ejecutar smoke público
+        env:
+          SMOKE_DEMO_REGRESSION: '1'
+          SMOKE_DATA_HUB: '1'
+          # La demo pública limita a cinco consultas por minuto.
+          SMOKE_DELAY_SECONDS: '12'
+          SMOKE_TIMEOUT_SECONDS: '20'
+        run: ./scripts/smoke-test.sh "${{ vars.AGROVOZ_SMOKE_BASE_URL }}"

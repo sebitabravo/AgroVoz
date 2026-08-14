@@ -21,6 +21,7 @@ SMOKE_READINESS_FILE="$(mktemp "${TMPDIR:-/tmp}/agrovoz-readiness.XXXXXX")"
 trap 'rm -f "$SMOKE_RESPONSE_FILE" "$SMOKE_READINESS_FILE"' EXIT
 
 SMOKE_DEMO_REGRESSION="${SMOKE_DEMO_REGRESSION:-0}"
+SMOKE_DATA_HUB="${SMOKE_DATA_HUB:-0}"
 SMOKE_TIMEOUT_SECONDS="${SMOKE_TIMEOUT_SECONDS:-20}"
 if [ -z "${SMOKE_DELAY_SECONDS:-}" ]; then
     if [[ "$API_URL" == "http://localhost"* || "$API_URL" == "http://127.0.0.1"* ]]; then
@@ -129,7 +130,14 @@ if [[ "$API_URL" != "http://localhost"* ]] && [[ "$API_URL" != "http://127.0.0.1
     check "OpenAPI docs NO expuestas en prod" "$API_URL/docs" 404 || true
 fi
 
-# 6. Regresiones críticas de la demo. Se activa aparte porque son cinco
+# 6. Catálogo público del Data Hub. Es opcional para desarrollo porque una
+# base local recién creada aún puede no haber ejecutado el sync inicial.
+if [ "$SMOKE_DATA_HUB" = "1" ]; then
+    check "Data Hub público disponible" "$API_URL/api/v1/data/sources" 200 \
+        '. | type == "array" and length > 0' || true
+fi
+
+# 7. Regresiones críticas de la demo. Se activa aparte porque son cinco
 # requests con TTS y el endpoint público limita a 5 consultas por minuto.
 if [ "$SMOKE_DEMO_REGRESSION" = "1" ]; then
     demo_calls=0
