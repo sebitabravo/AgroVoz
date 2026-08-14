@@ -66,6 +66,6 @@
 ## Notes
 
 - CHK030 quedó resuelto en los commits `3a85b00`, `557f2d7`, `5374297`,
-  `3d5cd97` y `36ca754`; no equivale a que exista un PR remoto.
+  `3d5cd97`, `36ca754` y `05701cc`; no equivale a que exista un PR remoto.
 - CHK038 se verifica localmente; no equivale a smoke de producción ni a validar
   adaptadores externos en el VPS.

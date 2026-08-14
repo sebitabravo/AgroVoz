@@ -108,9 +108,9 @@ errores de consola.
 - [x] Resolver divergencia con `origin/main` sin perder cambios ni reescribir
       historia compartida; `HEAD` comparte el `merge-base` `ddf21ea` y la
       rama contiene los commits locales de implementación/verificación.
-- [x] Crear commit(s) Conventional Commit enfocados: `3a85b00`, `557f2d7`,
-      `5374297`, `3d5cd97` y `36ca754` son los commits finales de esta
-      ejecución.
+- [x] Crear commits Conventional Commit enfocados: `3a85b00`, `557f2d7`,
+      `5374297`, `3d5cd97`, `36ca754` y `05701cc` contienen la implementación
+      y los verificadores locales de esta ejecución.
 - [ ] Ejecutar CI remoto y esperar checks requeridos.
 - [ ] Publicar mediante el flujo configurado (Dokploy/GitHub) si la conexión
       está disponible.
@@ -152,16 +152,22 @@ errores de consola.
 
 ### Fase 8 — Auditoría final y cierre
 
-- [ ] Revisar cada requisito de este plan contra evidencia actual.
-- [ ] Actualizar `README`, `docs/ARCHITECTURE` y el estado de fases.
-- [ ] Registrar commits, URLs, comandos, tiempos y advertencias.
-- [ ] Confirmar que no quedan tareas locales ni correcciones conocidas.
+- [x] Revisar cada requisito de este plan contra evidencia actual para el
+      alcance local; los gates externos permanecen separados y abiertos.
+- [x] Actualizar `README`, `docs/ARCHITECTURE`, `docs/DEPLOYMENT` y el estado
+      de fases.
+- [x] Registrar commits, URLs, comandos, tiempos y advertencias, incluyendo el
+      workflow reproducible de smoke público.
+- [x] Confirmar que no quedan tareas locales ni correcciones conocidas dentro
+      del alcance implementado; los secretos/deploy/smoke externo dependen del
+      canal productivo.
 - [ ] Marcar el objetivo completo solo si todos los gates exigidos tienen
       evidencia; de lo contrario, mantenerlo activo y describir el bloqueo.
 
 ## Estado actual
 
-- **Fase activa:** Fase 3 — operación y configuración productiva.
+- **Fase activa:** Fase 5/6 — publicación y smoke productivo; la configuración
+  de secretos y la migración/sync productivos siguen siendo prerrequisitos.
 - **Fases locales:** Fases 0, 1, 2, 4 y 7 verificadas en esta ejecución; el fix
   E2E de ubicación quedó protegido por regresión automatizada y los tres
   modelos locales tienen smoke real bajo 1 vCPU/4 GB.
