@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
@@ -28,10 +29,12 @@ from app.admin.admin import router as admin_html_router
 from app.admin.auth import AdminAuthMiddleware
 from app.agronomist_web import router as agronomist_web_router
 from app.api.admin.agronomist_admin import router as admin_agronomist_router
+from app.api.admin.data_hub import router as admin_data_hub_router
 from app.api.admin.metrics import router as admin_metrics_router
 from app.api.admin.odepa_admin import router as admin_odepa_router
 from app.api.admin.user_admin import router as admin_user_router
 from app.api.agronomist import router as agronomist_router
+from app.api.data_hub import router as data_hub_router
 from app.api.demo import router as demo_router
 from app.api.health import router as health_router
 from app.api.panel import router as panel_router
@@ -48,6 +51,7 @@ from app.core.security import (
     VisionUploadGuardMiddleware,
 )
 from app.panel_web import router as panel_web_router
+from app.services.data_hub_remote import RemoteDataHubSyncResult
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +140,41 @@ async def _odepa_scheduler() -> None:
             # no se captura -> shutdown limpio via odepa_task.cancel() en lifespan.
             logger.error(
                 "ODEPA scheduler: error en sync automática — error=%s",
+                type(exc).__name__,
+            )
+
+
+async def _data_hub_remote_scheduler() -> None:
+    """Verifica catálogos oficiales una vez al día fuera del camino crítico."""
+    while True:
+        now = datetime.datetime.now()
+        target = now.replace(
+            hour=settings.data_hub_remote_sync_hour,
+            minute=settings.data_hub_remote_sync_minute,
+            second=0,
+            microsecond=0,
+        )
+        if now >= target:
+            target += datetime.timedelta(days=1)
+        wait_seconds = (target - now).total_seconds()
+        logger.info(
+            "Data Hub remoto scheduler: próxima verificación en %.1f horas (%s)",
+            wait_seconds / 3600,
+            target.isoformat(),
+        )
+        await asyncio.sleep(wait_seconds)
+        try:
+            result = await asyncio.to_thread(_sync_data_hub_remote)
+            logger.info(
+                "Data Hub remoto scheduler: %d fuentes OK, %d con error",
+                result.sources_synced,
+                len(result.source_errors),
+            )
+        except Exception as exc:
+            # Boundary de resiliencia del scheduler: una caída remota no debe
+            # matar el proceso ni afectar las preguntas de agricultores.
+            logger.error(
+                "Data Hub remoto scheduler: error en verificación — error=%s",
                 type(exc).__name__,
             )
 
@@ -356,6 +395,30 @@ async def _cancel_background_task(task: asyncio.Task[None] | None) -> None:
         await task
 
 
+def _sync_data_hub_local() -> None:
+    """Sincroniza snapshots locales sin depender de red durante el request."""
+    from app.core.database import SessionLocal
+    from app.services.data_hub_service import sync_data_hub
+
+    db = SessionLocal()
+    try:
+        sync_data_hub(db)
+    finally:
+        db.close()
+
+
+def _sync_data_hub_remote() -> RemoteDataHubSyncResult:
+    """Ejecuta el sync remoto en un thread con una sesión SQLite propia."""
+    from app.core.database import SessionLocal
+    from app.services.data_hub_remote import sync_remote_data_hub
+
+    db = SessionLocal()
+    try:
+        return sync_remote_data_hub(db)
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Maneja el ciclo de vida de la aplicación.
@@ -405,6 +468,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.debug,
     )
 
+    # El Data Hub solo sincroniza el manifest/corpus versionado en el arranque.
+    # No descarga fuentes externas ni bloquea el backend si la última migración
+    # todavía no fue aplicada: en ese caso el catálogo queda degradado y el
+    # operador recibe el error desde el endpoint admin.
+    from app.services.data_hub_service import DataHubValidationError
+
+    try:
+        await asyncio.to_thread(_sync_data_hub_local)
+    except (DataHubValidationError, OSError, SQLAlchemyError) as exc:
+        logger.error(
+            "Data Hub: sync local de arranque no confirmada — error=%s",
+            type(exc).__name__,
+        )
+
     # Precalentar el modelo LLM antes de aceptar tráfico (~6s en VPS CX43).
     # El handshake ocurre fuera del event loop y evita el cold start del primer
     # request; si el modelo no existe, llm_service conserva el fallback mock.
@@ -422,6 +499,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Scheduler ODEPA: sync diario a las 06:00 AM hora local.
     # Tarea de fondo del lifespan. Se cancela automáticamente al detener la app.
     odepa_task = asyncio.create_task(_odepa_scheduler())
+    data_hub_remote_task = (
+        asyncio.create_task(_data_hub_remote_scheduler())
+        if settings.data_hub_remote_sync_enabled
+        else None
+    )
     history_purge_task = _start_consultation_history_scheduler()
     staging_cleanup_task = _start_consultation_staging_cleanup_scheduler()
     expense_purge_task = _start_expense_purge_scheduler()
@@ -438,6 +520,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await _cancel_background_task(expense_purge_task)
     await _cancel_background_task(staging_cleanup_task)
     await _cancel_background_task(history_purge_task)
+    await _cancel_background_task(data_hub_remote_task)
     await _cancel_background_task(odepa_task)
     engine.dispose()
     from app.services.weather_service import _close_http_client
@@ -538,6 +621,7 @@ app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(prices_router, prefix="/api/v1")
 app.include_router(weather_router, prefix="/api/v1")
+app.include_router(data_hub_router, prefix="/api/v1")
 app.include_router(vision_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(demo_router, prefix="/api/v1")
@@ -548,6 +632,7 @@ app.include_router(agronomist_web_router)  # prefix "/agronomo" va en el router
 # Admin — APIs JSON (autenticadas con X-Admin-Key) + dashboard HTML (cookie).
 app.include_router(admin_metrics_router, prefix="/api/v1")
 app.include_router(admin_odepa_router, prefix="/api/v1")
+app.include_router(admin_data_hub_router, prefix="/api/v1")
 app.include_router(admin_user_router, prefix="/api/v1")
 app.include_router(admin_agronomist_router, prefix="/api/v1")
 app.include_router(admin_html_router)  # prefix "/admin" va en el router

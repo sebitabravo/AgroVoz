@@ -87,8 +87,9 @@ Como detalle de implementación (no como eje de innovación, sino como garantía
   `PARCELA_TRACKING_ENABLED`), además de `get_regla_agronomica` y `get_calendario_agricola`
   (gate `AGRONOMIC_RULES_ENABLED`).
 
-Los gates de escritura, parcelas, reglas, panel y reportes están apagados por defecto; las demás
-consultas se ofrecen según el tipo de intención. El LLM no "sabe" precios ni clima: consulta el
+Los gates de escritura, parcelas, panel y reportes están apagados por defecto. El gate de reglas
+agronómicas parte apagado en `Settings`, pero Compose lo habilita explícitamente para el corpus
+piloto versionado; las demás consultas se ofrecen según el tipo de intención. El LLM no "sabe" precios ni clima: consulta el
 precio diario disponible en SQLite y el pronóstico de Open-Meteo al responder. Si intenta usar una
 tool no autorizada o generar una respuesta sin respaldo de datos, el sistema aplica un fallback
 determinístico: responde con los datos disponibles o solicita reformular la pregunta. Esta
@@ -96,7 +97,7 @@ arquitectura se explica en detalle en las secciones 5.1 y 5.2.
 
 **5. Recomendaciones solo por regla citada: el LLM nunca improvisa un consejo**
 
-El equipo está compuesto exclusivamente por estudiantes de Ingeniería en Informática, sin formación agronómica formal. Por esta razón, el sistema tiene una regla estricta: el LLM solo puede verbalizar reglas agronómicas resueltas de forma determinística desde hechos publicados por INIA/INDAP/ODEPA, y toda respuesta agronómica cita su fuente y su fecha. Si no hay regla con fuente vigente, el sistema dice que no tiene el dato. Para consultas de precio y clima, el sistema entrega los datos crudos sin interpretación: si un agricultor pregunta "¿puedo regar mis papas mañana?", responde con el pronóstico de lluvia y temperatura, sin interpretar si debe o no regar. La validación agronómica de las reglas se incorporará al escalar el proyecto mediante un ingeniero agrónomo asesor part-time (previsto en la sección 8.1 para el año 1 de implementación real). Actualmente el feature gate `AGRONOMIC_RULES_ENABLED=false` mantiene apagada la verbalización de reglas hasta que un agrónomo asesor valide y firme el corpus.
+El equipo está compuesto exclusivamente por estudiantes de Ingeniería en Informática, sin formación agronómica formal. Por esta razón, el sistema tiene una regla estricta: el LLM solo puede verbalizar reglas agronómicas resueltas de forma determinística desde hechos publicados por INIA/INDAP/ODEPA, y toda respuesta agronómica cita su fuente y su fecha. Si no hay regla con fuente vigente, el sistema dice que no tiene el dato. Para consultas de precio y clima, el sistema entrega los datos crudos sin interpretación: si un agricultor pregunta "¿puedo regar mis papas mañana?", responde con el pronóstico de lluvia y temperatura, sin interpretar si debe o no regar. La validación y ampliación agronómica del corpus se hará con un ingeniero agrónomo asesor part-time (previsto en la sección 8.1 para el año 1 de implementación real). El corpus piloto versionado se encuentra habilitado en los runtimes Compose mediante `AGRONOMIC_RULES_ENABLED=true`; fuera de ese runtime el default sigue siendo `false`. Esto activa únicamente reglas citadas con fuente/fecha y no tratamientos personalizados, dosis ni recomendaciones libres.
 
 **Lo que AgroVoz NO propone: decisiones de arquitectura deliberadas**
 

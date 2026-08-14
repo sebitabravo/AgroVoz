@@ -16,6 +16,7 @@ import pytest
 from app.core.config import settings
 from app.schemas.variables import ExtractedVariables
 from app.services.agricultural_calendar_service import get_calendario_agricola
+from app.services.agronomic_rules_service import get_agronomic_rule_for_llm
 from app.services.llm_keywords import (
     _force_compound_keyword_tools,
     _force_corpus_search,
@@ -189,6 +190,45 @@ class TestFastPathCalendario:
         assert "15/04 a 30/05" in response
         assert "INIA" in response
         assert origin == ["calendario"]
+
+
+class TestFastPathReglaAgronomica:
+    """Las recomendaciones cubiertas salen del corpus sin generar consejos."""
+
+    @pytest.mark.asyncio
+    async def test_texto_regla_citada_no_invoca_llm(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Un síntoma conocido devuelve INIA, fecha y el origen determinista."""
+        monkeypatch.setattr(settings, "agronomic_rules_enabled", True)
+
+        def fixed_rule(sintoma: str, cultivo: str) -> str:
+            """Mantiene fija la fecha del snapshot en esta prueba de integración."""
+            return get_agronomic_rule_for_llm(
+                sintoma,
+                cultivo,
+                today=date(2026, 7, 30),
+            )
+
+        monkeypatch.setattr(
+            "app.services.agronomic_rules_service.get_agronomic_rule_for_llm",
+            fixed_rule,
+        )
+        monkeypatch.setattr(
+            "app.services.llm_service.answer",
+            lambda *_args, **_kwargs: pytest.fail("la regla no debe invocar al LLM"),
+        )
+
+        origin = ["desconocido"]
+        response, intent = await AgroVozPipeline._generate_response(
+            "mis papas tienen manchas marrones en las hojas",
+            "phone-hash",
+            origin,
+        )
+
+        assert intent == "agronomica"
+        assert "tizón tardío" in response
+        assert "INIA" in response
+        assert "30/07/2026" in response
+        assert origin == ["regla_agronomica"]
 
 
 class TestFastPathAgronomicoDegradacion:

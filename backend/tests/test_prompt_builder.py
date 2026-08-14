@@ -124,9 +124,12 @@ class TestReglasConversacionalesSeguras:
         assert "No prometas que alguien llamará, responderá o revisará después" in prompt
 
     def test_mantiene_limite_de_recomendaciones(self) -> None:
-        """Las nuevas reglas no amplían el alcance agronómico."""
+        """La orientación agronómica queda acotada a tools y corpus citados."""
         prompt = build_system_prompt()
-        assert "NUNCA recomendaciones agronómicas" in prompt
+        assert "orientación agronómica citada" in prompt
+        assert "get_regla_agronomica" in prompt
+        assert "get_calendario_agricola" in prompt
+        assert "NUNCA recomendaciones agronómicas" not in prompt
         assert "sin instrucciones ni recomendaciones" in prompt
 
 

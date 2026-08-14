@@ -1,7 +1,7 @@
 # Reporte de bug interno — AgroVoz.
-# Equipo: Sebastián, Francisco, Matías. No es un repo open-source: omitir pre-flight
+# Mantenido por una sola persona (Sebastián). No es un repo open-source: omitir pre-flight
 # de "busqué duplicados" / "versión más reciente". Lo que sí importa: módulo, ambiente,
-# fase, responsable y severidad para priorizar rápido entre los 3.
+# fase y severidad para priorizar rápido.
 name: 🐛 Bug
 description: Algo del pipeline / WhatsApp / landing / admin no funciona como esperábamos
 title: "[Bug]: "
@@ -80,12 +80,10 @@ body:
     id: owner
     attributes:
       label: Responsable tentativo
-      description: Quién se cree con mejor contexto. Lo confirma quien lo tome.
+      description: Un solo mantenedor; este campo queda por si en el futuro hay más de uno.
       options:
-        - Sebastián (backend / pipeline voz / Open-WA / infra)
-        - Francisco (producto / landing / productores Traiguén)
-        - Matías (testing / docs / datos ODEPA)
-        - Sin asignar (lo vemos en standup)
+        - Sebastián (único mantenedor)
+        - Sin asignar
     validations:
       required: true
   - type: textarea

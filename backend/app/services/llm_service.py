@@ -69,6 +69,14 @@ FALLBACK_TEXT = "No tengo ese dato, pero puedo consultarte el precio en ODEPA o 
 # Texto cuando el LLM no genera respuesta.
 NO_RESPONSE_TEXT = "No entendí tu consulta. ¿Podrías reformularla?"
 
+# Un mock con precios fijos solo sirve en pruebas. En runtime sería
+# indistinguible de un dato real para el agricultor.
+LLM_UNAVAILABLE_TEXT = "No puedo procesar esa consulta en este momento. ¿Podrías intentarlo de nuevo más tarde?"
+
+# No se reinyecta un fallo de herramienta al modelo: podría repetir tags o
+# instrucciones internas en vez de comunicar una falla pública y acotada.
+TOOL_EXECUTION_ERROR_TEXT = "No pude consultar ese dato en este momento. ¿Probamos más tarde?"
+
 # Tool names permitidas. Cualquier otra -> fallback.
 WHITELIST_TOOLS = frozenset(
     {
@@ -506,14 +514,14 @@ TOOLS: list[dict[str, object]] = [
         "function": {
             "name": "search_corpus",
             "description": (
-                "USAR para BUSCAR en documentos oficiales ODEPA. "
-                "Cuando el agricultor pregunte por informacion de boletines, "
+                "USAR para BUSCAR en el Data Hub de documentos oficiales. "
+                "Para boletines, "
                 "contexto del mercado agricola, tendencias de precios, "
-                "definiciones del rubro o datos de los documentos oficiales. "
+                "programas, directorios, reglas INIA o datos de documentos oficiales. "
                 "NO usar para precios actuales (usa get_price). "
-                "CITA la fuente y fecha que devuelve la herramienta. "
+                "CITA fuente y fecha. "
                 "Ej: 'que dice el boletin de la papa', "
-                "'cual es la tendencia del mercado'."
+                "'cual es la tendencia del mercado', 'donde queda INDAP'."
             ),
             "parameters": {
                 "type": "object",
@@ -1453,7 +1461,7 @@ async def _execute_tool(name: str, arguments: dict[str, object], phone_hash: str
             )
         else:
             logger.error("Error ejecutando tool — error=%s", type(exc).__name__)
-        return "Hubo un error al consultar ese dato. ¿Probamos con otro?"
+        return TOOL_EXECUTION_ERROR_TEXT
 
 
 # ── Tool Calling loop ───────────────────────────────────────────────
@@ -1729,7 +1737,8 @@ async def answer(
     history = history or []
 
     if model is None:
-        return _mock_answer(query_text)
+        logger.warning("Modelo LLM no disponible — respuesta segura")
+        return LLM_UNAVAILABLE_TEXT
 
     messages = _build_messages(
         query_text.strip(),
@@ -1851,6 +1860,8 @@ async def answer(
                     ),
                     deadline=generation_deadline,
                 )
+                if tool_result == TOOL_EXECUTION_ERROR_TEXT:
+                    return TOOL_EXECUTION_ERROR_TEXT
                 if fn_name == "get_reporte_pdf":
                     from app.services.report_service import REPORT_TOOL_SIGNAL
 
@@ -1963,7 +1974,9 @@ _OPENROUTER_SYSTEM_PROMPT = (
     "Eres AgroVoz, un asistente de voz para pequeños agricultores chilenos. "
     "Responde en español chileno, maximo 3 oraciones cortas. "
     "SIEMPRE usa una herramienta antes de responder. "
-    "NUNCA inventes precios ni clima. NUNCA des recomendaciones agronomicas. "
+    "NUNCA inventes precios ni clima. Entrega solo orientación agronómica citada "
+    "por get_regla_agronomica o get_calendario_agricola; No inventes recomendaciones, "
+    "diagnósticos personalizados, dosis ni tratamientos. "
     "NUNCA evalues elegibilidad financiera ni recomiendes creditos, programas, "
     "montos o tasas. NUNCA pidas RUT, ingresos ni deudas. "
     "Conserva la fuente (ODEPA para precios, OpenMeteo para clima) al citar datos."
@@ -2196,62 +2209,14 @@ async def answer_with_provider_order(
 
 
 def _mock_answer(query_text: str) -> str:
-    """Respuesta mock para desarrollo y CI sin modelo LLM.
+    """Mantiene compatibilidad interna sin fabricar datos agrícolas o climáticos.
 
-    Detecta intenciones básicas por keyword para simular Tool Calling.
-    Solo para desarrollo; en producción el modelo real debe estar cargado.
+    La demo nunca debe responder precios o clima simulados cuando el modelo no
+    está disponible. El nombre se conserva temporalmente para consumidores
+    internos, pero su salida es el mismo mensaje público y seguro.
     """
-    q = query_text.strip().lower()
-
-    historico_keywords = [
-        "histórico",
-        "historico",
-        "invierno",
-        "otoño",
-        "otono",
-        "primavera",
-        "verano",
-        "helada",
-        "llovió",
-        "llovio",
-    ]
-    if any(kw in q for kw in historico_keywords):
-        return (
-            "Modo de prueba: resumen histórico simulado de Traiguén, con "
-            "420 milímetros de lluvia y 14 días de helada, según OpenMeteo."
-        )
-
-    # Detección de keywords de clima
-    clima_keywords = [
-        "clima",
-        "tiempo",
-        "temperatura",
-        "lluvia",
-        "lloviendo",
-        "frio",
-        "calor",
-        "humedad",
-        "viento",
-        "pronóstico",
-        "pronostico",
-    ]
-    if any(kw in q for kw in clima_keywords):
-        return (
-            "Modo de prueba: clima simulado en Traiguén, 18 grados, nublado, "
-            "humedad 65 por ciento, viento 3 coma 6 metros por segundo y "
-            "lluvia 0 coma 5 milímetros. No es una consulta real a OpenMeteo."
-        )
-
-    # Detección de keywords de precio
-    precio_keywords = ["precio", "cuánto", "cuanto", "cuesta", "vale", "está", "esta", "cómo está", "como esta"]
-    if any(kw in q for kw in precio_keywords):
-        return (
-            "Modo de prueba: precio simulado de papa, 1.200 pesos el kilo "
-            "en Lo Valledor. No es una consulta real a ODEPA."
-        )
-
-    # Fuera de scope
-    return FALLBACK_TEXT
+    del query_text
+    return LLM_UNAVAILABLE_TEXT
 
 
 def is_model_available() -> bool:

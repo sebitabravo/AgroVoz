@@ -293,3 +293,27 @@ class TestMcpSecurity:
         )
 
         config.validate_mcp_security()
+
+
+class TestDataHubRemoteSchedule:
+    """El refresh remoto queda apagado en dev y es configurable en producción."""
+
+    def test_scheduler_remoto_apagado_por_defecto(self) -> None:
+        config = Settings(_env_file=None)
+
+        assert config.data_hub_remote_sync_enabled is False
+        assert config.data_hub_remote_sync_hour == 4
+        assert config.data_hub_remote_sync_minute == 30
+
+    def test_scheduler_remoto_lee_horario_desde_entorno(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DATA_HUB_REMOTE_SYNC_ENABLED", "true")
+        monkeypatch.setenv("DATA_HUB_REMOTE_SYNC_HOUR", "5")
+        monkeypatch.setenv("DATA_HUB_REMOTE_SYNC_MINUTE", "15")
+
+        config = Settings(_env_file=None)
+
+        assert config.data_hub_remote_sync_enabled is True
+        assert config.data_hub_remote_sync_hour == 5
+        assert config.data_hub_remote_sync_minute == 15

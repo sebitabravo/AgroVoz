@@ -2,6 +2,10 @@
 
 > Parte del plan de negocio de AgroVoz. Índice en [`docs/negocio/README.md`](./README.md).
 > Área PMBOK relacionada: Integración (Acta de Constitución)
+>
+> **Actualización 2026-08-14:** el proyecto no continuó en el Desafío Crea INACAP 2026; el
+> piloto y el financiamiento descritos en este plan quedaron sin respaldo institucional. AgroVoz
+> es mantenido por una sola persona, verificable con `git shortlog -sne --all`.
 
 ---
 

@@ -67,7 +67,9 @@ services:
       - EXPENSE_RETENTION_DAYS=${EXPENSE_RETENTION_DAYS:-180}
       - PARCELA_TRACKING_ENABLED=${PARCELA_TRACKING_ENABLED:-false}
       - PARCELA_RETENTION_DAYS=${PARCELA_RETENTION_DAYS:-365}
-      - AGRONOMIC_RULES_ENABLED=${AGRONOMIC_RULES_ENABLED:-false}
+      # Orientación agronómica solo por reglas INIA citadas; se puede apagar
+      # explícitamente sin cambiar la imagen.
+      - AGRONOMIC_RULES_ENABLED=${AGRONOMIC_RULES_ENABLED:-true}
       - FARMER_PANEL_ENABLED=${FARMER_PANEL_ENABLED:-false}
       - PANEL_LINK_SECRET=${PANEL_LINK_SECRET:-}
       - PANEL_LINK_TTL_HOURS=${PANEL_LINK_TTL_HOURS:-24}
@@ -86,6 +88,12 @@ services:
       # ── ODEPA ────────────────────────
       - ODEPA_SYNC_HOUR=${ODEPA_SYNC_HOUR:-6}
       - ODEPA_SYNC_MINUTE=${ODEPA_SYNC_MINUTE:-0}
+      # Verificación diaria de catálogos INIA/CIREN/INE fuera del request.
+      # El sync admin/manual sigue disponible; este default se activa solo en
+      # el compose de producción, no en desarrollo.
+      - DATA_HUB_REMOTE_SYNC_ENABLED=${DATA_HUB_REMOTE_SYNC_ENABLED:-true}
+      - DATA_HUB_REMOTE_SYNC_HOUR=${DATA_HUB_REMOTE_SYNC_HOUR:-4}
+      - DATA_HUB_REMOTE_SYNC_MINUTE=${DATA_HUB_REMOTE_SYNC_MINUTE:-30}
       # ── Seguridad ────────────────────
       - PHONE_HASH_PEPPER=${PHONE_HASH_PEPPER:?PHONE_HASH_PEPPER requerida — configurar en Dokploy Secrets UI}
       - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-60}

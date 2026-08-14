@@ -40,7 +40,8 @@ class UserPrefs(Base):
     tratamiento distinto: una alerta es una comunicación que AgroVoz inicia sin
     que el productor pregunte, y por lo tanto necesita su propia base de licitud.
     Default ``False``: sin consentimiento registrado no se envía ninguna alerta.
-    Se recoge en la sección 7.3 del Acuerdo de Uso (docs/piloto/06).
+    Se recogía en la sección 7.3 del Acuerdo de Uso del piloto de Traiguén,
+    retirado del repositorio junto con `docs/piloto/` al perder su respaldo institucional.
 
     ``history_consent`` controla exclusivamente la retención del historial de
     consultas. Es independiente de los consentimientos de dataset y alertas:

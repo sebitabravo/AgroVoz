@@ -1,41 +1,7 @@
 # CODEOWNERS de AgroVoz.
-# GitHub auto-requesta review de los owners según la ruta que toca cada PR.
-# Esto hace que el code review llegue a la persona correcta sin tener que asignar a mano.
+# Proyecto mantenido por una sola persona — sin auto-request de reviewer real,
+# esto queda como documentación de propiedad, no como gate de revisión.
 #
-# Equipo:
-#   Sebastián Bravo   → @sebitabravo   (tech lead: backend, pipeline voz, Open-WA, infra)
-#   Francisco Fernández → @franbuilds  (PO: producto, landing, productores Traiguén)
-#   Matías Atuán      → @FixZzT        (dev: testing, docs, datos ODEPA)
+#   Sebastián Bravo → @sebitabravo (único mantenedor)
 
-# ── Backend: Python, FastAPI, DB, lógica ──
-/backend/app/api/            @sebitabravo
-/backend/app/services/       @sebitabravo
-/backend/app/core/           @sebitabravo
-/backend/app/models/         @sebitabravo
-/backend/app/schemas/        @sebitabravo
-/backend/app/jobs/           @sebitabravo
-/backend/tests/              @sebitabravo @FixZzT
-/backend/requirements*.txt   @sebitabravo
-/backend/pyproject.toml      @sebitabravo
-
-# ── Pipeline de voz + Open-WA (dominio de Sebastián) ──
-/backend/Dockerfile          @sebitabravo
-
-# ── Landing (Astro) ──
-/landing/                    @franbuilds @FixZzT
-
-# ── Admin dashboard (Jinja2 + HTMX) ──
-/backend/app/admin/          @sebitabravo @franbuilds
-
-# ── Infra / deploy / CI ──
-/.github/                    @sebitabravo
-/docker-compose*.yml         @sebitabravo
-/scripts/                    @sebitabravo
-/Makefile                    @sebitabravo
-
-# ── Documentación ──
-/AGENTS.md                   @sebitabravo
-/docs/                       @FixZzT
-
-# ── Default: todo lo no cubierto arriba ──
-*                            @sebitabravo
+*                             @sebitabravo

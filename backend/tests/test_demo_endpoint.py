@@ -202,7 +202,7 @@ async def test_demo_no_registra_consulta_ni_error_llm(
 
     response, intent = await _generate_demo_response(consulta)
 
-    assert "problema" in response
+    assert response == "No tengo ese dato, pero puedo consultarte el precio en ODEPA o el clima."
     assert intent == "desconocido"
     assert "SECRETO-DEMO" not in caplog.text
     assert "dato privado" not in caplog.text
@@ -213,62 +213,44 @@ async def test_demo_no_registra_consulta_ni_error_llm(
 async def test_demo_openrouter_no_llama_al_responder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """El proveedor remoto de demo no cae al Qwen local."""
+    """Una recomendación cubierta no llega a ningún proveedor LLM."""
     from app.services.demo_service import _generate_demo_response
 
-    monkeypatch.setattr(config.settings, "llm_primary_provider", "openrouter")
-    monkeypatch.setattr(config.settings, "openrouter_api_key", "sk-or-test")
-    captured: dict[str, object] = {}
+    monkeypatch.setattr(config.settings, "agronomic_rules_enabled", True)
 
-    async def fake_openrouter(*args: object, **kwargs: object) -> str:
-        captured.update(kwargs)
-        return "Respuesta remota de prueba."
+    async def provider_must_not_run(*_args: object, **_kwargs: object) -> str:
+        raise AssertionError("la regla agronómica no debe invocar un proveedor")
 
-    async def local_must_not_run(*_args: object, **_kwargs: object) -> str:
-        raise AssertionError("la demo remota no debe invocar answer() local")
+    monkeypatch.setattr("app.services.demo_service.answer_with_provider_order", provider_must_not_run)
 
-    monkeypatch.setattr("app.services.llm_service.answer_via_openrouter", fake_openrouter)
-    monkeypatch.setattr("app.services.llm_service.answer", local_must_not_run)
-    monkeypatch.setattr(config.settings, "openrouter_max_output_tokens", 96)
-    monkeypatch.setattr(
-        "app.services.demo_service.AgroVozPipeline._puede_usar_fast_path",
-        staticmethod(lambda *_args: False),
-    )
+    response, intent = await _generate_demo_response("¿Cuándo puedo sembrar papa?")
 
-    response, intent = await _generate_demo_response("cuéntame algo de mi cultivo")
-
-    assert response == "Respuesta remota de prueba."
-    assert intent == "desconocido"
-    assert captured["max_tokens"] == 96
+    assert "INIA" in response
+    assert "Fuente" in response
+    assert intent == "agronomica"
 
 
 @pytest.mark.asyncio
 async def test_demo_openrouter_fallido_saltea_al_llm_local(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """La caída remota pasa al Qwen local como segundo proveedor."""
+    """El calendario citado evita remoto y local, aunque ambos estén configurados."""
     from app.services.demo_service import _generate_demo_response
 
+    monkeypatch.setattr(config.settings, "agronomic_rules_enabled", True)
     monkeypatch.setattr(config.settings, "llm_primary_provider", "openrouter")
     monkeypatch.setattr(config.settings, "openrouter_api_key", "sk-or-test")
 
-    async def remote_unavailable(*_args: object, **_kwargs: object) -> None:
-        return None
+    async def provider_must_not_run(*_args: object, **_kwargs: object) -> str:
+        raise AssertionError("el calendario no debe invocar un proveedor")
 
-    async def local_response(*_args: object, **_kwargs: object) -> str:
-        return "Respuesta local de respaldo."
+    monkeypatch.setattr("app.services.demo_service.answer_with_provider_order", provider_must_not_run)
 
-    monkeypatch.setattr("app.services.llm_service.answer_via_openrouter", remote_unavailable)
-    monkeypatch.setattr("app.services.llm_service.answer", local_response)
-    monkeypatch.setattr(
-        "app.services.demo_service.AgroVozPipeline._puede_usar_fast_path",
-        staticmethod(lambda *_args: False),
-    )
+    response, intent = await _generate_demo_response("¿Cuándo puedo sembrar papa?")
 
-    response, intent = await _generate_demo_response("cuéntame algo de mi cultivo")
-
-    assert response == "Respuesta local de respaldo."
-    assert intent == "desconocido"
+    assert "INIA" in response
+    assert "Fuente" in response
+    assert intent == "agronomica"
 
 
 @pytest.mark.asyncio

@@ -79,6 +79,36 @@ const pasos = [
   },
 ];
 
+const ecosystemItems = [
+  {
+    title: "Datos oficiales, no respuestas inventadas",
+    subtitle: "ODEPA · Open-Meteo",
+    description:
+      "Precios agrícolas y clima localizado con fecha, unidad y fuente. Si el dato no está disponible, AgroVoz lo dice.",
+    i18nTitle: "ecosistema.1.title",
+    i18nSubtitle: "ecosistema.1.sub",
+    i18nDescription: "ecosistema.1.desc",
+  },
+  {
+    title: "Orientación conectada al territorio",
+    subtitle: "INIA · INDAP · PRODESAL",
+    description:
+      "Programas, reglas agronómicas y directorios se consultan por voz, siempre distinguiendo un snapshot de un dato vivo.",
+    i18nTitle: "ecosistema.2.title",
+    i18nSubtitle: "ecosistema.2.sub",
+    i18nDescription: "ecosistema.2.desc",
+  },
+  {
+    title: "Un catálogo que se puede auditar",
+    subtitle: "CIREN · INE · fuentes públicas",
+    description:
+      "Las fuentes conectadas y las que aún no tienen adaptador aparecen separadas. No prometemos trámites ni marketplace.",
+    i18nTitle: "ecosistema.3.title",
+    i18nSubtitle: "ecosistema.3.sub",
+    i18nDescription: "ecosistema.3.desc",
+  },
+];
+
 // Nota: card 1 usa Open-WA (gateway self-hosted). El mockup decia Twilio,
 // pero el constraint del proyecto es 100% open-source, sin APIs pagas.
 const SVG = (p: string) =>
@@ -213,26 +243,10 @@ const equipo = [
   {
     initials: "SB",
     name: "Sebastián Bravo",
-    role: "Líder técnico",
-    desc: "Arquitectura, backend, LLM y Tool Calling.",
+    role: "Diseño, desarrollo y producto",
+    desc: "Arquitectura, backend, LLM, Tool Calling y producto.",
     i18nRole: "equipo.sb.role",
     i18nDesc: "equipo.sb.desc",
-  },
-  {
-    initials: "FF",
-    name: "Francisco Fernández",
-    role: "Product Owner",
-    desc: "Producto, investigación y vínculo territorial en Traiguén.",
-    i18nRole: "equipo.ff.role",
-    i18nDesc: "equipo.ff.desc",
-  },
-  {
-    initials: "MA",
-    name: "Matías Atuán",
-    role: "Desarrollo e investigación",
-    desc: "Backend, validación de fuentes y testing.",
-    i18nRole: "equipo.ma.role",
-    i18nDesc: "equipo.ma.desc",
   },
 ];
 ---
@@ -352,6 +366,36 @@ const equipo = [
             </div>
           </div>
           <DemoPhone />
+        </div>
+      </div>
+    </section>
+
+    <!-- #ecosistema -->
+    <section class="section" id="ecosistema" style="background:var(--color-surface)">
+      <div class="container">
+        <div data-reveal style="max-width:760px">
+          <span class="eyebrow" data-i18n="ecosistema.eyebrow">Ecosistema agrícola</span>
+          <h2 class="h2" data-i18n="ecosistema.title">
+            La información fragmentada, en una sola conversación.
+          </h2>
+          <p class="lede" style="margin-top:20px" data-i18n="ecosistema.body">
+            AgroVoz no reemplaza a las instituciones ni vende productos: ordena
+            fuentes oficiales y las acerca al agricultor por WhatsApp.
+          </p>
+        </div>
+        <div class="grid-3" style="margin-top:44px">
+          {
+            ecosystemItems.map((item) => (
+              <FeatureCard
+                title={item.title}
+                subtitle={item.subtitle}
+                description={item.description}
+                i18nTitle={item.i18nTitle}
+                i18nSubtitle={item.i18nSubtitle}
+                i18nDescription={item.i18nDescription}
+              />
+            ))
+          }
         </div>
       </div>
     </section>
@@ -485,7 +529,7 @@ const equipo = [
         <div data-reveal style="text-align:center;margin-bottom:44px">
           <span class="eyebrow" data-i18n="equipo.eyebrow">Equipo</span>
           <h2 class="h2" style="margin-inline:auto" data-i18n="equipo.title">
-            Estudiantes de Ingeniería en Informática, INACAP Temuco.
+            Estudiante de Ingeniería en Informática, INACAP Temuco.
           </h2>
         </div>
         <div class="grid-3">
@@ -552,6 +596,7 @@ const equipo = [
   const EN: Record<string, string> = {
     "nav.como": "How it works",
     "nav.demo": "Demo",
+    "nav.ecosistema": "Ecosystem",
     "nav.planes": "Plans",
     "nav.stack": "Technology",
     "nav.impacto": "Impact",
@@ -600,6 +645,22 @@ const equipo = [
     "demo.m3": "And will it rain in Traiguén tomorrow?",
     "demo.m4":
       "Tomorrow in Traiguén: high of 14 degrees and low of 9, 23.9 mm of rain. According to OpenMeteo.",
+    "ecosistema.eyebrow": "Agricultural ecosystem",
+    "ecosistema.title": "Fragmented information, in one conversation.",
+    "ecosistema.body":
+      "AgroVoz does not replace institutions or sell products: it organizes official sources and brings them closer to farmers through WhatsApp.",
+    "ecosistema.1.title": "Official data, not made-up answers",
+    "ecosistema.1.sub": "ODEPA · Open-Meteo",
+    "ecosistema.1.desc":
+      "Agricultural prices and localized weather with date, unit and source. If the data is unavailable, AgroVoz says so.",
+    "ecosistema.2.title": "Guidance connected to the territory",
+    "ecosistema.2.sub": "INIA · INDAP · PRODESAL",
+    "ecosistema.2.desc":
+      "Programs, agronomic rules and directories by voice, always distinguishing a snapshot from live data.",
+    "ecosistema.3.title": "An auditable source catalog",
+    "ecosistema.3.sub": "CIREN · INE · public sources",
+    "ecosistema.3.desc":
+      "Connected sources and those without an adapter are shown separately. No promise of procedures or marketplace.",
     "stack.eyebrow": "Technology",
     "stack.title": "Costs under control, by design.",
     "stack.body":
@@ -649,13 +710,9 @@ const equipo = [
     "impacto.odsLabels":
       "Zero Hunger · Decent Work and Growth · Reduced Inequalities · Climate Action",
     "equipo.eyebrow": "Team",
-    "equipo.title": "Computer Engineering students, INACAP Temuco.",
-    "equipo.sb.role": "Technical Lead",
-    "equipo.sb.desc": "Architecture, backend, LLM and Tool Calling.",
-    "equipo.ff.role": "Product Owner",
-    "equipo.ff.desc": "Product, research and territorial link in Traiguén.",
-    "equipo.ma.role": "Development & Research",
-    "equipo.ma.desc": "Backend, source validation and testing.",
+    "equipo.title": "Computer Engineering student, INACAP Temuco.",
+    "equipo.sb.role": "Design, development & product",
+    "equipo.sb.desc": "Architecture, backend, LLM, Tool Calling and product.",
     "contacto.eyebrow": "Contact",
     "contacto.title": "Book an AgroVoz demo.",
     "contacto.body":

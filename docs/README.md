@@ -7,13 +7,13 @@
 | Documento | Contenido |
 |---|---|
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Arquitectura, esquema de base de datos, decisiones técnicas |
-| [`DEPLOYMENT.md`](./DEPLOYMENT.md) | Deploy real en producción: NAS + Dokploy + Pangolin, reemplaza el plan de #9 |
 | [`DEV-GUIDE.md`](./DEV-GUIDE.md) | Guía de desarrollo y setup local |
-| [`validacion-operativa.md`](./validacion-operativa.md) | Checklist y preflight saneado para E2E real de Open-WA (#214) |
-| [`humanizacion-voz.md`](./humanizacion-voz.md) | Decisión por propuesta de humanización para el canal WhatsApp |
-| [`spike-kapso.md`](./spike-kapso.md) | Evaluación de Kapso como alternativa de gateway |
-| [`spike-ivr.md`](./spike-ivr.md) | Prueba local Asterisk y decisión de costo PSTN |
-| [`vision-model.md`](./vision-model.md) | Contrato y configuración del modelo ONNX de imágenes de WhatsApp |
+
+El Data Hub, el orden global de proveedores LLM y los fallbacks seguros de la demo se diseñaron
+originalmente vía specs SDD (`specs/agrovoz-data-ecosystem/`, `specs/global-llm-provider-order/`,
+`specs/demo-safe-fallbacks/`); esos tres ya están completos y en producción, así que sus
+carpetas SDD se retiraron. `docs/ARCHITECTURE.md` (decisiones 32-34) es la referencia vigente.
+`specs/ai-agronomic-guidance/` sigue activa.
 
 ## Negocio
 
@@ -32,15 +32,6 @@ PMBOK.
 
 Contiene 11 documentos de gestión y un informe de defensa redactados; siguen
 pendientes la revisión del equipo y la aceptación académica.
-
-## Piloto
-
-| Documento | Contenido |
-|---|---|
-| [`piloto/`](./piloto/) | Plan de pilotaje y kit operativo para Traiguén |
-
-Incluye guion de onboarding, bitácora del productor, check-in semanal, métricas pre/post,
-instructivo impreso y el acuerdo de consentimiento.
 
 ## Legal
 

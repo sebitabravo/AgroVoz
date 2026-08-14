@@ -25,9 +25,11 @@ RUN apt-get update && \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Instalar dependencias Python (cache de capas: requirements.txt cambia poco)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Instalar dependencias Python (cache de capas: requirements-docker.txt cambia poco).
+# El nombre distingue este set completo (pipeline de voz + visión) del set
+# base que instala Vercel para el deploy slim de la demo (app/vercel_demo.py).
+COPY requirements-docker.txt .
+RUN pip install --no-cache-dir -r requirements-docker.txt
 
 # ── Etapa 2: Runtime ──────────────────────────────────────────────
 FROM python:3.12-slim AS runtime
@@ -47,6 +49,13 @@ RUN apt-get update && \
 # Crear usuario no-root (seguridad: el proceso no corre como root)
 RUN groupadd --system --gid 1000 agrovoz && \
     useradd --system --uid 1000 --gid agrovoz --create-home agrovoz
+
+# Preparar el destino del volumen de cache de Whisper con ownership no-root.
+# Si el named volume esta vacio, Docker copia este directorio al montarlo;
+# sin este paso lo crea como root y faster-whisper no puede descargar el
+# snapshot al arrancar el contenedor con USER agrovoz.
+RUN mkdir -p /home/agrovoz/.cache && \
+    chown -R agrovoz:agrovoz /home/agrovoz
 
 # Copiar virtualenv desde builder
 COPY --from=builder --chown=agrovoz:agrovoz /opt/venv /opt/venv

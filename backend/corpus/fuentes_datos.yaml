@@ -1,0 +1,149 @@
+# Registro de fuentes del Data Hub de AgroVoz.
+#
+# "conectado" describe una integración que existe en el repositorio, no una
+# promesa de que la institución tenga una API pública estable. Las entradas
+# false se muestran en el catálogo, pero no se consultan ni generan datos.
+version: 1
+fuentes:
+  - clave: odepa_precios_mayoristas
+    nombre: Precios agrícolas mayoristas ODEPA
+    institucion: Oficina de Estudios y Políticas Agrarias (ODEPA)
+    categoria: precios
+    modo: database
+    url: https://datos.odepa.gob.cl/es/
+    licencia: Datos abiertos del Estado de Chile
+    frecuencia: diaria
+    cobertura: 79 productos y mercados mayoristas disponibles en la base local ODEPA
+    corpus: [odepa_papa.yaml]
+    conectado: true
+    verificado_el: "2026-08-13"
+    revisar_antes_de: "2026-08-14"
+
+  - clave: openmeteo_clima
+    nombre: Pronóstico meteorológico Open-Meteo
+    institucion: Open-Meteo
+    categoria: clima
+    modo: live
+    url: https://open-meteo.com/en/docs
+    licencia: Open-Meteo API terms
+    frecuencia: en cada consulta con cache
+    cobertura: Comunas con geocodificación y coordenadas soportadas por AgroVoz
+    corpus: []
+    conectado: true
+    verificado_el: "2026-08-13"
+    revisar_antes_de: "2026-09-13"
+
+  - clave: inia_agroclima
+    nombre: Pulso Agroclimático INIA
+    institucion: Instituto de Investigaciones Agropecuarias (INIA)
+    categoria: clima_agricola
+    modo: snapshot
+    url: https://www.inia.cl/2025/06/26/inia-lanza-pulso-agroclimatico-nuevo-boletin-de-monitoreo-de-la-realidad-agricola-y-climatica-nacional/
+    licencia: Publicaciones públicas de INIA; revisar condiciones de reutilización
+    frecuencia: mensual
+    cobertura: Monitoreo agroclimático nacional y estaciones reportadas por INIA
+    corpus: []
+    conectado: false
+    verificado_el: "2026-08-13"
+    revisar_antes_de: "2026-09-13"
+
+  - clave: inia_red_agrometeorologica
+    nombre: Red Agrometeorológica INIA
+    institucion: Instituto de Investigaciones Agropecuarias (INIA)
+    categoria: clima_agricola
+    modo: live
+    url: https://agrometeorologia.cl/
+    licencia: Datos públicos de INIA; citar el portal y revisar condiciones de reutilización
+    frecuencia: diaria
+    cobertura: Verificación del catálogo público de estaciones INIA; no descarga coordenadas ni series al consultar
+    corpus: [inia_agrometeorologia.yaml]
+    adaptador: inia_red_agrometeorologica
+    conectado: true
+    verificado_el: "2026-08-13"
+    revisar_antes_de: "2026-09-13"
+
+  - clave: inia_conocimiento_agronomico
+    nombre: Fichas y reglas agronómicas INIA
+    institucion: Instituto de Investigaciones Agropecuarias (INIA)
+    categoria: agronomia
+    modo: snapshot
+    url: https://biblioteca.inia.cl/handle/20.500.14001/6706
+    licencia: Publicaciones públicas de INIA; citar fuente primaria
+    frecuencia: revisión manual por versión
+    cobertura: Papa, trigo y ventanas/reglas verificadas del corpus versionado
+    corpus: [inia_papa.yaml, inia_trigo.yaml, calendario_agricola.yaml, reglas_agronomicas.yaml]
+    conectado: true
+    verificado_el: "2026-08-03"
+    revisar_antes_de: "2027-01-30"
+
+  - clave: indap_programas_creditos
+    nombre: Programas, fomento y créditos INDAP
+    institucion: Instituto de Desarrollo Agropecuario (INDAP)
+    categoria: programas
+    modo: snapshot
+    url: https://www.indap.gob.cl/plataforma-de-servicios
+    licencia: Información pública de INDAP; confirmar condiciones al postular
+    frecuencia: revisión manual por convocatoria
+    cobertura: Programas nacionales y oferta regional de La Araucanía en corpus
+    corpus: [indap_creditos.yaml, indap_programas_araucania.yaml]
+    conectado: true
+    verificado_el: "2026-08-03"
+    revisar_antes_de: "2026-09-02"
+
+  - clave: directorio_indap_prodesal
+    nombre: Directorio de oficinas y servicios agrícolas
+    institucion: INDAP / datos públicos regionales
+    categoria: directorio
+    modo: snapshot
+    url: https://www.indap.gob.cl/la-araucania
+    licencia: Datos publicados por organismos públicos; confirmar antes de viajar
+    frecuencia: revisión manual
+    cobertura: Oficinas INDAP y presencia PRODESAL/cooperativas según registro
+    corpus: [directorio_agricola.yaml]
+    conectado: true
+    verificado_el: "2026-08-03"
+    revisar_antes_de: "2026-09-02"
+
+  - clave: ciren_ide_minagri
+    nombre: Infraestructura de Datos Espaciales del Ministerio de Agricultura
+    institucion: Centro de Información de Recursos Naturales (CIREN)
+    categoria: territorio
+    modo: live
+    url: https://ide.minagri.gob.cl/
+    licencia: Revisar licencia de cada capa IDE Minagri
+    frecuencia: según actualización de cada capa
+    cobertura: Capas geográficas y servicios interoperables del Ministerio de Agricultura
+    corpus: [ciren_ide_minagri.yaml]
+    adaptador: ciren_ide_minagri
+    conectado: true
+    verificado_el: "2026-08-13"
+    revisar_antes_de: "2026-09-13"
+
+  - clave: ine_censo_agropecuario
+    nombre: Censo Agropecuario y Forestal
+    institucion: Instituto Nacional de Estadísticas (INE)
+    categoria: estadisticas
+    modo: snapshot
+    url: https://www.ine.gob.cl/censoagropecuario/
+    licencia: Estadísticas públicas del INE; revisar condiciones de uso
+    frecuencia: según publicación censal
+    cobertura: Línea base estadística de explotaciones silvoagropecuarias de Chile
+    corpus: [ine_censo_agropecuario.yaml]
+    adaptador: ine_censo_catalogo
+    conectado: true
+    verificado_el: "2026-08-13"
+    revisar_antes_de: "2026-09-13"
+
+  - clave: campoclick_directorio_productores
+    nombre: CampoClick
+    institucion: CIREN e INDAP
+    categoria: ecosistema
+    modo: snapshot
+    url: https://www.indap.gob.cl/noticias/ciren-e-indap-lanzan-campoclick-30-con-nuevos-servicios-y-convenios-para-el-mundo
+    licencia: Servicio institucional; no copiar datos sin autorización
+    frecuencia: según actualización del servicio
+    cobertura: Directorio georreferenciado y servicios informativos para el mundo rural
+    corpus: []
+    conectado: false
+    verificado_el: "2026-08-13"
+    revisar_antes_de: "2026-09-13"

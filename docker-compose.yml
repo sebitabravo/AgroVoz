@@ -29,6 +29,9 @@ services:
       # La demo web queda apagada por defecto en desarrollo para no abrir un
       # endpoint costoso sin consentimiento explícito en .env.
       - DEMO_ENDPOINT_ENABLED=${DEMO_ENDPOINT_ENABLED:-false}
+      # Orientación agronómica determinista desde reglas INIA versionadas.
+      # El servicio mantiene el default cerrado fuera de Compose.
+      - AGRONOMIC_RULES_ENABLED=${AGRONOMIC_RULES_ENABLED:-true}
       # OpenRouter es el primer proveedor global cuando hay key; Qwen queda
       # como segundo. La API key se lee desde .env; nunca se escribe aquí.
       - LLM_PRIMARY_PROVIDER=${LLM_PRIMARY_PROVIDER:-openrouter}
@@ -60,6 +63,9 @@ services:
       # del último build y el schema de la DB deriva del de los modelos
       # (ej: "no such column: user_prefs.cultivos" con imagen vieja).
       - ./backend/migrations:/app/migrations
+      # Manifest y corpus montados para que el Data Hub local no dependa de
+      # reconstruir la imagen cada vez que cambia una fuente.
+      - ./backend/corpus:/app/corpus:ro
     healthcheck:
       test:
         ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health?probe=liveness"]

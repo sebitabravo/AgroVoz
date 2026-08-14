@@ -62,10 +62,8 @@ body:
     attributes:
       label: Responsable tentativo
       options:
-        - Sebastián (backend / pipeline voz / Open-WA / infra)
-        - Francisco (producto / landing / productores Traiguén)
-        - Matías (testing / docs / datos ODEPA)
-        - Sin asignar (lo vemos en standup)
+        - Sebastián (único mantenedor)
+        - Sin asignar
     validations:
       required: true
   - type: textarea

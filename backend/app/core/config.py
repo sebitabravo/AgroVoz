@@ -3,6 +3,7 @@
 Lee variables de entorno desde .env (desarrollo) o entorno real (producción).
 """
 
+import contextlib
 import warnings
 from pathlib import Path
 from typing import Literal
@@ -13,7 +14,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Path absoluto a data/ para que la DB no dependa del CWD desde donde se lance uvicorn.
 # Resuelve desde este archivo: backend/app/core/config.py -> backend/ -> raíz del repo
 _data_dir = Path(__file__).resolve().parent.parent.parent / "data"
-_data_dir.mkdir(parents=True, exist_ok=True)
+with contextlib.suppress(OSError):
+    # Filesystem de solo lectura (bundle serverless, p.ej. Vercel): DATABASE_URL
+    # llega sobreescrita por entorno y este directorio nunca se usa. Sin este
+    # suppress, el import de config.py fallaría antes de leer esa variable.
+    _data_dir.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_DATABASE_URL = f"sqlite:///{_data_dir / 'agrovoz.db'}"
 
@@ -61,6 +66,11 @@ class Settings(BaseSettings):
     # ── ODEPA ────────────────────────────
     odepa_sync_hour: int = 6
     odepa_sync_minute: int = 0
+    # Verificación diaria de catálogos oficiales del Data Hub. Se deja
+    # apagada por defecto en desarrollo; producción la activa explícitamente.
+    data_hub_remote_sync_enabled: bool = False
+    data_hub_remote_sync_hour: int = Field(default=4, ge=0, le=23)
+    data_hub_remote_sync_minute: int = Field(default=30, ge=0, le=59)
     # URL del CSV de precios mayoristas ODEPA (frutas y hortalizas).
     # Dataset CKAN: precios-mayoristas-de-frutas-y-hortalizas
     # La URL apunta al año actual. ODEPA publica un CSV por año, así que

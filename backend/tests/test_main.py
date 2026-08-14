@@ -309,6 +309,22 @@ async def test_lifespan_shutdown_cierra_http_client(
     assert ws._http_client is None or ws._http_client.is_closed
 
 
+async def test_data_hub_remote_scheduler_continua_tras_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Una caída de una ronda remota no mata el scheduler diario."""
+    sync = Mock(side_effect=RuntimeError("proveedor caído"))
+    sleep = AsyncMock(side_effect=[None, asyncio.CancelledError])
+    monkeypatch.setattr(app_main, "_sync_data_hub_remote", sync)
+    monkeypatch.setattr(app_main.asyncio, "sleep", sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await app_main._data_hub_remote_scheduler()
+
+    sync.assert_called_once_with()
+    assert sleep.await_count == 2
+
+
 async def test_report_temp_scheduler_purga_antes_de_dormir(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -26,12 +26,15 @@ from app.services.llm_service import (
     _GENERATION_TIMEOUT,
     _N_CTX,
     _N_THREADS,
+    _OPENROUTER_SYSTEM_PROMPT,
     _TOOLS_SECTION,
     FALLBACK_TEXT,
+    LLM_UNAVAILABLE_TEXT,
     MAX_TOOL_ITERATIONS,
     NO_RESPONSE_TEXT,
     OPENROUTER_PRIMARY_READ_ONLY_TOOLS,
     SYSTEM_PROMPT,
+    TOOL_EXECUTION_ERROR_TEXT,
     TOOLS,
     WHITELIST_TOOLS,
     LlmBusyError,
@@ -69,12 +72,21 @@ class TestConstantes:
         assert "calculate_margin" in SYSTEM_PROMPT
         assert "search_corpus" in SYSTEM_PROMPT
         assert "register_expense" in SYSTEM_PROMPT
-        assert "NUNCA recomendaciones" in SYSTEM_PROMPT
+        assert "orientación agronómica citada" in SYSTEM_PROMPT
+        assert "get_regla_agronomica" in SYSTEM_PROMPT
+        assert "get_calendario_agricola" in SYSTEM_PROMPT
+        assert "NUNCA recomendaciones" not in SYSTEM_PROMPT
         assert "Crédito: deriva a INDAP, sin asesorar" in SYSTEM_PROMPT
         assert "NUNCA pidas datos personales" in SYSTEM_PROMPT
         assert "NUNCA inventes precios" in SYSTEM_PROMPT
         assert "Español chileno" in SYSTEM_PROMPT
         assert "pesos chilenos" in SYSTEM_PROMPT
+
+    def test_prompt_openrouter_permite_regla_citada_y_prohibe_inventar(self) -> None:
+        """El proveedor remoto no debe contradecir las tools de orientación."""
+        assert "orientación agronómica citada" in _OPENROUTER_SYSTEM_PROMPT
+        assert "NUNCA des recomendaciones agronomicas" not in _OPENROUTER_SYSTEM_PROMPT
+        assert "No inventes recomendaciones" in _OPENROUTER_SYSTEM_PROMPT
 
     def test_system_prompt_instruye_conservar_cita_fuente(self) -> None:
         """Issue #95: el system prompt comprimido debe instruir conservar la
@@ -104,7 +116,8 @@ class TestConstantes:
         """Whitelist: precio, spread, historico, venta, margen, clima actual,
         pronostico, clima historico, corpus, gastos, parcelas, reglas
         agronomicas, calendario, histórico multianual, link del panel,
-        directorio agrícola, reporte PDF y programas INDAP (19 tools)."""
+        directorio agrícola, reporte PDF y programas INDAP (19 tools). El resumen
+        del ecosistema usa un fast path y no agrega una tool al prompt."""
         assert (
             frozenset(
                 {
@@ -645,101 +658,54 @@ class TestBuildMessages:
         assert messages[3]["content"] == "Quiero saber el clima"
 
 
-# ── Mock answer ─────────────────────────────────────────────────
+# ── Fallback sin modelo ─────────────────────────────────────────
 
 
 class TestMockAnswer:
-    """_mock_answer responde por keyword sin modelo LLM."""
+    """El helper histórico no fabrica datos cuando falta el modelo."""
 
-    def test_keyword_clima(self) -> None:
-        """Detecta intencion de clima por keywords."""
-        result = _mock_answer("¿Cómo está el clima en Traiguén?")
-        assert "Traiguén" in result
-        assert "simulado" in result
-        assert "humedad" in result
-
-    def test_keyword_temperatura(self) -> None:
-        """'temperatura' dispara respuesta de clima."""
-        result = _mock_answer("¿Qué temperatura hace hoy?")
-        assert "simulado" in result
-
-    def test_keyword_lluvia(self) -> None:
-        """'lluvia' dispara respuesta de clima."""
-        result = _mock_answer("¿Hay lluvia para mañana?")
-        assert "lluvia" in result.lower()
-
-    def test_keyword_precio(self) -> None:
-        """Detecta intencion de precio por keyword 'precio'."""
-        result = _mock_answer("¿Cuál es el precio de la papa?")
-        assert "papa" in result.lower() or "Papa" in result
-        assert "pesos" in result
-        assert "simulado" in result
-        assert "kilo" in result
-
-    def test_keyword_cuanto_cuesta(self) -> None:
-        """'cuánto cuesta' dispara respuesta de precio."""
-        result = _mock_answer("¿Cuánto cuesta la cebolla?")
-        assert "pesos" in result
-
-    def test_fuera_de_scope(self) -> None:
-        """Consulta fuera de scope retorna FALLBACK_TEXT."""
-        result = _mock_answer("¿Debo regar mis papas hoy?")
-        assert result == FALLBACK_TEXT
-
-    def test_query_vacia(self) -> None:
-        """Query sin keywords reconocibles retorna fallback."""
-        result = _mock_answer("hola buenos días")
-        assert result == FALLBACK_TEXT
-
-    def test_keywords_insensibles_a_mayusculas(self) -> None:
-        """Deteccion case-insensitive."""
-        result = _mock_answer("CLIMA EN SANTIAGO")
-        assert "simulado" in result
+    @pytest.mark.parametrize(
+        "query", [
+            "¿Cómo está el clima en Traiguén?",
+            "¿Cuál es el precio de la papa?",
+            "¿Debo regar mis papas hoy?",
+            "hola buenos días",
+        ],
+    )
+    def test_retorna_mensaje_seguro(self, query: str) -> None:
+        """Ninguna consulta obtiene precios o clima simulados."""
+        assert _mock_answer(query) == LLM_UNAVAILABLE_TEXT
 
 
-# ── answer() sin modelo (mock path) ─────────────────────────────
+# ── answer() sin modelo ─────────────────────────────────────────
 
 
 class TestAnswerMockPath:
-    """answer() usa _mock_answer cuando no hay modelo LLM cargado."""
+    """answer() responde seguro cuando no hay modelo LLM cargado."""
 
-    async def test_answer_sin_modelo_clima(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Sin modelo, answer() delega en _mock_answer para clima."""
+    @pytest.mark.parametrize(
+        "query", [
+            "¿Cómo está el clima?",
+            "¿Cuál es el precio de la papa?",
+            "¿Debo regar?",
+            "None",
+        ],
+    )
+    async def test_answer_sin_modelo(self, monkeypatch: pytest.MonkeyPatch, query: str) -> None:
+        """La indisponibilidad del modelo no activa datos simulados."""
         monkeypatch.setattr("app.services.llm_service._get_model", lambda: None)
-        result = await answer("¿Cómo está el clima?")
-        assert "simulado" in result
-
-    async def test_answer_sin_modelo_precio(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Sin modelo, answer() delega en _mock_answer para precio."""
-        monkeypatch.setattr("app.services.llm_service._get_model", lambda: None)
-        result = await answer("¿Cuál es el precio de la papa?")
-        assert "simulado" in result
-
-    async def test_answer_sin_modelo_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Sin modelo, query fuera de scope retorna fallback."""
-        monkeypatch.setattr("app.services.llm_service._get_model", lambda: None)
-        result = await answer("¿Debo regar?")
-        assert result == FALLBACK_TEXT
+        assert await answer(query) == LLM_UNAVAILABLE_TEXT
 
     async def test_answer_query_vacia(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Query vacia o solo whitespace retorna NO_RESPONSE_TEXT."""
+        """Query vacía o solo whitespace retorna NO_RESPONSE_TEXT."""
         monkeypatch.setattr("app.services.llm_service._get_model", lambda: None)
         assert await answer("") == NO_RESPONSE_TEXT
         assert await answer("   ") == NO_RESPONSE_TEXT
 
-    async def test_answer_query_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Query None (type checker bypass) tratado como texto 'None'."""
-        monkeypatch.setattr("app.services.llm_service._get_model", lambda: None)
-        # Si alguien pasa None, str(None) = "None" que cae en fallback
-        result = await answer("None")
-        # "None" no matchea keywords, asi que cae en fallback
-        assert result == FALLBACK_TEXT
-
     async def test_answer_con_historial_vacio(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """answer con historial vacio funciona igual."""
+        """El historial vacío conserva la respuesta segura."""
         monkeypatch.setattr("app.services.llm_service._get_model", lambda: None)
-        result = await answer("clima en Traiguén", history=[])
-        assert "simulado" in result
+        assert await answer("clima en Traiguén", history=[]) == LLM_UNAVAILABLE_TEXT
 
 
 class TestAnswerGuardasLlm:
@@ -777,7 +743,7 @@ class TestAnswerGuardasLlm:
         )
 
         assert heartbeat_completed is True
-        assert result == FALLBACK_TEXT
+        assert result == LLM_UNAVAILABLE_TEXT
 
     async def test_fallback_keyword_precede_carga_y_timeout_del_llm(
         self,
@@ -993,6 +959,34 @@ class TestAnswerGuardasLlm:
             AsyncMock(return_value="dato determinista"),
         )
         assert await answer("consulta ambigua") == "respuesta formateada"
+
+    async def test_error_de_tool_no_se_reinyecta_al_llm(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Una falla de tool termina el flujo sin una segunda generación."""
+        completion = AsyncMock(
+            return_value={"choices": [{"message": {"content": "tool-call"}}]}
+        )
+        tool_calls = [{"function": {"name": "get_weather", "arguments": "{}"}}]
+
+        monkeypatch.setattr(llm_service, "_get_model", lambda: object())
+        monkeypatch.setattr(llm_service, "_run_llm_completion", completion)
+        monkeypatch.setattr(
+            llm_service,
+            "_parse_text_tool_calls",
+            lambda content: tool_calls if content == "tool-call" else [],
+        )
+        monkeypatch.setattr(
+            llm_service,
+            "_execute_tool",
+            AsyncMock(return_value=TOOL_EXECUTION_ERROR_TEXT),
+        )
+
+        result = await answer("consulta de clima")
+
+        assert result == TOOL_EXECUTION_ERROR_TEXT
+        assert completion.await_count == 1
 
     async def test_llm_ocupado_responde_sin_colgar(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Si la guarda detecta LLM ocupado, retorna mensaje rápido sin esperar."""
@@ -1351,7 +1345,7 @@ class TestExecuteToolWhitelist:
             {"ubicacion": argument_secret},
         )
 
-        assert "error" in result.lower()
+        assert result == TOOL_EXECUTION_ERROR_TEXT
         assert argument_secret not in caplog.text
         assert exception_secret not in caplog.text
         assert "get_weather" in caplog.text
@@ -2245,7 +2239,7 @@ class TestToolResultCache:
         # Primer llamado: handler lanza excepción
         r1 = await _execute_tool("get_price", {"producto": "papa"})
         assert call_count == 1
-        assert "error" in r1.lower()
+        assert r1 == TOOL_EXECUTION_ERROR_TEXT
 
         # Segundo llamado mismos params: DEBE re-ejecutar handler
         # (el error NO se cachea)

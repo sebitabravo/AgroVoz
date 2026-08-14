@@ -591,6 +591,18 @@ async def sync_odepa(session: Session | None = None) -> SyncResult:
             return SyncResult()
 
         insertados, actualizados = upsert_prices(session, registros)
+        # Data Hub registra el éxito del adaptador estructurado por separado
+        # del snapshot documental ODEPA; así no se muestra como "al día" una
+        # base de precios que nunca fue sincronizada.
+        from app.services.data_hub_service import mark_data_source_success
+
+        mark_data_source_success(
+            session,
+            "odepa_precios_mayoristas",
+            record_count=len(registros),
+            valid_until=max(registro.fecha for registro in registros)
+            + datetime.timedelta(days=1),
+        )
         logger.info(
             "Sync ODEPA OK: %d insertados, %d actualizados (productos=%s)",
             insertados,

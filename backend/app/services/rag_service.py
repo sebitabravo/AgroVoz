@@ -23,6 +23,7 @@ Uso:
 
 from __future__ import annotations
 
+import datetime
 import logging
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,12 @@ import numpy as np
 import yaml
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+
+from app.services.data_hub_service import (
+    DataHubValidationError,
+    load_manifest,
+    load_snapshot_facts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +88,87 @@ _TOP_K = 3
 _MIN_SCORE = 0.05
 
 
-def _load_corpus_from_yaml(corpus_dir: Path) -> list[dict[str, str]]:
+def _load_legacy_documents(
+    corpus_dir: Path,
+    *,
+    today: datetime.date,
+) -> list[dict[str, str]]:
+    """Carga el formato histórico de tests/corpus sin manifest."""
+    chunks: list[dict[str, str]] = []
+    for path in sorted(corpus_dir.glob("*.yaml")):
+        if path.name == "fuentes_datos.yaml":
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+        except (yaml.YAMLError, OSError, UnicodeDecodeError) as exc:
+            logger.warning(
+                "Error leyendo corpus — error=%s",
+                type(exc).__name__,
+            )
+            continue
+
+        if not isinstance(data, dict):
+            continue
+        review_before = data.get("revisar_antes_de") or data.get("revisar_antes")
+        try:
+            review_date = (
+                datetime.date.fromisoformat(str(review_before))
+                if review_before
+                else None
+            )
+        except ValueError:
+            logger.warning("Fecha de revisión inválida en %s", path.name)
+            continue
+        if review_date is not None and review_date < today:
+            continue
+
+        verified_on = str(data.get("verificado_el", ""))
+        docs = data.get("documentos", [])
+        if not isinstance(docs, list):
+            continue
+        for doc in docs:
+            if not isinstance(doc, dict):
+                continue
+            fuente = str(doc.get("fuente", ""))
+            fecha = str(doc.get("fecha", ""))
+            titulo = str(doc.get("titulo", ""))
+            doc_url = str(doc.get("fuente_url") or doc.get("url") or "")
+            doc_chunks = doc.get("chunks", [])
+            if not isinstance(doc_chunks, list):
+                continue
+            for chunk in doc_chunks:
+                if isinstance(chunk, str):
+                    texto = chunk
+                    chunk_url = doc_url
+                elif isinstance(chunk, dict):
+                    texto = chunk.get("texto", "")
+                    chunk_url = str(chunk.get("fuente_url") or chunk.get("url") or doc_url)
+                else:
+                    continue
+                if not isinstance(texto, str) or not texto.strip():
+                    continue
+                chunks.append(
+                    {
+                        "text": " ".join(texto.split()),
+                        "source": fuente,
+                        "date": fecha,
+                        "title": titulo,
+                        "source_url": chunk_url,
+                        "source_key": path.stem,
+                        "domain": "documentos",
+                        "verified_on": verified_on,
+                        "review_before": str(review_date or ""),
+                    }
+                )
+    return chunks
+
+
+def _load_corpus_from_yaml(
+    corpus_dir: Path,
+    *,
+    today: datetime.date | None = None,
+) -> list[dict[str, str]]:
     """Carga todos los documentos YAML del directorio corpus.
 
     Cada archivo YAML debe tener el formato:
@@ -97,6 +184,7 @@ def _load_corpus_from_yaml(corpus_dir: Path) -> list[dict[str, str]]:
         Lista de chunks, cada uno con keys: text, source, date, title.
         Vacia si no hay archivos o el formato es invalido.
     """
+    current_day = today or datetime.date.today()
     chunks: list[dict[str, str]] = []
     if not corpus_dir.is_dir():
         logger.warning("Directorio de corpus no encontrado")
@@ -107,45 +195,42 @@ def _load_corpus_from_yaml(corpus_dir: Path) -> list[dict[str, str]]:
         logger.warning("No se encontraron archivos YAML en el corpus")
         return chunks
 
-    for path in yaml_files:
+    manifest_path = corpus_dir / "fuentes_datos.yaml"
+    if manifest_path.is_file():
         try:
-            with open(path, encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-        except (yaml.YAMLError, OSError, UnicodeDecodeError) as exc:
+            entries = load_manifest(manifest_path)
+            for entry in entries:
+                facts = load_snapshot_facts(entry, corpus_dir) if entry.corpus_files else []
+                for fact in facts:
+                    if fact.review_before is not None and fact.review_before < current_day:
+                        continue
+                    chunks.append(
+                        {
+                            "text": fact.text,
+                            "source": fact.source_name,
+                            "date": fact.source_date or "",
+                            "title": fact.title,
+                            "source_url": fact.source_url,
+                            "source_key": fact.source_key,
+                            "domain": fact.domain,
+                            "verified_on": fact.verified_on.isoformat(),
+                            "review_before": (
+                                fact.review_before.isoformat()
+                                if fact.review_before
+                                else ""
+                            ),
+                        }
+                    )
+        except (DataHubValidationError, OSError, UnicodeDecodeError) as exc:
             logger.warning(
-                "Error leyendo corpus — error=%s",
+                "Manifest Data Hub inválido; RAG queda sin hechos servibles — error=%s",
                 type(exc).__name__,
             )
-            continue
-
-        if not isinstance(data, dict):
-            continue
-        docs = data.get("documentos", [])
-        if not isinstance(docs, list):
-            continue
-
-        for doc in docs:
-            if not isinstance(doc, dict):
-                continue
-            fuente = str(doc.get("fuente", ""))
-            fecha = str(doc.get("fecha", ""))
-            titulo = str(doc.get("titulo", ""))
-            doc_chunks = doc.get("chunks", [])
-            if not isinstance(doc_chunks, list):
-                continue
-            for chunk in doc_chunks:
-                if not isinstance(chunk, dict):
-                    continue
-                texto = chunk.get("texto", "")
-                if not texto or not isinstance(texto, str) or not texto.strip():
-                    continue
-                # Usar fuente/fecha del documento como default
-                chunks.append({
-                    "text": texto.strip(),
-                    "source": fuente,
-                    "date": fecha,
-                    "title": titulo,
-                })
+            # Si el manifest existe pero no valida, no se puede usar el cargador
+            # legado: serviría snapshots sin procedencia/frescura confirmadas.
+            chunks = []
+    else:
+        chunks = _load_legacy_documents(corpus_dir, today=current_day)
 
     logger.info(
         "Corpus cargado: %d chunks desde %d archivos en %s",
@@ -163,8 +248,14 @@ class RAGCorpus:
     Thread-safe para lectura (la matriz TF-IDF es inmutable tras crearse).
     """
 
-    def __init__(self, corpus_dir: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        corpus_dir: str | Path | None = None,
+        *,
+        today: datetime.date | None = None,
+    ) -> None:
         self._corpus_dir = Path(corpus_dir) if corpus_dir else _DEFAULT_CORPUS_DIR
+        self._today = today
         self._chunks: list[dict[str, str]] = []
         self._vectorizer: TfidfVectorizer | None = None
         self._tfidf_matrix: Any = None  # scipy sparse matrix
@@ -175,7 +266,7 @@ class RAGCorpus:
         if self._loaded:
             return
 
-        self._chunks = _load_corpus_from_yaml(self._corpus_dir)
+        self._chunks = _load_corpus_from_yaml(self._corpus_dir, today=self._today)
         if not self._chunks:
             logger.warning("Corpus vacio — RAG no disponible")
             self._loaded = True
@@ -260,6 +351,11 @@ class RAGCorpus:
                     "source": chunk["source"],
                     "date": chunk["date"],
                     "title": chunk["title"],
+                    "source_url": chunk.get("source_url", ""),
+                    "source_key": chunk.get("source_key", ""),
+                    "domain": chunk.get("domain", ""),
+                    "verified_on": chunk.get("verified_on", ""),
+                    "review_before": chunk.get("review_before", ""),
                     "score": score,
                 })
 
@@ -297,7 +393,7 @@ rag_corpus = RAGCorpus()
 
 
 def search_corpus_for_llm(query: str) -> str:
-    """Busca en el corpus ODEPA y retorna resultados formateados para el LLM.
+    """Busca en el corpus integrado y retorna resultados trazables para el LLM.
 
     Formatea los top-3 chunks con fuente y fecha para que el LLM pueda
     citarlos en su respuesta. Si no hay resultados, retorna un string
@@ -320,7 +416,12 @@ def search_corpus_for_llm(query: str) -> str:
 
     lines: list[str] = []
     for i, r in enumerate(results, 1):
-        citation = f"Fuente: {r['source']}, {r['date']}"
+        published_date = r.get("date") or "sin fecha de publicación"
+        citation = f"Fuente: {r['source']}, {published_date}"
+        if r.get("verified_on"):
+            citation += f"; verificado {r['verified_on']}"
+        if r.get("source_url"):
+            citation += f"; {r['source_url']}"
         lines.append(
             f"[{i}] {r['text']}\n   ({citation})"
         )

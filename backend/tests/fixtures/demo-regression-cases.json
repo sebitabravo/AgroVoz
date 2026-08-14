@@ -1,0 +1,131 @@
+[
+  {
+    "description": "01 semillas falla cerrado",
+    "query": "Tengo que viajar a Temuco, ¿a cuánto está el kilo de semilla de tomates y papas?",
+    "kind": "seed_safe"
+  },
+  {
+    "description": "02 quinua no recibe precio de papa",
+    "query": "¿Cuánto cuesta la quinua orgánica?",
+    "kind": "unknown_price_safe"
+  },
+  {
+    "description": "03 Concepción no cae a Traiguén",
+    "query": "¿Qué temperatura hay en Concepción?",
+    "kind": "unsupported_location"
+  },
+  {
+    "description": "04 clima mañana en Temuco",
+    "query": "¿Va a llover mañana en Temuco?",
+    "kind": "weather_temuco"
+  },
+  {
+    "description": "05 seguimiento conserva Temuco",
+    "query": "¿Y pasado mañana?",
+    "kind": "weather_temuco",
+    "history": [
+      {"rol": "user", "texto": "¿Va a llover mañana en Temuco?"},
+      {"rol": "assistant", "texto": "Mañana en Temuco se consultó el pronóstico."}
+    ]
+  },
+  {
+    "description": "06 precio de papa con ODEPA",
+    "query": "¿Cuánto cuesta la papa?",
+    "kind": "price_odepa"
+  },
+  {
+    "description": "07 precio de tomate con ODEPA",
+    "query": "¿A cuánto está el tomate?",
+    "kind": "price_odepa"
+  },
+  {
+    "description": "08 precio de cebolla con ODEPA",
+    "query": "¿Cuál es el precio de la cebolla?",
+    "kind": "price_odepa"
+  },
+  {
+    "description": "09 precio de manzana con ODEPA",
+    "query": "¿Cuánto cuesta la manzana?",
+    "kind": "price_odepa"
+  },
+  {
+    "description": "10 precio de zanahoria con ODEPA",
+    "query": "¿A cuánto está la zanahoria?",
+    "kind": "price_odepa"
+  },
+  {
+    "description": "11 precio de zapallo con ODEPA",
+    "query": "¿Cuál es el precio del zapallo?",
+    "kind": "price_odepa"
+  },
+  {
+    "description": "12 precio de lechuga con ODEPA",
+    "query": "¿Cuánto cuesta la lechuga?",
+    "kind": "price_odepa"
+  },
+  {
+    "description": "13 precio de poroto verde con ODEPA",
+    "query": "¿A cuánto está el poroto verde?",
+    "kind": "price_odepa"
+  },
+  {
+    "description": "14 precio de zapallo italiano con ODEPA",
+    "query": "¿Cuál es el precio del zapallo italiano?",
+    "kind": "price_odepa"
+  },
+  {
+    "description": "15 precio de ajo con ODEPA",
+    "query": "¿Cuánto cuesta el ajo?",
+    "kind": "price_odepa"
+  },
+  {
+    "description": "16 clima actual de Traiguén",
+    "query": "¿Qué temperatura hay ahora en Traiguén?",
+    "kind": "weather_traiguen"
+  },
+  {
+    "description": "17 clima actual de Temuco",
+    "query": "¿Qué temperatura hay ahora en Temuco?",
+    "kind": "weather_temuco"
+  },
+  {
+    "description": "18 pronóstico mañana de Traiguén",
+    "query": "¿Va a llover mañana en Traiguén?",
+    "kind": "weather_traiguen"
+  },
+  {
+    "description": "19 pronóstico mañana de Temuco",
+    "query": "¿Cómo estará el tiempo mañana en Temuco?",
+    "kind": "weather_temuco"
+  },
+  {
+    "description": "20 pronóstico pasado mañana de Traiguén",
+    "query": "¿Cómo estará el tiempo pasado mañana en Traiguén?",
+    "kind": "weather_traiguen"
+  },
+  {
+    "description": "21 Buenos Aires no cae a Traiguén",
+    "query": "¿Qué temperatura hay en Buenos Aires?",
+    "kind": "unsupported_location"
+  },
+  {
+    "description": "22 Villa Felicidad no cae a Traiguén",
+    "query": "¿Hay lluvia en la ciudad de Villa Felicidad?",
+    "kind": "unsupported_location"
+  },
+  {
+    "description": "23 saludo estable",
+    "query": "Hola, ¿cómo estás?",
+    "kind": "generic_safe"
+  },
+  {
+    "description": "24 capacidades del ecosistema",
+    "query": "¿Qué puede hacer AgroVoz?",
+    "kind": "generic_safe"
+  },
+  {
+    "description": "25 consulta fuera de dominio falla seguro",
+    "query": "¿Qué hora es?",
+    "kind": "generic_safe"
+  }
+]

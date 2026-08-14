@@ -5,12 +5,16 @@
 
 ---
 
-**Etapa actual: PRODUCTO CONSTRUIDO, pendiente de validar el despliegue y la operación en terreno.**
+**Etapa actual: PRODUCTO CONSTRUIDO. Sin piloto de campo, sin operación con productores reales.**
 
 > **Nota sobre este documento.** La versión enviada al Desafío Crea INACAP el 8 de junio de 2026
 > declaraba etapa de idea sin desarrollo iniciado, lo que era exacto en esa fecha. El desarrollo
 > comenzó el 16 de junio de 2026. Esta sección combina el historial de desarrollo con un snapshot
 > técnico local verificado el **9 de agosto de 2026**, sobre el commit `f85b2e4`.
+>
+> **Actualización 2026-08-14:** el proyecto no continuó en el Desafío Crea INACAP 2026. El piloto
+> de Traiguén y el respaldo institucional (INDAP, PRODESAL) que lo sostenía ya no existen. AgroVoz
+> es mantenido por una sola persona, verificable con `git shortlog -sne --all`.
 
 ### Lo construido y verificable
 
@@ -61,13 +65,14 @@ contratar con una institución pública. Está registrado en la sección 8.3.
 
 ### Lo pendiente
 
-- **Piloto con 3-5 productores reales en Traiguén**, 4 semanas. Es el siguiente hito.
-- **Medición de WER** de Whisper con audio real de la zona. El objetivo declarado es menos de 15%;
-  todavía no se mide con hablantes de Traiguén.
-- **Medición de consultas por productor al mes.** Es el supuesto crítico del modelo financiero y hoy
-  no está validado con ningún usuario real.
-- Carta de respaldo institucional INACAP para el contacto formal con PRODESAL, INDAP e INIA Carillanca.
-- Resolución del riesgo de Open-WA antes de cualquier venta institucional.
-- Auditoría formal de cumplimiento de la Ley 21.719 antes del 1 de diciembre de 2026.
+- **Piloto con productores reales.** No se ejecutó y no está planificado: el respaldo institucional
+  (Crea INACAP, contacto con PRODESAL/INDAP) que lo hacía posible ya no existe.
+- **Medición de WER** de Whisper con audio real de agricultores. Sin piloto, no hay vía para
+  ejecutarla.
+- **Medición de consultas por productor al mes.** Era el supuesto crítico del modelo financiero;
+  nunca se validó con ningún usuario real y no hay forma de validarlo sin retomar un piloto.
+- Resolución del riesgo de Open-WA antes de cualquier venta institucional, si se retoma ese camino.
+- Auditoría formal de cumplimiento de la Ley 21.719, solo relevante si en el futuro se procesan
+  datos personales de terceros reales — hoy no es el caso.
 
 ---

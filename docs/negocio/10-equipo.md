@@ -5,18 +5,21 @@
 
 ---
 
-La composición, dedicación, fortalezas, vínculo territorial y plan de ramp-up
-que siguen son **autodeclaraciones y planificación del equipo**, no evidencia
-independiente de contratos, calendario de horas, red de contactos o resultados.
-Se deben confirmar con registros autorizados antes de presentarlos como
-capacidad ejecutada.
+> **Actualización 2026-08-14:** AgroVoz es un proyecto de una sola persona. La versión anterior de
+> este documento (parte del plan enviado al Desafío Crea INACAP) declaraba un equipo de tres
+> integrantes; esa composición ya no aplica.
 
-| # | Nombre | Carrera | Rol | Dedicación autodeclarada | Fortalezas autodeclaradas | Aprendizaje en el proyecto |
-|---|---|---|---|---|---|---|
-| 1 | Sebastián Bravo | Ingeniería en Informática | Líder técnico: arquitectura, backend, LLM, Tool Calling, integración | 15-20 hrs/sem (declarado) | FastAPI, REST APIs, Python, integración de APIs (declarado) | Whisper/fine-tuning, cuantización de LLMs, operaciones VPS |
-| 2 | Francisco Fernández | Ingeniería en Informática | Product Owner: producto, investigación de mercado, pitch, enlace con productores | 10 hrs/sem (declarado) | Investigación, documentación, comunicación, conocimiento del territorio (declarado) | Metodologías de validación con usuarios rurales, procurement público, modelos de negocio B2G |
-| 3 | Matías Atuán | Ingeniería en Informática | Desarrollo e investigación: apoyo técnico, validación de fuentes, documentación, testing | 10-15 hrs/sem (declarado) | Python, bases de datos, análisis de datos (declarado) | SQLite/ODEPA, testing de APIs, webhooks, documentación técnica |
+La dedicación, fortalezas y plan de ramp-up que siguen son **autodeclaraciones**, no evidencia
+independiente de contratos ni calendario de horas.
 
-**Capacidades planificadas del equipo**: el stack técnico identificado (Whisper + LLM + TTS + FastAPI, con Tool Calling y whitelist) y la vinculación territorial son autodeclaraciones sujetas a confirmación. Las 35-45 horas/semana combinadas y el plan de ejecución en 6 semanas para la Fase 1 son hipótesis de disponibilidad y ramp-up, no horas observadas ni cronograma comprometido. El equipo reconoce que varios componentes del stack (Whisper en CPU, cuantización de LLMs, integración del gateway de WhatsApp) eran áreas de aprendizaje activo al inicio, no experiencia previa.
+| Nombre | Carrera | Rol | Dedicación autodeclarada | Fortalezas autodeclaradas | Aprendizaje en el proyecto |
+|---|---|---|---|---|---|
+| Sebastián Bravo | Ingeniería en Informática | Diseño, arquitectura, backend, LLM, Tool Calling, integración, producto | 15-20 hrs/sem (declarado) | FastAPI, REST APIs, Python, integración de APIs (declarado) | Whisper/fine-tuning, cuantización de LLMs, operaciones VPS |
+
+**Capacidades planificadas**: el stack técnico identificado (Whisper + LLM + TTS + FastAPI, con
+Tool Calling y whitelist) es una autodeclaración sujeta a confirmación. El plan de ejecución en
+6 semanas para la Fase 1 es una hipótesis de disponibilidad y ramp-up, no un cronograma
+comprometido. Varios componentes del stack (Whisper en CPU, cuantización de LLMs, integración del
+gateway de WhatsApp) eran áreas de aprendizaje activo al inicio, no experiencia previa.
 
 ---

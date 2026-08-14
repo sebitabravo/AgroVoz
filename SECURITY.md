@@ -1,16 +1,20 @@
 # Política de Seguridad — AgroVoz
 
-> Última actualización: 2026-07-26
-> Repositorio privado. Proyecto INACAP Temuco, Desafío Crea 2026.
+> Última actualización: 2026-08-14
+> Proyecto INACAP Temuco. El Desafío Crea 2026 y el piloto de Traiguén que dependía de su
+> respaldo institucional ya no están vigentes.
 
 ## Alcance
 
-AgroVoz es un producto desplegado y en operación: pipeline E2E de voz y texto, catálogo ODEPA
-completo, alertas proactivas, dashboard admin, landing. El piloto de validación con 3-5 productores
-en Traiguén está en preparación.
+AgroVoz es un producto funcional (pipeline E2E de voz y texto, catálogo ODEPA completo, alertas
+proactivas, dashboard admin, landing) sin infraestructura propia desplegada 24/7 ni piloto real
+con productores en curso. El único deploy público vigente es la demo web gratuita en Vercel
+(subconjunto slim: sin WhatsApp, sin modelos locales).
 
-**Estar desplegado cambia el modelo de riesgo:** desde que el piloto arranque se procesan datos
-personales de personas reales, y las obligaciones de la Ley 21.719 dejan de ser teóricas.
+**El modelo de riesgo depende del entorno.** Hoy no hay datos personales de terceros reales en
+producción — la demo pública no persiste consultas. Si en el futuro se retoma un piloto con
+productores reales, las obligaciones de la Ley 21.719 dejan de ser teóricas y esta política debe
+revisarse antes de ese arranque, no después.
 
 | Componente | Soporte de seguridad |
 | --- | --- |
@@ -33,11 +37,10 @@ Si encontrás una vulnerabilidad en el código, dependencias o infraestructura:
 4. El tech lead (@sebitabravo) revisa en máximo 48 horas.
 5. Una vez corregido, el fix se despliega en la siguiente ventana de deploy.
 
-### Para terceros (post-lanzamiento)
+### Para terceros
 
-Una vez que AgroVoz sea público (post-clasificación Crea INACAP), se habilitará
-GitHub Private Vulnerability Reporting. Mientras tanto, contactar a
-`sebastian.bravo77@inacapmail.cl`.
+Contactar a `sebastian.bravo77@inacapmail.cl`. GitHub Private Vulnerability Reporting queda
+pendiente de habilitar en el repositorio.
 
 ## Modelo de seguridad
 
@@ -69,8 +72,9 @@ GitHub Private Vulnerability Reporting. Mientras tanto, contactar a
     su propia base de licitud.
   - Auditoría formal de cumplimiento pendiente antes del escalamiento post-piloto.
 
-  Documentos: `docs/legal/politica-privacidad.md`, `docs/legal/aviso-responsabilidad.md` y
-  `docs/piloto/06-acuerdo-consentimiento.md`.
+  Documentos: `docs/legal/politica-privacidad.md` y `docs/legal/aviso-responsabilidad.md`.
+  El acuerdo de consentimiento específico del piloto de Traiguén (`docs/piloto/`) se retiró
+  del repositorio: el respaldo institucional de ese piloto (Crea INACAP) ya no existe.
 
 - **Responsabilidad por el dato entregado:** el aviso de responsabilidad se envía en el primer
   contacto por WhatsApp, en los dos canales. Deja explícito que AgroVoz entrega información y no
@@ -143,6 +147,6 @@ para el impacto financiero de migrar a la API oficial.
 ## Divulgación responsable
 
 AgroVoz es un proyecto estudiantil sin bug bounty ni programa de recompensas.
-Una vez público, las vulnerabilidades reportadas se corrigen en la siguiente
-ventana semanal de deploy. No se divulgan detalles hasta que el fix esté
-desplegado en el VPS de piloto.
+Las vulnerabilidades reportadas se corrigen en la siguiente ventana de deploy
+del subconjunto público (Vercel). No se divulgan detalles hasta que el fix
+esté desplegado.
