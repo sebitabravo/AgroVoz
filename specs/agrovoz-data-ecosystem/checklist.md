@@ -43,7 +43,8 @@
 - [x] CHK027 Tests focalizados y regresiones en verde; refactor mínimo del prompt y RAG fail-closed verificado.
 - [x] CHK028 Cada FR cubierto por al menos un test o gate nativo documentado.
 - [x] CHK029 Sin TODOs, secretos, PII ni debug en el diff del Data Hub.
-- [ ] CHK030 Conventional Commit solo si el usuario pide commit; este turno no publica.
+- [x] CHK030 Commits finales en formato Conventional Commit, sin huella de IA;
+      la publicación remota queda bloqueada por la política del entorno.
 
 ## Phase 6: Verify
 
@@ -64,5 +65,7 @@
 
 ## Notes
 
-- CHK030 queda pendiente porque no se solicitó commit; la calidad del cambio se verificará sin crear historia remota.
-- CHK038 se verifica localmente; no equivale a smoke de producción ni a validar adaptadores externos.
+- CHK030 quedó resuelto en los commits `3a85b00`, `557f2d7` y `5374297`; no
+  equivale a que exista un PR remoto.
+- CHK038 se verifica localmente; no equivale a smoke de producción ni a validar
+  adaptadores externos en el VPS.

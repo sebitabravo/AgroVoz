@@ -102,14 +102,20 @@ errores de consola.
 
 ### Fase 5 — Publicación segura
 
-- [ ] Revisar diff completo, secretos, archivos generados y migraciones.
-- [ ] Resolver divergencia con `origin/main` sin perder cambios ni reescribir
-      historia compartida.
-- [ ] Crear commit(s) Conventional Commit enfocados.
+- [x] Revisar diff completo, secretos, archivos generados y migraciones; el
+      árbol está limpio, el diff no contiene credenciales y `git diff --check`
+      pasa.
+- [x] Resolver divergencia con `origin/main` sin perder cambios ni reescribir
+      historia compartida; `HEAD` está 12 commits adelante y comparte el
+      `merge-base` `ddf21ea`.
+- [x] Crear commit(s) Conventional Commit enfocados: `3a85b00`, `557f2d7` y
+      `5374297` son los tres commits finales de esta ejecución.
 - [ ] Ejecutar CI remoto y esperar checks requeridos.
 - [ ] Publicar mediante el flujo configurado (Dokploy/GitHub) si la conexión
       está disponible.
-- [ ] Conservar un punto de rollback identificable.
+- [x] Conservar un punto de rollback local identificable: `origin/main` como
+      base y `5374297` como último artefacto verificado; falta llevarlo a un
+      remoto compartido.
 
 **Salida:** artefacto publicado con commit y checks verificables.
 
