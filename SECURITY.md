@@ -27,7 +27,8 @@ revisarse antes de ese arranque, no después.
 
 Si encontrás una vulnerabilidad en el código, dependencias o infraestructura:
 
-1. **NO abras un issue público.** El repo es privado, pero mantenemos el reporte en canal restringido.
+1. **NO abras un issue público.** El repo es público desde el 14/08/2026: usar GitHub Private
+   Vulnerability Reporting (pestaña Security → Report a vulnerability) o el correo de abajo.
 2. Abrí un issue con label `security` y `prio:must`.
 3. Incluí:
    - Descripción del problema
@@ -39,8 +40,8 @@ Si encontrás una vulnerabilidad en el código, dependencias o infraestructura:
 
 ### Para terceros
 
-Contactar a `sebastian.bravo77@inacapmail.cl`. GitHub Private Vulnerability Reporting queda
-pendiente de habilitar en el repositorio.
+Usar [GitHub Private Vulnerability Reporting](https://github.com/sebitabravo/AgroVoz/security/advisories/new)
+(habilitado desde el 14/08/2026). Alternativa: `sebastian.bravo77@inacapmail.cl`.
 
 ## Modelo de seguridad
 
@@ -141,8 +142,9 @@ para el impacto financiero de migrar a la API oficial.
 | CI: ruff lint + mypy strict   | ✅ GitHub Actions (se activa con `pyproject.toml`) |
 | CI: pytest + coverage         | ✅ GitHub Actions                                  |
 | PR gate: issue-first + labels | ✅ `pr-check.yml`                                  |
-| Code scanning (CodeQL)        | ⏳ No disponible en repo privado sin Advanced Security |
-| Secret scanning + push prot.  | ⏳ No disponible en repo privado sin Advanced Security |
+| Secret scanning + push protection | ✅ Activo (habilitado 14/08/2026, gratis en repo público) |
+| Private Vulnerability Reporting | ✅ Activo (habilitado 14/08/2026) |
+| Code scanning (CodeQL)        | ⏳ Workflow preparado (`.github/workflows/codeql.yml`), pendiente de mergear |
 
 ## Divulgación responsable
 
