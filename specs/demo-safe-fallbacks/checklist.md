@@ -94,9 +94,11 @@
 
 ## Estado actual
 
-La implementación local y sus regresiones están verificadas. CHK040 se deja
-abierto deliberadamente: archivar la spec antes de publicar y ejecutar el
-smoke productivo ocultaría que la producción todavía reproduce los fallos de
-quinua y de ubicaciones no soportadas. La rama local tiene commits verificables
-sobre `origin/main`; no existe rama remota/PR porque el push fue rechazado
-por la política de aprobación del entorno.
+La implementación local y sus regresiones están verificadas. El manifiesto
+reproducible de 25 consultas y el workflow post-deploy quedaron agregados; el
+smoke local completo pasó 30/30 checks (cinco checks base más 25 consultas).
+CHK040 se deja abierto deliberadamente: archivar la spec antes de publicar y
+ejecutar el smoke productivo ocultaría que la producción todavía reproduce los
+fallos de quinua y de ubicaciones no soportadas. La rama local tiene commits
+verificables sobre `origin/main`; no existe rama remota/PR porque el push fue
+rechazado por la política de aprobación del entorno.

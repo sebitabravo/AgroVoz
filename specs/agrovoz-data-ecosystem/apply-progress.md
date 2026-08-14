@@ -139,3 +139,22 @@
 - `landing/tests/privacy-page.test.ts` — regresión del contrato de foco.
 
 **Evidence:** `bun run test` → 8 passed; `bun run build` → 3 páginas generadas.
+
+### Batch 9 — Regresión pública completa y guardas del Data Hub
+
+**Files modified:**
+- `specs/demo-safe-fallbacks/public-regression-cases.json` — manifiesto
+  reproducible de 25 consultas reales con historial explícito cuando aplica.
+- `scripts/smoke-test.sh`, `Makefile` — suite completa con contrato de TTS,
+  latencia menor a 15 s, ausencia de respuestas simuladas y validación del
+  fixture antes de ejecutar.
+- `.github/workflows/production-smoke.yml`, `docs/DEPLOYMENT.md` — smoke
+  público post-deploy condicionado a una URL configurada, incluyendo Data Hub.
+- `.github/workflows/docker-smoke.yml`, `docker-compose.yml` — manifest del
+  Data Hub obligatorio en imagen y disponible en desarrollo sin imagen stale.
+
+**Evidence:** `shellcheck`, `actionlint`, `docker compose config`, `git diff
+--check` y validación JSON pasan; una imagen recién construida contiene el
+manifest de 10 fuentes; el smoke local completo pasó 30/30 checks. La
+publicación, migración/sync y smoke productivo siguen sin evidencia por falta de
+canal autorizado.

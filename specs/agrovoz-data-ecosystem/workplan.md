@@ -109,8 +109,11 @@ errores de consola.
       historia compartida; `HEAD` comparte el `merge-base` `ddf21ea` y la
       rama contiene los commits locales de implementación/verificación.
 - [x] Crear commits Conventional Commit enfocados: `3a85b00`, `557f2d7`,
-      `5374297`, `3d5cd97`, `36ca754` y `05701cc` contienen la implementación
-      y los verificadores locales de esta ejecución.
+      `5374297`, `3d5cd97`, `36ca754`, `05701cc` y `3656464` contienen la
+      implementación y los verificadores locales de esta ejecución.
+- [x] Dejar un runner reproducible para post-deploy: `make smoke-full` ejecuta
+      el manifiesto de 25 consultas, exige TTS/latencia/fallback seguro y el
+      workflow público lo corre solo si existe `AGROVOZ_SMOKE_BASE_URL`.
 - [ ] Ejecutar CI remoto y esperar checks requeridos.
 - [ ] Publicar mediante el flujo configurado (Dokploy/GitHub) si la conexión
       está disponible.
@@ -122,6 +125,8 @@ errores de consola.
 
 ### Fase 6 — Smoke productivo y correcciones
 
+- [x] Preparar el verificador externo con los 25 casos y la comprobación del
+      catálogo Data Hub; la corrida local quedó en 30/30 checks.
 - [ ] Confirmar health/readiness públicos.
 - [ ] Confirmar migración aplicada y único head.
 - [ ] Confirmar sync ODEPA y Data Hub desde el entorno real.
@@ -174,4 +179,5 @@ errores de consola.
 - **Fases externas:** secrets productivos, migración/sync productiva, publicación,
   E2E publicado, backups/rollback y medición del VPS real aún no tienen
   evidencia en esta ejecución.
-- **Última actualización:** 2026-08-13.
+- **Última actualización:** 2026-08-13; la publicación sigue siendo el único
+  canal pendiente para ejecutar los gates externos.
