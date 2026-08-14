@@ -75,7 +75,8 @@ Una fase se marca completa solo cuando:
 - [x] Aplicar `alembic upgrade head` en una base temporal y comprobar el head
       único `a7b8c9d0e1f2`; el backup/rollback de la base productiva sigue
       siendo un gate externo.
-- [ ] Ejecutar sync ODEPA real y confirmar estado `healthy`/frescura.
+- [x] Ejecutar sync ODEPA real reproducible y confirmar estado `healthy`/frescura
+      en un contenedor fresco; falta repetirlo en producción.
 - [x] Ejecutar sync local Data Hub y verificar 10 fuentes/121 hechos; el sync
       remoto queda opt-in y autenticado.
 - [x] Revisar permisos, logs, media TTL, rate limits y headers en el código y
@@ -90,9 +91,11 @@ Una fase se marca completa solo cuando:
 - [x] Probar precio real, clima real, consulta de semillas, comuna no soportada,
       seguimiento conversacional, fallback, error de red y TTS.
 - [x] Probar catálogo público y endpoint admin sin exponer secretos.
-- [x] Medir latencia de cada consulta de la demo; el flujo Whisper real queda
-      pendiente de un artefacto de audio controlado en este entorno.
-- [ ] Corregir cualquier regresión y repetir desde Fase 1.
+- [x] Medir latencia de cada consulta de la demo; el flujo Whisper dentro de la
+      landing publicada queda pendiente, pero el servicio real con un artefacto
+      de audio controlado ya pasó bajo 1 vCPU/4 GB en Fase 7.
+- [x] Corregir cualquier regresión y repetir desde Fase 1; la última suite quedó
+      en 2255 passed, 3 skipped y 86.39% de cobertura.
 
 **Salida:** reporte E2E reproducible con requests, respuestas, tiempos y
 errores de consola.
@@ -123,12 +126,20 @@ errores de consola.
 
 ### Fase 7 — Piso de hardware, seguridad y observabilidad
 
-- [ ] Medir en 1 vCPU/4 GB: arranque, memoria, inferencia, sync, RAG y E2E.
-- [ ] Confirmar que no hay sobresuscripción ni dependencia externa nueva.
-- [ ] Ejecutar revisión de seguridad del diff y de rutas públicas/admin.
-- [ ] Verificar backups, rollback de migración, logs sin PII y TTL de medios.
-- [ ] Revisar accesibilidad móvil de landing/demo.
-- [ ] Registrar cualquier limitación que requiera una decisión explícita.
+- [x] Medir en 1 vCPU/4 GB los modelos locales reales: Piper sintetizó en
+      945 ms, Whisper small/faster transcribió en 4.557 s y Qwen respondió en
+      1.838 s; el smoke de arranque/readiness y Data Hub también pasó.
+- [x] Confirmar que no hay sobresuscripción de hilos en el código y que el
+      worker Qwen funciona sin dependencia externa durante la inferencia.
+- [x] Ejecutar revisión local de seguridad del diff y de rutas públicas/admin;
+      el límite de cuerpos remotos se aplica antes de parsear JSON.
+- [ ] Verificar backups, rollback de migración, logs sin PII y TTL de medios en
+      el entorno productivo; la evidencia local no sustituye ese gate.
+- [x] Revisar accesibilidad móvil de landing/demo durante el E2E real de
+      390x844 y evitar foco en el drawer cerrado con `inert`; quedan pendientes
+      auditoría y smoke del dominio publicado.
+- [x] Registrar limitaciones: secretos, despliegue, migración/sync productivos
+      y smoke externo siguen bloqueados por falta de canal autorizado.
 
 **Salida:** matriz de calidad local/producción/hardware con límites separados.
 
@@ -144,8 +155,10 @@ errores de consola.
 ## Estado actual
 
 - **Fase activa:** Fase 3 — operación y configuración productiva.
-- **Fases locales:** Fases 0, 1, 2 y 4 verificadas en esta ejecución; el fix
-  E2E de ubicación quedó protegido por regresión automatizada.
+- **Fases locales:** Fases 0, 1, 2, 4 y 7 verificadas en esta ejecución; el fix
+  E2E de ubicación quedó protegido por regresión automatizada y los tres
+  modelos locales tienen smoke real bajo 1 vCPU/4 GB.
 - **Fases externas:** secrets productivos, migración/sync productiva, publicación,
-  E2E publicado y medición del VPS aún no tienen evidencia en esta ejecución.
+  E2E publicado, backups/rollback y medición del VPS real aún no tienen
+  evidencia en esta ejecución.
 - **Última actualización:** 2026-08-13.

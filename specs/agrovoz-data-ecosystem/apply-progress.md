@@ -4,7 +4,7 @@
 
 - **Feature:** agrovoz-data-ecosystem
 - **Linked tasks:** `specs/agrovoz-data-ecosystem/tasks.md`
-- **Batches completed:** 6
+- **Batches completed:** 8
 - **Started:** 2026-08-13
 
 ## Batch Log
@@ -113,3 +113,29 @@
 - `backend/tests/test_demo_safe_fallbacks.py` — regresiones para Concepción, Buenos Aires y Villa Felicidad.
 
 **Evidence:** `make test` → 2255 passed, 3 skipped, 86.39% coverage; Playwright real contra Astro + FastAPI en viewport 390x844 verificó semillas/quinua sin datos falsos, Temuco con fuente OpenMeteo, seguimiento con historial, Concepción rechazada sin caer a Traiguén, botón TTS y reintento ante error de red; cero errores de consola. La reproducción TTS cambió el control a `Pausar` sin `pageerror`.
+
+### Batch 7 — Artefactos de voz y volumen de cache no-root
+
+**Files modified:**
+- `backend/Dockerfile` — prepara `/home/agrovoz/.cache` con ownership del
+  usuario `agrovoz` antes de montar el volumen de Whisper.
+- `.github/workflows/docker-smoke.yml` — aserción de ownership `1000:1000`
+  para el volumen fresco de Whisper.
+
+**Evidence:** un contenedor fresco limitado a 1 vCPU/4 GB descargó y verificó
+  Piper (`es_MX-claude-high.onnx`, 63.122.309 bytes), Whisper small/faster y
+  Qwen2.5-3B Q4_K_M (`2.104.932.768` bytes). Piper generó Ogg Opus mono en
+  945 ms; Whisper precargó en 17 s y transcribió en 4.557 s; el worker spawn
+  de llama.cpp cargó Qwen en 1.759 s y respondió en 1.838 s. El named volume
+  fresco quedó `1000:1000`, eliminando el `PermissionError` reproducido antes.
+  Esta evidencia es local y reproducible; no prueba el volumen ni el VPS de
+  producción.
+
+### Batch 8 — Foco accesible en navegación móvil
+
+**Files modified:**
+- `landing/src/components/Header.astro` — aplica `inert` al drawer cerrado y
+  devuelve el foco al botón al cerrarlo desde un enlace.
+- `landing/tests/privacy-page.test.ts` — regresión del contrato de foco.
+
+**Evidence:** `bun run test` → 8 passed; `bun run build` → 3 páginas generadas.
