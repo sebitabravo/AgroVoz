@@ -66,7 +66,7 @@
 - [x] CHK031 Tests pass: `make test` → 2255 passed, 3 skipped
 - [x] CHK032 Linter clean: `make lint`
 - [x] CHK033 Type check: `make typecheck`
-- [x] CHK034 Coverage not lower than main: 86.39%, gate 85%
+- [x] CHK034 Coverage not lower than main: 86.40%, gate 85%
 - [x] CHK035 Every user story works independently in local E2E/regressions
 - [x] CHK036 Success criteria from requirements.md met for local scope
 - [x] CHK037 Security review passed for local diff and public/admin contracts
@@ -97,6 +97,6 @@
 La implementación local y sus regresiones están verificadas. CHK040 se deja
 abierto deliberadamente: archivar la spec antes de publicar y ejecutar el
 smoke productivo ocultaría que la producción todavía reproduce los fallos de
-quinua y de ubicaciones no soportadas. La rama local está 13 commits adelante
+quinua y de ubicaciones no soportadas. La rama local está 14 commits adelante
 de `origin/main`, pero no existe rama remota/PR porque el push fue rechazado
 por la política de aprobación del entorno.

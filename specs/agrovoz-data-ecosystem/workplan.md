@@ -95,7 +95,7 @@ Una fase se marca completa solo cuando:
       landing publicada queda pendiente, pero el servicio real con un artefacto
       de audio controlado ya pasó bajo 1 vCPU/4 GB en Fase 7.
 - [x] Corregir cualquier regresión y repetir desde Fase 1; la última suite quedó
-      en 2255 passed, 3 skipped y 86.39% de cobertura.
+      en 2255 passed, 3 skipped y 86.40% de cobertura.
 
 **Salida:** reporte E2E reproducible con requests, respuestas, tiempos y
 errores de consola.
@@ -106,15 +106,16 @@ errores de consola.
       árbol está limpio, el diff no contiene credenciales y `git diff --check`
       pasa.
 - [x] Resolver divergencia con `origin/main` sin perder cambios ni reescribir
-      historia compartida; `HEAD` está 13 commits adelante y comparte el
+      historia compartida; `HEAD` está 14 commits adelante y comparte el
       `merge-base` `ddf21ea`.
-- [x] Crear commit(s) Conventional Commit enfocados: `3a85b00`, `557f2d7` y
-      `5374297` son los tres commits finales de esta ejecución.
+- [x] Crear commit(s) Conventional Commit enfocados: `3a85b00`, `557f2d7`,
+      `5374297`, `3d5cd97` y `36ca754` son los commits finales de esta
+      ejecución.
 - [ ] Ejecutar CI remoto y esperar checks requeridos.
 - [ ] Publicar mediante el flujo configurado (Dokploy/GitHub) si la conexión
       está disponible.
 - [x] Conservar un punto de rollback local identificable: `origin/main` como
-      base y `5374297` como último artefacto verificado; falta llevarlo a un
+      base y `36ca754` como último artefacto verificado; falta llevarlo a un
       remoto compartido.
 
 **Salida:** artefacto publicado con commit y checks verificables.
