@@ -227,6 +227,11 @@ o mediante `workflow_dispatch`, activa también la comprobación del catálogo
 Data Hub y conserva los 12 segundos entre consultas. Si la variable no existe,
 el job se omite en vez de inventar un entorno de prueba.
 
+El workflow ejecuta el manifiesto de 25 casos de
+`specs/demo-safe-fallbacks/public-regression-cases.json` cuando se configura
+`AGROVOZ_SMOKE_BASE_URL`. Son cinco consultas por minuto como máximo por el
+límite de la demo, por lo que la corrida completa tarda varios minutos.
+
 ## Troubleshooting rápido
 
 | Síntoma | Causa | Dónde mirar |

@@ -9,7 +9,7 @@
         dev-backend dev-frontend \
         db-init db-migrate db-seed db-shell db-reset \
         sync-odepa sync-data-hub tunnel \
-        smoke smoke-demo build-landing preview-landing
+        smoke smoke-demo smoke-full build-landing preview-landing
 
 # ─────────────────────────────────────────────
 # Ayuda
@@ -79,6 +79,9 @@ smoke: ## Ejecutar smoke de salud, trazabilidad y headers
 
 smoke-demo: ## Ejecutar regresiones críticas de la demo (cinco consultas)
 	SMOKE_DEMO_REGRESSION=1 ./scripts/smoke-test.sh "$(API_URL)"
+
+smoke-full: ## Ejecutar la suite pública completa de 25 consultas de demo
+	SMOKE_FULL_DEMO_REGRESSION=1 SMOKE_DATA_HUB=1 ./scripts/smoke-test.sh "$(API_URL)"
 
 # ─────────────────────────────────────────────
 # Base de datos

@@ -6,13 +6,16 @@
 #   ./scripts/smoke-test.sh                          # Local
 #   ./scripts/smoke-test.sh http://api.agrovoz.cl    # Producción
 #   SMOKE_DEMO_REGRESSION=1 ./scripts/smoke-test.sh  # Regresión crítica de demo
+#   SMOKE_FULL_DEMO_REGRESSION=1 ./scripts/smoke-test.sh # Suite de 25 casos
 #
-# Requisitos: curl, jq. La regresión de demo ejecuta cinco requests; en
-# producción conserva el límite de 5/min usando SMOKE_DELAY_SECONDS=12.
+# Requisitos: curl, jq. La regresión crítica ejecuta cinco requests; la suite
+# completa lee 25 casos. En producción conserva el límite de 5/min usando
+# SMOKE_DELAY_SECONDS=12.
 
 set -euo pipefail
 # Los filtros jq escapan su variable `$t` para no mezclarla con el shell.
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 API_URL="${1:-http://localhost:8000}"
 PASSED=0
 FAILED=0
@@ -21,7 +24,9 @@ SMOKE_READINESS_FILE="$(mktemp "${TMPDIR:-/tmp}/agrovoz-readiness.XXXXXX")"
 trap 'rm -f "$SMOKE_RESPONSE_FILE" "$SMOKE_READINESS_FILE"' EXIT
 
 SMOKE_DEMO_REGRESSION="${SMOKE_DEMO_REGRESSION:-0}"
+SMOKE_FULL_DEMO_REGRESSION="${SMOKE_FULL_DEMO_REGRESSION:-0}"
 SMOKE_DATA_HUB="${SMOKE_DATA_HUB:-0}"
+SMOKE_DEMO_CASES_FILE="${SMOKE_DEMO_CASES_FILE:-$SCRIPT_DIR/../specs/demo-safe-fallbacks/public-regression-cases.json}"
 SMOKE_TIMEOUT_SECONDS="${SMOKE_TIMEOUT_SECONDS:-20}"
 if [ -z "${SMOKE_DELAY_SECONDS:-}" ]; then
     if [[ "$API_URL" == "http://localhost"* || "$API_URL" == "http://127.0.0.1"* ]]; then
@@ -38,6 +43,15 @@ fi
 
 green() { echo -e "\033[32m[PASS]\033[0m $*"; }
 red()   { echo -e "\033[31m[FAIL]\033[0m $*"; }
+
+show_demo_failure() {
+    # Nunca imprime audio_base64: un fallo del smoke no debe llenar logs con
+    # una respuesta binaria codificada ni ocultar el motivo del contrato.
+    if ! jq -c '{texto: (.texto // null), intent: (.intent // null), latency_ms: (.latency_ms // null), audio_bytes: ((.audio_base64 // "") | length)}' \
+        "$SMOKE_RESPONSE_FILE" 2>/dev/null; then
+        echo "Respuesta no JSON"
+    fi
+}
 
 check() {
     local desc="$1"
@@ -139,7 +153,7 @@ fi
 
 # 7. Regresiones críticas de la demo. Se activa aparte porque son cinco
 # requests con TTS y el endpoint público limita a 5 consultas por minuto.
-if [ "$SMOKE_DEMO_REGRESSION" = "1" ]; then
+if [ "$SMOKE_DEMO_REGRESSION" = "1" ] || [ "$SMOKE_FULL_DEMO_REGRESSION" = "1" ]; then
     demo_calls=0
 
     demo_post() {
@@ -147,8 +161,11 @@ if [ "$SMOKE_DEMO_REGRESSION" = "1" ]; then
         local query="$2"
         local history_json="$3"
         local jq_filter="$4"
+        local demo_contract
         local request_body
         local http_code
+
+        demo_contract='(.texto | type == "string" and length > 0) and (.audio_base64 | type == "string" and length > 0) and (.latency_ms | type == "number" and . < 15000) and (.texto | ascii_downcase | contains("modo de prueba") | not) and (.texto | ascii_downcase | contains("precio simulado") | not)'
 
         if [ "$demo_calls" -gt 0 ] && [ "$SMOKE_DELAY_SECONDS" -gt 0 ]; then
             sleep "$SMOKE_DELAY_SECONDS"
@@ -169,53 +186,105 @@ if [ "$SMOKE_DEMO_REGRESSION" = "1" ]; then
 
         if [ "$http_code" != "200" ]; then
             red "$desc — esperaba HTTP 200, obtuve $http_code"
-            cat "$SMOKE_RESPONSE_FILE"
+            show_demo_failure
             FAILED=$((FAILED + 1))
             return
         fi
 
-        if jq -e "$jq_filter" "$SMOKE_RESPONSE_FILE" > /dev/null 2>&1; then
+        if jq -e "$demo_contract and ($jq_filter)" "$SMOKE_RESPONSE_FILE" > /dev/null 2>&1; then
             green "$desc"
             PASSED=$((PASSED + 1))
         else
             red "$desc — respuesta no cumple el contrato seguro"
-            cat "$SMOKE_RESPONSE_FILE"
+            show_demo_failure
             FAILED=$((FAILED + 1))
         fi
     }
 
-    # Una semilla no es el precio del cultivo fresco.
-    demo_post "Demo semillas falla cerrado" \
-        "Tengo que viajar a Temuco, ¿a cuánto está el kilo de semilla de tomates y papas?" \
-        '[]' \
-        "(.texto | ascii_downcase) as \$t | (\$t | contains(\"simulado\") | not) and (\$t | contains(\"1.200\") | not) and (\$t | contains(\"no tengo datos verificables\"))"
+    if [ "$SMOKE_FULL_DEMO_REGRESSION" = "1" ]; then
+        if ! jq -e '
+            def nonempty_string: type == "string" and length > 0;
+            type == "array" and length == 25 and
+            all(.[];
+                (.description | nonempty_string) and
+                (.query | nonempty_string) and
+                (.kind | nonempty_string) and
+                ((.history // []) | type == "array")
+            )
+        ' "$SMOKE_DEMO_CASES_FILE" > /dev/null 2>&1; then
+            red "Suite demo completa — manifiesto inválido: se esperan 25 casos con contrato completo"
+            FAILED=$((FAILED + 1))
+        else
+            while IFS= read -r case_json; do
+                description=$(jq -r '.description' <<< "$case_json")
+                query=$(jq -r '.query' <<< "$case_json")
+                history_json=$(jq -c '.history // []' <<< "$case_json")
+                kind=$(jq -r '.kind' <<< "$case_json")
+                case "$kind" in
+                    seed_safe)
+                        filter='(.texto | ascii_downcase | contains("1.200") | not) and (.texto | ascii_downcase | contains("no tengo datos verificables"))'
+                        ;;
+                    unknown_price_safe)
+                        filter='(.texto | ascii_downcase | contains("1.200") | not)'
+                        ;;
+                    unsupported_location)
+                        filter='(.texto | ascii_downcase | contains("en traiguén ahora") | not) and (.texto | ascii_downcase | contains("en traiguen ahora") | not)'
+                        ;;
+                    weather_temuco)
+                        filter='(.texto | ascii_downcase | contains("temuco")) and (.texto | ascii_downcase | contains("openmeteo"))'
+                        ;;
+                    weather_traiguen)
+                        filter='((.texto | ascii_downcase | contains("traiguén")) or (.texto | ascii_downcase | contains("traiguen"))) and (.texto | ascii_downcase | contains("openmeteo"))'
+                        ;;
+                    price_odepa)
+                        filter='(.texto | ascii_downcase | contains("odepa")) and (.texto | ascii_downcase | contains("simulado") | not)'
+                        ;;
+                    generic_safe)
+                        filter='true'
+                        ;;
+                    *)
+                        red "$description — kind desconocido: $kind"
+                        FAILED=$((FAILED + 1))
+                        continue
+                        ;;
+                esac
+                demo_post "$description" "$query" "$history_json" "$filter"
+            done < <(jq -c '.[]' "$SMOKE_DEMO_CASES_FILE")
+        fi
+    else
+        # Una semilla no es el precio del cultivo fresco.
+        demo_post "Demo semillas falla cerrado" \
+            "Tengo que viajar a Temuco, ¿a cuánto está el kilo de semilla de tomates y papas?" \
+            '[]' \
+            '(.texto | ascii_downcase | contains("1.200") | not) and (.texto | ascii_downcase | contains("no tengo datos verificables"))'
 
-    # Un producto fuera del catálogo no puede recibir el precio de otro.
-    demo_post "Demo producto fuera de catálogo no inventa precio" \
-        "¿Cuánto cuesta la quinua orgánica?" \
-        '[]' \
-        "(.texto | ascii_downcase) as \$t | (\$t | contains(\"modo de prueba\") | not) and (\$t | contains(\"precio simulado\") | not) and (\$t | contains(\"1.200\") | not)"
+        # Un producto fuera del catálogo no puede recibir el precio de otro.
+        demo_post "Demo producto fuera de catálogo no inventa precio" \
+            "¿Cuánto cuesta la quinua orgánica?" \
+            '[]' \
+            '(.texto | ascii_downcase | contains("1.200") | not)'
 
-    # Un lugar explícito no soportado nunca cae silenciosamente a Traiguén.
-    demo_post "Demo comuna no soportada es transparente" \
-        "¿Qué temperatura hay en Concepción?" \
-        '[]' \
-        "(.texto | ascii_downcase) as \$t | (\$t | contains(\"concepción\")) and (\$t | contains(\"en traiguén ahora\") | not) and (\$t | contains(\"en traiguen ahora\") | not)"
+        # Un lugar explícito no soportado nunca cae silenciosamente a Traiguén.
+        demo_post "Demo comuna no soportada es transparente" \
+            "¿Qué temperatura hay en Concepción?" \
+            '[]' \
+            '(.texto | ascii_downcase | contains("concepción")) and (.texto | ascii_downcase | contains("en traiguén ahora") | not) and (.texto | ascii_downcase | contains("en traiguen ahora") | not)'
 
-    first_weather_query="¿Va a llover mañana en Temuco?"
-    demo_post "Demo clima de Temuco conserva fuente" \
-        "$first_weather_query" \
-        '[]' \
-        "(.texto | ascii_downcase) as \$t | (\$t | contains(\"temuco\")) and (\$t | contains(\"openmeteo\")) and (.latency_ms < 15000)"
-    first_weather_text=$(jq -r '.texto // empty' "$SMOKE_RESPONSE_FILE")
-    follow_up_history=$(jq -cn \
-        --arg pregunta "$first_weather_query" \
-        --arg respuesta "$first_weather_text" \
-        '[{rol: "user", texto: $pregunta}, {rol: "assistant", texto: $respuesta}]')
-    demo_post "Demo seguimiento usa historial" \
-        "¿Y pasado mañana?" \
-        "$follow_up_history" \
-        "(.texto | ascii_downcase) as \$t | (\$t | contains(\"temuco\")) and (\$t | contains(\"problema\") | not) and (.latency_ms < 15000)"
+        first_weather_query="¿Va a llover mañana en Temuco?"
+        demo_post "Demo clima de Temuco conserva fuente" \
+            "$first_weather_query" \
+            '[]' \
+            '(.texto | ascii_downcase | contains("temuco")) and (.texto | ascii_downcase | contains("openmeteo"))'
+        first_weather_text=$(jq -r '.texto // empty' "$SMOKE_RESPONSE_FILE")
+        follow_up_history=$(jq -cn \
+            --arg pregunta "$first_weather_query" \
+            --arg respuesta "$first_weather_text" \
+            '[{rol: "user", texto: $pregunta}, {rol: "assistant", texto: $respuesta}]')
+        demo_post "Demo seguimiento usa historial" \
+            "¿Y pasado mañana?" \
+            "$follow_up_history" \
+            '(.texto | ascii_downcase | contains("temuco")) and (.texto | ascii_downcase | contains("problema") | not)'
+    fi
 fi
 
 echo ""
