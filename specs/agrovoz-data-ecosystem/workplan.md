@@ -109,8 +109,9 @@ errores de consola.
       historia compartida; `HEAD` comparte el `merge-base` `ddf21ea` y la
       rama contiene los commits locales de implementación/verificación.
 - [x] Crear commits Conventional Commit enfocados: `3a85b00`, `557f2d7`,
-      `5374297`, `3d5cd97`, `36ca754`, `05701cc` y `3656464` contienen la
-      implementación y los verificadores locales de esta ejecución.
+      `5374297`, `3d5cd97`, `36ca754`, `05701cc`, `3656464`, `424c1fa`,
+      `6640abc` y `c7e6a03` contienen la implementación y los verificadores
+      locales de esta ejecución.
 - [x] Dejar un runner reproducible para post-deploy: `make smoke-full` ejecuta
       el manifiesto de 25 consultas, exige TTS/latencia/fallback seguro y el
       workflow público lo corre solo si existe `AGROVOZ_SMOKE_BASE_URL`.
