@@ -7,10 +7,11 @@
 #   ./scripts/smoke-test.sh http://api.agrovoz.cl    # Producción
 #   SMOKE_DEMO_REGRESSION=1 ./scripts/smoke-test.sh  # Regresión crítica de demo
 #   SMOKE_FULL_DEMO_REGRESSION=1 ./scripts/smoke-test.sh # Suite de 25 casos
+#   SMOKE_AGRONOMIC_REGRESSION=1 ./scripts/smoke-test.sh # Reglas/calendario citados
 #
 # Requisitos: curl, jq. La regresión crítica ejecuta cinco requests; la suite
-# completa lee 25 casos. En producción conserva el límite de 5/min usando
-# SMOKE_DELAY_SECONDS=12.
+# completa lee 25 casos y la agronómica ejecuta dos casos adicionales. En
+# producción conserva el límite de 5/min usando SMOKE_DELAY_SECONDS=12.
 
 set -euo pipefail
 # Los filtros jq escapan su variable `$t` para no mezclarla con el shell.
@@ -25,8 +26,9 @@ trap 'rm -f "$SMOKE_RESPONSE_FILE" "$SMOKE_READINESS_FILE"' EXIT
 
 SMOKE_DEMO_REGRESSION="${SMOKE_DEMO_REGRESSION:-0}"
 SMOKE_FULL_DEMO_REGRESSION="${SMOKE_FULL_DEMO_REGRESSION:-0}"
+SMOKE_AGRONOMIC_REGRESSION="${SMOKE_AGRONOMIC_REGRESSION:-0}"
 SMOKE_DATA_HUB="${SMOKE_DATA_HUB:-0}"
-SMOKE_DEMO_CASES_FILE="${SMOKE_DEMO_CASES_FILE:-$SCRIPT_DIR/../specs/demo-safe-fallbacks/public-regression-cases.json}"
+SMOKE_DEMO_CASES_FILE="${SMOKE_DEMO_CASES_FILE:-$SCRIPT_DIR/../backend/tests/fixtures/demo-regression-cases.json}"
 SMOKE_TIMEOUT_SECONDS="${SMOKE_TIMEOUT_SECONDS:-20}"
 if [ -z "${SMOKE_DELAY_SECONDS:-}" ]; then
     if [[ "$API_URL" == "http://localhost"* || "$API_URL" == "http://127.0.0.1"* ]]; then
@@ -151,9 +153,9 @@ if [ "$SMOKE_DATA_HUB" = "1" ]; then
         '. | type == "array" and length > 0' || true
 fi
 
-# 7. Regresiones críticas de la demo. Se activa aparte porque son cinco
-# requests con TTS y el endpoint público limita a 5 consultas por minuto.
-if [ "$SMOKE_DEMO_REGRESSION" = "1" ] || [ "$SMOKE_FULL_DEMO_REGRESSION" = "1" ]; then
+# 7. Regresiones de la demo. Se activan aparte porque cada caso genera TTS y
+# el endpoint público limita a 5 consultas por minuto.
+if [ "$SMOKE_DEMO_REGRESSION" = "1" ] || [ "$SMOKE_FULL_DEMO_REGRESSION" = "1" ] || [ "$SMOKE_AGRONOMIC_REGRESSION" = "1" ]; then
     demo_calls=0
 
     demo_post() {
@@ -251,7 +253,7 @@ if [ "$SMOKE_DEMO_REGRESSION" = "1" ] || [ "$SMOKE_FULL_DEMO_REGRESSION" = "1" ]
                 demo_post "$description" "$query" "$history_json" "$filter"
             done < <(jq -c '.[]' "$SMOKE_DEMO_CASES_FILE")
         fi
-    else
+    elif [ "$SMOKE_DEMO_REGRESSION" = "1" ]; then
         # Una semilla no es el precio del cultivo fresco.
         demo_post "Demo semillas falla cerrado" \
             "Tengo que viajar a Temuco, ¿a cuánto está el kilo de semilla de tomates y papas?" \
@@ -284,6 +286,21 @@ if [ "$SMOKE_DEMO_REGRESSION" = "1" ] || [ "$SMOKE_FULL_DEMO_REGRESSION" = "1" ]
             "¿Y pasado mañana?" \
             "$follow_up_history" \
             '(.texto | ascii_downcase | contains("temuco")) and (.texto | ascii_downcase | contains("problema") | not)'
+    fi
+
+    if [ "$SMOKE_AGRONOMIC_REGRESSION" = "1" ]; then
+        # Una consulta cubierta debe salir del corpus citado y no del LLM.
+        demo_post "Demo regla agronómica cita INIA" \
+            "¿Qué hago si mis papas tienen manchas marrones en las hojas?" \
+            '[]' \
+            '(.texto | ascii_downcase | contains("tizón tardío")) and (.texto | ascii_downcase | contains("inia")) and (.texto | ascii_downcase | contains("fuente verificada"))'
+
+        # El calendario está acotado a cultivo y territorio con cobertura
+        # explícita; esta consulta evita que una fecha sea inventada.
+        demo_post "Demo calendario agrícola cita INIA" \
+            "¿Cuándo siembro trigo en Traiguén?" \
+            '[]' \
+            '(.texto | ascii_downcase | contains("15/04 a 30/05")) and (.texto | ascii_downcase | contains("inia")) and (.texto | ascii_downcase | contains("snapshot verificado"))'
     fi
 fi
 

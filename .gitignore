@@ -24,6 +24,11 @@ IDEA.md
 *.db
 *.sqlite
 *.sqlite3
+!/backend/app/data/demo.db
+backend/tests/qa-report-admin.md
+!landing/public/og-image.png
+!/backend/app/static/icon-192.png
+!/backend/app/static/icon-512.pngs
 
 # ── Audio temporal ───────────────────
 audio/
@@ -40,9 +45,6 @@ audio/
 *.gif
 *.ico
 *.webp
-!landing/public/og-image.png
-!/backend/app/static/icon-192.png
-!/backend/app/static/icon-512.png
 
 # ── Debug artifacts ─────────────────
 openwa-login

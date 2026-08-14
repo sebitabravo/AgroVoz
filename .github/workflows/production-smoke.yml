@@ -28,8 +28,10 @@ jobs:
       - name: Ejecutar smoke público
         env:
           SMOKE_FULL_DEMO_REGRESSION: '1'
+          SMOKE_AGRONOMIC_REGRESSION: '1'
           SMOKE_DATA_HUB: '1'
-          # La demo pública limita a cinco consultas por minuto.
+          # La demo pública limita a cinco consultas por minuto; la suite
+          # agronómica agrega dos casos citados al smoke completo.
           SMOKE_DELAY_SECONDS: '12'
           SMOKE_TIMEOUT_SECONDS: '20'
         run: ./scripts/smoke-test.sh "${{ vars.AGROVOZ_SMOKE_BASE_URL }}"

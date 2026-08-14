@@ -1,7 +1,7 @@
 # AgroVoz — Dependencias de desarrollo
-# Versiones exactas. Hereda de requirements.txt.
+# Versiones exactas. Hereda de requirements-docker.txt.
 
--r requirements.txt
+-r requirements-docker.txt
 
 pytest==9.1.1
 pytest-asyncio==1.4.0

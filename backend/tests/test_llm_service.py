@@ -26,6 +26,7 @@ from app.services.llm_service import (
     _GENERATION_TIMEOUT,
     _N_CTX,
     _N_THREADS,
+    _OPENROUTER_SYSTEM_PROMPT,
     _TOOLS_SECTION,
     FALLBACK_TEXT,
     LLM_UNAVAILABLE_TEXT,
@@ -71,12 +72,21 @@ class TestConstantes:
         assert "calculate_margin" in SYSTEM_PROMPT
         assert "search_corpus" in SYSTEM_PROMPT
         assert "register_expense" in SYSTEM_PROMPT
-        assert "NUNCA recomendaciones" in SYSTEM_PROMPT
+        assert "orientación agronómica citada" in SYSTEM_PROMPT
+        assert "get_regla_agronomica" in SYSTEM_PROMPT
+        assert "get_calendario_agricola" in SYSTEM_PROMPT
+        assert "NUNCA recomendaciones" not in SYSTEM_PROMPT
         assert "Crédito: deriva a INDAP, sin asesorar" in SYSTEM_PROMPT
         assert "NUNCA pidas datos personales" in SYSTEM_PROMPT
         assert "NUNCA inventes precios" in SYSTEM_PROMPT
         assert "Español chileno" in SYSTEM_PROMPT
         assert "pesos chilenos" in SYSTEM_PROMPT
+
+    def test_prompt_openrouter_permite_regla_citada_y_prohibe_inventar(self) -> None:
+        """El proveedor remoto no debe contradecir las tools de orientación."""
+        assert "orientación agronómica citada" in _OPENROUTER_SYSTEM_PROMPT
+        assert "NUNCA des recomendaciones agronomicas" not in _OPENROUTER_SYSTEM_PROMPT
+        assert "No inventes recomendaciones" in _OPENROUTER_SYSTEM_PROMPT
 
     def test_system_prompt_instruye_conservar_cita_fuente(self) -> None:
         """Issue #95: el system prompt comprimido debe instruir conservar la

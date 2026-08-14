@@ -253,7 +253,8 @@ _HISTORY_VOICE_RESPONSE_MAX_CHARS = 320
 # Sin tildes a proposito: Piper las verbaliza mal en algunas palabras.
 # Se mencionan las DOS vias de entrada (audio y texto) y se aclara de entrada
 # que entregamos datos y no recomendaciones, que es la limitacion de alcance
-# que el productor firma en el acuerdo de consentimiento (docs/piloto/06).
+# que el productor firmaba en el acuerdo de consentimiento del piloto de
+# Traiguen (retirado del repositorio junto con docs/piloto/).
 _WELCOME_TEXT = (
     "Hola, te doy la bienvenida a AgroVoz. "
     "Soy un asistente que te ayuda a consultar "

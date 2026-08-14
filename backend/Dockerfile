@@ -25,9 +25,11 @@ RUN apt-get update && \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Instalar dependencias Python (cache de capas: requirements.txt cambia poco)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Instalar dependencias Python (cache de capas: requirements-docker.txt cambia poco).
+# El nombre distingue este set completo (pipeline de voz + visión) del set
+# base que instala Vercel para el deploy slim de la demo (app/vercel_demo.py).
+COPY requirements-docker.txt .
+RUN pip install --no-cache-dir -r requirements-docker.txt
 
 # ── Etapa 2: Runtime ──────────────────────────────────────────────
 FROM python:3.12-slim AS runtime

@@ -163,49 +163,74 @@ const pageDescription = "Prueba AgroVoz desde el navegador. Escribe una pregunta
 
     bubble.appendChild(textDiv);
 
-    if (audioB64 && side === "received") {
+    if (side === "received" && text.trim()) {
       const audioContainer = document.createElement("div");
       audioContainer.className = "chat-audio-player";
+
+      const iconPlay =
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Escuchar';
+      const iconPause =
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Pausar';
 
       const playBtn = document.createElement("button");
       playBtn.className = "chat-audio-btn";
       playBtn.type = "button";
       playBtn.setAttribute("aria-label", "Reproducir audio de respuesta");
-      playBtn.innerHTML =
-        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Escuchar';
+      playBtn.innerHTML = iconPlay;
 
-      let audio: HTMLAudioElement | null = null;
-      playBtn.addEventListener("click", () => {
-        if (audio) {
-          if (audio.paused) {
-            audio.play();
-            playBtn.innerHTML =
-              '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Pausar';
-          } else {
-            audio.pause();
-            playBtn.innerHTML =
-              '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Escuchar';
+      if (audioB64) {
+        // Voz real de Piper TTS (deploy con pipeline completo: Docker/local).
+        let audio: HTMLAudioElement | null = null;
+        playBtn.addEventListener("click", () => {
+          if (audio) {
+            if (audio.paused) {
+              audio.play();
+              playBtn.innerHTML = iconPause;
+            } else {
+              audio.pause();
+              playBtn.innerHTML = iconPlay;
+            }
+            return;
           }
-          return;
-        }
-        const byteChars = atob(audioB64);
-        const byteNums = new Array(byteChars.length);
-        for (let i = 0; i < byteChars.length; i++) {
-          byteNums[i] = byteChars.charCodeAt(i);
-        }
-        const blob = new Blob([new Uint8Array(byteNums)], {
-          type: "audio/ogg; codecs=opus",
+          const byteChars = atob(audioB64);
+          const byteNums = new Array(byteChars.length);
+          for (let i = 0; i < byteChars.length; i++) {
+            byteNums[i] = byteChars.charCodeAt(i);
+          }
+          const blob = new Blob([new Uint8Array(byteNums)], {
+            type: "audio/ogg; codecs=opus",
+          });
+          audio = new Audio(URL.createObjectURL(blob));
+          audio.play();
+          playBtn.innerHTML = iconPause;
+          audio.addEventListener("ended", () => {
+            playBtn.innerHTML = iconPlay;
+            audio = null;
+          });
         });
-        audio = new Audio(URL.createObjectURL(blob));
-        audio.play();
-        playBtn.innerHTML =
-          '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Pausar';
-        audio.addEventListener("ended", () => {
-          playBtn.innerHTML =
-            '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Escuchar';
-          audio = null;
+      } else if ("speechSynthesis" in window) {
+        // Sin Piper (deploy slim en Vercel: sin modelos locales), la demo
+        // sigue hablando con el sintetizador del navegador. No es la voz de
+        // producción — la etiqueta del botón lo deja explícito.
+        playBtn.setAttribute("aria-label", "Reproducir con voz del navegador");
+        playBtn.addEventListener("click", () => {
+          if (window.speechSynthesis.speaking) {
+            window.speechSynthesis.cancel();
+            playBtn.innerHTML = iconPlay;
+            return;
+          }
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = "es-CL";
+          utterance.onend = () => {
+            playBtn.innerHTML = iconPlay;
+          };
+          playBtn.innerHTML = iconPause;
+          window.speechSynthesis.speak(utterance);
         });
-      });
+      } else {
+        playBtn.disabled = true;
+        playBtn.title = "Este navegador no soporta síntesis de voz";
+      }
 
       audioContainer.appendChild(playBtn);
       bubble.appendChild(audioContainer);

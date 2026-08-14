@@ -16,21 +16,35 @@ dependencies = [
     "alembic==1.18.5",
     "pydantic-settings==2.14.2",
     "httpx==0.28.1",
-    # Backend de transcripcion por defecto: CTranslate2 INT8, sin torch.
-    "faster-whisper==1.2.1",
-    "piper-tts==1.6.0",
-    "llama-cpp-python>=0.3.34",
     "jinja2>=3.1.6",
     "itsdangerous>=2.2.0",
     "psutil>=7.2.2",
     "python-multipart>=0.0.32",
     "scikit-learn>=1.6.0",
     "pyyaml>=6.0.2",
+    "numpy>=2.0.0",
+]
+
+# Pipeline de voz completo (Whisper/Qwen/Piper), visión ONNX y reportes PDF.
+# El deploy Docker/VPS instala este extra; el deploy slim de Vercel
+# (app/vercel_demo.py) NO lo instala — su bundle debe caber en 500 MB y
+# ninguno de estos paquetes se importa en ese camino (imports lazy, ver
+# whisper_service.py/tts_service.py/llm_service.py). scikit-learn y numpy
+# quedan en dependencies base porque el RAG (rag_service.py) los usa incluso
+# en el modo slim.
+[project.optional-dependencies]
+heavy = [
+    # Backend de transcripcion por defecto: CTranslate2 INT8, sin torch.
+    "faster-whisper==1.2.1",
+    "piper-tts==1.6.0",
+    "llama-cpp-python>=0.3.34",
     "reportlab>=5.0.0,<6",
     "pillow>=11.0.0",
-    "numpy>=2.0.0",
     "onnxruntime>=1.28.0",
 ]
+
+[tool.vercel]
+entrypoint = "app.vercel_demo:app"
 
 [dependency-groups]
 dev = [

@@ -1,6 +1,10 @@
 # Contribuir a AgroVoz
 
-Guía de workflow en GitHub para el equipo (Sebastián, Francisco, Matías).
+> AgroVoz es mantenido por una sola persona (Sebastián). La mecánica de issues, labels, branches
+> y PRs sigue siendo útil como disciplina de trabajo aunque no haya un segundo revisor — sirve de
+> checklist personal, no de proceso de equipo.
+
+Guía de workflow en GitHub para el proyecto.
 Las reglas del proyecto (stack, restricciones, convenciones de código) viven en
 [`AGENTS.md`](./AGENTS.md) — leerlo primero. Acá cubrimos solo la mecánica de GitHub:
 issues, GitHub Project (kanban), branches, pull requests y code review.
@@ -35,7 +39,7 @@ completar módulo + ambiente/fase + severidad/prioridad + responsable.
 | Campo | Bug | Feature | Para qué sirve |
 |---|---|---|---|
 | Módulo | ✅ | ✅ | Filtrar y enrutar (CODEOWNERS + label `mod:*`) |
-| Ambiente | ✅ | — | Dónde se reproduce (dev/VPS/Traiguén) |
+| Ambiente | ✅ | — | Dónde se reproduce (dev/local/Vercel) |
 | Área | ✅ | ✅ | A qué frente pertenece (`area:*`) |
 | Severidad | ✅ | — | Priorizar bugs (Bloqueante → Baja) |
 | Prioridad MoSCoW | — | ✅ | Must / Should / Could / Won't |
@@ -52,12 +56,12 @@ Set de labels: `mod:*` (módulo), `area:*` (frente de trabajo), `prio:*` (MoSCoW
 `chore`, `ci`, `security`.
 
 Regla: cada issue lleva **1 label de tipo** + **1 `mod:*`** + **1 `area:*`** + **1 `prio:*`** (si aplica)
-+ **1 `status:*`** (gestionado por el tech lead).
++ **1 `status:*`**.
 
 > **Sobre las fases 00–06.** Las etiquetas `fase:*` correspondían al plan de construcción original,
 > que se completó entre junio y julio de 2026. El trabajo ya no se organiza por fases: es mantención
 > y evolución de un producto en operación. Los issues históricos conservan su `fase:*`; los nuevos
-> usan `area:*` (piloto, negocio, pmbok, legal, producto, infra).
+> usan `area:*` (negocio, pmbok, legal, producto, infra).
 
 ### Ciclo de vida del issue (issue-first)
 
@@ -66,7 +70,7 @@ Created → status:needs-review → status:approved → abrir PR (Closes #N)
                               → status:rejected → cerrado, sin PR
 ```
 
-El tech lead (Sebastián) aprueba los issues. El workflow `pr-check.yml` **bloquea**
+Sebastián aprueba los issues antes de abrir PR. El workflow `pr-check.yml` **bloquea**
 el merge de cualquier PR cuyo issue no tenga `status:approved`, que no tenga
 `Closes #N`, o que no tenga label `mod:*`.
 
@@ -97,15 +101,15 @@ Mapean 1:1 con los dropdowns de las plantillas, así no hay que re-escribir dato
 |---|---|---|
 | Status | Single select | Backlog, Todo, In Progress, In Review, Done |
 | Módulo | Single select | backend, voz, openwa, landing, admin, infra, datos |
-| Área | Single select | piloto, negocio, pmbok, legal, producto, infra |
+| Área | Single select | negocio, pmbok, legal, producto, infra |
 | Prioridad | Single select | Must, Should, Could, Won't |
 | Severidad | Single select | Bloqueante, Alta, Media, Baja |
-| Responsable | Iteration/Assignee | Sebastián, Francisco, Matías |
+| Responsable | Iteration/Assignee | Sebastián |
 
 ### Vistas recomendadas
 
 - **Board por Status** (kanban general): agrupado por Status, ordenado por Prioridad.
-- **Board por Área**: agrupado por Área → ve el avance de cada frente (piloto, negocio, PMBOK, legal).
+- **Board por Área**: agrupado por Área → ve el avance de cada frente (negocio, PMBOK, legal).
 - **Board por Responsable**: agrupado por Responsable → quién tiene qué.
 
 ### Automatización (Settings → Workflows / Automation)
@@ -213,7 +217,7 @@ Un issue se considera done cuando:
 3. `make test-backend` pasa (cobertura no baja).
 4. Bug fix tiene test de regresión que falla sin el fix.
 5. No hay huella de IA en commits.
-6. PR aprobado por el codeowner del módulo (CODEOWNERS) + mergeado con squash.
+6. Autorevisado contra la checklist de la sección 7 + mergeado con squash.
 
 ---
 
@@ -221,19 +225,8 @@ Un issue se considera done cuando:
 
 ### Quién revisa
 
-GitHub usa [`.github/CODEOWNERS`](./.github/CODEOWNERS) para auto-requestar el
-reviewer según la ruta tocada:
-
-| Ruta | Codeowner |
-|---|---|
-| `/backend/` (api, services, core, models) | Sebastián |
-| `/landing/` | Francisco, Matías |
-| `/backend/app/admin/` | Sebastián, Francisco |
-| `/.github/`, `/scripts/`, compose | Sebastián |
-| `/docs/` | Matías |
-| Default (todo lo demás) | Sebastián (tech lead) |
-
-> ⚠️ Reemplazar los handles en `CODEOWNERS` por los usernames reales de GitHub.
+Un solo mantenedor: Sebastián autorevisa cada PR contra la checklist de abajo antes de hacer
+squash and merge. No hay mecánica de CODEOWNERS/reviewer automático — no aplica con una persona.
 
 ### Qué mirar al revisar
 
@@ -256,7 +249,7 @@ reviewer según la ruta tocada:
 | 🔴 Crítico | Secret expuesto, SQLi, XSS, bypass de auth | Bloquea el merge |
 | 🟠 Alto | Bug funcional, validación faltante, test ausente | Solicitar cambios |
 | 🟡 Medio | Code smell, dependencia vulnerable | Resolver esta iteración |
-| 🟢 Bajo | Estilo,命名, nitpick | Sugerencia, no bloqueante |
+| 🟢 Bajo | Estilo, nombrado, nitpick | Sugerencia, no bloqueante |
 
 ### Veredicto
 

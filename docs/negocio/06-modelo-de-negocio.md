@@ -2,6 +2,9 @@
 
 > Parte del plan de negocio de AgroVoz. Índice en [`docs/negocio/README.md`](./README.md).
 > Área PMBOK relacionada: Costos (fuentes de ingreso)
+>
+> **Actualización 2026-08-14:** el piloto del Crea INACAP mencionado abajo no continuó — el
+> proyecto no sigue en ese desafío.
 
 ---
 

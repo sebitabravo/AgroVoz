@@ -1,11 +1,15 @@
 # Plan de Negocio — AgroVoz
 ## Tu voz tiene el precio justo
 
-**Equipo:** Sebastián Bravo · Francisco Fernández · Matías Atuán
+**Equipo:** Sebastián Bravo
 **Institución:** INACAP Temuco, Ingeniería en Informática
 **Origen:** Desafío Crea INACAP Estudiantes 2026
 **Redacción original:** junio 2026
 **Última revisión de fondo:** 26 de julio de 2026
+
+> **Actualización 2026-08-14:** el proyecto no continuó en el Desafío Crea INACAP 2026 y es
+> mantenido por una sola persona. Este plan de negocio queda como el registro de lo diseñado, no
+> como un piloto, un equipo ni un financiamiento vigentes.
 
 Documento segmentado por partes. Reemplaza al antiguo `AgroVoz_Informe_Completo.md`, que era un
 archivo único de ~650 líneas en la raíz del repositorio.
@@ -39,7 +43,6 @@ Cada parte es un archivo independiente por dos razones:
 
 Documentos relacionados fuera de esta carpeta:
 
-- [`docs/piloto/`](../piloto/) — plan y kit operativo del piloto en Traiguén
 - [`docs/legal/`](../legal/) — política de privacidad y aviso de responsabilidad
 - [`docs/pmbok/`](../pmbok/) — documentación de gestión de proyecto
 - [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md) — arquitectura técnica en detalle

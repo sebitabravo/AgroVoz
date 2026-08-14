@@ -11,6 +11,12 @@ evita Whisper y TTS. El problema de producto no es que el agricultor esté
 “atrasado”, sino que la información oficial está fragmentada y llega por
 canales poco accesibles.
 
+> **Qué corre dónde hoy.** El diagrama y flujo de abajo describen la
+> arquitectura completa (WhatsApp, Whisper, LLM local, Piper), demostrable
+> solo en local/Docker — no hay VPS ni NAS propios. El único deploy público
+> vigente es un subconjunto slim en Vercel (fast-path determinista +
+> OpenRouter, sin modelos locales ni WhatsApp): ver decisión 34 más abajo.
+
 ## Diagrama de arquitectura
 
 ```
@@ -66,6 +72,7 @@ del piso sigue pendiente en [#215][i215].
 7. Texto → LLM con Tool Calling:
    - Si pregunta por precio → query SQLite ODEPA
    - Si pregunta por clima → GET OpenMeteo API
+   - Si pregunta por una regla agronómica o calendario cubierto → fast path determinista contra el corpus INIA, con fuente y fecha
    - Si busca una oficina o cooperativa → query SQLite `directorio_agricola`
    - Si busca conocimiento, programas o capacidades → búsqueda local del Data Hub con procedencia
    - Whitelist de 19 tools: `get_price`, `get_price_spread`, `get_price_history`,
@@ -77,7 +84,9 @@ del piso sigue pendiente en [#215][i215].
      de capacidades del ecosistema usa un fast path determinista y no agrega otra
      tool al prompt. Si alucina una tool fuera de la whitelist → fallback.
 8. Fast-path determinista o LLM genera respuesta textual (datos crudos de precio/clima,
-   hechos documentales vigentes o reglas citadas de fuente oficial)
+   hechos documentales vigentes o reglas citadas de fuente oficial). Las reglas y
+   calendarios no pasan por generación libre: si el corpus no calza, está vencido
+   o `AGRONOMIC_RULES_ENABLED` está apagado, la respuesta falla cerrado.
 9. Solo audio: Piper TTS convierte texto → audio `.wav`
 10. Solo audio: ffmpeg convierte `.wav` → `.ogg`
 11. FastAPI envía texto o audio por Open-WA y registra entrega efectiva
@@ -113,6 +122,14 @@ el catálogo de archivos del Censo: ninguno descarga series, capas GIS o bases
 masivas durante una pregunta o el arranque. Pulso Agroclimático y CampoClick
 siguen `not_connected` hasta tener un contrato reproducible/autorizado; una URL
 en el catálogo no activa una integración ni una feature gate.
+
+Las recomendaciones agronómicas usan una ruta más estricta que el RAG general:
+`agronomic_rules_service.py` y `agricultural_calendar_service.py` cargan
+snapshots INIA versionados, validan vigencia y construyen la respuesta con
+fuente/fecha. El LLM solo puede verbalizar el resultado de esas tools; no puede
+crear tratamientos, dosis ni diagnósticos personalizados. El default de la
+clase `Settings` sigue siendo cerrado, mientras los Compose demo/prod entregan
+`AGRONOMIC_RULES_ENABLED=true` salvo override explícito.
 
 Las tablas `data_sources`/`data_facts` son el registro operativo y auditable de
 la carga. Para no sumar una consulta SQLite al camino crítico, el RAG lee el
@@ -159,8 +176,11 @@ Siete tools se mantienen fuera del prompt cuando su feature gate está apagado
 (`AGRONOMIC_RULES_ENABLED`), `get_link_resumen` (`FARMER_PANEL_ENABLED`) y
 `get_reporte_pdf` (`PDF_REPORTS_ENABLED`). Este inventario refleja
 `WHITELIST_TOOLS` y `_GATED_TOOLS` de `backend/app/services/llm_service.py`;
-los nombres y defaults se deben sincronizar con esa fuente, sin inferir que
-una tool está habilitada en producción.
+los nombres y defaults se deben sincronizar con esa fuente. Para agronomía,
+`Settings` parte en `false` como fail-closed, pero los Compose demo/prod lo
+habilitan explícitamente para que la IA entregue las reglas versionadas del
+piloto; eso no habilita recomendaciones libres ni permite inferir cobertura
+territorial fuera del corpus.
 
 ### `app/services/` — Capa de negocio
 - `whisper_service.py` — transcripción de audio (descarga, ffmpeg, Whisper)
@@ -169,7 +189,8 @@ una tool está habilitada en producción.
 - `odepa_service.py` — consultas a SQLite ODEPA, sync diario y detector determinista de variaciones
 - `weather_service.py` — consultas a OpenMeteo API (forecast + histórico)
 - `location_service.py` — persistencia de coordenadas compartidas, seudonimizadas por `phone_hash`
-- `pipeline_service.py` — orquestador del pipeline end-to-end
+- `pipeline_service.py` — orquestador del pipeline end-to-end y fast paths
+  deterministas de calendario/reglas agronómicas
 - `openwa_service.py` — cliente HTTP para Open-WA API (enviar/recibir mensajes, webhooks)
 - `rag_service.py` — retrieval de documentos oficiales con TF-IDF + citations
 - `data_hub_service.py` — catálogo de fuentes, snapshots, hechos normalizados, frescura y estado operativo
@@ -237,15 +258,15 @@ una tool está habilitada en producción.
 -- Precios ODEPA (cargado desde CSV diario)
 CREATE TABLE odepa_prices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    producto TEXT NOT NULL,
-    variedad TEXT,
-    mercado TEXT NOT NULL,
+    producto VARCHAR(100) NOT NULL,
+    mercado VARCHAR(200) NOT NULL,
+    precio_kg NUMERIC(10, 2) NOT NULL,  -- precio en la unidad que reporta ODEPA, no siempre kg
+    unidad VARCHAR(100) NOT NULL DEFAULT 'kg',
     fecha DATE NOT NULL,
-    precio_min REAL,
-    precio_max REAL,
-    precio_promedio REAL,
-    unidad TEXT NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    fuente VARCHAR(100) NOT NULL DEFAULT 'ODEPA',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (producto, mercado, fecha)
 );
 
 -- Registro de consultas (métricas)
@@ -471,12 +492,11 @@ CREATE INDEX idx_data_facts_product ON data_facts(product);
     red pública. Un DID/SIP chileno agrega costo recurrente y requiere
     autorización operativa/legal; por eso el despliegue PSTN queda bloqueado
     hasta contar con presupuesto y validación E2E. No se usará Twilio porque
-    contradice el stack open-source y agrega una API paga. Evidencia y decisión:
-    `docs/spike-ivr.md`.
+    contradice el stack open-source y agrega una API paga.
 
 20. **WhatsApp: seguir con Open-WA, no migrar a Kapso (#194).** Se evaluó
     Kapso, WaliChat y Wassenger como APIs WhatsApp que no requieren mantener
-    una instancia de browser (ver `docs/spike-kapso.md`). Todas rompen el
+    una instancia de browser. Todas rompen el
     hard constraint "sin APIs pagas externas" (USD 20-50/mes por número).
     **Decisión: seguir con Open-WA** (gratuito, self-hosted). Reconsiderar
     Kapso solo si se cumplen 3 condiciones: (a) el piloto Traiguén muestra
@@ -532,8 +552,7 @@ CREATE INDEX idx_data_facts_product ON data_facts(product);
     WhatsApp: el webhook recibe una grabación ya terminada y la respuesta es otro
     archivo completo. Esas técnicas se reconsideran solo en un canal síncrono,
     como IVR. `faster-whisper` o reemplazar Piper exige primero benchmark de WER,
-    CPU, RAM, latencia y calidad sobre 1 vCPU/4 GB. Evidencia:
-    `docs/humanizacion-voz.md`.
+    CPU, RAM, latencia y calidad sobre 1 vCPU/4 GB.
 
 26. **Registro de gastos fail-closed (#34/#170).** La tool `register_expense`
     persiste en la tabla `expenses`: seudonimizada por `phone_hash`, sin
@@ -636,3 +655,61 @@ CREATE INDEX idx_data_facts_product ON data_facts(product);
     Las fuentes sin adaptador estable fallan cerrado y se muestran como
     `not_connected`. Registrar una fuente no activa panel, reglas, reportes ni
     otros gates sensibles.
+
+34. **Deploy público free en Vercel con demo slim, sin infraestructura propia.**
+    La topología de la decisión 12 (NAS Proxmox + Dokploy + VPS Hostinger con
+    Pangolin) dejó de existir tras la baja
+    del piloto Crea INACAP: no hay VPS ni NAS pagados. El proyecto pasa a ser
+    pieza de portfolio y necesita un deploy público gratis donde la landing y
+    su demo funcionen siempre, sin depender de infraestructura propia.
+
+    La solución desacopla la demo pública del pipeline pesado en vez de
+    intentar correrlo en un free tier: Whisper + Qwen + Piper pesan ~2,5 GB y
+    exceden el límite de 500 MB de bundle Python de Vercel Hobby. Dos
+    proyectos Vercel sobre el mismo repo:
+    - `agrovoz-landing` (Root Directory `landing`): el sitio Astro estático,
+      sin cambios de arquitectura.
+    - `agrovoz-api` (Root Directory `backend`): entrypoint nuevo
+      `app/vercel_demo.py`, que monta SOLO `demo`, `prices`, `weather`,
+      `data_hub` y un `/api/v1/health` slim (sin chequeo de ffmpeg). No monta
+      webhooks de WhatsApp, `/admin`, panel del agricultor, consultor
+      agrónomo, visión ni el router MCP — ninguno tiene sentido sin Open-WA,
+      un dashboard con sesión o modelos locales.
+
+    La demo pública casi no necesita LLM: el fast-path determinista de
+    `pipeline_service.py` (`_puede_usar_fast_path`) ya resuelve precio ODEPA y
+    clima OpenMeteo sin tocar ningún modelo, y cubre la mayoría de los 25
+    casos de `backend/tests/fixtures/demo-regression-cases.json`. Lo que
+    sobra usa OpenRouter (`LLM_PRIMARY_PROVIDER=openrouter`, decisión 32); sin
+    Qwen local, si OpenRouter falla la respuesta es el texto seguro de
+    `LLM_UNAVAILABLE_TEXT`, nunca un dato inventado.
+
+    Cambios estructurales que este modo exige, no solo el entrypoint nuevo:
+    - `pyproject.toml` mueve `llama-cpp-python`, `faster-whisper`,
+      `piper-tts`, `onnxruntime`, `pillow`, `reportlab` a
+      `[project.optional-dependencies] heavy`. El Dockerfile y CI instalan ese
+      extra (`uv sync --extra heavy --dev`); Vercel instala solo el set base.
+    - `config.py` protegía la creación de `backend/data/` con un
+      `mkdir(parents=True, exist_ok=True)` sin manejo de errores a nivel de
+      módulo — falla el import completo en el filesystem de solo lectura de
+      Vercel. Se envolvió en `contextlib.suppress(OSError)`: si
+      `DATABASE_URL` llega sobreescrita por entorno (el caso de Vercel), ese
+      directorio local nunca se usa.
+    - `backend/scripts/build_demo_db.py` genera `app/data/demo.db`: aplica
+      las migraciones (mismo schema que producción) y copia SOLO
+      `odepa_prices` (ventana de 90 días), `directorio_agricola`,
+      `data_sources` y `data_facts` — nunca `consultations`, `user_prefs`,
+      `expenses` ni `consultation_history`. `app/vercel_demo.py` copia ese
+      snapshot de solo lectura a `/tmp` (única ruta escribible en Vercel)
+      antes de que el engine SQLAlchemy abra la conexión.
+    - Sin Piper ni ffmpeg disponibles, `landing/src/pages/demo.astro`
+      reproduce la respuesta con `speechSynthesis` del navegador cuando
+      `audio_base64` llega vacío; el botón lo etiqueta como voz del
+      navegador, no como Piper, para no simular una capacidad que no corre
+      ahí.
+
+    Fuera de alcance del deploy free, documentado y no simulado: WhatsApp vía
+    Open-WA (necesita sesión QR persistente), el pipeline de voz real
+    (Whisper/Qwen/Piper), el dashboard admin, y los jobs de cron in-process
+    (sync ODEPA diario, purgas TTL) — el refresco de `demo.db` se hace vía
+    GitHub Actions, no vía scheduler propio.

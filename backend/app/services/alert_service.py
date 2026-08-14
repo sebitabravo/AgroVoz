@@ -585,7 +585,8 @@ def _tiene_consentimiento_de_alertas(phone_hash: str) -> bool:
 
     Una alerta la inicia AgroVoz sin que el productor pregunte, así que necesita
     su propia base de licitud, distinta de la consulta que él mismo dispara. El
-    opt-in se recoge en la sección 7.4 del Acuerdo de Uso (docs/piloto/06).
+    opt-in se recogía en la sección 7.4 del Acuerdo de Uso del piloto de Traiguén,
+    retirado del repositorio junto con `docs/piloto/` al perder su respaldo institucional.
 
     Falla cerrado: si la consulta a la DB revienta, se asume que NO hay
     consentimiento. Es preferible no enviar una alerta a enviarla sin permiso.

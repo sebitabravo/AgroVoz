@@ -167,6 +167,14 @@ async def _generate_demo_response(
                 return semilla, "precio"
         if extracted.consulta_tipo == "desconocido":
             return FALLBACK_TEXT, "desconocido"
+        if extracted.consulta_tipo == "agronomica":
+            # La demo debe usar exactamente el fast path citado de WhatsApp:
+            # el LLM no puede completar una regla o calendario que no exista.
+            response_text, intent = await AgroVozPipeline._generate_response(
+                resolved_query,
+                _DEMO_CHAT_ID_HASH,
+            )
+            return response_text, intent
         if extracted.consulta_tipo == "precio" and extracted.producto is None:
             return "No tengo datos ODEPA para ese producto. ¿Podrías consultar otro producto?", "precio"
         if AgroVozPipeline._puede_usar_fast_path(resolved_query, extracted, None):

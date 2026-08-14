@@ -9,7 +9,7 @@
         dev-backend dev-frontend \
         db-init db-migrate db-seed db-shell db-reset \
         sync-odepa sync-data-hub tunnel \
-        smoke smoke-demo smoke-full build-landing preview-landing
+        smoke smoke-demo smoke-agronomic smoke-full build-landing preview-landing
 
 # ─────────────────────────────────────────────
 # Ayuda
@@ -29,7 +29,7 @@ setup-env: ## Crear .env desde .env.example
 
 setup-dev: setup-env ## Setup completo de desarrollo
 	bun install --cwd landing
-	cd backend && uv sync --dev
+	cd backend && uv sync --extra heavy --dev
 	@echo "Setup completo."
 
 setup-models: ## Descargar modelos de IA (Whisper, LLM, Piper)
@@ -79,6 +79,9 @@ smoke: ## Ejecutar smoke de salud, trazabilidad y headers
 
 smoke-demo: ## Ejecutar regresiones críticas de la demo (cinco consultas)
 	SMOKE_DEMO_REGRESSION=1 ./scripts/smoke-test.sh "$(API_URL)"
+
+smoke-agronomic: ## Verificar reglas y calendario agronómico citados (dos consultas)
+	SMOKE_AGRONOMIC_REGRESSION=1 ./scripts/smoke-test.sh "$(API_URL)"
 
 smoke-full: ## Ejecutar la suite pública completa de 25 consultas de demo
 	SMOKE_FULL_DEMO_REGRESSION=1 SMOKE_DATA_HUB=1 ./scripts/smoke-test.sh "$(API_URL)"

@@ -29,6 +29,9 @@ services:
       # La demo web queda apagada por defecto en desarrollo para no abrir un
       # endpoint costoso sin consentimiento explícito en .env.
       - DEMO_ENDPOINT_ENABLED=${DEMO_ENDPOINT_ENABLED:-false}
+      # Orientación agronómica determinista desde reglas INIA versionadas.
+      # El servicio mantiene el default cerrado fuera de Compose.
+      - AGRONOMIC_RULES_ENABLED=${AGRONOMIC_RULES_ENABLED:-true}
       # OpenRouter es el primer proveedor global cuando hay key; Qwen queda
       # como segundo. La API key se lee desde .env; nunca se escribe aquí.
       - LLM_PRIMARY_PROVIDER=${LLM_PRIMARY_PROVIDER:-openrouter}

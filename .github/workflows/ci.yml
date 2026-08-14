@@ -62,7 +62,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.gate.outputs.skip != 'true'
-        run: uv sync --dev
+        run: uv sync --extra heavy --dev
 
       - name: Ruff (lint + format check)
         if: steps.gate.outputs.skip != 'true'
@@ -108,7 +108,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.gate.outputs.skip != 'true'
-        run: uv sync --dev
+        run: uv sync --extra heavy --dev
 
       - name: pytest
         if: steps.gate.outputs.skip != 'true'
@@ -165,7 +165,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.gate.outputs.skip != 'true'
-        run: uv sync --dev
+        run: uv sync --extra heavy --dev
 
       - name: pytest (E2E)
         if: steps.gate.outputs.skip != 'true'

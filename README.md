@@ -1,6 +1,12 @@
 # AgroVoz — Tu voz tiene el precio justo
 
-Asistente de IA que responde por WhatsApp, diseñado para que pequeños agricultores chilenos accedan a precios agrícolas, clima y orientación pública sin instalar aplicaciones.
+> **Estado del proyecto:** demo de portfolio, mantenida por una sola persona
+> (verificable con `git shortlog -sne --all`). El piloto Crea INACAP y su
+> infraestructura (NAS + VPS) ya no están disponibles; el deploy vigente es
+> gratuito en Vercel con un backend slim (fast-path + OpenRouter, sin
+> Whisper/Qwen/Piper). Detalle completo en `docs/ARCHITECTURE.md` (decisión 34).
+
+Asistente de IA que responde por WhatsApp, diseñado para que pequeños agricultores chilenos accedan a precios agrícolas, clima y orientación agronómica acotada por reglas citadas, sin instalar aplicaciones.
 
 El productor manda un audio y recibe una respuesta hablada con precios ODEPA sincronizados diariamente a las 06:00 y pronósticos de Open-Meteo actualizados. También puede escribir: el camino de texto salta Whisper y Piper, así que responde en ~100 ms contra los ~11 s del de voz. No siempre se puede mandar audio —lugar ruidoso, una reunión, mala señal—, así que el texto es una vía de entrada de primera clase, no un fallback.
 
@@ -21,6 +27,10 @@ fuentes y las entrega por conversación:
   conectada no se presenta como dato actual; AgroVoz lo declara.
 - **Consulta conversacional:** el RAG local busca INIA/INDAP/directorio y los
   servicios estructurados mantienen prioridad para ODEPA y clima.
+- **Orientación agronómica segura:** la IA puede responder síntomas y
+  calendarios cubiertos por el corpus INIA versionado; cada respuesta conserva
+  fuente, fecha y el límite de que no es un diagnóstico personalizado. Si no
+  existe una regla vigente, no improvisa.
 
 La versión actual conecta ODEPA, Open-Meteo, el corpus verificado INIA, la Red
 Agrometeorológica INIA, programas INDAP, directorios agrícolas, un verificador
@@ -75,8 +85,8 @@ AgroVoz/
 ├── Makefile               ← Comandos de desarrollo
 ├── backend/               ← FastAPI + servicios
 ├── landing/               ← Astro static site
-├── docs/                  ← Arquitectura, piloto, legal
-├── skills/                ← Guías de trabajo del equipo
+├── docs/                  ← Arquitectura, negocio, legal
+├── skills/                ← Guías de trabajo
 └── scripts/               ← Utilidades
 ```
 
@@ -89,7 +99,6 @@ AgroVoz/
 - `docs/DEV-GUIDE.md` — guía de desarrollo y setup local
 - `docs/negocio/` — plan de negocio segmentado en 11 partes
 - `docs/pmbok/` — documentación de gestión de proyecto para INACAP
-- `docs/piloto/` — plan y kit operativo del piloto en Traiguén
 - `docs/legal/` — política de privacidad y aviso de responsabilidad
 - `docs/historico/` — la postulación al Crea tal como se envió, congelada
 - `skills/` — cómo se trabaja acá (issues, branches, commits, tests, docs)
@@ -107,4 +116,4 @@ Ver `LICENSE` para el texto legal completo.
 
 ---
 
-Nacido como proyecto estudiantil para el Desafío Crea INACAP 2026 (INACAP Temuco, Ingeniería en Informática). Hoy es un producto desplegado, en preparación para el piloto de validación con productores reales en Traiguén.
+Nacido como proyecto estudiantil para el Desafío Crea INACAP 2026 (INACAP Temuco, Ingeniería en Informática), que no continuó. Hoy es un proyecto de portfolio mantenido por una sola persona, con una demo pública gratuita funcional y sin piloto de campo en curso.

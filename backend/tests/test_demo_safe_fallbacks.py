@@ -49,6 +49,32 @@ class TestFallbackSeguro:
         assert response == FALLBACK_TEXT
         assert intent == "desconocido"
 
+    async def test_demo_agronomia_usa_regla_citada_sin_llm(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """La demo no puede reemplazar una regla INIA por un fallback del LLM."""
+        from app.services.demo_service import _generate_demo_response
+
+        monkeypatch.setattr("app.core.config.settings.agronomic_rules_enabled", True)
+
+        async def provider_no_permitido(*_args: object, **_kwargs: object) -> tuple[str, str]:
+            raise AssertionError("una recomendación cubierta no debe llegar al proveedor")
+
+        monkeypatch.setattr(
+            "app.services.demo_service.answer_with_provider_order",
+            provider_no_permitido,
+        )
+
+        response, intent = await _generate_demo_response(
+            "¿Qué hago si mis papas tienen manchas marrones en las hojas?"
+        )
+
+        assert intent == "agronomica"
+        assert "tizón tardío" in response
+        assert "INIA" in response
+        assert "Fuente verificada" in response
+
 
 class TestSemillasYPlurales:
     """Semillas no se confunden con el precio ODEPA del producto fresco."""
