@@ -40,6 +40,7 @@ describe("privacidad pública", () => {
 
     expect(headerSource.match(/function setNav/g)).toHaveLength(1);
     expect(headerSource).toContain("navToggle");
+    expect(headerSource).toContain('toggleAttribute("inert", mobileClosed)');
     expect(indexSource).not.toContain("function setNav");
     expect(indexSource).not.toContain("navToggle");
   });

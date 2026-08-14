@@ -60,11 +60,18 @@
       "aria-label",
       open ? "Cerrar menú de navegación" : "Abrir menú de navegación",
     );
-    nav?.setAttribute(
-      "aria-hidden",
-      !open && window.innerWidth <= 920 ? "true" : "false",
-    );
+    const mobileClosed = !open && window.innerWidth <= 920;
+    nav?.setAttribute("aria-hidden", mobileClosed ? "true" : "false");
+    // aria-hidden no quita el foco de los enlaces descendientes. `inert`
+    // evita que el teclado entre a un drawer cerrado en mobile.
+    nav?.toggleAttribute("inert", mobileClosed);
     document.body.style.overflow = open && window.innerWidth <= 920 ? "hidden" : "";
+
+    // Si Escape o el backdrop cierran el drawer desde un enlace, el foco no
+    // debe quedar dentro de un elemento que acaba de quedar inert.
+    if (mobileClosed && nav?.contains(document.activeElement)) {
+      navToggle.focus();
+    }
   }
 
   setNav(false);
