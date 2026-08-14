@@ -9,11 +9,11 @@
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Arquitectura, esquema de base de datos, decisiones técnicas |
 | [`DEV-GUIDE.md`](./DEV-GUIDE.md) | Guía de desarrollo y setup local |
 
-El Data Hub, el orden global de proveedores LLM y los fallbacks seguros de la demo se diseñaron
-originalmente vía specs SDD (`specs/agrovoz-data-ecosystem/`, `specs/global-llm-provider-order/`,
-`specs/demo-safe-fallbacks/`); esos tres ya están completos y en producción, así que sus
-carpetas SDD se retiraron. `docs/ARCHITECTURE.md` (decisiones 32-34) es la referencia vigente.
-`specs/ai-agronomic-guidance/` sigue activa.
+El Data Hub, el orden global de proveedores LLM, los fallbacks seguros de la demo y la orientación
+agronómica citada se diseñaron originalmente vía specs SDD (`specs/agrovoz-data-ecosystem/`,
+`specs/global-llm-provider-order/`, `specs/demo-safe-fallbacks/`, `specs/ai-agronomic-guidance/`);
+las cuatro ya están completas y en producción, así que sus carpetas SDD se retiraron.
+`docs/ARCHITECTURE.md` (decisiones 27, 32-34) es la referencia vigente.
 
 ## Negocio
 
