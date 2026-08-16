@@ -1,6 +1,13 @@
 .coverage
-# Anclado a la raiz de backend/: solo modelos IA descargados.
-# Sin anclar ignoraba tambien app/models/ (codigo SQLAlchemy).
-/models/
+# Anclado a la raíz de backend/: modelos pesados, salvo el modelo de visión
+# versionado para que Docker y el endpoint local sean reproducibles.
+/models/*
+!/models/checksums.sha256
+!/models/vision/
+!/models/vision/README.md
+!/models/vision/plant_disease_mobilenetv3.onnx
+!/models/vision/model.onnx.data
+!/models/vision/plant_disease_labels.json
 *.gguf
+/models/*.onnx
 /data/

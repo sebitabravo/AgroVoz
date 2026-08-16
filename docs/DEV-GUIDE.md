@@ -1,5 +1,8 @@
 # AgroVoz — Guía de Desarrollo
 
+Smoke E2E completo de WhatsApp: [`E2E-WHATSAPP.md`](./E2E-WHATSAPP.md).
+
+
 Setup completo del entorno de desarrollo local. Levanta backend FastAPI + Open-WA
 (gateway WhatsApp) con Docker Compose.
 

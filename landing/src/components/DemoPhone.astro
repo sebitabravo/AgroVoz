@@ -1,12 +1,11 @@
 ---
-// Mockup de telefono con conversacion de WhatsApp (#demo).
+// Vista previa de telefono con conversacion de WhatsApp (#demo).
 // Los mensajes aparecen en cascada via JS cuando entra en viewport.
 //
-// IMPORTANTE: las respuestas de abajo son las que entrega el sistema REAL,
-// verificadas ejecutando las tools contra la base ODEPA y OpenMeteo. Si se
-// cambia el formato de salida de get_price o get_pronostico, hay que
-// actualizarlas aca. Un demo que promete algo que el producto no hace se cae
-// en la primera prueba de un evaluador.
+// IMPORTANTE: esta vista es ilustrativa y no sustituye la demo interactiva.
+// El precio de la papa y el estado del backend se resuelven contra la API
+// real al cargar (script abajo); si el backend no responde, quedan los
+// textos de respaldo sin fecha. /demo consulta el backend en cada interacción.
 //
 // Dos cosas que el sistema real SIEMPRE hace y el demo debe reflejar:
 //   1. Cita la fuente ("segun ODEPA" / "segun OpenMeteo"). Es el diferencial
@@ -23,7 +22,7 @@ const messages = [
   {
     side: "received",
     time: "0:08",
-    text: "Papa está a 1.200 pesos el kilo en Lo Valledor, según ODEPA, precio del 20/06/2026.",
+    text: "Papa según ODEPA, con el precio más reciente disponible.",
     i18n: "demo.m2",
   },
   {
@@ -48,7 +47,7 @@ const messages = [
       <div class="demo-phone__avatar" aria-hidden="true">A</div>
       <div>
         <div class="demo-phone__name">AgroVoz</div>
-        <div class="demo-phone__status" data-i18n="demo.status">en línea</div>
+        <div class="demo-phone__status">conectando…</div>
       </div>
     </div>
     <div class="demo-phone__chat">
@@ -63,3 +62,84 @@ const messages = [
     </div>
   </div>
 </div>
+
+<script>
+  /**
+   * Base del backend — mismo patrón que la demo interactiva (demo.astro):
+   * same-origin vía proxy Vercel en producción, localhost:8000 en desarrollo.
+   */
+  function apiBase(): string {
+    // Los dominios *.vercel.app usan el proxy same-origin de Vercel.
+    if (window.location.hostname.endsWith(".vercel.app")) {
+      return window.location.origin;
+    }
+
+    const configurada = import.meta.env.PUBLIC_API_URL;
+    if (configurada) return String(configurada).replace(/\/$/, "");
+
+    const esDesarrolloLocal =
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1";
+    if (esDesarrolloLocal && window.location.port !== "8000") {
+      return `${window.location.protocol}//${window.location.hostname}:8000`;
+    }
+    return window.location.origin;
+  }
+
+  const statusEl = document.querySelector<HTMLElement>(".demo-phone__status");
+  const langEs = () => document.documentElement.lang !== "en";
+  const statusLabels = () =>
+    langEs()
+      ? { online: "en línea", offline: "sin conexión" }
+      : { online: "online", offline: "offline" };
+
+  // Ultimo resultado de /health; la label se re-resuelve al momento de pintar
+  // para que el toggle de idioma (index.astro) la retraduzca sin re-consultar.
+  let healthResult: "online" | "offline" | null = null;
+  function applyStatusLabel() {
+    if (healthResult && statusEl) statusEl.textContent = statusLabels()[healthResult];
+  }
+
+  // El "en línea" estático podía mentir: se resuelve contra /health al cargar.
+  async function checkHealth() {
+    try {
+      const resp = await fetch(apiBase() + "/api/v1/health");
+      healthResult = resp.ok ? "online" : "offline";
+    } catch {
+      healthResult = "offline";
+    }
+    applyStatusLabel();
+  }
+  void checkHealth();
+
+  new MutationObserver(applyStatusLabel).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["lang"],
+  });
+
+  // El precio del mensaje sale con la fecha real del dato ODEPA, no con una
+  // fecha fija del mockup. Si el backend no responde, queda el texto de
+  // respaldo sin fecha.
+  const priceEl = document.querySelector<HTMLElement>('[data-i18n="demo.m2"]');
+  async function refreshPrice() {
+    try {
+      const resp = await fetch(apiBase() + "/api/v1/prices/papa");
+      if (!resp.ok) return;
+      const payload = (await resp.json()) as {
+        precios: Array<{ mercado: string; texto: string }>;
+      };
+      // Prefiere Lo Valledor (el mercado del ejemplo) aunque la API incluya
+      // el nombre institucional completo, y cae al primero si no existe.
+      const precio =
+        payload.precios.find((p) => p.mercado.toLowerCase().includes("lo valledor")) ??
+        payload.precios[0];
+      if (!precio || !priceEl) return;
+      // dataset.es es la fuente de verdad ES del toggle de idioma (index.astro).
+      priceEl.dataset.es = precio.texto;
+      if (langEs()) priceEl.textContent = precio.texto;
+    } catch {
+      /* sin backend: queda el texto de respaldo */
+    }
+  }
+  void refreshPrice();
+</script>

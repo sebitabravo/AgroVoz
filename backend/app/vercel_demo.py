@@ -113,8 +113,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     app.main.lifespan precarga Qwen (~6s), visión ONNX y levanta seis tareas
     de fondo (sync ODEPA, purgas TTL). Ninguna aplica acá: no hay modelo
     local que precargar y Vercel no sostiene tareas de fondo entre requests
-    (cada invocación es efímera). El refresco de demo.db es un cron externo
-    de GitHub Actions, no un scheduler in-process.
+    (cada invocación es efímera). El snapshot de demo.db se refresca
+    manualmente con scripts/build_demo_db.py y se actualiza mediante un cambio revisado.
     """
     logger.info("AgroVoz demo slim iniciando — version=%s", __version__)
     yield

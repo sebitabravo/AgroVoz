@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import calendar
+import datetime
 import unicodedata
 from collections.abc import Iterable
 
@@ -20,6 +22,8 @@ _TIPO_ALIASES = {
     "coop": "cooperativa",
 }
 _MAX_RESULTADOS = 10
+_MAX_SOURCE_AGE_DAYS = 180
+_MAX_SNAPSHOT_AGE_DAYS = 90
 
 
 def _normalizar(texto: str) -> str:
@@ -47,6 +51,43 @@ def _campo_contacto(etiqueta: str, valor: str | None) -> str:
     return f"{etiqueta}: {valor}."
 
 
+def _parse_fecha_fuente(valor: str | None) -> datetime.date | None:
+    """Convierte fechas ISO completas o con precisión de mes/año."""
+    if valor is None or not valor.strip():
+        return None
+
+    texto = valor.strip()
+    try:
+        if len(texto) == 4:
+            return datetime.date(int(texto), 12, 31)
+        if len(texto) == 7:
+            anio, mes = (int(parte) for parte in texto.split("-"))
+            return datetime.date(anio, mes, calendar.monthrange(anio, mes)[1])
+        return datetime.date.fromisoformat(texto)
+    except ValueError:
+        return None
+
+
+def _estado_vigencia(
+    sede: DirectorioAgricola,
+    hoy: datetime.date,
+) -> tuple[str, str]:
+    """Evalúa la vigencia sin convertir una fecha ausente en una suposición."""
+    if sede.verificado_el > hoy:
+        return "no_confirmada", "el snapshot tiene una fecha de verificación futura"
+    if (hoy - sede.verificado_el).days > _MAX_SNAPSHOT_AGE_DAYS:
+        return "vencida", "el snapshot de datos supera 90 días sin revisión"
+
+    fecha_fuente = _parse_fecha_fuente(sede.fecha_fuente)
+    if fecha_fuente is None:
+        return "no_confirmada", "la fuente oficial no publica una fecha de actualización válida"
+    if fecha_fuente > hoy:
+        return "no_confirmada", "la fuente declara una fecha futura no verificable"
+    if (hoy - fecha_fuente).days > _MAX_SOURCE_AGE_DAYS:
+        return "vencida", "la fecha declarada por la fuente supera 180 días"
+    return "vigente", "la fuente y el snapshot están dentro de la ventana de revisión"
+
+
 def _format_source(sede: DirectorioAgricola) -> str:
     """Construye la cita trazable del registro."""
     fecha = sede.fecha_fuente or "fecha no informada"
@@ -57,18 +98,26 @@ def _format_source(sede: DirectorioAgricola) -> str:
     )
 
 
-def _format_sede(sede: DirectorioAgricola) -> str:
+def _format_sede(sede: DirectorioAgricola, hoy: datetime.date) -> str:
     """Convierte una sede en texto corto para lectura y voz."""
-    horario = sede.horario or "no publicado en la fuente oficial"
-    return "\n".join(
-        (
-            f"- {sede.nombre}",
-            _campo_contacto("  Dirección", sede.direccion),
-            _campo_contacto("  Teléfono oficial", sede.telefono),
-            f"  Horario: {horario}.",
-            f"  {_format_source(sede)}",
+    estado, detalle = _estado_vigencia(sede, hoy)
+    lineas = [f"- {sede.nombre}"]
+    if estado == "vigente":
+        horario = sede.horario or "no publicado en la fuente oficial"
+        lineas.extend(
+            (
+                _campo_contacto("  Dirección", sede.direccion),
+                _campo_contacto("  Teléfono oficial", sede.telefono),
+                f"  Horario: {horario}.",
+            )
         )
-    )
+    else:
+        lineas.append(
+            f"  Vigencia: {estado.replace('_', ' ')}; {detalle}. "
+            "No entrego dirección ni teléfono como contacto vigente."
+        )
+    lineas.append(f"  {_format_source(sede)}")
+    return "\n".join(lineas)
 
 
 def _filter_by_comuna(sedes: Iterable[DirectorioAgricola], comuna: str) -> list[DirectorioAgricola]:
@@ -90,6 +139,8 @@ def get_directorio_agricola(
     session: Session,
     comuna: str,
     tipo: str | None = None,
+    *,
+    hoy: datetime.date | None = None,
 ) -> str:
     """Devuelve contactos oficiales de servicios agrícolas por comuna.
 
@@ -97,6 +148,7 @@ def get_directorio_agricola(
         session: Sesión SQLAlchemy de corta duración.
         comuna: Comuna que se desea consultar; se compara sin tildes.
         tipo: ``indap``, ``prodesal`` o ``cooperativa``. Es opcional.
+        hoy: Fecha de evaluación opcional para pruebas deterministas.
 
     Returns:
         Texto breve con dirección, teléfono, horario y fuente de cada registro.
@@ -120,8 +172,12 @@ def get_directorio_agricola(
         return _no_resultado(comuna_limpia, tipo_normalizado)
 
     mostradas = sedes[:_MAX_RESULTADOS]
+    fecha_evaluacion = hoy or datetime.date.today()
     encabezado = f"Directorio agrícola de {mostradas[0].comuna}:"
-    respuesta = [encabezado, *(_format_sede(sede) for sede in mostradas)]
+    respuesta = [
+        encabezado,
+        *(_format_sede(sede, fecha_evaluacion) for sede in mostradas),
+    ]
     if len(sedes) > _MAX_RESULTADOS:
         respuesta.append(f"Hay {len(sedes)} registros; muestra limitada a {_MAX_RESULTADOS}.")
     return "\n".join(respuesta)

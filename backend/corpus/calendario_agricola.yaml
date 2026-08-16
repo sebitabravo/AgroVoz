@@ -7,8 +7,12 @@
 # cerrado y dice que no tiene el dato.
 # Cobertura verificable de este snapshot: 22 fichas; 21 corresponden al secano
 # interior del piloto Traiguén y una ficha de papa declara las zonas cubiertas
-# por la propia tabla como "todas". El resto del catálogo de 79 cultivos queda
-# explícitamente sin regla hasta contar con una fuente INIA comprobada.
+# por la propia tabla como "todas". La biblioteca Plan Predial actual lista 33
+# fichas, pero las restantes no fueron transcritas aquí sin validar cada zona y
+# ventana. La matriz ODEPA 2017 entrega labores mensuales por macrozona, no una
+# ventana INIA específica para Traiguén; por eso no se transforma en reglas por
+# inferencia. El resto del catálogo de 79 cultivos queda explícitamente sin
+# regla hasta contar con una fuente primaria comprobada.
 version: 1
 verificado_el: "2026-08-03"
 revisar_antes_de: "2027-02-03"

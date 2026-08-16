@@ -26,6 +26,13 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       - OPENWA_API_URL=http://openwa:2785
+      # El panel y la visión quedan activos en desarrollo local cuando existen
+      # los artefactos del modelo en backend/models/vision/.
+      - VISION_ENABLED=${VISION_ENABLED:-true}
+      - FARMER_PANEL_ENABLED=${FARMER_PANEL_ENABLED:-true}
+      - PANEL_LINK_SECRET=${PANEL_LINK_SECRET:-dev-panel-secret}
+      - PANEL_LINK_TTL_HOURS=${PANEL_LINK_TTL_HOURS:-24}
+      - PANEL_BASE_URL=${PANEL_BASE_URL:-http://localhost:8000/panel}
       # La demo web queda apagada por defecto en desarrollo para no abrir un
       # endpoint costoso sin consentimiento explícito en .env.
       - DEMO_ENDPOINT_ENABLED=${DEMO_ENDPOINT_ENABLED:-false}

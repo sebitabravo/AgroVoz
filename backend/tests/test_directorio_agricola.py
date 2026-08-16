@@ -16,6 +16,8 @@ def _sede(
     comuna: str = "Traiguén",
     direccion: str | None = "Riveros #1059, Traiguén",
     telefono: str | None = "45 250 6151",
+    fecha_fuente: str | None = "2026-08-03",
+    verificado_el: datetime.date = datetime.date(2026, 8, 3),
 ) -> DirectorioAgricola:
     """Construye una sede determinista para los escenarios de prueba."""
     return DirectorioAgricola(
@@ -27,8 +29,8 @@ def _sede(
         horario="Lunes a viernes de 8:30 a 17:00",
         fuente="Fuente oficial de prueba",
         fuente_url="https://oficial.example/directorio",
-        fecha_fuente="2026-08-03",
-        verificado_el=datetime.date(2026, 8, 3),
+        fecha_fuente=fecha_fuente,
+        verificado_el=verificado_el,
     )
 
 
@@ -55,6 +57,63 @@ def test_directorio_declara_contactos_ausentes_en_vez_de_inventarlos(db) -> None
 
     assert "Dirección: no publicado en la fuente oficial." in respuesta
     assert "Teléfono oficial: no publicado en la fuente oficial." in respuesta
+
+
+def test_directorio_no_presenta_contacto_vigente_sin_fecha_de_fuente(db) -> None:
+    """Una fuente sin fecha no se convierte en un contacto actual por defecto."""
+    db.add(_sede(fecha_fuente=None))
+    db.commit()
+
+    respuesta = get_directorio_agricola(
+        db,
+        "Traiguén",
+        "indap",
+        hoy=datetime.date(2026, 8, 16),
+    )
+
+    assert "no confirmada" in respuesta
+    assert "No entrego dirección ni teléfono como contacto vigente" in respuesta
+    assert "Riveros #1059" not in respuesta
+    assert "45 250 6151" not in respuesta
+
+
+def test_directorio_bloquea_fuente_antigua(db) -> None:
+    """Una fecha de fuente fuera de la ventana de revisión queda fail-closed."""
+    db.add(_sede(tipo="cooperativa", fecha_fuente="2013-01-25"))
+    db.commit()
+
+    respuesta = get_directorio_agricola(
+        db,
+        "Traiguén",
+        "cooperativa",
+        hoy=datetime.date(2026, 8, 16),
+    )
+
+    assert "vencida" in respuesta
+    assert "supera 180 días" in respuesta
+    assert "Riveros #1059" not in respuesta
+    assert "45 250 6151" not in respuesta
+
+
+def test_directorio_bloquea_snapshot_antiguo(db) -> None:
+    """Un snapshot no revisado recientemente tampoco expone contactos."""
+    db.add(
+        _sede(
+            fecha_fuente="2026-01-01",
+            verificado_el=datetime.date(2026, 1, 1),
+        )
+    )
+    db.commit()
+
+    respuesta = get_directorio_agricola(
+        db,
+        "Traiguén",
+        "indap",
+        hoy=datetime.date(2026, 8, 16),
+    )
+
+    assert "snapshot de datos supera 90 días" in respuesta
+    assert "Riveros #1059" not in respuesta
 
 
 def test_directorio_valida_tipo_y_comuna(db) -> None:

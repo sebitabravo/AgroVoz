@@ -28,6 +28,17 @@ describe("privacidad pública", () => {
     expect(result).not.toContain("/blob/");
   });
 
+  test("usa la estructura visual de privacidad de la landing", async () => {
+    const container = await AstroContainer.create();
+    const result = await container.renderToString(PrivacyPage);
+
+    expect(result).toContain("privacy-hero");
+    expect(result).toContain("privacy-status-card");
+    expect(result).toContain("privacy-toc");
+    expect(result).toContain("privacy-card--sources");
+    expect(result).toContain("privacy-table");
+  });
+
   test("centraliza el drawer mobile en Header sin duplicarlo en index", () => {
     const headerSource = readFileSync(
       new URL("../src/components/Header.astro", import.meta.url),

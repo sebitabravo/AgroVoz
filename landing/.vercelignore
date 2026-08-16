@@ -1,0 +1,21 @@
+# El proyecto Vercel usa `landing/` como Root Directory. Estos artefactos del
+# monorepo no forman parte del sitio estático y pueden romper el escaneo local.
+.codegraph/
+.claude/
+.claude-rdd/
+.github/
+.playwright-mcp/
+.worktrees/
+backend/
+docs/
+node_modules/
+landing/node_modules/
+landing/.astro/
+landing/dist/
+*.db
+*.sqlite
+*.sqlite3
+.env*
+*.pem
+*.key
+*.crt
