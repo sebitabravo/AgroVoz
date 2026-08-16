@@ -1,0 +1,43 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/api/v1/health",
+      "destination": "https://agrovoz.sbravo.app/api/v1/health"
+    },
+    {
+      "source": "/api/v1/products",
+      "destination": "https://agrovoz.sbravo.app/api/v1/products"
+    },
+    {
+      "source": "/api/v1/data/sources",
+      "destination": "https://agrovoz.sbravo.app/api/v1/data/sources"
+    },
+    {
+      "source": "/api/v1/demo/preguntar",
+      "destination": "https://agrovoz.sbravo.app/api/v1/demo/preguntar"
+    },
+    {
+      "source": "/api/v1/prices/:path*",
+      "destination": "https://agrovoz.sbravo.app/api/v1/prices/:path*"
+    },
+    {
+      "source": "/api/v1/weather",
+      "destination": "https://agrovoz.sbravo.app/api/v1/weather"
+    },
+    {
+      "source": "/api/v1/weather/:path*",
+      "destination": "https://agrovoz.sbravo.app/api/v1/weather/:path*"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy", "value": "camera=(), geolocation=(), microphone=(self)" }
+      ]
+    }
+  ]
+}

@@ -6,6 +6,10 @@
 # El plan regional de INDAP solo acredita presencia de PRODESAL por comuna; no
 # publica teléfonos ni direcciones de esas oficinas, así que esos campos quedan
 # ausentes en vez de completar datos no respaldados.
+# Política del servicio: un registro solo entrega dirección/teléfono si la fuente
+# declara una fecha válida dentro de 180 días y el snapshot fue verificado dentro
+# de 90 días. Si la fuente no tiene fecha (como INDAP), es antigua o inválida,
+# la respuesta muestra solo la advertencia y el enlace oficial (fail-closed).
 version: 1
 verificado_el: "2026-08-03"
 sedes:

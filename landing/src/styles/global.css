@@ -2,6 +2,7 @@
    Fuente: mockup AgroVoz Landing.dc.html (Claude Design handoff).
    Tailwind 4 con tokens del diseño registrados via @theme. */
 
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap");
 @import "tailwindcss";
 
 /* ---- Tokens del diseño registrados como colores de Tailwind ---- */
@@ -14,8 +15,21 @@
   --color-accent: #4f7d5a;
   --color-accent-deep: #3c6446;
   --color-accent-soft: #edf2ed;
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
-    Arial, sans-serif;
+  --color-bubble-sent: #d9fdd3;
+  /* Chat demo (mock de WhatsApp) y estados de error */
+  --color-chat-bg: #e8e1d9;
+  --color-chat-divider-bg: #e0d9ce;
+  --color-chat-divider-text: #6b6b6b;
+  --color-chat-time: #8696a0;
+  --color-chat-input-bar: #f0f2f5;
+  --color-placeholder: #a0a8ae;
+  --color-danger: #c0392b;
+  --color-danger-deep: #a93226;
+  --color-danger-bg: #fff7f6;
+  --color-danger-border: #e8a6a0;
+  --color-danger-soft: #fdecea;
+  --font-sans: "Manrope", system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
 }
 
 /* Skip-to-content link (accesibilidad: WCAG 2.4.1 Bypass Blocks). */
@@ -285,7 +299,7 @@ textarea {
 .wave-bar {
   width: 4px;
   border-radius: 3px;
-  background: linear-gradient(var(--color-accent), var(--color-accent-deep));
+  background: var(--color-accent);
   transform-origin: bottom;
   animation: wf 1.3s ease-in-out infinite;
 }
@@ -521,21 +535,21 @@ textarea {
   padding: 11px 15px;
   font-size: 13.5px;
   line-height: 1.45;
-  border-radius: 16px;
+  border-radius: 8px;
 }
 
 .bubble--sent {
   align-self: flex-end;
-  background: #dcefd8;
-  color: #1c1e1a;
-  border-bottom-right-radius: 4px;
+  background: var(--color-bubble-sent);
+  color: var(--color-ink);
+  border-top-right-radius: 2px;
 }
 
 .bubble--received {
   align-self: flex-start;
   background: var(--color-surface);
   color: var(--color-ink);
-  border-bottom-left-radius: 4px;
+  border-top-left-radius: 2px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
@@ -726,6 +740,25 @@ textarea {
   border-radius: 22px;
   padding: 32px;
 }
+
+.contact-form__trap {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.contact-form__status {
+  margin: -4px 0 16px;
+  color: var(--color-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.contact-form__status.is-success { color: var(--color-accent-deep); }
+.contact-form__status.is-error { color: var(--color-danger); }
 
 .chip-grid {
   display: grid;

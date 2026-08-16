@@ -1,6 +1,13 @@
 ---
-// Header sticky con backdrop-blur, navegacion ancla, toggle de idioma ES/EN.
+// Header sticky con backdrop-blur y navegacion ancla.
 // En mobile (<920px) la nav se vuelve un drawer abierto por el boton hamburguesa.
+// El toggle de idioma solo se muestra en páginas que cargan el diccionario
+// completo; ocultarlo en rutas sin traducción evita un control que no responde.
+interface Props {
+  showLanguageToggle?: boolean;
+}
+
+const { showLanguageToggle = true } = Astro.props;
 ---
 
 <header class="site-header" id="site-header">
@@ -35,10 +42,14 @@
     </nav>
 
     <div class="header-actions">
-      <div class="lang-toggle" role="group" aria-label="Idioma">
-        <button type="button" id="lang-es" data-lang="es">ES</button>
-        <button type="button" id="lang-en" data-lang="en">EN</button>
-      </div>
+      {
+        showLanguageToggle && (
+          <div class="lang-toggle" role="group" aria-label="Idioma">
+            <button type="button" id="lang-es" data-lang="es">ES</button>
+            <button type="button" id="lang-en" data-lang="en">EN</button>
+          </div>
+        )
+      }
       <a href="/#contacto" class="pill" data-i18n="nav.contacto">Contacto</a>
     </div>
   </div>

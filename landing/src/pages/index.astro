@@ -16,8 +16,8 @@ import Waveform from "../components/Waveform.astro";
 const problemaStats = [
   {
     count: 205000,
-    label: "agricultores usuarios de INDAP en Chile",
-    source: "Fuente: INDAP, 2024",
+    label: "población objetivo estimada a partir de usuarios acreditados de INDAP",
+    source: "Cruce INDAP–SII, abril 2026 · estimación interna por validar",
     i18nLabel: "problema.s1",
     i18nSource: "problema.s1.src",
     delay: 0,
@@ -26,7 +26,7 @@ const problemaStats = [
     text: "40–60%",
     accent: true,
     label: "del precio mayorista capturado por intermediarios",
-    source: "Fuente: ODEPA / FAO",
+    source: "Fuente: ODEPA / FIA",
     i18nLabel: "problema.s2",
     i18nSource: "problema.s2.src",
     delay: 90,
@@ -36,7 +36,7 @@ const problemaStats = [
     decimals: 1,
     suffix: "%",
     label: "de pérdidas post-cosecha en promedio",
-    source: "Fuente: FAO",
+    source: "Fuente: estudio U. de Talca / FAO",
     i18nLabel: "problema.s3",
     i18nSource: "problema.s3.src",
     delay: 180,
@@ -45,7 +45,7 @@ const problemaStats = [
     count: 7,
     suffix: "%",
     label: "de la adaptación climática es planificada; el resto es intuición",
-    source: "Fuente: FAO",
+    source: "Fuente: CR2 / MMA",
     i18nLabel: "problema.s4",
     i18nSource: "problema.s4.src",
     delay: 270,
@@ -72,7 +72,7 @@ const pasos = [
   {
     step: "03",
     title: "Responde por el mismo canal",
-    desc: "Devuelve audio o texto en español natural con datos verificables, en menos de 15 segundos.",
+    desc: "Devuelve audio o texto en español natural con datos verificables. Objetivo: responder en menos de 15 segundos.",
     i18nTitle: "como.3.title",
     i18nDesc: "como.3.desc",
     delay: 240,
@@ -93,7 +93,7 @@ const ecosystemItems = [
     title: "Orientación conectada al territorio",
     subtitle: "INIA · INDAP · PRODESAL",
     description:
-      "Programas, reglas agronómicas y directorios se consultan por voz, siempre distinguiendo un snapshot de un dato vivo.",
+      "Calendarios y reglas de INIA con fuente y fecha, listos para probar en la demo web. Programas de INDAP y directorios se consultan por voz en WhatsApp, en etapa de piloto. Siempre con fuente y fecha.",
     i18nTitle: "ecosistema.2.title",
     i18nSubtitle: "ecosistema.2.sub",
     i18nDescription: "ecosistema.2.desc",
@@ -171,11 +171,11 @@ const planes = [
     name: "Institucional · B2G",
     sub: "Para INDAP, PRODESAL y municipios",
     price: "CLP 500–1.000",
-    unit: "por agricultor · mes",
+    unit: "por agricultor · mes · precio de referencia",
     features: [
       "Gratis para el agricultor (subsidiado)",
-      "Consultas ilimitadas de precios y clima",
-      "Panel de cobertura y uso",
+      "Consultas de precios y clima (sujetas a límites operativos)",
+      "Panel de cobertura y uso (en desarrollo)",
       "Onboarding en terreno",
     ],
     cta: "Hablar con ventas",
@@ -225,8 +225,8 @@ const impactoStats = [
   },
   {
     count: 265000,
-    label: "explotaciones de agricultura familiar — el 85% de los predios del país",
-    source: "Fuente: INE / Censo Agropecuario",
+    label: "explotaciones de agricultura familiar — hipótesis de contexto de mercado",
+    source: "Censo Agropecuario 2021 · cifra por validar con fuente primaria versionada",
     i18nLabel: "impacto.i2",
     i18nSource: "impacto.i2.src",
   },
@@ -259,11 +259,11 @@ const equipo = [
       eyebrow="Inteligencia de precios y clima · por voz en WhatsApp"
       title="Tu voz tiene el precio justo."
       subtitle="AgroVoz convierte un mensaje de voz o texto en WhatsApp en datos oficiales de mercado y clima, devueltos por el mismo canal. Sin apps ni instalaciones."
-      ctaText="Solicitar una demo"
-      ctaLink="#contacto"
-      ctaSecondaryText="Ver cómo funciona"
-      ctaSecondaryLink="#demo"
-      meta="WhatsApp · Precios ODEPA del día + clima actualizado · <15 s por respuesta"
+      ctaText="Probar la demo"
+      ctaLink="/demo"
+      ctaSecondaryText="Solicitar una demo"
+      ctaSecondaryLink="#contacto"
+      meta="Precios ODEPA con fecha visible + clima actualizado · respuesta en <15 s (objetivo) · WhatsApp en piloto"
       i18nEyebrow="hero.eyebrow"
       i18nTitle="hero.title"
       i18nSubtitle="hero.sub"
@@ -341,7 +341,7 @@ const equipo = [
         <div class="demo-grid" id="demo-track">
           <div data-reveal>
             <span class="eyebrow" data-i18n="demo.eyebrow"
-              >Una conversación real</span
+              >Así se ve la conversación</span
             >
             <h2 class="h2" data-i18n="demo.title">
               Tan simple como un mensaje de WhatsApp.
@@ -351,8 +351,8 @@ const equipo = [
               style="margin-top:20px;max-width:46ch"
               data-i18n="demo.caption"
             >
-              Por voz o texto. Sin apps ni instalaciones — como mandarle un
-              mensaje de WhatsApp a un vecino.
+              La vista previa es un ejemplo del formato de respuesta; la demo
+              interactiva consulta precios y clima con datos vivos.
             </p>
             <div style="margin-top:32px">
               <Waveform variant="mini" />
@@ -360,7 +360,7 @@ const equipo = [
             {/* Enlace a la demo interactiva: sin esto /demo queda huerfana,
                 no habia forma de llegar desde el sitio. */}
             <div style="margin-top:28px">
-              <a href="/demo" class="btn btn-secondary" data-i18n="demo.cta">
+              <a href="/demo" class="btn btn-primary" data-i18n="demo.cta">
                 Probar la demo interactiva
               </a>
             </div>
@@ -409,10 +409,11 @@ const equipo = [
             Costos bajo control, por diseño.
           </h2>
           <p class="lede" style="margin-top:20px" data-i18n="stack.body">
-            Whisper, el LLM y la síntesis de voz corren sobre tecnología
-            open-source en infraestructura propia. No para regalar el servicio,
-            sino para que sea rentable: el costo de operación no crece con cada
-            nuevo agricultor.
+            Whisper, Piper y el modelo Qwen son open-source y pueden correr en
+            infraestructura propia. El LLM principal se conecta a un proveedor
+            en la nube, configurable, y el modelo local queda como respaldo
+            obligatorio si falla. Modelos abiertos, sin depender de una sola
+            nube.
           </p>
         </div>
         <div class="grid-stack" style="margin-top:44px">
@@ -431,8 +432,8 @@ const equipo = [
         <div class="cost-note" data-reveal>
           <span class="dot" aria-hidden="true"></span>
           <span data-i18n="stack.cost"
-            >Costo fijo de operación: CLP 14.364/mes · costo variable CLP 0 ·
-            margen bruto &gt;97% a escala</span
+            >Costo base de operación: CLP 14.364/mes · costo por uso solo si el
+            LLM corre en la nube · fallback local sin costo</span
           >
         </div>
       </div>
@@ -479,8 +480,8 @@ const equipo = [
           style="margin-top:32px;text-align:center;font-size:13.5px;color:var(--color-muted);max-width:60ch;margin-inline:auto"
           data-reveal data-i18n="planes.note"
         >
-          El agricultor nunca paga. El costo de operación es fijo: CLP 14.364 al
-          mes y CLP 0 variable.
+          El agricultor nunca paga. El costo base de operación es CLP 14.364 al
+          mes; el LLM en la nube suma costo por uso.
         </p>
       </div>
     </section>
@@ -563,14 +564,6 @@ const equipo = [
               con datos reales de tu zona. Para INDAP, PRODESAL, cooperativas,
               municipios y empresas del agro.
             </p>
-            <p style="margin-top:24px;font-size:14.5px">
-              <a
-                href="mailto:hola@agrovoz.cl"
-                style="color:var(--color-accent-deep);font-weight:600"
-                data-i18n="contacto.alt"
-                >O escríbenos a hola@agrovoz.cl</a
-              >
-            </p>
           </div>
           <div data-reveal>
             <ContactForm />
@@ -586,7 +579,7 @@ const equipo = [
 <script>
   // --- AgroVoz landing: interactividad del lado cliente ---
   // Port fiel del JS del mockup (.dc.html): reveals, count-up, demo cascade,
-  // parallax, selector de plan, i18n ES/EN y envio del form por mailto.
+  // parallax, selector de plan, i18n ES/EN y envio seguro del formulario.
 
   const reduce = window.matchMedia(
     "(prefers-reduced-motion: reduce)",
@@ -605,23 +598,23 @@ const equipo = [
     "hero.title": "Your voice gets the right price.",
     "hero.sub":
       "AgroVoz turns a WhatsApp voice message or text into official market and weather data, returned through the same channel. No app installation.",
-    "hero.cta1": "Request a demo",
-    "hero.cta2": "See how it works",
+    "hero.cta1": "Try the demo",
+    "hero.cta2": "Request a demo",
     "hero.meta":
-      "WhatsApp · ODEPA daily prices + updated weather · <15s per reply",
+      "ODEPA prices with visible date + updated weather · reply in under 15s (target) · WhatsApp in pilot",
     "problema.eyebrow": "The problem",
     "problema.title": "The prices exist. Access doesn't.",
     "problema.body":
       "ODEPA publishes wholesale prices in a spreadsheet. But the smallholder negotiating with a middleman at 6 AM has no way to check them. That information gap costs up to 60% of the price.",
-    "problema.s1": "INDAP-registered farmers in Chile",
+    "problema.s1": "estimated target population from accredited INDAP users",
     "problema.s2": "of the wholesale price captured by middlemen",
     "problema.s3": "average post-harvest losses",
     "problema.s4":
       "of climate adaptation is planned; the rest is guesswork",
-    "problema.s1.src": "Source: INDAP, 2024",
-    "problema.s2.src": "Source: ODEPA / FAO",
-    "problema.s3.src": "Source: FAO",
-    "problema.s4.src": "Source: FAO",
+    "problema.s1.src": "INDAP–SII cross-check, April 2026 · internal estimate pending validation",
+    "problema.s2.src": "Source: ODEPA / FIA",
+    "problema.s3.src": "Source: University of Talca study / FAO",
+    "problema.s4.src": "Source: CR2 / Ministry of Environment",
     "como.eyebrow": "How it works",
     "como.title": "Speaking is the whole interface.",
     "como.1.title": "The farmer asks",
@@ -632,16 +625,14 @@ const equipo = [
       "Transcribes voice or processes text, understands the question and queries official sources. ODEPA updates daily at 06:00; weather updates through OpenMeteo.",
     "como.3.title": "Replies in your channel",
     "como.3.desc":
-      "Returns audio or text in natural Spanish with verifiable data, in under 15 seconds.",
-    "demo.eyebrow": "A real conversation",
+      "Returns audio or text in natural Spanish with verifiable data. Target: a reply in under 15 seconds.",
+    "demo.eyebrow": "What the conversation looks like",
     "demo.title": "As simple as a WhatsApp message.",
     "demo.caption":
-      "By voice or text. No app installation — like sending a WhatsApp message to a neighbor.",
+      "The preview is an example of the reply format; the interactive demo queries live price and weather data.",
     "demo.cta": "Try the interactive demo",
-    "demo.status": "online",
     "demo.m1": "How much is potato?",
-    "demo.m2":
-      "Potato is at 1,200 pesos per kilo in Lo Valledor, according to ODEPA, price from 20/06/2026.",
+    "demo.m2": "Potato at the latest available price, according to ODEPA.",
     "demo.m3": "And will it rain in Traiguén tomorrow?",
     "demo.m4":
       "Tomorrow in Traiguén: high of 14 degrees and low of 9, 23.9 mm of rain. According to OpenMeteo.",
@@ -656,7 +647,7 @@ const equipo = [
     "ecosistema.2.title": "Guidance connected to the territory",
     "ecosistema.2.sub": "INIA · INDAP · PRODESAL",
     "ecosistema.2.desc":
-      "Programs, agronomic rules and directories by voice, always distinguishing a snapshot from live data.",
+      "INIA calendars and agronomic rules with source and date, ready to try in the web demo. INDAP programs and directories by voice on WhatsApp, in pilot. Always with source and date.",
     "ecosistema.3.title": "An auditable source catalog",
     "ecosistema.3.sub": "CIREN · INE · public sources",
     "ecosistema.3.desc":
@@ -664,9 +655,9 @@ const equipo = [
     "stack.eyebrow": "Technology",
     "stack.title": "Costs under control, by design.",
     "stack.body":
-      "Whisper, the LLM and voice synthesis run on open-source technology on our own infrastructure. Not to give the service away, but so it's profitable: operating cost doesn't grow with every new farmer.",
+      "Whisper, Piper and the Qwen model are open-source and can run on our own infrastructure. The main LLM connects to a configurable cloud provider, with the local model as a mandatory fallback. Open models, without depending on a single cloud.",
     "stack.cost":
-      "Fixed operating cost: CLP 14,364/month · CLP 0 variable cost · >97% gross margin at scale",
+      "Base operating cost: CLP 14,364/month · usage-based cost only if the LLM runs in the cloud · local fallback at no cost",
     "stack.1.sub": "Messaging channel",
     "stack.2.sub": "Voice transcription",
     "stack.3.sub": "Understanding + Tool Calling",
@@ -677,17 +668,16 @@ const equipo = [
     "planes.title": "A plan for every way to reach the farmer.",
     "planes.body":
       "From institutional deployment to private partnerships: choose how AgroVoz fits your organization.",
-    "planes.badge": "Recommended",
     "planes.note":
-      "The farmer never pays. Operating cost is fixed at CLP 14,364/month with CLP 0 variable cost.",
+      "The farmer never pays. Base operating cost is CLP 14,364/month; the cloud LLM adds usage-based cost.",
     "plan1.name": "Institutional · B2G",
     "plan1.sub": "For INDAP, PRODESAL and municipalities",
-    "plan1.unit": "per farmer · month",
+    "plan1.unit": "per farmer · month · reference price",
     "plan1.cta": "Talk to sales",
     "plan1.badge": "Recommended",
     "plan1.f1": "Free for the farmer (subsidized)",
-    "plan1.f2": "Unlimited price and weather queries",
-    "plan1.f3": "Coverage and usage dashboard",
+    "plan1.f2": "Price and weather queries (subject to operational limits)",
+    "plan1.f3": "Coverage and usage dashboard (in development)",
     "plan1.f4": "Field onboarding",
     "plan3.name": "Private partnerships",
     "plan3.sub": "For companies and trade associations",
@@ -700,11 +690,11 @@ const equipo = [
     "impacto.title": "Closing the gap changes a family's economy.",
     "impacto.i1":
       "extra annual income per producer (up to), by negotiating with data",
-    "impacto.i2": "family-farming holdings — 85% of the country's farms",
+    "impacto.i2": "family-farming holdings — market-context hypothesis",
     "impacto.i3":
       "target latency between the question and the voice answer",
     "impacto.i1.src": "AgroVoz projection",
-    "impacto.i2.src": "Source: INE / Agricultural Census",
+    "impacto.i2.src": "2021 Agricultural Census · primary source version pending",
     "impacto.i3.src": "AgroVoz target",
     "impacto.odsNumbers": "SDG 2 · 8 · 10 · 13",
     "impacto.odsLabels":
@@ -717,7 +707,6 @@ const equipo = [
     "contacto.title": "Book an AgroVoz demo.",
     "contacto.body":
       "Tell us about your organization and we'll show AgroVoz working with real data from your area. For INDAP, PRODESAL, cooperatives, municipalities and agribusiness.",
-    "contacto.alt": "Or write us at hola@agrovoz.cl",
     "form.name": "Name",
     "form.email": "Email",
     "form.msg": "Message",
@@ -729,7 +718,6 @@ const equipo = [
     "form.chip.general": "General inquiry",
     "footer.credit": "Born at INACAP Temuco · Desafío Crea INACAP 2026",
     "footer.privacy": "Privacy (Law 21.719)",
-    "footer.notice": "Legal notice",
   };
 
   const ENPH: Record<string, string> = {
@@ -910,9 +898,9 @@ const equipo = [
     parallax.forEach((el) => {
       const r = el.getBoundingClientRect();
       const center = r.top + r.height / 2 - window.innerHeight / 2;
-      el.style.transform = `translateY(${
-        center * parseFloat(el.dataset.parallax ?? "0") * 0.35
-      }px)`;
+      const offset = center * parseFloat(el.dataset.parallax ?? "0") * 0.35;
+      const clamped = Math.max(-60, Math.min(60, offset));
+      el.style.transform = `translateY(${clamped}px)`;
     });
   }
   let ticking = false;
@@ -929,7 +917,7 @@ const equipo = [
   window.addEventListener("resize", onScroll, { passive: true });
   applyParallax();
 
-  // ===== Selector de plan + envio del form por mailto =====
+  // ===== Selector de plan + envio server-side =====
   let selectedPlan = "general";
   const chips = Array.from(
     document.querySelectorAll<HTMLElement>("[data-plan-chip]"),
@@ -939,9 +927,10 @@ const equipo = [
     selectedPlan = p;
     chips.forEach((c) => {
       const on = c.dataset.planChip === p;
-      c.style.background = on ? "var(--accent-soft)" : "var(--surface)";
-      c.style.borderColor = on ? "var(--accent)" : "var(--line)";
-      c.style.color = on ? "var(--accent-deep)" : "var(--muted)";
+      c.style.background = on ? "var(--color-accent-soft)" : "var(--color-surface)";
+      c.style.borderColor = on ? "var(--color-accent)" : "var(--color-line)";
+      c.style.color = on ? "var(--color-accent-deep)" : "var(--color-muted)";
+      c.setAttribute("aria-pressed", String(on));
     });
   }
   chips.forEach((c) =>
@@ -958,26 +947,55 @@ const equipo = [
 
   const form = document.getElementById("contact-form") as HTMLFormElement | null;
   if (form) {
-    form.addEventListener("submit", (ev) => {
+    const submitButton = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+    const contactStatus = document.getElementById("contact-status");
+
+    form.addEventListener("submit", async (ev) => {
       ev.preventDefault();
-      const fields = form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
-        "input, textarea",
-      );
-      const name = fields[0]?.value ?? "";
-      const email = fields[1]?.value ?? "";
-      const msg = fields[2]?.value ?? "";
+      if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+      }
+
       const activeChip = document.querySelector<HTMLElement>(
         `[data-plan-chip="${selectedPlan}"]`,
       );
-      const planText = activeChip?.textContent ?? selectedPlan;
-      const body = encodeURIComponent(
-        `Plan de interés: ${planText}\n\n${msg}\n\n— ${name} (${email})`,
-      );
-      window.location.href =
-        "mailto:hola@agrovoz.cl?subject=" +
-        encodeURIComponent(`AgroVoz — ${planText} — ${name || "Contacto"}`) +
-        "&body=" +
-        body;
+      const plan = activeChip?.dataset.planChip ?? selectedPlan;
+      if (submitButton) submitButton.disabled = true;
+      if (contactStatus) {
+        contactStatus.hidden = false;
+        contactStatus.classList.remove("is-error", "is-success");
+        contactStatus.textContent = "Enviando…";
+      }
+
+      try {
+        const response = await fetch(form.action, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: (form.elements.namedItem("name") as HTMLInputElement).value,
+            email: (form.elements.namedItem("email") as HTMLInputElement).value,
+            message: (form.elements.namedItem("message") as HTMLTextAreaElement).value,
+            plan,
+            website: (form.elements.namedItem("website") as HTMLInputElement).value,
+          }),
+        });
+
+        if (!response.ok) throw new Error("contact_request_failed");
+        form.reset();
+        setPlan("general");
+        if (contactStatus) {
+          contactStatus.classList.add("is-success");
+          contactStatus.textContent = "Mensaje enviado. Te responderemos pronto.";
+        }
+      } catch {
+        if (contactStatus) {
+          contactStatus.classList.add("is-error");
+          contactStatus.textContent = "No se pudo enviar ahora. Inténtalo nuevamente en unos minutos.";
+        }
+      } finally {
+        if (submitButton) submitButton.disabled = false;
+      }
     });
   }
 </script>

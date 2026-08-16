@@ -12,12 +12,19 @@ service-account*.json
 IDEA.md
 
 # ── Modelos IA (solo backend/models/, no backend/app/models/ que es SQLAlchemy) ──
-/backend/models/
+/backend/models/*
+!/backend/models/
+!/backend/models/checksums.sha256
+!/backend/models/vision/
+!/backend/models/vision/README.md
+!/backend/models/vision/plant_disease_mobilenetv3.onnx
+!/backend/models/vision/model.onnx.data
+!/backend/models/vision/plant_disease_labels.json
 *.gguf
 *.bin
 *.pt
 *.safetensors
-*.onnx
+/backend/models/*.onnx
 
 # ── Datos y runtime (solo backend/data/) ──
 /backend/data/
@@ -28,7 +35,7 @@ IDEA.md
 backend/tests/qa-report-admin.md
 !landing/public/og-image.png
 !/backend/app/static/icon-192.png
-!/backend/app/static/icon-512.pngs
+!/backend/app/static/icon-512.png
 
 # ── Audio temporal ───────────────────
 audio/
@@ -91,3 +98,5 @@ logs/
 openspec/
 .worktrees/
 .claude-rdd/
+.vercel
+.env*

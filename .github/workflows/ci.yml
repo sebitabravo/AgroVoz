@@ -41,7 +41,7 @@ jobs:
         run: |
           if [ ! -f pyproject.toml ]; then
             echo "⏭️  Backend aún no inicializado (sin pyproject.toml). Nada que lint-ear."
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Setup Python
@@ -87,7 +87,7 @@ jobs:
         run: |
           if [ ! -f pyproject.toml ]; then
             echo "⏭️  Backend aún no inicializado (sin pyproject.toml). Nada que testear."
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Setup Python
@@ -139,12 +139,12 @@ jobs:
         run: |
           if [ ! -f pyproject.toml ]; then
             echo "⏭️  Backend aún no inicializado (sin pyproject.toml). Nada que testear."
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ -z "${{ secrets.AGROVOZ_E2E_BASE_URL }}" ] && [ -z "${{ vars.AGROVOZ_E2E_BASE_URL }}" ]; then
             echo "⏭️  AGROVOZ_E2E_BASE_URL no configurado (ni secret ni var). Omitiendo tests E2E."
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Setup Python
@@ -189,7 +189,7 @@ jobs:
         run: |
           if [ ! -f package.json ]; then
             echo "⏭️  Landing aún no inicializada (sin package.json). Nada que build-ear."
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Setup bun
@@ -200,8 +200,14 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         run: bun install --frozen-lockfile
 
+      - name: Test
+        if: steps.gate.outputs.skip != 'true'
+        timeout-minutes: 10
+        run: bun run test
+
       - name: Build
         if: steps.gate.outputs.skip != 'true'
+        timeout-minutes: 10
         run: bun run build
 
   # ── Docker: validar compose ──
@@ -216,7 +222,7 @@ jobs:
         run: |
           if [ ! -f docker-compose.yml ]; then
             echo "⏭️  Docker Compose aún no configurado. Nada que validar."
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create .env for compose validation

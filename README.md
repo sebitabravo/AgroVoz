@@ -49,7 +49,13 @@ gigante: primero se protege la vigencia, la fuente y la utilidad del dato.
 - **Voz:** Whisper (transcripción) + Qwen2.5-3B (LLM) + Piper TTS (síntesis)
 - **Frontend:** Astro 7.x + Tailwind CSS 4.x (landing)
 - **Admin:** Jinja2 + HTMX (dashboard server-side)
-- **Infra:** Docker Compose / Dokploy (Traefik + SSL Let's Encrypt) / VPS Hetzner CX43
+- **Deploy público:** Vercel Hobby (landing Astro + API slim)
+- **Desarrollo local:** Docker Compose (pipeline completo, Open-WA y modelos locales)
+- **Visión local:** ONNX Runtime CPU, modelo PlantVillage acotado y reglas INIA fail-closed
+- **CI/CD:** GitHub Actions (tests, lint, CodeQL, Docker smoke)
+
+Deploy público: landing y API se configuran como proyectos Vercel separados (`landing/` y `backend/`).
+La URL depende del proyecto Vercel activo y no se inventa en esta documentación.
 
 ## Requisitos
 

@@ -3,7 +3,7 @@
 # Requiere: Docker, uv (Python), bun (Astro)
 
 .PHONY: help up down logs build clean \
-        setup-dev setup-env setup-models \
+        setup-dev setup-env setup-models setup-vision-model \
         test test-backend test-unit test-e2e \
         lint lint-fix typecheck \
         dev-backend dev-frontend \
@@ -34,6 +34,9 @@ setup-dev: setup-env ## Setup completo de desarrollo
 
 setup-models: ## Descargar modelos de IA (Whisper, LLM, Piper)
 	cd backend && bash scripts/download_models.sh
+
+setup-vision-model: ## Verificar modelo ONNX de visión versionado
+	cd backend/models && grep ' vision/' checksums.sha256 | sha256sum -c -
 
 # ─────────────────────────────────────────────
 # Docker

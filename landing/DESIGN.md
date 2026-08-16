@@ -63,7 +63,7 @@
 
 ### Sistema de grid
 ```css
-/* 3 columnas auto-adaptables (tecnología, pasos, equipo) */
+/* 3 columnas auto-adaptables (tecnología, pasos, ecosistema y equipo) */
 grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 
 /* Stats 4 columnas separadas por borde */
@@ -71,7 +71,7 @@ grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 background: var(--line);   /* gap como borde con 1px entre celdas */
 gap: 1px;
 
-/* Selector de plan 2×2 */
+/* Selector de plan 2×2 dentro del formulario de contacto */
 grid-template-columns: 1fr 1fr;
 gap: 8px;
 ```
@@ -208,10 +208,10 @@ el.style.transform = `translateY(${center * factor * 0.35}px)`;
 | `#problema` | Stats 4 columnas con count-up |
 | `#como` | 3 tarjetas numeradas (01/02/03) |
 | `#demo` | Grid texto + mockup WhatsApp con cascada de mensajes |
-| `#planes` | 3 tarjetas de pricing |
+| `#planes` | 2 tarjetas de pricing actualmente validadas (institucional y convenios privados) |
 | `#stack` | 6 tarjetas de tecnología (grilla 3+3) |
 | `#impacto` | 3 stats grandes + fila ODS |
-| `#equipo` | 3 tarjetas con iniciales avatar |
+| `#equipo` | Tarjetas con iniciales avatar; actualmente hay 1 integrante publicado |
 | `#contacto` | Grid texto + formulario con selector de plan |
 | footer | Una fila: logo·tagline / links / copyright |
 
@@ -219,11 +219,11 @@ el.style.transform = `translateY(${center * factor * 0.35}px)`;
 
 ## 🧠 Principios de diseño
 
-1. **Casi monocromático** — un solo acento verde, fondo crema, sin gradientes
+1. **Casi monocromático** — un solo acento verde, fondo crema, sin gradientes decorativos
 2. **Tipografía como jerarquía** — el tamaño hace el trabajo, no el color
 3. **Espacio como diseño** — márgenes generosos, secciones bien separadas
 4. **Sin emojis** — la marca comunica con forma y tipografía
-5. **Inline styles únicamente** — no hay clases CSS globales; cada estilo es explícito
+5. **Tokens y componentes explícitos** — las clases globales del design system y los estilos scoped de cada ruta son la fuente de verdad; los inline styles quedan para ajustes de composición puntuales
 6. **Animaciones útiles** — revelan contenido, no distraen
 
 ---

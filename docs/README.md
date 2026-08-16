@@ -6,14 +6,16 @@
 
 | Documento | Contenido |
 |---|---|
-| [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Arquitectura, esquema de base de datos, decisiones técnicas |
+| [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Referencia compacta: arquitectura, esquema de base de datos y contrato vigente |
+| [`ARCHITECTURE-DECISIONS.md`](./ARCHITECTURE-DECISIONS.md) | Registro completo de ADRs y contexto histórico |
 | [`DEV-GUIDE.md`](./DEV-GUIDE.md) | Guía de desarrollo y setup local |
 
 El Data Hub, el orden global de proveedores LLM, los fallbacks seguros de la demo y la orientación
 agronómica citada se diseñaron originalmente vía specs SDD (`specs/agrovoz-data-ecosystem/`,
 `specs/global-llm-provider-order/`, `specs/demo-safe-fallbacks/`, `specs/ai-agronomic-guidance/`);
 las cuatro ya están completas y en producción, así que sus carpetas SDD se retiraron.
-`docs/ARCHITECTURE.md` (decisiones 27, 32-34) es la referencia vigente.
+`docs/ARCHITECTURE.md` (decisiones 27, 32-34) es la referencia rápida vigente;
+el detalle histórico está en `docs/ARCHITECTURE-DECISIONS.md`.
 
 ## Negocio
 

@@ -9,232 +9,982 @@ const pageDescription =
 ---
 
 <Base title={pageTitle} description={pageDescription}>
-  <Header />
-  <main id="top" class="min-h-screen py-16 sm:py-24">
-    <div class="mx-auto max-w-4xl px-5 sm:px-8">
-      <a
-        href="/#top"
-        class="mb-8 inline-flex items-center text-sm font-semibold text-[var(--color-accent-deep)] underline decoration-[var(--color-accent)] underline-offset-4 hover:text-[var(--color-ink)]"
-      >
-        ← Volver a AgroVoz
-      </a>
+  <Header showLanguageToggle={false} />
+  <main id="top" class="privacy-page">
+    <section class="privacy-hero section">
+      <div class="container">
+        <a class="privacy-back" href="/#top">
+          <span aria-hidden="true">←</span>
+          Volver a AgroVoz
+        </a>
 
-      <header class="mb-12 max-w-3xl">
-        <p class="eyebrow">Privacidad y protección de datos</p>
-        <h1 class="text-4xl font-extrabold tracking-tight text-[var(--color-ink)] sm:text-6xl">
-          Información de privacidad
-        </h1>
-        <p class="mt-6 text-lg leading-8 text-[var(--color-muted)]">
-          Esta página hace accesible un resumen técnico público de privacidad de AgroVoz. Describe el
-          comportamiento observado y las brechas pendientes; no es una política aprobada, no reemplaza
-          la revisión jurídica externa ni constituye una declaración de cumplimiento.
-        </p>
-      </header>
-
-      <aside
-        class="mb-12 border-l-4 border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-5 text-[var(--color-ink)] sm:p-6"
-        aria-labelledby="estado-documento"
-      >
-        <h2 id="estado-documento" class="text-lg font-bold">Estado del documento</h2>
-        <p class="mt-2 leading-7">
-          <strong>Resumen técnico público — versión 1.1, sujeto a revisión jurídica.</strong>
-          Describe el comportamiento observado al 29 de julio de 2026 y las brechas materiales pendientes.
-          La Ley 21.719 entra en vigencia el 1 de diciembre de 2026. Los datos de responsable,
-          representante y canales de derechos todavía están por designar o completar.
-        </p>
-      </aside>
-
-      <div class="space-y-14 text-base leading-7 text-[var(--color-ink)]">
-        <section aria-labelledby="responsable">
-          <h2 id="responsable" class="text-2xl font-bold tracking-tight sm:text-3xl">
-            1. Responsable y contacto
-          </h2>
-          <p class="mt-4">
-            AgroVoz es un asistente por WhatsApp desarrollado en el contexto académico de INACAP
-            Temuco.
-          </p>
-          <div class="mt-5 overflow-x-auto rounded-lg border border-[var(--color-line)]">
-            <table class="min-w-full text-left text-sm">
-              <caption class="sr-only">Datos de responsable y contacto aún por completar</caption>
-              <thead class="bg-[var(--color-accent-soft)]">
-                <tr>
-                  <th scope="col" class="px-4 py-3 font-bold">Información</th>
-                  <th scope="col" class="px-4 py-3 font-bold">Estado</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-[var(--color-line)]">
-                <tr><th scope="row" class="px-4 py-3 font-semibold">Responsable del tratamiento</th><td class="px-4 py-3">Por designar</td></tr>
-                <tr><th scope="row" class="px-4 py-3 font-semibold">Representante legal, si corresponde</th><td class="px-4 py-3">Por designar</td></tr>
-                <tr><th scope="row" class="px-4 py-3 font-semibold">Domicilio</th><td class="px-4 py-3">Por completar</td></tr>
-                <tr><th scope="row" class="px-4 py-3 font-semibold">Correo para ejercer derechos</th><td class="px-4 py-3">Por completar</td></tr>
-                <tr><th scope="row" class="px-4 py-3 font-semibold">WhatsApp u otro canal verificable</th><td class="px-4 py-3">Por completar</td></tr>
-              </tbody>
-            </table>
+        <div class="privacy-hero__grid">
+          <div class="privacy-hero__copy">
+            <span class="eyebrow-pill">
+              <span class="dot" aria-hidden="true"></span>
+              Transparencia y confianza
+            </span>
+            <h1 class="h1 privacy-title">
+              Información de privacidad<span>.</span>
+            </h1>
+            <p class="lede privacy-hero__lede">
+              Qué datos trata AgroVoz, por qué los necesita y qué brechas materiales pendientes siguen abiertas. Sin promesas que todavía no podamos demostrar.
+            </p>
+            <div class="privacy-hero__meta" aria-label="Estado de la información">
+              <span class="privacy-pill privacy-pill--accent">Resumen técnico público</span>
+              <span>Versión 1.1 · 15 ago 2026</span>
+            </div>
           </div>
-          <p class="mt-4">
-            Hasta completar y validar estos datos no existe un canal formal suficiente para iniciar la
-            captación de consentimientos o tramitar solicitudes de derechos.
-          </p>
-        </section>
 
-        <section aria-labelledby="datos">
-          <h2 id="datos" class="text-2xl font-bold tracking-tight sm:text-3xl">2. Datos que el sistema trata hoy</h2>
-          <p class="mt-4">
-            Los datos seudonimizados siguen siendo datos personales cuando pueden vincularse
-            nuevamente con una persona usando información adicional. AgroVoz no los denomina
-            anónimos.
-          </p>
-          <div class="mt-5 overflow-x-auto rounded-lg border border-[var(--color-line)]">
-            <table class="min-w-[720px] text-left text-sm">
-              <caption class="sr-only">Tratamientos, datos y retención observados</caption>
-              <thead class="bg-[var(--color-accent-soft)]">
-                <tr>
-                  <th scope="col" class="px-4 py-3 font-bold">Tratamiento</th>
-                  <th scope="col" class="px-4 py-3 font-bold">Datos</th>
-                  <th scope="col" class="px-4 py-3 font-bold">Comportamiento y retención observados</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-[var(--color-line)]">
-                <tr><th scope="row" class="px-4 py-3 font-semibold">Canal WhatsApp</th><td class="px-4 py-3">Número/chat ID, audio o texto y metadatos del mensaje</td><td class="px-4 py-3">Meta y Open-WA procesan el mensaje para entregarlo. El backend recibe el identificador durante la solicitud.</td></tr>
-                <tr><th scope="row" class="px-4 py-3 font-semibold">Audio temporal</th><td class="px-4 py-3">Archivos <code>.ogg</code> y <code>.wav</code></td><td class="px-4 py-3">Se eliminan del VPS en menos de 24 horas en el flujo normal. Deben verificarse fallos, backups y cleanup.</td></tr>
-                <tr><th scope="row" class="px-4 py-3 font-semibold">Registro operativo</th><td class="px-4 py-3"><code>phone_hash</code>, intención, producto, tiempos, feedback, fecha y estado de entrega</td><td class="px-4 py-3">Sin <code>history_consent</code> el contenido queda vacío. Con opt-in se redacta tras entrega o fallo y un job horario elimina staging mayor a 24 horas. Los metadatos aún no tienen TTL aprobado.</td></tr>
-                <tr><th scope="row" class="px-4 py-3 font-semibold">Preferencias</th><td class="px-4 py-3">Hash, tipo de identidad, código de grupo, comuna/localidad, cultivos y opt-ins</td><td class="px-4 py-3">Se guardan sin un TTL automático definido. <code>location_consent</code> es separado y no habilita otros tratamientos.</td></tr>
-                <tr><th scope="row" class="px-4 py-3 font-semibold">Ubicación GPS, solo con opt-in</th><td class="px-4 py-3"><code>lat</code>, <code>lng</code> y fecha de actualización del pin</td><td class="px-4 py-3"><code>location_consent</code> y <code>LOCATION_SHARING_ENABLED</code> son necesarios para nuevas escrituras. El pin se limpia tras 180 días desde su última actualización.</td></tr>
-                <tr><th scope="row" class="px-4 py-3 font-semibold">Dataset de voz, solo con opt-in</th><td class="px-4 py-3">Copia de audio, transcripción y metadatos técnicos</td><td class="px-4 py-3"><code>dataset_consent</code> permite crear una copia distinta al audio temporal. Su plazo y borrado E2E deben cerrarse antes de recolectar.</td></tr>
-                <tr><th scope="row" class="px-4 py-3 font-semibold">Logs</th><td class="px-4 py-3">Códigos cerrados, contadores, tiempos e IDs técnicos de correlación</td><td class="px-4 py-3">El código omite texto libre y teléfono/chat/hash. Docker conserva como máximo 3 × 10 MB por servicio, pero aún falta aprobar un plazo temporal y verificar Open-WA.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section aria-labelledby="finalidades">
-          <h2 id="finalidades" class="text-2xl font-bold tracking-tight sm:text-3xl">3. Finalidades y bases propuestas</h2>
-          <p class="mt-4">Esta tabla es una hipótesis de trabajo sujeta a revisión jurídica:</p>
-          <div class="mt-5 overflow-x-auto rounded-lg border border-[var(--color-line)]">
-            <table class="min-w-[720px] text-left text-sm">
-              <caption class="sr-only">Finalidades y bases propuestas</caption>
-              <thead class="bg-[var(--color-accent-soft)]"><tr><th scope="col" class="px-4 py-3 font-bold">Finalidad</th><th scope="col" class="px-4 py-3 font-bold">Base propuesta</th><th scope="col" class="px-4 py-3 font-bold">Estado</th></tr></thead>
-              <tbody class="divide-y divide-[var(--color-line)]">
-                <tr><th scope="row" class="px-4 py-3 font-semibold">Procesar una pregunta y entregar una respuesta</th><td class="px-4 py-3">Ejecución del servicio solicitado</td><td class="px-4 py-3">El contenido no consentido se redacta; la base y retención de metadatos operativos siguen pendientes.</td></tr>
-                <tr><th scope="row" class="px-4 py-3 font-semibold">Dataset de voz para evaluar o mejorar Whisper</th><td class="px-4 py-3">Consentimiento específico de dataset</td><td class="px-4 py-3">Debe cubrir expresamente audio y transcripción.</td></tr>
-                <tr><th scope="row" class="px-4 py-3 font-semibold">Recordar la última consulta durante 28 días</th><td class="px-4 py-3">Consentimiento específico de memoria contextual</td><td class="px-4 py-3"><code>history_consent</code> existe; la feature sigue bloqueada hasta aprobación externa.</td></tr>
-                <tr><th scope="row" class="px-4 py-3 font-semibold">Consultar clima usando un pin GPS guardado</th><td class="px-4 py-3">Consentimiento específico de ubicación</td><td class="px-4 py-3"><code>location_consent</code> es independiente; todavía no existe activación por voz.</td></tr>
-              </tbody>
-            </table>
-          </div>
-          <p class="mt-4 font-semibold">Aceptar una finalidad opcional no implica aceptar otra.</p>
-        </section>
-
-        <section aria-labelledby="identidad">
-          <h2 id="identidad" class="text-2xl font-bold tracking-tight sm:text-3xl">4. Identidad y seudonimización</h2>
-          <p class="mt-4">
-            El número de WhatsApp se transforma con HMAC-SHA256 y un secreto
-            (<code>PHONE_HASH_PEPPER</code>) para usarlo como identidad interna. Esta medida dificulta
-            atribuir la base sin la clave, pero no es anonimización irreversible: el servidor recibe el
-            identificador real al procesar el mensaje, y quien controla canal, servidor y clave puede
-            correlacionar actividad. Las alertas pueden guardar <code>wa_chat_id</code> directamente.
-          </p>
-        </section>
-
-        <section aria-labelledby="destinatarios">
-          <h2 id="destinatarios" class="text-2xl font-bold tracking-tight sm:text-3xl">5. Destinatarios e infraestructura</h2>
-          <p class="mt-4">
-            WhatsApp/Meta procesa mensajes, audio, identificadores y metadatos del canal. Open-WA
-            autohospedado procesa la sesión y los mensajes necesarios para operar. El VPS en Hetzner,
-            Alemania, aloja backend, SQLite, archivos temporales, modelos y logs. La transferencia
-            internacional y sus mecanismos todavía están pendientes de documentación.
-          </p>
-          <p class="mt-4">
-            Open-Meteo recibe coordenadas redondeadas a 2 decimales para consultar clima; no recibe
-            hash, texto ni coordenadas precisas del productor. ODEPA no recibe datos del productor.
-            <code>MCP_ENABLED=false</code> y <code>EXPENSE_TRACKING_ENABLED=false</code> permanecen
-            apagados por defecto.
-          </p>
-        </section>
-
-        <section aria-labelledby="derechos">
-          <h2 id="derechos" class="text-2xl font-bold tracking-tight sm:text-3xl">6. Derechos y revocación</h2>
-          <p class="mt-4">
-            La Ley 21.719 contempla acceso, rectificación, supresión, oposición, portabilidad y
-            bloqueo, entre otros derechos. El mecanismo operativo y el procedimiento para autenticar al
-            solicitante están pendientes porque el responsable y los contactos todavía no se designan.
-          </p>
-          <p class="mt-4">
-            La revocación implementada para memoria contextual, desde admin autenticado o WhatsApp
-            verificado, desactiva el opt-in usado, elimina <code>consultation_history</code> del sujeto y
-            registra evidencia append-only mediante un token HMAC. No elimina automáticamente todos
-            los metadatos, dataset de voz, logs, backups, preferencias, alertas ni sesiones del canal.
-          </p>
-        </section>
-
-        <section aria-labelledby="retencion">
-          <h2 id="retencion" class="text-2xl font-bold tracking-tight sm:text-3xl">7. Retención pendiente de aprobación</h2>
-          <div class="mt-5 overflow-x-auto rounded-lg border border-[var(--color-line)]">
-            <table class="min-w-[620px] text-left text-sm">
-              <caption class="sr-only">Plazos técnicos y brechas de retención</caption>
-              <thead class="bg-[var(--color-accent-soft)]"><tr><th scope="col" class="px-4 py-3 font-bold">Datos</th><th scope="col" class="px-4 py-3 font-bold">Plazo técnico actual</th><th scope="col" class="px-4 py-3 font-bold">Brecha</th></tr></thead>
-              <tbody class="divide-y divide-[var(--color-line)]">
-                <tr><th scope="row" class="px-4 py-3 font-semibold">Audio temporal</th><td class="px-4 py-3">Menos de 24 horas</td><td class="px-4 py-3">Auditar excepciones y backups.</td></tr>
-                <tr><th scope="row" class="px-4 py-3 font-semibold">Memoria contextual</th><td class="px-4 py-3">28 días</td><td class="px-4 py-3">Separar consentimiento y probar scheduler en producción.</td></tr>
-                <tr><th scope="row" class="px-4 py-3 font-semibold">Dataset de voz</th><td class="px-4 py-3">Propuesta hasta cierre académico</td><td class="px-4 py-3">Implementar inventario y borrado verificable.</td></tr>
-                <tr><th scope="row" class="px-4 py-3 font-semibold">Preferencias y alertas</th><td class="px-4 py-3">Sin TTL</td><td class="px-4 py-3">Definir término del servicio y revocación.</td></tr>
-                <tr><th scope="row" class="px-4 py-3 font-semibold">Logs y auditoría</th><td class="px-4 py-3">Tope por tamaño, sin plazo temporal</td><td class="px-4 py-3">Aprobar TTL y acceso; verificar rotación productiva y Open-WA.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section aria-labelledby="seguridad">
-          <h2 id="seguridad" class="text-2xl font-bold tracking-tight sm:text-3xl">8. Seguridad y límites declarados</h2>
-          <ul class="mt-4 list-disc space-y-2 pl-6">
-            <li>HMAC del identificador interno: implementada; sigue siendo seudonimización.</li>
-            <li>Audio temporal: eliminado en menos de 24 horas en el flujo normal; requiere evidencia periódica.</li>
-            <li>Firma y autenticación de webhooks y admin: implementadas según configuración.</li>
-            <li>Feature gates de MCP, estado, historial y gastos: apagados por defecto.</li>
-            <li>La minimización de logs de aplicación está implementada; faltan TTL y verificación productiva/Open-WA.</li>
-          </ul>
-          <p class="mt-4">
-            AgroVoz entrega información de precios y clima; no pretende decidir, puntuar o recomendar
-            acciones al productor. Si se detecta participación de menores, el tratamiento debe detenerse
-            y escalarse a revisión antes de conservar datos.
-          </p>
-        </section>
-
-        <section aria-labelledby="pendientes">
-          <h2 id="pendientes" class="text-2xl font-bold tracking-tight sm:text-3xl">9. Bloqueos antes del piloto</h2>
-          <ul class="mt-4 list-disc space-y-2 pl-6">
-            <li>Designar responsable, representante y canales de derechos.</li>
-            <li>Aprobar finalidad, base, TTL y supresión de metadatos operativos.</li>
-            <li>Cerrar retención y borrado del dataset de voz.</li>
-            <li>Definir TTL, acceso y prueba productiva de logs, incluido Open-WA.</li>
-            <li>Documentar Hetzner, backups, contrato y transferencia internacional.</li>
-            <li>Aprobar procedimientos de derechos e incidentes.</li>
-            <li>Obtener revisión jurídica externa firmada.</li>
-            <li>Preparar y publicar una versión formal aprobada y accesible.</li>
-          </ul>
-        </section>
-
-        <section aria-labelledby="fuentes">
-          <h2 id="fuentes" class="text-2xl font-bold tracking-tight sm:text-3xl">10. Fuentes oficiales</h2>
-          <ul class="mt-4 list-disc space-y-2 pl-6">
-            <li>
-              <a class="font-semibold text-[var(--color-accent-deep)] underline underline-offset-4 hover:text-[var(--color-ink)]" href="https://www.bcn.cl/leychile/Navegar?idNorma=1209272&amp;idVersion=2026-12-01" target="_blank" rel="noopener noreferrer">
-                Biblioteca del Congreso Nacional — Ley 21.719, versión 01-12-2026
-              </a>
-            </li>
-            <li>
-              <a class="font-semibold text-[var(--color-accent-deep)] underline underline-offset-4 hover:text-[var(--color-ink)]" href="https://www.diariooficial.interior.gob.cl/publicaciones/2024/12/13/44023/01/2583630.pdf" target="_blank" rel="noopener noreferrer">
-                Diario Oficial — publicación de la Ley 21.719, 13-12-2024
-              </a>
-            </li>
-          </ul>
-          <p class="mt-6 text-sm text-[var(--color-muted)]">
-            Última actualización del contenido técnico: 29 de julio de 2026 · Versión 1.1 (resumen
-            público sujeto a revisión jurídica).
-          </p>
-        </section>
+          <aside class="privacy-status-card" aria-labelledby="estado-documento">
+            <div class="privacy-status-card__top">
+              <span class="privacy-status-card__icon" aria-hidden="true">✓</span>
+              <span class="privacy-pill privacy-pill--warning">Revisión pendiente</span>
+            </div>
+            <h2 id="estado-documento">Estado del documento</h2>
+            <p>
+              Este resumen describe el comportamiento técnico observado. No es
+              una política aprobada ni reemplaza la revisión jurídica externa.
+            </p>
+            <div class="privacy-status-card__details">
+              <div>
+                <span>Próximo hito</span>
+                <strong>Revisión Ley 21.719</strong>
+              </div>
+              <div>
+                <span>Vigencia de la ley</span>
+                <strong>1 dic 2026</strong>
+              </div>
+            </div>
+          </aside>
+        </div>
       </div>
-    </div>
+    </section>
+
+    <section class="privacy-body section" aria-label="Resumen de privacidad">
+      <div class="container">
+        <div class="privacy-layout">
+          <nav class="privacy-toc" aria-label="En esta página">
+            <span class="privacy-toc__label">En esta página</span>
+            <a href="#responsable">Responsable</a>
+            <a href="#datos">Datos tratados</a>
+            <a href="#finalidades">Finalidades</a>
+            <a href="#identidad">Identidad</a>
+            <a href="#destinatarios">Infraestructura</a>
+            <a href="#derechos">Derechos</a>
+            <a href="#retencion">Retención</a>
+            <a href="#seguridad">Seguridad</a>
+            <a href="#pendientes">Bloqueos</a>
+            <a href="#fuentes">Fuentes</a>
+          </nav>
+
+          <div class="privacy-sections">
+            <section class="privacy-card" aria-labelledby="responsable">
+              <header class="privacy-card__header">
+                <span class="privacy-card__number">01</span>
+                <div>
+                  <span class="privacy-card__eyebrow">Quién responde</span>
+                  <h2 id="responsable">Responsable y contacto</h2>
+                </div>
+              </header>
+              <p>
+                AgroVoz es un asistente por WhatsApp desarrollado en el contexto
+                académico de INACAP Temuco.
+              </p>
+              <div class="privacy-table-wrap">
+                <table class="privacy-table">
+                  <caption class="sr-only">Datos de responsable y contacto aún por completar</caption>
+                  <thead>
+                    <tr><th scope="col">Información</th><th scope="col">Estado</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><th scope="row">Responsable del tratamiento</th><td>Por designar</td></tr>
+                    <tr><th scope="row">Representante legal, si corresponde</th><td>Por designar</td></tr>
+                    <tr><th scope="row">Domicilio</th><td>Por completar</td></tr>
+                    <tr><th scope="row">Correo para ejercer derechos</th><td>Por completar</td></tr>
+                    <tr><th scope="row">WhatsApp u otro canal verificable</th><td>Por completar</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="privacy-note">
+                Hasta completar y validar estos datos no existe un canal formal
+                suficiente para iniciar la captación de consentimientos o
+                tramitar solicitudes de derechos.
+              </p>
+            </section>
+
+            <section class="privacy-card" aria-labelledby="datos">
+              <header class="privacy-card__header">
+                <span class="privacy-card__number">02</span>
+                <div>
+                  <span class="privacy-card__eyebrow">Qué entra al sistema</span>
+                  <h2 id="datos">Datos que el sistema trata hoy</h2>
+                </div>
+              </header>
+              <p>
+                Los datos seudonimizados siguen siendo datos personales cuando
+                pueden vincularse nuevamente con una persona usando información
+                adicional. AgroVoz no los denomina anónimos.
+              </p>
+              <p class="privacy-mobile-hint">Desliza la tabla hacia el lado para ver todas las columnas →</p>
+              <div class="privacy-table-wrap">
+                <table class="privacy-table privacy-table--wide">
+                  <caption class="sr-only">Tratamientos, datos y retención observados</caption>
+                  <thead>
+                    <tr><th scope="col">Tratamiento</th><th scope="col">Datos</th><th scope="col">Comportamiento y retención observados</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><th scope="row">Canal WhatsApp</th><td>Número/chat ID, audio o texto y metadatos del mensaje</td><td>Meta y Open-WA procesan el mensaje para entregarlo. El backend recibe el identificador durante la solicitud.</td></tr>
+                    <tr><th scope="row">Audio temporal</th><td>Archivos <code>.ogg</code> y <code>.wav</code></td><td>Se eliminan del VPS en menos de 24 horas en el flujo normal. Deben verificarse fallos, backups y cleanup.</td></tr>
+                    <tr><th scope="row">Registro operativo</th><td><code>phone_hash</code>, intención, producto, tiempos, feedback, fecha y estado de entrega</td><td>Sin <code>history_consent</code> el contenido queda vacío. Con opt-in se redacta tras entrega o fallo y un job horario elimina staging mayor a 24 horas. Los metadatos aún no tienen TTL aprobado.</td></tr>
+                    <tr><th scope="row">Preferencias</th><td>Hash, tipo de identidad, código de grupo, comuna/localidad, cultivos y opt-ins</td><td>Se guardan sin un TTL automático definido. <code>location_consent</code> es separado y no habilita otros tratamientos.</td></tr>
+                    <tr><th scope="row">Ubicación GPS, solo con opt-in</th><td><code>lat</code>, <code>lng</code> y fecha de actualización del pin</td><td><code>location_consent</code> y <code>LOCATION_SHARING_ENABLED</code> son necesarios para nuevas escrituras. El pin se limpia tras 180 días desde su última actualización.</td></tr>
+                    <tr><th scope="row">Dataset de voz, solo con opt-in</th><td>Copia de audio, transcripción y metadatos técnicos</td><td><code>dataset_consent</code> permite crear una copia distinta al audio temporal. Su plazo y borrado E2E deben cerrarse antes de recolectar.</td></tr>
+                    <tr><th scope="row">Logs</th><td>Códigos cerrados, contadores, tiempos e IDs técnicos de correlación</td><td>El código omite texto libre y teléfono/chat/hash. Docker conserva como máximo 3 × 10 MB por servicio, pero aún falta aprobar un plazo temporal y verificar Open-WA.</td></tr>
+                    <tr><th scope="row">Demo web (landing)</th><td>Audio capturado por el micrófono del navegador, texto escrito y contexto de la conversación en curso</td><td>El audio viaja en base64 a <code>POST /api/v1/demo/preguntar</code> y se descarta tras la respuesta. Las consultas demo no se persisten en la tabla <code>consultations</code>.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="privacy-card" aria-labelledby="finalidades">
+              <header class="privacy-card__header">
+                <span class="privacy-card__number">03</span>
+                <div>
+                  <span class="privacy-card__eyebrow">Por qué se usan</span>
+                  <h2 id="finalidades">Finalidades y bases propuestas</h2>
+                </div>
+              </header>
+              <p>Esta tabla es una hipótesis de trabajo sujeta a revisión jurídica:</p>
+              <p class="privacy-mobile-hint">Desliza la tabla hacia el lado para ver todas las columnas →</p>
+              <div class="privacy-table-wrap">
+                <table class="privacy-table privacy-table--wide">
+                  <caption class="sr-only">Finalidades y bases propuestas</caption>
+                  <thead>
+                    <tr><th scope="col">Finalidad</th><th scope="col">Base propuesta</th><th scope="col">Estado</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><th scope="row">Procesar una pregunta y entregar una respuesta</th><td>Ejecución del servicio solicitado</td><td>El contenido no consentido se redacta; la base y retención de metadatos operativos siguen pendientes.</td></tr>
+                    <tr><th scope="row">Dataset de voz para evaluar o mejorar Whisper</th><td>Consentimiento específico de dataset</td><td>Debe cubrir expresamente audio y transcripción.</td></tr>
+                    <tr><th scope="row">Recordar la última consulta durante 28 días</th><td>Consentimiento específico de memoria contextual</td><td><code>history_consent</code> existe; la feature sigue bloqueada hasta aprobación externa.</td></tr>
+                    <tr><th scope="row">Consultar clima usando un pin GPS guardado</th><td>Consentimiento específico de ubicación</td><td><code>location_consent</code> es independiente; todavía no existe activación por voz.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="privacy-note privacy-note--strong">Aceptar una finalidad opcional no implica aceptar otra.</p>
+            </section>
+
+            <section class="privacy-card" aria-labelledby="identidad">
+              <header class="privacy-card__header">
+                <span class="privacy-card__number">04</span>
+                <div>
+                  <span class="privacy-card__eyebrow">Cómo se protege</span>
+                  <h2 id="identidad">Identidad y seudonimización</h2>
+                </div>
+              </header>
+              <p>
+                El número de WhatsApp se transforma con HMAC-SHA256 y un secreto
+                (<code>PHONE_HASH_PEPPER</code>) para usarlo como identidad interna.
+                Esta medida dificulta atribuir la base sin la clave, pero no es
+                anonimización irreversible: el servidor recibe el identificador
+                real al procesar el mensaje, y quien controla canal, servidor y
+                clave puede correlacionar actividad. Las alertas pueden guardar
+                <code>wa_chat_id</code> directamente.
+              </p>
+            </section>
+
+            <section class="privacy-card" aria-labelledby="destinatarios">
+              <header class="privacy-card__header">
+                <span class="privacy-card__number">05</span>
+                <div>
+                  <span class="privacy-card__eyebrow">Dónde circulan</span>
+                  <h2 id="destinatarios">Destinatarios e infraestructura</h2>
+                </div>
+              </header>
+              <p>
+                WhatsApp/Meta procesa mensajes, audio, identificadores y metadatos
+                del canal. Open-WA autohospedado procesa la sesión y los mensajes
+                necesarios para operar. El VPS en Hetzner, Alemania, aloja
+                backend, SQLite, archivos temporales, modelos y logs. La
+                transferencia internacional y sus mecanismos todavía están
+                pendientes de documentación.
+              </p>
+              <p>
+                Open-Meteo recibe coordenadas redondeadas a 2 decimales para
+                consultar clima; no recibe hash, texto ni coordenadas precisas del
+                productor. ODEPA no recibe datos del productor.
+                <code>MCP_ENABLED=false</code> y
+                <code>EXPENSE_TRACKING_ENABLED=false</code> permanecen apagados
+                por defecto.
+              </p>
+              <p>
+                La landing pública carga tipografías desde Google Fonts
+                (<code>fonts.googleapis.com</code>), que recibe la IP y el
+                User-Agent del navegador al descargar la hoja de estilos. No
+                recibe consultas, audio ni datos del productor.
+              </p>
+            </section>
+
+            <section class="privacy-card" aria-labelledby="derechos">
+              <header class="privacy-card__header">
+                <span class="privacy-card__number">06</span>
+                <div>
+                  <span class="privacy-card__eyebrow">Qué puede pedir una persona</span>
+                  <h2 id="derechos">Derechos y revocación</h2>
+                </div>
+              </header>
+              <p>
+                La Ley 21.719 contempla acceso, rectificación, supresión, oposición,
+                portabilidad y bloqueo, entre otros derechos. El mecanismo
+                operativo y el procedimiento para autenticar al solicitante están
+                pendientes porque el responsable y los contactos todavía no se
+                designan.
+              </p>
+              <p>
+                La revocación implementada para memoria contextual, desde admin
+                autenticado o WhatsApp verificado, desactiva el opt-in usado,
+                elimina <code>consultation_history</code> del sujeto y registra
+                evidencia append-only mediante un token HMAC. No elimina
+                automáticamente todos los metadatos, dataset de voz, logs,
+                backups, preferencias, alertas ni sesiones del canal.
+              </p>
+            </section>
+
+            <section class="privacy-card" aria-labelledby="retencion">
+              <header class="privacy-card__header">
+                <span class="privacy-card__number">07</span>
+                <div>
+                  <span class="privacy-card__eyebrow">Cuánto tiempo</span>
+                  <h2 id="retencion">Retención pendiente de aprobación</h2>
+                </div>
+              </header>
+              <p class="privacy-mobile-hint">Desliza la tabla hacia el lado para ver todas las columnas →</p>
+              <div class="privacy-table-wrap">
+                <table class="privacy-table privacy-table--wide">
+                  <caption class="sr-only">Plazos técnicos y brechas de retención</caption>
+                  <thead>
+                    <tr><th scope="col">Datos</th><th scope="col">Plazo técnico actual</th><th scope="col">Brecha</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><th scope="row">Audio temporal</th><td>Menos de 24 horas</td><td>Auditar excepciones y backups.</td></tr>
+                    <tr><th scope="row">Memoria contextual</th><td>28 días</td><td>Separar consentimiento y probar scheduler en producción.</td></tr>
+                    <tr><th scope="row">Dataset de voz</th><td>Propuesta hasta cierre académico</td><td>Implementar inventario y borrado verificable.</td></tr>
+                    <tr><th scope="row">Preferencias y alertas</th><td>Sin TTL</td><td>Definir término del servicio y revocación.</td></tr>
+                    <tr><th scope="row">Logs y auditoría</th><td>Tope por tamaño, sin plazo temporal</td><td>Aprobar TTL y acceso; verificar rotación productiva y Open-WA.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="privacy-card" aria-labelledby="seguridad">
+              <header class="privacy-card__header">
+                <span class="privacy-card__number">08</span>
+                <div>
+                  <span class="privacy-card__eyebrow">Controles observados</span>
+                  <h2 id="seguridad">Seguridad y límites declarados</h2>
+                </div>
+              </header>
+              <ul class="privacy-list">
+                <li><span>01</span><div><strong>HMAC del identificador interno</strong><small>Implementada; sigue siendo seudonimización.</small></div></li>
+                <li><span>02</span><div><strong>Audio temporal</strong><small>Eliminado en menos de 24 horas en el flujo normal; requiere evidencia periódica.</small></div></li>
+                <li><span>03</span><div><strong>Webhooks y admin</strong><small>Firma y autenticación implementadas según configuración.</small></div></li>
+                <li><span>04</span><div><strong>Feature gates</strong><small>MCP, estado, historial y gastos apagados por defecto.</small></div></li>
+                <li><span>05</span><div><strong>Logs de aplicación</strong><small>Minimización implementada; faltan TTL y verificación productiva/Open-WA.</small></div></li>
+              </ul>
+              <p>
+                AgroVoz entrega información de precios y clima; no pretende decidir,
+                puntuar o recomendar acciones al productor. Si se detecta
+                participación de menores, el tratamiento debe detenerse y
+                escalarse a revisión antes de conservar datos.
+              </p>
+            </section>
+
+            <section class="privacy-card privacy-card--attention" aria-labelledby="pendientes">
+              <header class="privacy-card__header">
+                <span class="privacy-card__number">09</span>
+                <div>
+                  <span class="privacy-card__eyebrow">Antes de operar</span>
+                  <h2 id="pendientes">Bloqueos antes del piloto</h2>
+                </div>
+              </header>
+              <ul class="privacy-checklist">
+                <li>Designar responsable, representante y canales de derechos.</li>
+                <li>Aprobar finalidad, base, TTL y supresión de metadatos operativos.</li>
+                <li>Cerrar retención y borrado del dataset de voz.</li>
+                <li>Definir TTL, acceso y prueba productiva de logs, incluido Open-WA.</li>
+                <li>Documentar Hetzner, backups, contrato y transferencia internacional.</li>
+                <li>Aprobar procedimientos de derechos e incidentes.</li>
+                <li>Obtener revisión jurídica externa firmada.</li>
+                <li>Preparar y publicar una versión formal aprobada y accesible.</li>
+              </ul>
+            </section>
+
+            <section class="privacy-card privacy-card--sources" aria-labelledby="fuentes">
+              <header class="privacy-card__header">
+                <span class="privacy-card__number">10</span>
+                <div>
+                  <span class="privacy-card__eyebrow">Para profundizar</span>
+                  <h2 id="fuentes">Fuentes oficiales</h2>
+                </div>
+              </header>
+              <ul class="privacy-sources">
+                <li>
+                  <a href="https://www.bcn.cl/leychile/Navegar?idNorma=1209272&amp;idVersion=2026-12-01" target="_blank" rel="noopener noreferrer">
+                    <span>Biblioteca del Congreso Nacional</span>
+                    <small>Ley 21.719 · versión 01-12-2026 ↗</small>
+                  </a>
+                </li>
+                <li>
+                  <a href="https://www.diariooficial.interior.gob.cl/publicaciones/2024/12/13/44023/01/2583630.pdf" target="_blank" rel="noopener noreferrer">
+                    <span>Diario Oficial</span>
+                    <small>Publicación de la Ley 21.719 · 13-12-2024 ↗</small>
+                  </a>
+                </li>
+              </ul>
+              <p class="privacy-last-updated">
+                Última actualización del contenido técnico: 15 de agosto de 2026 ·
+                Versión 1.1 (resumen público sujeto a revisión jurídica).
+              </p>
+            </section>
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
   <Footer />
 </Base>
+
+<style>
+  .privacy-page {
+    background: var(--color-bg);
+  }
+
+  .privacy-hero {
+    padding-top: clamp(34px, 5vw, 72px);
+    padding-bottom: clamp(52px, 8vw, 104px);
+  }
+
+  .privacy-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    margin-bottom: clamp(2.8rem, 6vw, 5.4rem);
+    color: var(--color-accent-deep);
+    font-size: 0.88rem;
+    font-weight: 700;
+    transition: gap 0.18s ease, color 0.18s ease;
+  }
+
+  .privacy-back:hover,
+  .privacy-back:focus-visible {
+    gap: 0.8rem;
+    color: var(--color-ink);
+  }
+
+  .privacy-back span {
+    font-size: 1.2rem;
+    line-height: 1;
+  }
+
+  .privacy-hero__grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 390px);
+    align-items: end;
+    gap: clamp(3rem, 8vw, 9rem);
+  }
+
+  .privacy-title {
+    max-width: 10ch;
+    margin-top: 1.2rem;
+    font-size: clamp(3.4rem, 7vw, 7rem);
+  }
+
+  .privacy-title span {
+    color: var(--color-accent);
+  }
+
+  .privacy-hero__lede {
+    max-width: 620px;
+    margin-top: 2rem;
+  }
+
+  .privacy-hero__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.8rem 1rem;
+    margin-top: 2rem;
+    color: var(--color-muted);
+    font-size: 0.78rem;
+  }
+
+  .privacy-pill {
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.75rem;
+    border-radius: 999px;
+    padding: 0.28rem 0.7rem;
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .privacy-pill--accent {
+    background: var(--color-accent-soft);
+    color: var(--color-accent-deep);
+  }
+
+  .privacy-pill--warning {
+    background: #fff2d9;
+    color: #8a5b12;
+  }
+
+  .privacy-status-card {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(79, 125, 90, 0.22);
+    border-radius: 1.4rem;
+    padding: clamp(1.35rem, 3vw, 2rem);
+    background: rgba(255, 255, 255, 0.82);
+    box-shadow: 0 1.5rem 3.5rem rgba(28, 30, 26, 0.08);
+  }
+
+  .privacy-status-card::before {
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: 0;
+    height: 0.28rem;
+    background: var(--color-accent);
+    content: "";
+  }
+
+  .privacy-status-card__top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .privacy-status-card__icon {
+    display: grid;
+    width: 2.2rem;
+    height: 2.2rem;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--color-accent-soft);
+    color: var(--color-accent-deep);
+    font-weight: 800;
+  }
+
+  .privacy-status-card h2 {
+    margin: 0;
+    color: var(--color-ink);
+    font-size: 1.18rem;
+    letter-spacing: -0.02em;
+  }
+
+  .privacy-status-card p {
+    margin-top: 0.7rem;
+    color: var(--color-muted);
+    font-size: 0.86rem;
+    line-height: 1.6;
+  }
+
+  .privacy-status-card__details {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.8rem;
+    margin-top: 1.35rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--color-line);
+  }
+
+  .privacy-status-card__details span,
+  .privacy-status-card__details strong {
+    display: block;
+  }
+
+  .privacy-status-card__details span {
+    color: var(--color-muted);
+    font-size: 0.68rem;
+  }
+
+  .privacy-status-card__details strong {
+    margin-top: 0.22rem;
+    color: var(--color-ink);
+    font-size: 0.76rem;
+  }
+
+  .privacy-body {
+    padding-top: 0;
+  }
+
+  .privacy-layout {
+    display: grid;
+    grid-template-columns: 168px minmax(0, 820px);
+    justify-content: center;
+    align-items: start;
+    gap: clamp(2rem, 7vw, 6rem);
+  }
+
+  .privacy-toc {
+    position: sticky;
+    top: 7rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    padding-top: 0.35rem;
+  }
+
+  .privacy-toc__label {
+    margin-bottom: 0.8rem;
+    color: var(--color-muted);
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .privacy-toc a {
+    position: relative;
+    padding: 0.38rem 0 0.38rem 0.9rem;
+    color: var(--color-muted);
+    font-size: 0.76rem;
+    line-height: 1.3;
+    transition: color 0.18s ease, padding 0.18s ease;
+  }
+
+  .privacy-toc a::before {
+    position: absolute;
+    top: 0.78rem;
+    left: 0;
+    width: 0.3rem;
+    height: 0.3rem;
+    border-radius: 50%;
+    background: var(--color-line);
+    content: "";
+    transition: background 0.18s ease;
+  }
+
+  .privacy-toc a:hover,
+  .privacy-toc a:focus-visible {
+    padding-left: 1.1rem;
+    color: var(--color-accent-deep);
+    outline: none;
+  }
+
+  .privacy-toc a:hover::before,
+  .privacy-toc a:focus-visible::before {
+    background: var(--color-accent);
+  }
+
+  .privacy-sections {
+    display: grid;
+    gap: 1.15rem;
+  }
+
+  .privacy-card {
+    border: 1px solid var(--color-line);
+    border-radius: 1.25rem;
+    padding: clamp(1.35rem, 3vw, 2.2rem);
+    background: rgba(255, 255, 255, 0.78);
+    box-shadow: 0 0.8rem 2rem rgba(28, 30, 26, 0.035);
+  }
+
+  .privacy-card__header {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.9rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .privacy-card__number {
+    display: grid;
+    width: 2rem;
+    height: 2rem;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 0.65rem;
+    background: var(--color-accent-soft);
+    color: var(--color-accent-deep);
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+  }
+
+  .privacy-card__eyebrow {
+    display: block;
+    margin-bottom: 0.22rem;
+    color: var(--color-accent-deep);
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .privacy-card h2 {
+    margin: 0;
+    color: var(--color-ink);
+    font-size: clamp(1.35rem, 2.6vw, 2rem);
+    letter-spacing: -0.035em;
+    line-height: 1.08;
+  }
+
+  .privacy-card p {
+    max-width: 72ch;
+    color: var(--color-muted);
+    font-size: 0.92rem;
+    line-height: 1.72;
+  }
+
+  .privacy-card p + p {
+    margin-top: 1rem;
+  }
+
+  .privacy-card code {
+    border-radius: 0.3rem;
+    padding: 0.1rem 0.28rem;
+    background: var(--color-accent-soft);
+    color: var(--color-accent-deep);
+    font-size: 0.82em;
+  }
+
+  .privacy-table-wrap {
+    overflow-x: auto;
+    margin-top: 1.25rem;
+    border: 1px solid var(--color-line);
+    border-radius: 0.85rem;
+    background: var(--color-surface);
+  }
+
+  .privacy-table {
+    width: 100%;
+    min-width: 520px;
+    border-collapse: collapse;
+    color: var(--color-muted);
+    font-size: 0.78rem;
+    line-height: 1.5;
+    text-align: left;
+  }
+
+  .privacy-table--wide {
+    min-width: 720px;
+  }
+
+  .privacy-table th,
+  .privacy-table td {
+    padding: 0.8rem 0.9rem;
+    vertical-align: top;
+  }
+
+  .privacy-table thead {
+    background: var(--color-accent-soft);
+    color: var(--color-accent-deep);
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .privacy-table tbody tr + tr {
+    border-top: 1px solid var(--color-line);
+  }
+
+  .privacy-table tbody th {
+    min-width: 10rem;
+    color: var(--color-ink);
+    font-weight: 700;
+  }
+
+  .privacy-table tbody td {
+    min-width: 11rem;
+  }
+
+  .privacy-note {
+    margin-top: 1rem;
+    padding: 0.8rem 1rem;
+    border-left: 3px solid var(--color-accent);
+    background: var(--color-accent-soft);
+    color: var(--color-accent-deep) !important;
+    font-size: 0.8rem !important;
+    line-height: 1.55 !important;
+  }
+
+  .privacy-note--strong {
+    font-weight: 700;
+  }
+
+  .privacy-mobile-hint {
+    display: none;
+    margin-top: 1rem !important;
+    color: var(--color-accent-deep) !important;
+    font-size: 0.75rem !important;
+  }
+
+  .privacy-list,
+  .privacy-checklist,
+  .privacy-sources {
+    display: grid;
+    gap: 0.65rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .privacy-list {
+    margin: 1.25rem 0;
+  }
+
+  .privacy-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.8rem 0;
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  .privacy-list li:last-child {
+    border-bottom: 0;
+  }
+
+  .privacy-list li > span {
+    color: var(--color-accent);
+    font-size: 0.68rem;
+    font-weight: 800;
+  }
+
+  .privacy-list strong,
+  .privacy-list small {
+    display: block;
+  }
+
+  .privacy-list strong {
+    color: var(--color-ink);
+    font-size: 0.84rem;
+  }
+
+  .privacy-list small {
+    margin-top: 0.15rem;
+    color: var(--color-muted);
+    font-size: 0.8rem;
+    line-height: 1.5;
+  }
+
+  .privacy-card--attention {
+    border-color: rgba(181, 128, 30, 0.3);
+    background: #fffaf0;
+  }
+
+  .privacy-card--attention .privacy-card__number {
+    background: #fff0ce;
+    color: #8a5b12;
+  }
+
+  .privacy-card--attention .privacy-card__eyebrow {
+    color: #8a5b12;
+  }
+
+  .privacy-checklist {
+    margin-top: 1.35rem;
+  }
+
+  .privacy-checklist li {
+    position: relative;
+    padding-left: 1.55rem;
+    color: var(--color-muted);
+    font-size: 0.86rem;
+    line-height: 1.55;
+  }
+
+  .privacy-checklist li::before {
+    position: absolute;
+    top: 0.4rem;
+    left: 0;
+    width: 0.52rem;
+    height: 0.52rem;
+    border: 2px solid #c49335;
+    border-radius: 50%;
+    content: "";
+  }
+
+  .privacy-card--sources {
+    background: var(--color-ink);
+    border-color: var(--color-ink);
+  }
+
+  .privacy-card--sources .privacy-card__number {
+    background: rgba(255, 255, 255, 0.1);
+    color: #b5d2b9;
+  }
+
+  .privacy-card--sources .privacy-card__eyebrow {
+    color: #b5d2b9;
+  }
+
+  .privacy-card--sources h2,
+  .privacy-card--sources p {
+    color: #fff;
+  }
+
+  .privacy-sources {
+    gap: 0.6rem;
+    margin-top: 1.35rem;
+  }
+
+  .privacy-sources li {
+    border-top: 1px solid rgba(255, 255, 255, 0.14);
+  }
+
+  .privacy-sources a {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.95rem 0;
+    color: #fff;
+    transition: color 0.18s ease;
+  }
+
+  .privacy-sources a:hover,
+  .privacy-sources a:focus-visible {
+    color: #b5d2b9;
+    outline: none;
+  }
+
+  .privacy-sources span,
+  .privacy-sources small {
+    display: block;
+  }
+
+  .privacy-sources span {
+    font-size: 0.86rem;
+    font-weight: 700;
+  }
+
+  .privacy-sources small {
+    margin-top: 0.2rem;
+    color: #aeb7af;
+    font-size: 0.75rem;
+  }
+
+  .privacy-last-updated {
+    margin-top: 1.3rem;
+    color: #aeb7af !important;
+    font-size: 0.72rem !important;
+  }
+
+  @media (max-width: 900px) {
+    .privacy-hero__grid {
+      grid-template-columns: 1fr;
+      gap: 2.5rem;
+    }
+
+    .privacy-status-card {
+      max-width: 520px;
+    }
+
+    .privacy-layout {
+      grid-template-columns: 1fr;
+      gap: 2rem;
+    }
+
+    .privacy-toc {
+      position: static;
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 0.35rem;
+      padding: 0.85rem;
+      border: 1px solid var(--color-line);
+      border-radius: 0.9rem;
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    .privacy-toc__label {
+      grid-column: 1 / -1;
+      margin: 0 0 0.15rem;
+    }
+
+    .privacy-toc a {
+      border-radius: 0.45rem;
+      padding: 0.45rem 0.5rem;
+      background: var(--color-bg);
+      font-size: 0.7rem;
+      text-align: center;
+    }
+
+    .privacy-toc a::before {
+      display: none;
+    }
+
+    .privacy-toc a:hover,
+    .privacy-toc a:focus-visible {
+      padding-left: 0.5rem;
+      background: var(--color-accent-soft);
+    }
+  }
+
+  @media (max-width: 560px) {
+    .privacy-hero {
+      padding-top: 2rem;
+    }
+
+    .privacy-title {
+      font-size: clamp(3rem, 15vw, 4.8rem);
+    }
+
+    .privacy-hero__lede {
+      margin-top: 1.5rem;
+    }
+
+    .privacy-hero__meta {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    .privacy-status-card__details {
+      grid-template-columns: 1fr;
+    }
+
+    .privacy-toc {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .privacy-card {
+      border-radius: 1rem;
+      padding: 1.1rem;
+    }
+
+    .privacy-card__header {
+      gap: 0.65rem;
+    }
+
+    .privacy-card h2 {
+      font-size: 1.35rem;
+    }
+
+    .privacy-card p {
+      font-size: 0.86rem;
+    }
+
+    .privacy-mobile-hint {
+      display: block;
+    }
+
+    .privacy-table {
+      font-size: 0.74rem;
+    }
+
+    .privacy-table th,
+    .privacy-table td {
+      padding: 0.7rem;
+    }
+
+    .privacy-sources a {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+  }
+</style>

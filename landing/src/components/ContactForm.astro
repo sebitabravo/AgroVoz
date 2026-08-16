@@ -1,16 +1,12 @@
 ---
-// Formulario de contacto (#contacto). El submit arma un mailto: con el plan
-// seleccionado. Para MVP no hay backend: mailto es suficiente.
-//
-// Accesibilidad sin JS: el form usa action + method POST nativo, asi si el
-// JS no carga, el navegador igual abre el cliente de correo con los campos.
-// El JS (index.astro) hace preventDefault y arma un mailto mas rico (subject
-// + plan). Para usar Formspree/Netlify/endpoint propio, pasar la URL en formAction.
+// Formulario de contacto (#contacto). El submit se procesa en la Function
+// server-side /api/contact; el destinatario vive solo en Vercel Environment
+// Variables y nunca se entrega al navegador.
 interface Props {
   formAction?: string;
 }
 
-const { formAction = "mailto:hola@agrovoz.cl" } = Astro.props;
+const { formAction = "/api/contact" } = Astro.props;
 
 const chips = [
   { plan: "institucional", label: "Institucional", i18n: "form.chip.inst" },
@@ -24,8 +20,7 @@ const chips = [
   id="contact-form"
   action={formAction}
   method="post"
-  enctype="text/plain"
-  novalidate
+  data-contact-form
 >
   <div class="chip-grid">
     {
@@ -34,6 +29,7 @@ const chips = [
           type="button"
           class="chip"
           data-plan-chip={c.plan}
+          aria-pressed="false"
           {...(c.i18n ? { "data-i18n": c.i18n } : {})}
         >
           {c.label}
@@ -50,6 +46,7 @@ const chips = [
       type="text"
       autocomplete="name"
       placeholder="Tu nombre"
+      required
       data-i18n-ph="form.nameph"
     />
   </div>
@@ -62,6 +59,7 @@ const chips = [
       type="email"
       autocomplete="email"
       placeholder="tu@correo.cl"
+      required
       data-i18n-ph="form.emailph"
     />
   </div>
@@ -73,8 +71,16 @@ const chips = [
       name="message"
       rows="3"
       placeholder="¿Cómo podemos colaborar?"
+      required
       data-i18n-ph="form.msgph"></textarea>
   </div>
+
+  <div class="contact-form__trap" aria-hidden="true">
+    <label for="cf-website">Sitio web</label>
+    <input id="cf-website" name="website" type="text" tabindex="-1" autocomplete="off" />
+  </div>
+
+  <div id="contact-status" class="contact-form__status" role="status" aria-live="polite" hidden></div>
 
   <button type="submit" class="btn btn-primary" style="width:100%" data-i18n="form.submit">
     Solicitar demo
