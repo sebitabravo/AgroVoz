@@ -7,7 +7,7 @@
 # ── Etapa 1: Builder ──────────────────────────────────────────────
 # openai-whisper depende de numba, cuya versión compatible no soporta Python
 # 3.13+. Python 3.12 es el mínimo documentado y mantiene operativo el fallback.
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 
 WORKDIR /build
 
@@ -32,7 +32,7 @@ COPY requirements-docker.txt .
 RUN pip install --no-cache-dir -r requirements-docker.txt
 
 # ── Etapa 2: Runtime ──────────────────────────────────────────────
-FROM python:3.12-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 # Instalar dependencias de sistema en runtime
 # - ffmpeg: conversión .ogg ↔ .wav para pipeline de voz
