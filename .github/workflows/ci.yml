@@ -52,7 +52,7 @@ jobs:
 
       - name: Setup uv
         if: steps.gate.outputs.skip != 'true'
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
           # setup-uv v9 cambió el default de prune-cache a false, lo que engorda
@@ -98,7 +98,7 @@ jobs:
 
       - name: Setup uv
         if: steps.gate.outputs.skip != 'true'
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
           # setup-uv v9 cambió el default de prune-cache a false, lo que engorda
@@ -155,7 +155,7 @@ jobs:
 
       - name: Setup uv
         if: steps.gate.outputs.skip != 'true'
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
           # setup-uv v9 cambió el default de prune-cache a false, lo que engorda
