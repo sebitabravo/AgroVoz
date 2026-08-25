@@ -138,9 +138,18 @@ _CANT_UNIDAD_RE = re.compile(
 
 # El sufijo "lucas"/"mil" se CAPTURA (grupo 2) para aplicar el multiplicador
 # x1000 de la jerga chilena: "150 lucas" = 150.000 pesos. Dígitos acotados.
+# Colapsa cualquier corrida de espacios en uno solo. Se aplica antes de cortar
+# texto libre por separadores, para no dejar que un patrón con `\s+` retroceda.
+_WHITESPACE_RUN_RE = re.compile(r"\s+")
+
+# El separador entre el gatillo y el monto se escribe `\s*(?:\$\s*)?` y no
+# `\s*\$?\s*`: con dos `\s*` contiguos un espacio puede quedar en cualquiera de
+# los dos, y el motor prueba todas las combinaciones sobre una corrida larga de
+# espacios (py/polynomial-redos). Exigir el `$` literal para entrar al grupo
+# opcional deja una sola forma de calzar el mismo texto.
 _MONTO_RE = re.compile(
-    r"(?:a\s*\$?\s*|en\s*\$?\s*|por\s*\$?\s*|recibi\s*\$?\s*"
-    r"|recib[íi]\s*\$?\s*|me\s+(?:pagaron|pago)\s*\$?\s*)"
+    r"(?:a\s*(?:\$\s*)?|en\s*(?:\$\s*)?|por\s*(?:\$\s*)?"
+    r"|recib[íi]\s*(?:\$\s*)?|me\s+(?:pagaron|pago)\s*(?:\$\s*)?)"
     r"(\d{1,9}(?:[.,\s]{0,2}\d{1,9}){0,4})\s*(lucas?|pesos?|mil|\.)?",
     re.IGNORECASE,
 )
@@ -1113,8 +1122,11 @@ async def _force_multi_price_tool(
     flujo determinista para "papa en Temuco y tomate en Chillán" y para
     "papa en Temuco y en Puerto Montt".
     """
-    q = query_text.strip().lower()
-    clauses = re.split(r"\s+y\s+", q)
+    # Colapsar los espacios en una sola pasada y cortar por el literal " y "
+    # evita el retroceso cuadrático de re.split(r"\s+y\s+", ...) sobre un texto
+    # con muchos espacios seguidos (py/polynomial-redos).
+    q = _WHITESPACE_RUN_RE.sub(" ", query_text.strip().lower())
+    clauses = q.split(" y ")
     if len(clauses) < 2:
         return None
 

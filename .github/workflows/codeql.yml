@@ -1,6 +1,9 @@
 # CodeQL — análisis estático de seguridad para Python (backend) y
-# JavaScript/TypeScript (landing). Corre en cada push/PR a main y semanalmente
-# para capturar vulnerabilidades nuevas en patrones ya presentes en el código.
+# JavaScript/TypeScript (landing). Corre en cada push/PR a main.
+#
+# El proyecto está cerrado y el código dejó de moverse, así que el barrido
+# semanal solo repetía el mismo resultado. Queda `workflow_dispatch` para
+# relanzarlo a mano cuando haga falta revalidar con reglas nuevas.
 name: CodeQL
 
 on:
@@ -8,8 +11,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  schedule:
-    - cron: '17 3 * * 1'
+  workflow_dispatch:
 
 concurrency:
   group: codeql-${{ github.ref }}

@@ -100,3 +100,7 @@ openspec/
 .claude-rdd/
 .vercel
 .env*
+
+# Artefactos de sesion del agente (roadmap y receipts de convergencia)
+TASK-ROADMAP.md
+RECEIPT_CONVERGENCE.*.txt
