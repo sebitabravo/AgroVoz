@@ -20,8 +20,8 @@ openai-whisper==20250625
 # a una versión que falla durante el build de la imagen ARM.
 numba==0.60.0
 llvmlite==0.43.0
-piper-tts==1.6.0
-llama-cpp-python==0.3.34
+piper-tts==1.7.0
+llama-cpp-python==0.3.35
 jinja2==3.1.6
 itsdangerous==2.2.0
 psutil==7.2.2
