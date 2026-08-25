@@ -32,5 +32,5 @@ reportlab==5.0.0
 pillow==12.3.0
 # Excepción al pin de uv.lock (2.5.0): el fallback openai-whisper usa Numba
 # 0.60, que requiere NumPy < 2.1 en Python 3.12.
-numpy==2.0.0
+numpy==2.5.2
 onnxruntime==1.28.0
