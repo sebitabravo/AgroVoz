@@ -18,7 +18,7 @@ openai-whisper==20250625
 # Numba 0.60 es la última línea compatible con Python 3.12 y exige
 # NumPy < 2.1. Se pinnea con llvmlite para que el fallback no backtrackee
 # a una versión que falla durante el build de la imagen ARM.
-numba==0.60.0
+numba==0.67.0
 llvmlite==0.43.0
 piper-tts==1.7.0
 llama-cpp-python==0.3.35
