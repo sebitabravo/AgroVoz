@@ -6,9 +6,9 @@
 
 fastapi==0.141.1
 uvicorn[standard]==0.51.0
-sqlalchemy==2.0.51
-alembic==1.18.5
-pydantic-settings==2.14.2
+sqlalchemy==2.0.52
+alembic==1.19.1
+pydantic-settings==2.15.0
 httpx==0.28.1
 # Backend de transcripción por defecto: CTranslate2 INT8, sin torch.
 faster-whisper==1.2.1
